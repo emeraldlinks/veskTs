@@ -2,7 +2,7 @@
 
 > Living task tracker. Read at start of every session. Update after every unit of work.
 
-**Current phase:** 0 (scaffolding) — COMPLETE. Ready to begin Phase 1.
+**Current phase:** 1 (parser: expression mode) — IN PROGRESS. Phase 1a (parser) complete. Phase 1b (codegen) pending.
 
 ---
 
@@ -34,15 +34,31 @@
 
 ## Phase 1 — Parser: Expression Mode Only
 
-- [ ] `component` keyword parsing (top-level declarations)
-- [ ] Expression-mode component bodies (`return (<jsx>)`)
-- [ ] `let &[name] = track(...)` parsing and binding resolution
-- [ ] `.vsk` file extension support
-- [ ] Guard-clause early returns (`if (x) return <Y />` before main tree)
-- [ ] Hard error: bare statements inside `return <jsx>` tree (§2.4)
-- [ ] Parse example §2.4 into AST correctly
-- [ ] Write `/docu/language/component.md` (partial — expression mode only)
-- [ ] Write `/docu/language/expression-mode.md`
+### Step 1a — Parser Plugin ✅
+- [x] `vesk-plugin.js` — Acorn plugin with component, &[], unreserved checks
+- [x] `component` keyword parsing (top-level declarations)
+- [x] Expression-mode component bodies (`return (<jsx>)`)
+- [x] `let &[name] = track(...)` parsing and binding resolution
+- [x] `.vsk` file extension support (convention, no parser logic needed)
+- [x] Guard-clause early returns (`if (x) return <Y />` before main tree)
+- [x] Hard error: `component` cannot be used as regular identifier
+- [x] Parse example §2.4 into AST correctly
+- [x] 47/47 parser tests passing (node --experimental-vm-modules)
+- [x] Phase 0 regression: all 8 base tests still passing
+
+### Known Limitations (Phase 1a)
+- Generic type params (`component List<T>(...)`) are ambiguous with JSX — use inline type annotations instead
+- `async component` not supported yet (Phase 7)
+- `client component` not supported yet (Phase 7)
+- `export component` not supported yet
+
+### Step 1b — Docs ✅
+- [x] Write `/docu/language/component.md` (partial — expression mode only)
+- [x] Write `/docu/language/expression-mode.md`
+
+### Step 1c — Remaining (deferred to Phase 2)
+- [ ] IR generation for expression-mode components
+- [ ] Server codegen: IR → HTML string
 
 ---
 

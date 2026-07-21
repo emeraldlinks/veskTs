@@ -1,22 +1,22 @@
 /**
- * Vesk Parser — Phase 0 Proof of Concept
+ * Vesk Parser
  *
- * Proves the base Acorn + TypeScript parser can parse a plain .tsx file
- * before touching Vesk-specific grammar.
+ * Acorn + TypeScript + Vesk plugin. Parses .vsk files with Vesk-specific
+ * grammar extensions: component declarations, reactive bindings, etc.
  */
 import * as acorn from 'acorn';
 import { tsPlugin } from '@sveltejs/acorn-typescript';
+import { VeskPlugin } from './vesk-plugin.js';
 
 /**
- * Create a base parser that handles TypeScript + JSX.
- * This is the foundation Vesk will extend for its own grammar.
+ * Create the Vesk parser (Acorn + TypeScript + Vesk plugin).
  */
 export function createBaseParser() {
-  return acorn.Parser.extend(tsPlugin({ jsx: true }));
+  return acorn.Parser.extend(tsPlugin({ jsx: true }), VeskPlugin());
 }
 
 /**
- * Parse a TypeScript/TSX source string into an ESTree AST.
+ * Parse a Vesk source string into an AST.
  * @param {string} source
  * @param {object} [options]
  * @param {string} [options.filename]
