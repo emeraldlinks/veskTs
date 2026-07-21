@@ -1,0 +1,24 @@
+{
+  "name": "vesk-monorepo",
+  "private": true,
+  "type": "module",
+  "description": "Vesk — A Compiler-First Framework for the Post-VDOM Web",
+  "author": "emeraldlinks",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "workspaces": [
+    "packages/compiler",
+    "packages/runtime",
+    "packages/cli"
+  ],
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}

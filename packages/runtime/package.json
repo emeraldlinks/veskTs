@@ -1,0 +1,21 @@
+{
+  "name": "@vesk/runtime",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Vesk runtime — reactivity, blocks, DOM operations, hydration",
+  "main": "./src/index-client.js",
+  "types": "./src/index-client.d.ts",
+  "exports": {
+    ".": "./src/index-client.js",
+    "./client": "./src/index-client.js",
+    "./server": "./src/index-server.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0",
+    "vitest": "^3.2.0"
+  }
+}
