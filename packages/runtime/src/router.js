@@ -1,5 +1,6 @@
 import { track, effect } from './track.js';
 import { createContext } from './context.js';
+import { hydrate, createHydrateWalker } from './hydrate.js';
 
 // ── Redirect — throws a redirect that SSR can catch ───────────
 
@@ -347,6 +348,9 @@ function renderMatch(router, match, container) {
 	// Collect layout nodes (everything before pageNode that has a layout)
 	const layoutNodes = chain.filter(n => n.layout && n !== pageNode);
 
+	// Create a client-side walker that creates fresh elements (no hydration)
+	const clientWalker = createHydrateWalker(container, []);
+
 	// Build the component tree: outermost layout wraps... wraps page
 	// We render top-down: each component receives children (the next inner component)
 	function renderLayoutChain(index) {
@@ -357,7 +361,7 @@ function renderMatch(router, match, container) {
 			_state.search.set(window.location.search || '');
 
 			const pageProps = { params: paramValues, ...pageNode.props };
-			const dom = pageNode.page(pageProps);
+			const dom = pageNode.page(pageProps, new Map(), clientWalker);
 			return dom;
 		}
 
@@ -367,7 +371,7 @@ function renderMatch(router, match, container) {
 
 		// Wrap in the layout
 		const layoutProps = { children: childDom, params: paramValues };
-		const layoutDom = node.layout(layoutProps);
+		const layoutDom = node.layout(layoutProps, new Map(), clientWalker);
 		return layoutDom;
 	}
 
@@ -377,6 +381,57 @@ function renderMatch(router, match, container) {
 	} else if (typeof rootDom === 'string') {
 		container.innerHTML = rootDom;
 	}
+}
+
+/**
+ * Hydrate initial SSR content — claims existing DOM nodes instead of re-rendering.
+ * Supports layout chains by passing children as hydrator functions: each layout
+ * receives a function that hydrates the inner component with a subWalker,
+ * enabling the SlotNode codegen to claim nested data-vsk elements correctly.
+ */
+function hydrateInitial(router, match, container) {
+	const chain = match.matchChain;
+	const paramValues = match.params;
+
+	let pageNode = null;
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].page) { pageNode = chain[i]; break; }
+	}
+	if (!pageNode) {
+		container.innerHTML = '<h1>404 — Not Found</h1>';
+		return;
+	}
+
+	const layoutNodes = chain.filter(n => n.layout && n !== pageNode);
+
+	_state.params.set(paramValues);
+	_state.path.set(match.pathname || window.location.pathname);
+	_state.search.set(window.location.search || '');
+
+	if (layoutNodes.length === 0) {
+		hydrate(container, pageNode.page, { params: paramValues, ...pageNode.props });
+		return;
+	}
+
+	// Build a hydration chain: outermost layout receives children as a function,
+	// which when called hydrates the next level with a subWalker.
+	function createChildrenFn(index) {
+		return (childWalker) => {
+			if (index >= layoutNodes.length) {
+				// Page level
+				return pageNode.page({ params: paramValues, ...pageNode.props }, new Map(), childWalker);
+			}
+			const node = layoutNodes[index];
+			const childrenFn = createChildrenFn(index + 1);
+			return node.layout({ params: paramValues, children: childrenFn }, new Map(), childWalker);
+		};
+	}
+
+	// Start hydration with the outermost layout
+	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
+	const walker = createHydrateWalker(container, allElements);
+	const topLayout = layoutNodes[0];
+	topLayout.layout({ params: paramValues, children: createChildrenFn(1) }, new Map(), walker);
 }
 
 // ── Create Router (Manual) ─────────────────────────────────────
@@ -520,6 +575,20 @@ export function createFileRouter(routeTree, options = {}) {
 			});
 
 			const path = window.location.pathname;
+			const hasSsrContent = container.querySelector('[data-vsk]');
+
+			if (hasSsrContent) {
+				const match = matchRoute(routeTree, path);
+				if (match) {
+					match.pathname = path;
+					_state.path.set(path);
+					_state.search.set(window.location.search);
+					hydrateInitial(router, match, container);
+					router._currentMatch = match;
+					return router;
+				}
+			}
+
 			router.navigate(path, { replace: true });
 			return router;
 		},
@@ -621,10 +690,19 @@ export function buildRouteTree(definitions) {
 			isCatchAll,
 			page: def.page || null,
 			layout: def.layout || null,
-			children: (def.children || []).map(c => ({
-				...c,
-				fullPath: (def.path + (c.path ? '/' + c.path : '')).replace(/\/+/g, '/'),
-			})),
+			children: (def.children || []).map(c => {
+				const cParts = c.path.split('/').filter(Boolean);
+				return {
+					...c,
+					path: cParts[cParts.length - 1] || '',
+					fullPath: (def.path + (c.path ? '/' + c.path : '')).replace(/\/+/g, '/'),
+					isDynamic: cParts.some(p => p.startsWith(':')),
+					isCatchAll: cParts.some(p => p === '*'),
+					isGroup: false,
+					segmentCount: Math.max(1, cParts.length),
+					children: [],
+				};
+			}),
 			segmentCount: Math.max(1, parts.length),
 		};
 		tree.push(node);

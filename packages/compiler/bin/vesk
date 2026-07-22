@@ -17,6 +17,7 @@ function usage(code = 0) {
 	console.error(`Usage:`);
 	console.error(`  vesk init [project-name]    Create a new Vesk project`);
 	console.error(`  vesk dev [port]             Start the dev server`);
+	console.error(`  vesk build [options]        Build .vesk/ production output`);
 	console.error(`  vesk <file.vsk> [options]   Compile a .vsk file`);
 	console.error(`  vesk --router [options]     Build app/ with file-based routing`);
 	console.error(`  vesk --help                 Show this help`);
@@ -26,6 +27,7 @@ function usage(code = 0) {
 	console.error(`  --ssg         Generate static HTML (Static Site Generation)`);
 	console.error(`  --props <json>  Custom props for SSG`);
 	console.error(`  --router      File-based routing (scans ./app/)`);
+	console.error(`  --out-dir     Output directory for build (default: .vesk)`);
 	process.exit(code);
 }
 
@@ -59,303 +61,33 @@ if (cmd === 'dev') {
 		process.exit(1);
 	}
 
-	const runtimeDir = resolve(projectDir, 'node_modules', '@vesk/runtime', 'src');
-	if (!existsSync(runtimeDir)) {
-		console.error(`vesk: @vesk/runtime not found. Run npm install first.`);
+	const adapterRoot = resolve(dirname(import.meta.url.replace('file://', '')), '../../adapter');
+	const { startDevServer } = await import(resolve(adapterRoot, 'src/dev-server.js'));
+	await startDevServer(appDirPath, { port, publicDir });
+}
+
+// ── build ─────────────────────────────────────────────────────
+if (cmd === 'build') {
+	const projectDir = process.cwd();
+	const appDir = resolve(projectDir, 'app');
+	const outDir = resolve(projectDir, args.includes('--out-dir') ? args[args.indexOf('--out-dir') + 1] || '.vesk' : '.vesk');
+	const ssgEnabled = args.includes('--ssg');
+
+	if (!existsSync(appDir)) {
+		console.error(`vesk: app/ directory not found. Run "vesk init" first.`);
 		process.exit(1);
 	}
 
-	const apiDir = resolve(projectDir, 'app', 'api');
-	let routeTree = scanRoutes(appDirPath);
-	let apiRouteTree = scanApiRoutes(apiDir);
-	let clientBundle = '';
-	let runtimeBundle = '';
-	const compileCache = new Map();
-
-	function getCachedCompile(filePath) {
-		const cached = compileCache.get(filePath);
-		if (cached) {
-			try {
-				const mtime = statSync(filePath).mtimeMs;
-				if (cached.mtime === mtime) return cached;
-			} catch {}
-		}
-		return null;
-	}
-
-	function cacheCompile(filePath, data) {
-		let mtime;
-		try { mtime = statSync(filePath).mtimeMs; } catch { mtime = Date.now(); }
-		compileCache.set(filePath, { mtime, ...data });
-	}
-
-	function invalidateCache(filePath) {
-		compileCache.delete(filePath);
-	}
-
-	function bundleRuntime() {
-		try {
-			const files = ['track.js', 'context.js', 'hydrate.js', 'resource.js', 'reconcile.js', 'bindings.js', 'router.js', 'request.js'];
-			let code = '';
-			for (const f of files) {
-				const p = join(runtimeDir, f);
-				if (existsSync(p)) {
-					let src = readFileSync(p, 'utf-8');
-					src = src.replace(/^import\s+.*?from\s+['"].\/.*?['"];?\n?/gm, '');
-					src = src.replace(/^export\s+/gm, '');
-					code += `// --- ${f} ---\n${src}\n`;
-				}
-			}
-			const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
-			const exportNames = indexSrc.match(/export\s*\{\s*([^}]+)\s*\}\s*from/g)
-				?.flatMap(m => m.replace(/export\s*\{\s*|\s*\}\s*from/g, '').split(',').map(s => s.trim())) || [];
-			code += `// --- exports ---\n`;
-			for (const name of [...new Set(exportNames)]) if (name) code += `export { ${name} };\n`;
-			runtimeBundle = code;
-			console.error(`vesk: runtime bundle: ${code.length} bytes`);
-		} catch (e) { console.error(`vesk: runtime bundle error:`, e.message); }
-	}
-
-	function buildClientBundle() {
-		try {
-			const seen = new Set();
-			const sources = collectSources(routeTree);
-			clientBundle = '';
-			for (const [compName, sourcePath] of sources) {
-				if (seen.has(sourcePath)) continue;
-				seen.add(sourcePath);
-				const src = readFileSync(sourcePath, 'utf-8');
-				const code = compileClient(src, null, { forceClient: true });
-				if (code) {
-					clientBundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/runtime.js'`) + '\n';
-				}
-			}
-			clientBundle += `\nconst __routeTree = ${JSON.stringify(routeTree)};\n`;
-			clientBundle += `const __router = createFileRouter(__routeTree);\n`;
-			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
-			console.error(`vesk: client bundle: ${clientBundle.length} bytes`);
-		} catch (e) { console.error(`vesk: client build error:`, e.message); }
-	}
-
-	bundleRuntime();
-	buildClientBundle();
-
-		try {
-			let debounceTimer = null;
-			const onFileChange = (filename) => {
-				if (!filename) return;
-				if (debounceTimer) clearTimeout(debounceTimer);
-				debounceTimer = setTimeout(() => {
-					try {
-						if (filename.endsWith('.vsk')) {
-							routeTree = scanRoutes(appDirPath);
-							buildClientBundle();
-							invalidateCache(resolve(appDirPath, filename));
-							console.error(`vesk: rebuilt (${filename})`);
-						}
-						if (filename.endsWith('.js') || filename.endsWith('.ts') || filename.endsWith('.vsk')) {
-							apiRouteTree = scanApiRoutes(apiDir);
-						}
-					} catch (e) { console.error(`vesk: rebuild error:`, e.message); }
-				}, 200);
-			};
-			watch(appDirPath, { recursive: true }, (eventType, filename) => onFileChange(filename));
-		} catch (e) { console.error(`vesk: file watching unavailable`); }
-
-	const MIME = {
-		'.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
-		'.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
-		'.html': 'text/html', '.json': 'application/json',
-	};
-
-	const server = createServer(async (req, res) => {
-		const url = new URL(req.url, `http://localhost:${port}`);
-
-		if (url.pathname === '/_vesk/runtime.js') {
-			res.writeHead(200, { 'Content-Type': 'application/javascript' });
-			res.end(runtimeBundle);
-			return;
-		}
-		if (url.pathname === '/_vesk/client.js') {
-			res.writeHead(200, { 'Content-Type': 'application/javascript' });
-			res.end(clientBundle);
-			return;
-		}
-
-		if (url.pathname !== '/') {
-			const staticPath = join(publicDir, url.pathname);
-			if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-				const ext = extname(staticPath);
-				res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-				res.end(readFileSync(staticPath));
-				return;
-			}
-		}
-
-		// ── API Routes ──
-		if (url.pathname.startsWith('/api')) {
-			const apiMatch = matchApiUrl(apiRouteTree, url.pathname);
-			if (apiMatch) {
-				try {
-					const webRequest = buildWebRequest(req, url);
-					const apiPath = resolve(projectDir, apiMatch.node.filePath);
-					const response = await executeApiRoute(apiPath, webRequest.method, webRequest, apiMatch.params);
-					const body = await response.text();
-					const headers = {};
-					response.headers.forEach((v, k) => { headers[k] = v; });
-					res.writeHead(response.status, headers);
-					res.end(body);
-				} catch (e) {
-					res.writeHead(500, { 'Content-Type': 'application/json' });
-					res.end(JSON.stringify({ error: e.message }));
-				}
-				return;
-			}
-		}
-
-		const match = matchUrl(routeTree, url.pathname);
-		if (!match) {
-			res.writeHead(404, { 'Content-Type': 'text/html' });
-			res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
-			return;
-		}
-
-		const urlParts = url.pathname.split('/').filter(Boolean);
-		const cleanChain = [];
-		let segIdx = 0;
-		for (const node of match.nodes) {
-			if (node.fullPath === '/') cleanChain.push(node);
-			else if (!node.isGroup && node.segmentCount > 0) {
-				if (segIdx < urlParts.length) { cleanChain.push(node); segIdx++; }
-			} else cleanChain.push(node);
-		}
-
-		// ── Middleware (onion model) + SSR ──
-		try {
-		const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
-
-		async function renderSSR() {
-			const chain = cleanChain;
-			let body = '';
-			let head = '';
-			function compName(src) {
-				const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-				return m ? m[1] : null;
-			}
-			function getRenderOptions(filePath) {
-				const cached = getCachedCompile(filePath);
-				if (cached) return { cached };
-				const src = readFileSync(filePath, 'utf-8');
-				const compiled = compileFile(src);
-				cacheCompile(filePath, compiled);
-				return { cached: compiled };
-			}
-			for (let i = chain.length - 1; i >= 0; i--) {
-				const node = chain[i];
-				const pagePath = resolve(appDirPath, node.sourceDir, 'page.vsk');
-				const layoutPath = resolve(appDirPath, node.sourceDir, 'layout.vsk');
-				if (i === chain.length - 1 && node.page && existsSync(pagePath)) {
-					const src = readFileSync(pagePath, 'utf-8');
-					const opts = getRenderOptions(pagePath);
-					const result = renderPage(src, compName(src) || node.page, { params: match.params }, new Map(), opts);
-					body = result.body; head = result.head || '';
-				}
-				if (node.layout && existsSync(layoutPath)) {
-					const src = readFileSync(layoutPath, 'utf-8');
-					const opts = getRenderOptions(layoutPath);
-					const result = renderPage(src, compName(src) || node.layout, { children: body }, new Map(), opts);
-					body = result.body; head = (result.head || '') + head;
-				}
-			}
-			const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir, 'layout.vsk')));
-			let html;
-			if (hasLayout) {
-				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body><div id="root">\n${body}\n</div></body>\n</html>`;
-			} else {
-				const leaf = chain.find(n => n.page);
-				if (leaf) {
-					const src = readFileSync(resolve(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
-					html = renderFullPage(src, compName(src) || leaf.page, { params: match.params });
-				} else throw new Error('No page or layout matched');
-			}
-			return html;
-		}
-
-		let mwLocals = {};
-		if (mwChain.length > 0) {
-			const mwReq = new Request(`http://localhost${url.pathname}${url.search}`, {
-				headers: req.headers,
-				method: req.method,
-			});
-			const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
-				onLast: async (rewrite) => {
-					// Middleware called next() — render the page
-					if (rewrite) {
-						// Rewrite happened — update URL/path for rendering
-						url.pathname = rewrite;
-					}
-					const prev = globalThis.__vesk_request;
-					globalThis.__vesk_request = {
-						headers: Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])),
-						url: req.url,
-						method: req.method,
-						cookies: parseCookies(req.headers.cookie || ''),
-						locals: mwLocals,
-					};
-					try {
-						const html = await renderSSR();
-						return new Response(html, {
-							headers: { 'Content-Type': 'text/html' },
-						});
-					} finally {
-						globalThis.__vesk_request = prev;
-					}
-				},
-			});
-			mwLocals = mwResult.locals;
-			if (mwResult.response) {
-				res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
-				res.end(await mwResult.response.text());
-				return;
-			}
-			// If middleware called next() and we got here, it already rendered via onLast
-		} else {
-			// No middleware — direct SSR
-			const prev = globalThis.__vesk_request;
-			globalThis.__vesk_request = {
-				headers: Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])),
-				url: req.url,
-				method: req.method,
-				cookies: parseCookies(req.headers.cookie || ''),
-				locals: {},
-			};
-			try {
-				const html = await renderSSR();
-				res.writeHead(200, { 'Content-Type': 'text/html' });
-				res.end(html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n</body>`));
-			} finally {
-				globalThis.__vesk_request = prev;
-			}
-			return;
-		}
+	try {
+		const adapterRoot = resolve(dirname(import.meta.url.replace('file://', '')), '../../adapter');
+		const adapter = await import(resolve(adapterRoot, 'src/index.js'));
+		await adapter.build(appDir, { outDir, ssg: ssgEnabled });
 	} catch (e) {
-			if (e.name === 'Redirect') {
-				res.writeHead(e.status || 302, { Location: e.url });
-				res.end(`<!DOCTYPE html><html><body><a href="${e.url}">Redirect</a></body></html>`);
-			} else if (e.name === 'NotFoundError') {
-				res.writeHead(404, { 'Content-Type': 'text/html' });
-				res.end(`<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>`);
-			} else {
-				res.writeHead(500, { 'Content-Type': 'text/html' });
-				res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}\n${e.stack}</pre></body></html>`);
-			}
-		}
-	});
-
-	server.listen(port, () => {
-		console.error(`vesk dev server at http://localhost:${port}`);
-	});
-	await new Promise(() => {});
+		console.error(`vesk build failed:`, e.message);
+		if (e.stack) console.error(e.stack);
+		process.exit(1);
+	}
+	process.exit(0);
 }
 
 function countRoutes(nodes) {

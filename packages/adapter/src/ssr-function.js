@@ -1,0 +1,126 @@
+import { readFileSync, existsSync } from 'fs';
+import { resolve } from 'path';
+
+function escapeSource(src) {
+  return src
+    .replace(/\\/g, '\\\\')
+    .replace(/`/g, '\\`')
+    .replace(/\$/g, '\\$');
+}
+
+function routeName(segments) {
+  const parts = segments.filter(Boolean).map(s => {
+    if (s.startsWith(':')) return s.slice(1) || 'param';
+    return s;
+  });
+  return parts.join('_') || 'index';
+}
+
+function extractCompName(src) {
+  const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
+  return m ? m[1] : null;
+}
+
+function buildParamExtraction(node, urlParts) {
+  const parts = [];
+  let partIdx = 0;
+  function walk(n) {
+    if (n.fullPath === '/') {
+      for (const child of (n.children || [])) walk(child);
+      return;
+    }
+    if (n.isGroup) {
+      for (const child of (n.children || [])) walk(child);
+      return;
+    }
+    if (partIdx >= urlParts.length) return;
+    if (n.isCatchAll) {
+      const paramName = n.path.startsWith(':') ? n.path.slice(1) : 'slug';
+      parts.push(`${JSON.stringify(paramName)}: urlParts.slice(${partIdx}).join('/')`);
+      partIdx = urlParts.length;
+      return;
+    }
+    if (n.isDynamic) {
+      const paramName = n.path.startsWith(':') ? n.path.slice(1) : 'param';
+      parts.push(`${JSON.stringify(paramName)}: urlParts[${partIdx}]`);
+      partIdx++;
+      for (const child of (n.children || [])) walk(child);
+      return;
+    }
+    if (n.path === urlParts[partIdx]) {
+      partIdx++;
+      for (const child of (n.children || [])) walk(child);
+    }
+  }
+  walk(node);
+  return parts;
+}
+
+export function generateSsrFunction(routeNode, appDir, outDir) {
+  const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
+  const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
+
+  const parts = routeNode.fullPath.split('/').filter(Boolean);
+  const name = routeName(parts);
+  const funcDir = resolve(outDir, 'server', 'functions');
+  const funcPath = resolve(funcDir, `${name}.js`);
+
+  // Check for global CSS file
+  const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
+  const altCssPath = resolve(appDir, '..', 'src', 'app.css');
+  const hasGlobalCss = existsSync(globalCssPath) || existsSync(altCssPath);
+  const cssOption = hasGlobalCss ? ', cssUrl: "/_vesk/static/global.css"' : '';
+
+  const hasLayout = routeNode.layout;
+  const pageSrc = readFileSync(pagePath, 'utf-8');
+  const pageComp = extractCompName(pageSrc) || 'Page';
+
+  let src = '';
+  if (hasLayout) {
+    const layoutSrc = readFileSync(layoutPath, 'utf-8');
+    const layoutComp = extractCompName(layoutSrc) || 'Layout';
+    src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
+    src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
+  } else {
+    src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
+  }
+
+  // Build param extraction
+  const urlParts = routeNode.fullPath.split('/').filter(Boolean);
+  const paramExprs = buildParamExtraction(routeNode, urlParts);
+  let paramsCode = '';
+  if (paramExprs.length > 0) {
+    paramsCode = `const params = { ${paramExprs.join(', ')} };\n`;
+  } else {
+    paramsCode = 'const params = {};\n';
+  }
+
+  const funcCode = [
+    `import { renderFullPage, renderPage } from '../runtime.js';`,
+    ``,
+    src,
+    ``,
+    `export async function handle(request) {`,
+    `  const url = new URL(request.url);`,
+    `  const urlParts = url.pathname.split('/').filter(Boolean);`,
+    `  ${paramsCode}`,
+    hasLayout
+      ? [
+          `  const page = renderPage(_pageSrc, _pageComp, { params }, new Map(), { hydrate: true });`,
+          `  const html = renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, new Map(), { hydrate: true${cssOption} });`,
+          `  return new Response(html, {`,
+          `    headers: { 'Content-Type': 'text/html' },`,
+          `  });`,
+        ].join('\n')
+      : [
+          `  const html = renderFullPage(_src, _comp, { params }, new Map(), { hydrate: true${cssOption} });`,
+          `  return new Response(html, {`,
+          `    headers: { 'Content-Type': 'text/html' },`,
+          `  });`,
+        ].join('\n'),
+    `}`,
+    ``,
+  ].join('\n');
+
+  return { funcPath, funcCode, name };
+}

@@ -63,14 +63,15 @@ if (cmd === 'init') {
 		type: 'module',
 		scripts: {
 			dev: 'vesk dev',
-			build: 'vesk --router -o dist/app.js',
-			ssg: 'vesk --router --ssg -o dist',
+			build: 'vesk build',
+			start: 'vesk start',
 			typecheck: 'tsc --noEmit',
 		},
 		dependencies: {
 			'@vesk/compiler': '^0.1.0',
 			'@vesk/runtime': '^0.1.0',
 			'@vesk/cli': '^0.1.0',
+			'@vesk/adapter': '^0.1.0',
 		},
 		devDependencies: {
 			typescript: '^5.8.0',
@@ -79,9 +80,9 @@ if (cmd === 'init') {
 	}, null, 2) + '\n');
 
 	// ═══════════════════════════════════════════════════════════
-	// vesk.config.js — Vesk compiler configuration
+	// vesk.config.ts — Vesk compiler configuration
 	// ═══════════════════════════════════════════════════════════
-	writeFileSync(join(targetDir, 'vesk.config.js'), [
+	writeFileSync(join(targetDir, 'vesk.config.ts'), [
 		`/** @type {import('@vesk/compiler').VeskConfig} */`,
 		`export default {`,
 		`\t// Root directory for file-based routing (default: ./app)`,
@@ -176,9 +177,9 @@ if (cmd === 'init') {
 	].join('\n'));
 
 	// ═══════════════════════════════════════════════════════════
-	// src/app.css — Tailwind entry
-	// ═══════════════════════════════════════════════════════════
-	writeFileSync(join(srcDir, 'app.css'), [
+	// src/global.css — Tailwind entry
+
+	writeFileSync(join(srcDir, 'global.css'), [
 		`@import 'tailwindcss';`,
 		``,
 		`@layer base {`,
@@ -314,6 +315,7 @@ if (cmd === 'init') {
 	writeFileSync(join(targetDir, '.gitignore'), [
 		`node_modules/`,
 		`dist/`,
+		`.vesk/`,
 		`.vsk-cache/`,
 		`*.log`,
 		`.DS_Store`,
@@ -328,43 +330,31 @@ if (cmd === 'init') {
 	].join('\n'));
 
 	// ═══════════════════════════════════════════════════════════
-	// app/api/hello/route.js — Sample API route
+	// app/api/hello/route.ts — Sample API route
 	// ═══════════════════════════════════════════════════════════
 	const apiDir = join(appDir, 'api', 'hello');
 	mkdirSync(apiDir, { recursive: true });
-	writeFileSync(join(apiDir, 'route.js'), [
-		`// Vesk API Route — app/api/hello/route.js → /api/hello`,
-		`//`,
+	writeFileSync(join(apiDir, 'route.ts'), [
+		`// Vesk API Route — app/api/hello/route.ts`,
 		`// Signature (Next.js App Router):`,
 		`//   export async function GET(request, { params }) {`,
 		`//     const { id } = await params;`,
 		`//     return Response.json({ id });`,
 		`//   }`,
-		`//`,
-		`// request: standard Web API Request`,
-		`// params: Promise<Record<string, string>>`,
-		`// return: Response`,
 		``,
-		`import { cookies, headers } from '@vesk/runtime';`,
+		`import type { NextRequest } from '@vesk/runtime';`,
 		``,
-		`export async function GET(request) {`,
-		`	// Access cookies directly on request object`,
+		`export async function GET(request: NextRequest) {`,
 		`	const token = request.cookies?.token || '(none)';`,
-		`	// Or use the cookies() hook (works in SSR, API, client)`,
-		`	const allCookies = cookies();`,
-		`	// Access request headers via the headers() hook`,
-		`	const userAgent = headers().get('user-agent');`,
 		`	return Response.json({`,
 		`		message: 'Hello from Vesk API!',`,
 		`		timestamp: Date.now(),`,
 		`		url: request.url,`,
 		`		token,`,
-		`		userAgent,`,
-		`		allCookies: Object.fromEntries(allCookies.getAll().map(c => [c.name, c.value])),`,
 		`	});`,
 		`}`,
 		``,
-		`export async function POST(request) {`,
+		`export async function POST(request: NextRequest) {`,
 		`	const body = await request.json();`,
 		`	return Response.json({ received: body, ok: true }, { status: 201 });`,
 		`}`,
@@ -372,14 +362,14 @@ if (cmd === 'init') {
 	].join('\n'));
 
 	// ═══════════════════════════════════════════════════════════
-	// app/api/echo/[msg]/route.js — Dynamic API route
+	// app/api/echo/[msg]/route.ts — Dynamic API route
 	// ═══════════════════════════════════════════════════════════
 	const echoDir = join(appDir, 'api', 'echo', '[msg]');
 	mkdirSync(echoDir, { recursive: true });
-	writeFileSync(join(echoDir, 'route.js'), [
+	writeFileSync(join(echoDir, 'route.ts'), [
 		`// Dynamic API route — /api/echo/hello  →  params.msg === "hello"`,
 		``,
-		`export async function GET(request, { params }) {`,
+		`export async function GET(request: Request, { params }: { params: Promise<Record<string, string>> }) {`,
 		`	const { msg } = await params;`,
 		`	return Response.json({ message: msg || '(empty)', method: 'GET' });`,
 		`}`,
@@ -392,6 +382,39 @@ if (cmd === 'init') {
 	console.error(`  ${projectName === '.' ? '' : 'cd ' + projectName + ' && '}npm install`);
 	console.error(`  ${projectName === '.' ? '' : 'cd ' + projectName + ' && '}npm run build`);
 	process.exit(0);
+}
+
+// ── build ────────────────────────────────────────────────────
+if (cmd === 'build') {
+  const projectDir = process.cwd();
+  const appDirPath = join(projectDir, 'app');
+  const publicDir = join(projectDir, 'public');
+
+  if (!existsSync(appDirPath)) {
+    console.error(`vesk build: no app/ directory found in ${projectDir}`);
+    process.exit(1);
+  }
+
+  const { build } = await import(resolve(__dirname, '../../adapter/src/index.js'));
+  try {
+    await build(appDirPath, { publicDir });
+    console.error(`vesk build: done`);
+  } catch (e) {
+    console.error(`vesk build: error — ${e.message}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// ── start ────────────────────────────────────────────────────
+if (cmd === 'start') {
+  const projectDir = process.cwd();
+  const outDir = join(projectDir, '.vesk');
+  const port = parseInt(args[1], 10) || 3000;
+
+  const { startProdServer } = await import(resolve(__dirname, '../../adapter/src/index.js'));
+  startProdServer(outDir, { port });
+  await new Promise(() => {});
 }
 
 // ── dev ──────────────────────────────────────────────────────
@@ -547,7 +570,7 @@ if (cmd === 'dev') {
 			const apiMatch = matchApiUrl(apiRoutes, req.url || url.pathname);
 			if (apiMatch) {
 				const webRequest = buildWebRequest(req, req.url || url.pathname);
-				const response = await executeApiRoute(apiMatch.file, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params);
+				const response = await executeApiRoute(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params);
 				res.writeHead(response.status, Object.fromEntries(response.headers));
 				const body = await response.text();
 				res.end(body);

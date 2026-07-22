@@ -728,12 +728,14 @@ export async function ssg(source, componentName, customProps, options = {}) {
 		? `\n<script>const __vesk_props = ${serializedProps};</script>\n<script>${clientCode}</script>\n`
 		: `\n<script>const __vesk_props = ${serializedProps};</script>\n`;
 
+	const cssUrl = options.cssUrl || '';
+	const cssLink = cssUrl ? `\t<link rel="stylesheet" href="${cssUrl}" />\n` : '';
 	const html = `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
+${cssLink}${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
 <body>
 ${bodyHtml}${scriptBlock}</body>
 </html>
@@ -758,12 +760,13 @@ export function renderFullPage(source, componentName, props = {}, registry = new
 	const rendered = renderPage(source, componentName, props, registry, options);
 	const headHtml = rendered.head;
 	const bodyHtml = rendered.body;
+	const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
 	return `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="utf-8" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
-${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
+${cssLink}${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
 <body>
 <div id="root">${bodyHtml}</div>
 </body>
@@ -777,7 +780,9 @@ ${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
  */
 export async function* renderPageStream(source, componentName, props = {}, registry = new Map(), options = {}) {
 	const rendered = renderPage(source, componentName, props, registry, options);
+	const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
 	yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n';
+	if (cssLink) yield cssLink;
 	if (rendered.head) {
 		yield '\t' + rendered.head.split('\n').join('\n\t') + '\n';
 	}

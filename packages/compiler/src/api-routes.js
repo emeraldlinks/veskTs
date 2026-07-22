@@ -50,8 +50,13 @@ function scanApiDir(rootDir, dir, parentPath) {
 	try { entries = readdirSync(dir); } catch { return nodes; }
 
 	let hasRoute = false;
+	let routeFileName = null;
 	for (const entry of entries) {
-		if (entry === 'route.js' || entry === 'route.ts') { hasRoute = true; break; }
+		if (entry === 'route.js' || entry === 'route.ts') {
+			hasRoute = true;
+			routeFileName = entry;
+			break;
+		}
 	}
 
 	const segName = basename(dir);
@@ -81,7 +86,7 @@ function scanApiDir(rootDir, dir, parentPath) {
 		fullPath: fullPath.replace(/\/+/g, '/') || '/',
 		isDynamic,
 		isCatchAll,
-		filePath: hasRoute ? join(dir, 'route.js') : null,
+		filePath: hasRoute && routeFileName ? join(dir, routeFileName) : null,
 		children: [],
 	};
 

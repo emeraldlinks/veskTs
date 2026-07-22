@@ -224,7 +224,17 @@ function emitNode(ctx, node, tracked, effectsVar, parentVar) {
 	}
 	if (node instanceof SlotNode) {
 		if (!parentVar) return null;
-		ctx.push(`if (props.children !== undefined && props.children !== null) ${parentVar}.appendChild(props.children);`);
+		if (ctx.hydrate) {
+			ctx.push(`if (props.children !== undefined && props.children !== null) {`);
+			ctx.push(`  if (typeof props.children === 'function') {`);
+			ctx.push(`    props.children(__hydrate.subWalker(${parentVar}));`);
+			ctx.push(`  } else {`);
+			ctx.push(`    ${parentVar}.appendChild(props.children);`);
+			ctx.push(`  }`);
+			ctx.push(`}`);
+		} else {
+			ctx.push(`if (props.children !== undefined && props.children !== null) ${parentVar}.appendChild(props.children);`);
+		}
 		return null;
 	}
 	if (node instanceof TryCatch) return emitTryCatch(ctx, node, tracked, effectsVar, parentVar);
@@ -617,7 +627,13 @@ function generateComponent(comp, importedNames = new Set(), hydrate = false) {
 
 	for (const node of comp.body) {
 		const v = emitNode(ctx, node, tracked);
-		if (v) ctx.push(indent(`$root.appendChild(${v});`));
+		if (v) {
+			if (ctx.hydrate) {
+				ctx.push(indent(`if (${v}.parentNode !== $root) $root.appendChild(${v});`));
+			} else {
+				ctx.push(indent(`$root.appendChild(${v});`));
+			}
+		}
 	}
 
 	const effCode = ctx.flushEffects();
