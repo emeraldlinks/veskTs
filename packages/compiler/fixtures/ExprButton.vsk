@@ -1,0 +1,8 @@
+import { ExprIcon } from './ExprIcon.vsk';
+
+export component ExprButton(props: { label: string }) {
+	<style>
+		.ebtn { padding: 6px 12px; background: #e67e22; color: white; border-radius: 4px; }
+	</style>
+	return <button class="ebtn"><ExprIcon name="star" /> {props.label}</button>
+}

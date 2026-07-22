@@ -5,6 +5,9 @@
   "description": "Vesk compiler — lexer, parser, semantic analysis, IR, codegen",
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
+  "bin": {
+    "vesk": "./bin/vesk"
+  },
   "exports": {
     ".": "./src/index.js",
     "./types": "./src/types/index.d.ts"
@@ -14,11 +17,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "acorn": "^8.15.0",
     "@sveltejs/acorn-typescript": "^1.0.0",
-    "zimmerframe": "^1.1.0",
+    "acorn": "^8.15.0",
+    "esrap": "^2.3.0",
     "is-reference": "^3.0.0",
-    "source-map": "^0.7.4"
+    "source-map": "^0.7.4",
+    "zimmerframe": "^1.1.0"
   },
   "devDependencies": {
     "typescript": "^5.8.0",

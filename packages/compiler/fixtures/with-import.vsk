@@ -1,0 +1,5 @@
+import { fn } from './utils.js';
+
+component App {
+	<div>{fn()}</div>
+}

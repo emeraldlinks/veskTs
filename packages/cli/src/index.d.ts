@@ -1,0 +1,4 @@
+/**
+ * Vesk CLI types
+ */
+export {};

@@ -1,0 +1,147 @@
+## Feature Proposal: Sub-Component Static Extraction
+
+### The idea
+
+A `client` component can contain sub-parts that are permanently server-only —
+never re-executed, never hydrated, never shipped as JS — alongside genuinely
+interactive parts, within the *same* component. Not "SSR once then hydrate
+everything," but "some of this component's output is permanently server-owned
+even though the component itself is marked `client`."
+
+This is a per-component, sub-tree-granular version of the same static analysis
+already used for whole-page zero-JS detection — just applied at a finer grain.
+
+### Example
+
+component ProductCard(props: { product: Product }) client {
+  let &[expanded] = track(false);
+
+  <div class="card">
+    // static, server-rendered, never touched by client JS again:
+    <h3>{props.product.name}</h3>
+    <p>{props.product.description}</p>
+
+    // genuinely interactive, needs client JS:
+    <button onClick={() => expanded = !expanded}>
+      {expanded ? "Show less" : "Show more"}
+    </button>
+
+    if (expanded) {
+      <p>{props.product.fullSpecs}</p>
+    }
+  </div>
+}
+
+`<h3>`/`<p>` never change — no `data-vsk` hydration marker, not walked by the
+client hydrator, not part of the interactive surface at all. Only the
+`<button>` and the `if (expanded)` region need client wiring.
+
+### Why it's buildable, not aspirational
+
+The compiler already needs the exact static analysis this requires — "does
+this node read a `track()`-bound value or have an event handler?" — for
+whole-page zero-JS detection. This is the same analysis applied per-node
+instead of per-page/per-component.
+
+### What actually has to change
+
+The hydration marker output changes shape: instead of sequential `data-vsk="N"`
+markers across the *whole* `client` component, only the specific dynamic
+sub-nodes get marked. The hydration walker must skip cleanly over static
+regions with no marker to attach to at all — a real change to the walker
+algorithm, not just a new keyword. Size this as its own build item, not a
+footnote under existing `client`-boundary work.
+
+### Real advantages — sized honestly
+
+**Genuinely real:**
+- Smaller hydration *walk* cost per `client` component. For the common
+  real-world shape — mostly static content, one small interactive corner
+  (a product card with one button, a comment with one reply link) — this can
+  meaningfully cut what the client has to scan/process on load.
+- Compounds with whole-page zero-JS detection rather than competing with it;
+  same technique, two granularities.
+
+**Smaller than it might sound:**
+- The component's JS bundle size barely changes — the event handler and
+  `track()` logic still ship regardless of how surgically the DOM is marked.
+  This optimizes hydration walk cost, not bundle size. Keep these as two
+  distinct claims, not one, when describing this publicly.
+- The win scales with how "mostly static" a `client` component actually is.
+  A densely interactive component (a form with ten bound inputs) has almost
+  no static sub-tree to extract — near-zero gain there.
+
+**Honest framing for the eventual public claim:** this shows up as a real,
+measurable improvement in Time to Interactive / Total Blocking Time for pages
+full of "mostly static, slightly interactive" components — a large share of
+real e-commerce/content sites. It's a steady structural improvement that
+compounds across many small components, not a dramatic new capability. Describe
+it as "less wasted hydration work," not as a headline number.
+
+---
+
+## SEO Readiness — What Actually Moves the Needle
+
+### 1. Content in the initial HTML response (already a structural advantage)
+
+Google's crawler can execute JS, but it's a resource-limited second pass —
+content only present after hydration gets indexed later or unreliably.
+Vesk already wins here by default: server-first-by-default and true SSR
+(content is genuinely in the HTML string at the server codegen stage, not
+"SSR'd then hydrated with the same content" the way React works) means Vesk
+pages are maximally crawler-friendly before any SEO-specific feature is built.
+Next.js requires correct configuration (Server Components, avoiding
+`"use client"` wrapping actual content) to get this; it's Vesk's default
+posture already. State this plainly — it's a real, structural claim, not
+marketing.
+
+### 2. Core Web Vitals (direct ranking factor: LCP, INP, CLS)
+
+Everything that reduces JS weight and hydration cost — zero-JS pages, AOT
+event binding, sub-component static extraction above — directly improves LCP
+and INP. This isn't a separate feature to build; it's the existing
+performance roadmap paying off in ranking terms too. Worth naming the
+connection explicitly: "fast" and "SEO-ready" are the same claim from two
+angles here.
+
+### 3. Metadata — the one real net-new feature gap
+
+- Per-page title, meta description, canonical URL, Open Graph tags,
+  Twitter card tags — settable from within a component, server-rendered into
+  head.
+- Structured data (JSON-LD / schema.org) — products, articles, breadcrumbs.
+  This is what earns rich results (star ratings, price, breadcrumbs in search
+  listings) — a real, measurable ranking/CTR feature, not cosmetic.
+- Dynamic per-route metadata (a product page's title must include the actual
+  product name, not be static boilerplate).
+
+### 4. Sitemap and robots.txt generation
+
+Needs to be a build-time or route-driven output, not hand-maintained.
+Straightforward, currently absent.
+
+### 5. Streaming SSR — a real ordering subtlety
+
+If streaming SSR ships before metadata support, head content (title, meta
+tags) must resolve and flush in the first chunk, before any deferred
+content streams in. Crawlers reading a partial response need metadata
+immediately — don't let it get stuck behind a slow defer block by accident.
+
+### Proposed SEO-specific work (distinct from the performance roadmap)
+
+1. Head-writing mechanism per component/page (title, meta, OG tags,
+   canonical) — the one clear net-new feature required.
+2. JSON-LD structured data support — second priority, real rich-results value.
+3. Sitemap/robots.txt generation from the route table.
+4. Compiler-time lint: warn if a client-marked component contains what looks
+   like primary page copy that would only render after interaction (catches
+   accidentally hydration-gating real content before it ships).
+
+### The honest positioning
+
+Vesk isn't SEO-ready because of a feature — it's SEO-ready because of the
+default architectural posture (server-first, real SSR, no VDOM-hydration gate
+on content) that already exists. The metadata/structured-data/sitemap work is
+what turns "good foundation" into "competitive with what Next.js ships out of
+the box." That part is genuinely still unbuilt.
+

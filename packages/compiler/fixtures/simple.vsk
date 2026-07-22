@@ -1,0 +1,12 @@
+import './global.css';
+import { Button } from './Button.vsk';
+
+export component App {
+	<style>
+		.app-wrapper { margin: 20px; font-family: sans-serif; }
+	</style>
+	<div class="app-wrapper">
+		<Button label="Click me" />
+		<div>Hello World</div>
+	</div>
+}

@@ -1,0 +1,6 @@
+component StyledBox {
+	<style>
+		.box { color: red; }
+	</style>
+	<div class="box">Colored</div>
+}

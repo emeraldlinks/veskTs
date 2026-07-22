@@ -18,6 +18,8 @@
     "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json"
   },
   "devDependencies": {
+    "@rollup/rollup-android-arm64": "^4.62.2",
+    "@rollup/wasm-node": "^4.62.2",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }

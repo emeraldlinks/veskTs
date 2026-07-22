@@ -61,7 +61,10 @@ function expect(value) {
 		},
 		toThrow() {
 			throw new Error('Expected function to throw');
-		}
+		},
+		not: {
+			toBe(e) { if (value === e) throw new Error(`Expected not ${JSON.stringify(e)}`); },
+		},
 	};
 }
 
@@ -201,6 +204,45 @@ describe('Component Declarations', () => {
 });
 
 // ============================================================
+// `client` keyword (islands architecture)
+describe('client keyword', () => {
+	it('parses component with client keyword', () => {
+		const ast = parse('component Counter() client { let &[count] = track(0); return <div>{count}</div>; }');
+		const comp = ast.body[0];
+		expect(comp.type).toBe('ComponentDeclaration');
+		expect(comp.client).toBe(true);
+	});
+
+	it('component without client has client=false', () => {
+		const ast = parse('component Static { return <div>Hi</div>; }');
+		expect(ast.body[0].client).toBe(false);
+	});
+
+	it('export component with client keyword', () => {
+		const ast = parse('export component Counter() client { let &[count] = track(0); return <div>{count}</div>; }');
+		const exp = ast.body[0];
+		expect(exp.type).toBe('ExportNamedDeclaration');
+		expect(exp.declaration.client).toBe(true);
+	});
+
+	it('export default component with client keyword', () => {
+		const ast = parse('export default component App() client { return <div>X</div>; }');
+		const exp = ast.body[0];
+		expect(exp.type).toBe('ExportDefaultDeclaration');
+		expect(exp.declaration.client).toBe(true);
+	});
+
+	it('component without parameters with client keyword', () => {
+		const ast = parse('component App client { <div>Static</div> }');
+		expect(ast.body[0].client).toBe(true);
+	});
+
+	it('client keyword does not affect non-component contexts', () => {
+		const ast = parse('const x = "client";');
+		expect(ast.body[0].type).toBe('VariableDeclaration');
+	});
+});
+
 // `let &[name] = track(...)` parsing
 // ============================================================
 describe('Track Declarations', () => {
@@ -588,6 +630,249 @@ describe('TypeScript Inside Components', () => {
 			}
 		`);
 		expect(ast.body[0].body.body[0]).toBeTruthy();
+	});
+});
+
+// ============================================================
+// Statement Mode — Bare JSX as Statement
+// ============================================================
+describe('Statement Mode (Default)', () => {
+	it('parses bare JSX as statement in component body', () => {
+		const ast = parse(`
+			component App() {
+				<div>Hello</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(1);
+		expect(body[0].type).toBe('JSXElement');
+	});
+
+	it('parses self-closing JSX as statement', () => {
+		const ast = parse(`
+			component App() {
+				<br />
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(1);
+		expect(body[0].type).toBe('JSXElement');
+	});
+
+	it('parses nested JSX as statements', () => {
+		const ast = parse(`
+			component App() {
+				<div>
+					<h1>Title</h1>
+					<p>Content</p>
+				</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(1);
+		const div = body[0];
+		expect(div.type).toBe('JSXElement');
+		expect(div.children.length).toBeGreaterThan(0);
+	});
+
+	it('parses track declarations alongside bare JSX', () => {
+		const ast = parse(`
+			component Counter() {
+				let &[count] = track(0);
+				<div>{count}</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[0].type).toBe('VariableDeclaration');
+		expect(body[1].type).toBe('JSXElement');
+	});
+
+	it('parses JSX with expression containers', () => {
+		const ast = parse(`
+			component App(props: { name: string }) {
+				<div>Hello {props.name}</div>
+			}
+		`);
+		const div = ast.body[0].body.body[0];
+		expect(div.type).toBe('JSXElement');
+		expect(div.children.length).toBeGreaterThan(0);
+	});
+
+	it('parses child components as statements', () => {
+		const ast = parse(`
+			component App() {
+				<Greeting name="World" />
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(1);
+		expect(body[0].type).toBe('JSXElement');
+	});
+
+	it('parses multiple JSX siblings', () => {
+		const ast = parse(`
+			component App() {
+				<h1>Header</h1>
+				<p>Body</p>
+				<footer>Footer</footer>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(3);
+	});
+
+	it('parses guard clause before bare JSX', () => {
+		const ast = parse(`
+			component App(props: { show: boolean }) {
+				if (!props.show) return null;
+				<div>Visible</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[0].type).toBe('IfStatement');
+		expect(body[1].type).toBe('JSXElement');
+	});
+
+	it('parses bare JSX alongside regular JS statements', () => {
+		const ast = parse(`
+			component App() {
+				const x = 42;
+				if (x > 0) {
+					<p>Positive</p>
+				}
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[0].type).toBe('VariableDeclaration');
+		expect(body[1].type).toBe('IfStatement');
+	});
+
+	it('parses for-loop inside JSX children (statement in expression container)', () => {
+		const ast = parse(`
+			component List(props: { items: string[] }) {
+				<ul>
+					{props.items.map((item) => (
+						<li key={item}>{item}</li>
+					))}
+				</ul>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(1);
+		expect(body[0].type).toBe('JSXElement');
+	});
+
+	it('parses conditional inside JSX children via expression', () => {
+		const ast = parse(`
+			component App(props: { show: boolean }) {
+				<div>
+					{props.show && <span>Visible</span>}
+				</div>
+			}
+		`);
+		const div = ast.body[0].body.body[0];
+		expect(div.type).toBe('JSXElement');
+	});
+
+	it('parses component with multiple track bindings and bare JSX', () => {
+		const ast = parse(`
+			component TodoList(props: { todos: Todo[] }) {
+				let &[filter] = track("all");
+				let &[count] = track(0);
+				if (props.todos.length === 0) return <EmptyState />;
+				<div class="todo-list">
+					<h2>Todos ({count})</h2>
+					{filter === "all" && <p>Showing all</p>}
+				</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		// 2 track + 1 guard + 1 JSX = 4 statements
+		expect(body).toHaveLength(4);
+		const tracks = body.filter(n => n.type === 'VariableDeclaration');
+		expect(tracks).toHaveLength(2);
+		expect(body[2].type).toBe('IfStatement');
+		expect(body[3].type).toBe('JSXElement');
+	});
+});
+
+// ============================================================
+// Mixed Mode — Statement + Expression in same file
+// ============================================================
+describe('Mixed Mode', () => {
+	it('statement mode component and expression mode component in same file', () => {
+		const ast = parse(`
+			component StatementComp() {
+				<div>Statement mode</div>
+			}
+			component ExpressionComp() {
+				return <div>Expression mode</div>;
+			}
+		`);
+		expect(ast.body).toHaveLength(2);
+		expect(ast.body[0].type).toBe('ComponentDeclaration');
+		expect(ast.body[1].type).toBe('ComponentDeclaration');
+		// Statement mode: body contains JSXElement directly
+		const stmtBody = ast.body[0].body.body;
+		expect(stmtBody[0].type).toBe('JSXElement');
+		// Expression mode: body contains ReturnStatement
+		const exprBody = ast.body[1].body.body;
+		expect(exprBody[0].type).toBe('ReturnStatement');
+	});
+});
+
+// ============================================================
+describe('Server/Client Blocks ({#server} / {#client})', () => {
+	const src = (s) => s;
+
+	it('parses {#server} block in statement mode', () => {
+		const s = `component App {
+			{#server}
+				<div>Server only</div>
+			{/server}
+		}`;
+		const ast = parse(s);
+		const comp = ast.body.find((n) => n.type === 'ComponentDeclaration' || (n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'ComponentDeclaration'));
+		const decl = comp.type === 'ComponentDeclaration' ? comp : comp.declaration;
+		expect(decl.body.body.length).not.toBe(0);
+		const block = decl.body.body.find((n) => n.type === 'VeskBlock');
+		expect(block).toBeTruthy();
+		expect(block.tag).toBe('server');
+	});
+
+	it('parses {#client} block in statement mode', () => {
+		const s = `component App {
+			{#client}
+				<button onClick={() => {}}>Client</button>
+			{/client}
+		}`;
+		const ast = parse(s);
+		const comp = ast.body.find((n) => n.type === 'ComponentDeclaration' || (n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'ComponentDeclaration'));
+		const decl = comp.type === 'ComponentDeclaration' ? comp : comp.declaration;
+		const block = decl.body.body.find((n) => n.type === 'VeskBlock');
+		expect(block).toBeTruthy();
+		expect(block.tag).toBe('client');
+	});
+
+	it('parses both blocks in same component', () => {
+		const s = `component App {
+			{#server}
+				<div>Server</div>
+			{/server}
+			{#client}
+				<button>Client</button>
+			{/client}
+		}`;
+		const ast = parse(s);
+		const comp = ast.body.find((n) => n.type === 'ComponentDeclaration' || (n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'ComponentDeclaration'));
+		const decl = comp.type === 'ComponentDeclaration' ? comp : comp.declaration;
+		const blocks = decl.body.body.filter((n) => n.type === 'VeskBlock');
+		expect(blocks.length).toBe(2);
+		expect(blocks[0].tag).toBe('server');
+		expect(blocks[1].tag).toBe('client');
 	});
 });
 

@@ -1,0 +1,6 @@
+export component Card(props: { title: string }) {
+	<div class="card">
+		<h1>{props.title}</h1>
+		<div class="body">{props.children}</div>
+	</div>
+}

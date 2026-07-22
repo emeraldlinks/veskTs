@@ -1,0 +1,4 @@
+component Counter {
+	let &[count] = track(0);
+	<div>{count}</div>
+}

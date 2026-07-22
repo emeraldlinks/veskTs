@@ -1,0 +1,9 @@
+import './global.css';
+import { ExprButton } from './ExprButton.vsk';
+
+export component ExprApp {
+	<style>
+		.eapp { padding: 30px; border: 1px solid #ddd; }
+	</style>
+	return <div class="eapp"><ExprButton label="Expr Mode" /><p>Hello from expression mode</p></div>
+}

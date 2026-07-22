@@ -1,0 +1,13 @@
+import './global.css';
+
+export component Form {
+	let &[name, c] = track('world');
+	<style>
+		.wrapper { padding: 20px; }
+		input { border: 1px solid #ccc; }
+	</style>
+	<div class="wrapper">
+		<input ref={bindValue(c)} placeholder="Enter name" />
+		<p>Hello, {name}!</p>
+	</div>
+}

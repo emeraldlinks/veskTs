@@ -1,0 +1,38 @@
+import { createContext, createResource } from '@vesk/runtime';
+
+// ==========================================
+// 1. Context — cross-component dependency injection
+// ==========================================
+const Theme = createContext('light');
+const User = createContext(null);
+
+// ==========================================
+// 2. Async resource with reactive loading
+// ==========================================
+async function fetchUsers() {
+  const res = await fetch('/api/users');
+  return res.json();
+}
+
+const users = createResource(fetchUsers);
+
+// ==========================================
+// 3. App — combines all features
+// ==========================================
+component App {
+  Theme.set('dark');
+  User.set({ name: 'Alice' });
+
+  <div class="app">
+    // Context-driven input (property-specific codegen: el.value = ...)
+    <input value={User.get().name} />
+
+    // Keyed .map() — guarded by loading state for SSR safety
+    <ul>
+      {!users.loading && users().map(u => <li key={u.id}>{u.name}</li>)}
+    </ul>
+
+    // Loading fallback
+    <p>{users.loading ? 'Loading...' : ''}</p>
+  </div>
+}

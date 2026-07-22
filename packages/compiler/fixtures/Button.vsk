@@ -1,0 +1,9 @@
+import { Icon } from './Icon.vsk';
+
+export component Button(props: { label: string }) {
+	<style>
+		button { padding: 8px 16px; background: #4a90d9; color: white; }
+	</style>
+	<Icon name="star" />
+	<button>{props.label}</button>
+}

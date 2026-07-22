@@ -171,14 +171,11 @@ export function VeskPlugin(config = {}) {
 
 					this.exprAllowed = true;
 				}
-		else if (tstt && this.type === tstt.jsxText) {
-				this.next();
-			}
-			else {
-				const node = this.parseStatement(null);
-				body.push(node);
-				this.exprAllowed = true;
-			}
+				else {
+					const node = this.parseStatement(null);
+					body.push(node);
+					this.exprAllowed = true;
+				}
 
 				this.parseTemplateBody(body);
 			}
@@ -250,7 +247,7 @@ export function VeskPlugin(config = {}) {
 			jsx_parseElementAt(startPos, startLoc) {
 				const prefixLen = Math.min(20, this.input.length - startPos);
 				const prefix = this.input.slice(startPos, startPos + prefixLen);
-				if (/^<style[\s/>{\n]/.test(prefix) || prefix.startsWith('<style>')) {
+				if (/^<style[\s/>]/.test(prefix)) {
 					return this.parseStyleElement(startPos, startLoc);
 				}
 				return super.jsx_parseElementAt(startPos, startLoc);
@@ -258,14 +255,7 @@ export function VeskPlugin(config = {}) {
 
 			parseStyleElement(startPos, startLoc) {
 				const el = this.startNodeAt(startPos, startLoc);
-
-				const openNode = this.startNodeAt(startPos, startLoc);
-				let nodeName = this.jsx_parseElementName();
-				if (nodeName) openNode.name = nodeName;
-				openNode.attributes = [];
-				this.lastTokEnd = this.pos;
-				openNode.selfClosing = false;
-				const openingElement = this.finishNode(openNode, 'JSXOpeningElement');
+				const openingElement = this.jsx_parseOpeningElementAt(startPos, startLoc);
 
 				if (openingElement.selfClosing) {
 					el.openingElement = openingElement;
@@ -273,10 +263,11 @@ export function VeskPlugin(config = {}) {
 					return this.finishNode(el, 'JSXElement');
 				}
 
-				const contentStart = openingElement.end;
-				const closeIdx = this.input.indexOf('</style>', contentStart);
-
 				const children = [];
+				const contentStart = openingElement.end;
+				const closeTag = '</style>';
+				const closeIdx = this.input.indexOf(closeTag, contentStart);
+
 				if (closeIdx > contentStart) {
 					const raw = this.input.slice(contentStart, closeIdx);
 					children.push({ type: 'JSXText', value: raw });
@@ -284,10 +275,11 @@ export function VeskPlugin(config = {}) {
 
 				this.pos = closeIdx;
 				this.next();
+				const closingStartPos = this.start;
+				const closingStartLoc = this.startLoc;
 				this.next();
 				this.eat(tt.slash);
-				this.lastTokEnd = this.pos;
-				const closingElement = this.jsx_parseClosingElementAt(closeIdx, undefined);
+				const closingElement = this.jsx_parseClosingElementAt(closingStartPos, closingStartLoc);
 
 				el.openingElement = openingElement;
 				el.closingElement = closingElement;

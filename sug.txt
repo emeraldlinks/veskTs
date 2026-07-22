@@ -1,0 +1,425 @@
+# Vesk vs Next.js: SSR/SSG/Hydration Comparison & Improvement Roadmap
+
+## How Next.js does it
+
+**SSR**: React's `renderToString()` walks the full virtual DOM tree and serializes
+to HTML. Every request re-executes all component functions.
+
+**SSG**: Same `renderToString()` at build time. Props from `getStaticProps` are
+embedded in `<script id="__NEXT_DATA__">` and also written as a standalone JSON
+file for client-side navigation.
+
+**Hydration**: React's `hydrateRoot()` re-executes EVERY component function on
+the client and reconciles the virtual DOM against the server HTML. The server
+and client output MUST match exactly — any mismatch discards the DOM and
+re-renders from scratch (flash of wrong content).
+
+## Our Vesk Implementation
+
+**SSR**: Direct string concatenation — component functions push to `__out[]`,
+joined at end. No virtual DOM, no tree walk.
+
+**SSG**: Same `render()` + `data-vsk` markers + `__VESK_DATA__` JSON output.
+`getStaticProps` evaluated at build time.
+
+**Hydration**: Sequential `data-vsk="N"` markers on server elements. Client
+walker uses `querySelector('[data-vsk]')`, consumes one per call, removes the
+attribute. Text nodes matched by pre-collected position index. Nested components
+get `subWalker()` scopes.
+
+---
+
+## Where Next.js Is Currently Better
+
+| Gap                  | Next.js                               | Vesk                          |
+|----------------------|---------------------------------------|-------------------------------|
+| Streaming SSR        | `renderToPipeableStream` flushes shell immediately | Blocked on full render |
+| Dynamic routes       | `getStaticPaths`                      | Not implemented               |
+| ISR                  | Periodic rebuild without full rebuild | Not implemented               |
+| Client-side nav      | `<Link>` prefetch + JSON fetch        | Not implemented               |
+| Route code-splitting | Automatic per-page chunks             | Manual                        |
+| Middleware/Edge      | Rewrites, headers, geolocation        | Not implemented               |
+| Image optimization   | `next/image`                          | Not implemented               |
+| SEO metadata         | `next/head` / metadata API            | Not implemented               |
+
+---
+
+## Tier 1: Architectural Moats (React Fundamentally Cannot Copy)
+
+### 1. Resumability Instead of Hydration (Qwik's trick)
+
+Instead of replaying every component on load, **serialize the framework state
+into HTML attributes**. The client is NOT "hydrating" — it's "resuming".
+Event handlers download only the component that was clicked. A page with
+10,000 components? Zero JS on load, single component loaded on click.
+
+React must walk every fiber node. We can do this because we control the
+codegen — each component is already a named entry point in `__components`.
+
+What to build:
+- Emit serialized reactive state in `data-` attributes instead of inline JS
+- Lazy `import()` per component on interaction
+- No client code executes until the user interacts
+
+### 2. Time-Sliced Hydration
+
+Hydrate only what's in the viewport. Our walker processes `data-vsk`
+sequentially — we can stop after N markers, defer the rest to
+`requestIdleCallback` or `IntersectionObserver`.
+
+React 18's "selective hydration" requires Suspense boundaries everywhere and
+still processes the entire tree eventually.
+
+What to build:
+- Count markers in viewport, stop walker after visible range
+- Resume on idle callback or when element scrolls into view
+- Priority queue for hydration order
+
+### 3. Zero-JS Pages (Proven at Build Time)
+
+A page with no `track()`, no event handlers, no `{dynamic}` expressions —
+emit exactly **zero bytes of JS**. The compiler can prove this statically.
+
+React sends the entire runtime + vdom + fiber tree even for
+`<div>Hello World</div>`. This single change makes Vesk pages load
+instantly on slow connections.
+
+What to build:
+- Static analysis pass: "does this component use `track` or event attrs?"
+- If no reactivity needed, emit only the HTML, skip client bundle
+- Inline in `<script type="application/json">` only what's needed
+
+### 4. Islands Architecture (by default)
+
+Each component decides its interactivity level at build time:
+
+| Level | Behavior                              | JS Emitted     |
+|-------|---------------------------------------|----------------|
+| 0     | Static HTML, no reactivity            | None           |
+| 1     | Event delegation only (root listener) | ~50 bytes      |
+| 2     | Reactive state only (track/effect)    | ~200 bytes     |
+| 3     | Full component execution              | Full bundle    |
+
+Next.js has no islands model — pages are all-or-nothing. Every component
+costs the full React overhead.
+
+What to build:
+- A `client` keyword on specific elements marks interactive islands
+- Everything else is static HTML with no JS cost
+- The compiler generates per-island entry points
+
+### 5. Mutation-Based Reactivity (direct DOM)
+
+React re-runs the entire function component on every state change, diffs the
+vdom, then patches the DOM.
+
+Our `track/effect` system emits direct DOM mutations:
+```js
+// Current: $n.data = String(v)  — O(1), one DOM write
+// React:   re-execute entire component — O(scope), diff entire vdom tree
+```
+
+This isn't marginal. It's the difference between O(1) and O(n). For a list
+of 1000 items where one changes, React re-runs all 1000 + diffs all 1000.
+We mutate one text node.
+
+---
+
+## Tier 2: Shipping Advantages
+
+### 6. Streaming Without Suspense Overhead
+
+Next.js streaming with Suspense requires `use()` hooks, Promise tracking, and
+complex reconciler integration. The implementation is deeply coupled to
+React's internals.
+
+Our `data-vsk` markers are natural streaming anchors — flush the HTML shell
+and `<head>` immediately, then stream chunks into marker positions as data
+arrives. The compiler already knows the tree structure; we don't need runtime
+discovery.
+
+What to build:
+- An `async` version of `render()` that yields between marker boundaries
+- Flush `<html><head>...<body>` immediately
+- Stream each `data-vsk="N"` region as data becomes available
+
+### 7. Client-Side Router with Prefetch
+
+Since every component compiles to ESM, we can build a ~2KB router:
+
+1. `<Link>` on hover → fetch `<target>.json` (props) + `<target>.js` (component)
+2. Click → swap DOM instantly
+3. No full page load, no framework re-init
+
+Next.js has this but it costs ~50KB for `next/router` + React runtime
+before loading any actual page code.
+
+What to build:
+- `VeskLink` component that prefetches on hover/intent
+- History API-based navigation without full reload
+- Cache layer for visited pages
+
+### 8. Server-Only / Client-Only Blocks
+
+Like Qwik's `$server$` and `$client$` markers:
+```
+{#server}
+  const db = await connect();
+  const data = db.query(...);
+{/server}
+
+{#client}
+  el.addEventListener('click', handler);
+{/client}
+```
+
+Server blocks are **stripped from client bundles at compile time**. Client
+blocks are **stripped from server output at compile time**.
+
+This is impossible in plain React without separate files and manual
+orchestration.
+
+What to build:
+- Parser annotation for `{#server}` / `{#client}` nodes
+- Codegen strips irrelevant blocks per target
+
+### 9. Ahead-of-Time Event Binding
+
+At build time, scan for `onClick`, `onSubmit`, `onInput`, etc. Generate a
+single root event delegation handler for exactly those event types. No
+per-element `addEventListener`, no closure capture per handler.
+
+Sub-millisecond event dispatch without per-listener overhead.
+
+What to build:
+- Compiler pass collects all event attribute names
+- Emits one `document.addEventListener(type, handler)` per unique type
+- Handler uses event target's `data-vesk-handler-id` to dispatch
+
+---
+
+## Tier 3: Data Transport Wins
+
+### 10. No Serialization Boundary
+
+Next.js serializes all props through JSON (cost: `JSON.stringify` +
+`JSON.parse` + type coercion — dates become strings, sets become arrays,
+Map/undefined are lost).
+
+Our component functions exist as both server code (pushing HTML strings)
+and client code (creating DOM nodes). The "props" are just function
+arguments — they cross the boundary naturally. For static pages, props
+don't cross at all.
+
+What to build:
+- No `JSON.parse` on the client for `__VESK_DATA__` — directly call
+  the component function with the parsed object
+- Static pages skip data payload entirely
+
+### 11. Reactive Graph Serialization
+
+Instead of serializing the *value* of `count = 5`, serialize the **graph
+edge**: "this span's text depends on `count`, which was 5 at render time."
+On the client, re-establish the edge without re-executing the component
+function.
+
+This is what makes Qwik instant — and we can do it because we have
+`track/effect` edges already. The dependency graph is known at compile
+time for simple cases.
+
+What to build:
+- Instead of JSON props, emit a compact dependency graph
+- Client reinstantiates `track/effect` edges directly
+- No component function re-execution on load
+
+### 12. No Double Data for Lists
+
+Next.js serializes the entire array in `__NEXT_DATA__` even for static
+lists that will never change on the client.
+
+We can statically prove a `map` produces static output (no reactive
+dependencies in the body) → omit the input data from the client bundle
+entirely. The server HTML is the final output; the data is discarded
+after render.
+
+What to build:
+- Static analysis of map bodies for reactive deps
+- If none, skip data serialization for that expression
+- List is "frozen" into HTML, not re-renderable (which is fine)
+
+---
+
+## Summary: Work Required
+
+| Feature                          | Complexity | Impact |
+|----------------------------------|------------|--------|
+| 3. Zero-JS page detection        | Low        | Huge   |
+| 9. AOT event binding             | Low        | Medium |
+| 4. Islands keyword               | Low-Medium | Huge   |
+| 6. Streaming SSR                 | Medium     | Large  |
+| 2. Time-sliced hydration         | Medium     | Medium |
+| 7. Client-side router            | Medium     | Large  |
+| 10. No serialization boundary    | Medium     | Medium |
+| 12. No double data for lists     | Medium     | Medium |
+| 8. Server/client blocks          | Medium     | Medium |
+| 5. Mutation-based reactivity     | Already done| Already done |
+| 11. Reactive graph serialization | High       | Huge   |
+| 1. Resumability                  | High       | Huge   |
+
+---
+
+## Bonus: Sub-Component Static Extraction (from ad_feat.txt)
+
+### The idea
+
+A `client` component can contain sub-parts that are permanently server-only —
+never re-executed, never hydrated, never shipped as JS — alongside genuinely
+interactive parts, within the *same* component. Not "SSR once then hydrate
+everything," but "some of this component's output is permanently server-owned
+even though the component itself is marked `client`."
+
+This is a per-component, sub-tree-granular version of the same static analysis
+already used for whole-page zero-JS detection — just applied at a finer grain.
+
+### Example
+
+```
+component ProductCard(props: { product: Product }) client {
+  let &[expanded] = track(false);
+
+  <div class="card">
+    // static, server-rendered, never touched by client JS again:
+    <h3>{props.product.name}</h3>
+    <p>{props.product.description}</p>
+
+    // genuinely interactive, needs client JS:
+    <button onClick={() => expanded = !expanded}>
+      {expanded ? "Show less" : "Show more"}
+    </button>
+
+    if (expanded) {
+      <p>{props.product.fullSpecs}</p>
+    }
+  </div>
+}
+```
+
+`<h3>`/`<p>` never change — no `data-vsk` hydration marker, not walked by the
+client hydrator, not part of the interactive surface at all. Only the
+`<button>` and the `if (expanded)` region need client wiring.
+
+### What actually has to change
+
+The hydration marker output changes shape: instead of sequential `data-vsk="N"`
+markers across the *whole* `client` component, only the specific dynamic
+sub-nodes get marked. The hydration walker must skip cleanly over static
+regions with no marker to attach to at all — a real change to the walker
+algorithm, not just a new keyword.
+
+### Real advantages — sized honestly
+
+- Smaller hydration *walk* cost per `client` component. For common real-world
+  shapes (product card with one button, comment with one reply link), this
+  meaningfully cuts hydration work on load.
+- Compounds with whole-page zero-JS detection — same technique, two granularities.
+- The component's JS bundle size barely changes (event handler + track logic
+  still ship). This optimizes hydration walk cost, not bundle size.
+- Win scales with how "mostly static" a `client` component is. A form with ten
+  bound inputs has near-zero gain.
+
+### Sizing note
+
+This is most impactful when the *entire page* ships zero-JS and only islands
+get client code. Without per-page zero-JS first (item 3), the per-component
+savings are marginal because the component JS still ships regardless.
+**Prioritize zero-JS page detection before sub-component extraction.**
+
+---
+
+## SEO Readiness — What Actually Moves the Needle
+
+### 1. Content in initial HTML (already a structural advantage)
+
+Google's crawler can execute JS, but it's a resource-limited second pass.
+Vesk already wins by default: server-first-by-default and true SSR (content
+is genuinely in the HTML string at the server codegen stage, not "SSR'd then
+hydrated with the same content") means Vesk pages are maximally crawler-friendly
+before any SEO-specific feature is built. Next.js requires correct configuration
+(Server Components, avoiding `"use client"` wrapping content) to get this.
+It's Vesk's default posture already.
+
+### 2. Core Web Vitals (direct ranking factor: LCP, INP, CLS)
+
+Everything that reduces JS weight and hydration cost — zero-JS pages, AOT event
+binding, sub-component static extraction — directly improves LCP and INP. "Fast"
+and "SEO-ready" are the same claim from two angles.
+
+### 3. Metadata — the one real net-new feature gap
+
+- Per-page title, meta description, canonical URL, Open Graph tags,
+  Twitter card tags — settable from within a component, server-rendered into `<head>`.
+- Structured data (JSON-LD / schema.org) — products, articles, breadcrumbs.
+  This is what earns rich results (star ratings, price, breadcrumbs in search
+  listings) — a real, measurable ranking/CTR feature.
+- Dynamic per-route metadata (product page title must include the actual
+  product name).
+
+### 4. Sitemap and robots.txt generation
+
+Build-time or route-driven output from the route table, not hand-maintained.
+Belongs with the routing system, not the compiler — a trivial output pass
+over resolved routes once routing exists.
+
+### 5. Streaming SSR ordering subtlety
+
+If streaming SSR ships before metadata support, head content (title, meta tags)
+must resolve and flush in the first chunk, before any deferred content streams
+in. Crawlers reading a partial response need metadata immediately.
+
+### Proposed SEO-specific work (distinct from the performance roadmap)
+
+1. Head-writing mechanism per component/page (title, meta, OG tags, canonical)
+2. JSON-LD structured data support
+3. Sitemap/robots.txt generation from the route table
+4. Compiler-time lint: warn if a `client`-marked component contains what looks
+   like primary page copy that would only render after interaction
+
+### Honest positioning
+
+Vesk isn't SEO-ready because of a feature — it's SEO-ready because of the
+default architectural posture (server-first, real SSR, no VDOM-hydration gate
+on content) that already exists. The metadata/structured-data/sitemap work is
+what turns "good foundation" into "competitive with Next.js out of the box."
+That part is genuinely still unbuilt.
+
+---
+
+## Prioritization
+
+### Phase 1 — Build first (highest impact, lowest complexity)
+1. **Zero-JS page detection** — every page without reactive state ships no JS at all
+2. **AOT event binding** — single root delegate instead of per-element listeners
+3. **Islands keyword** — components declare interactivity level, compiler optimizes per level
+
+### Phase 2 — Then build (medium complexity, large impact)
+4. **Streaming SSR** — flush shell immediately, stream marker regions
+5. **Time-sliced hydration** — hydrate only what's visible
+6. **No double data for lists** — static map bodies skip data serialization
+7. **No serialization boundary** — direct function calls instead of JSON.parse
+8. **Client-side router** — ~2KB ESM-based prefetching router
+
+### Phase 3 — Long-term (high complexity, huge impact)
+9. **Server/client blocks** — `{#server}` / `{#client}` compile-time annotation
+10. **Sub-component static extraction** — per-node granularity for islands
+11. **Reactive graph serialization** — serialize edges, not values
+12. **Resumability** — zero JS on load, lazy per-interaction import
+
+### Phase 4 — SEO features (after performance roadmap is solid)
+13. **Head/metadata/OG API**
+14. **JSON-LD structured data**
+15. **Sitemap/robots.txt from routes**
+16. **Compiler lint for hydration-gated content**
+
+The architecture is already right. Every feature above is a **codegen pass**
+— the compiler emits different code, the runtime barely changes. None of
+these require rewriting the framework.

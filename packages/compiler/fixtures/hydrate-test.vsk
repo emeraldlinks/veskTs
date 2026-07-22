@@ -1,0 +1,9 @@
+export component HydrateApp {
+	<style>
+		.test { color: red; }
+	</style>
+	<div class="test">
+		<span>Hello</span>
+		<p>World</p>
+	</div>
+}

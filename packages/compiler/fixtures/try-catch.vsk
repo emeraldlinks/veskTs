@@ -1,0 +1,12 @@
+component Throws(props) {
+	if (props.fail) throw new Error(props.msg);
+	return <p>OK</p>
+}
+
+export component App {
+	try {
+		<Throws fail={true} msg="Boom!" />
+	} catch(e) {
+		<p class="error">Error: {e.message}</p>
+	}
+}

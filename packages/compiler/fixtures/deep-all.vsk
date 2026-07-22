@@ -1,0 +1,72 @@
+import { createContext } from '@vesk/runtime';
+
+const Theme = createContext('light');
+const User = createContext(null);
+
+component App {
+  Theme.set('dark');
+  User.set({ name: 'Alice' });
+  let &[count, c] = track(0);
+
+  <style>
+    .app { padding: 20px; font-family: sans-serif; }
+    .card { border: 1px solid #ccc; border-radius: 8px; padding: 16px; margin: 8px 0; }
+    .btn { background: #4a90d9; color: white; border: none; padding: 8px 16px; cursor: pointer; }
+  </style>
+
+  <Head>
+    <title>Deep Nesting Demo</title>
+    <meta name="description" content="Testing all Vesk features" />
+  </Head>
+
+  <div class="app">
+    <h1>Vesk Deep Nesting</h1>
+    <p>Theme: {Theme.get()}</p>
+    <input value={User.get().name} />
+
+    <div class="card">
+      <CounterDisplay count={count} />
+      <button class="btn" onClick={() => count.set(count.get() + 1)}>+1</button>
+    </div>
+
+    <div class="card">
+      <h3>User Profile (nested context + Head)</h3>
+      <Profile user={User.get()} />
+    </div>
+  </div>
+}
+
+component CounterDisplay(props: { count: number }) {
+  <p>Count: <strong>{props.count}</strong></p>
+}
+
+component Profile(props: { user: { name: string } }) {
+  <Head>
+    <meta name="author" content={props.user.name} />
+  </Head>
+
+  <div class="profile">
+    <Avatar name={props.user.name} />
+    <Details user={props.user} />
+  </div>
+}
+
+component Avatar(props: { name: string }) {
+  <div class="avatar" style="background: #4a90d9; color: white; width: 40px; height: 40px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center;">
+    {props.name[0]}
+  </div>
+}
+
+component Details(props: { user: { name: string } }) {
+  <div class="details" style="display: inline-block; margin-left: 12px;">
+    <p>Name: {props.children || 'Guest'}</p>
+    <p>{props.user.name}</p>
+    <ThemeDisplay />
+  </div>
+}
+
+component ThemeDisplay {
+  <span style="color: {Theme.get() === 'dark' ? '#fff' : '#333'};">
+    Current theme: {Theme.get()}
+  </span>
+}

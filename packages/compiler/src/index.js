@@ -10,3 +10,18 @@
  */
 
 export { parse, createBaseParser } from './parser.js';
+export { VeskPlugin } from './vesk-plugin.js';
+export { generateIR } from './ir-generator.js';
+export { render } from './server-codegen.js';
+export { compileClient, compile } from './client-codegen.js';
+export {
+	IRRoot,
+	ComponentIR,
+	StaticNode,
+	TextNode,
+	DynamicBinding,
+	OpaqueDynamicRegion,
+	MapRegion,
+	ComponentCall,
+	Expression,
+} from './ir.js';

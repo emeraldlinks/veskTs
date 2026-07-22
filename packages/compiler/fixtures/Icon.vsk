@@ -1,0 +1,6 @@
+export component Icon(props: { name: string }) {
+	<style>
+		.icon { color: blue; font-weight: bold; }
+	</style>
+	<span class="icon">{props.name}</span>
+}

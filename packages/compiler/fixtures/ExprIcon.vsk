@@ -1,0 +1,6 @@
+export component ExprIcon(props: { name: string }) {
+	<style>
+		.eicon { color: green; font-style: italic; }
+	</style>
+	return <span class="eicon">{props.name}</span>
+}

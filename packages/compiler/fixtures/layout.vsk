@@ -1,0 +1,17 @@
+export component Layout(props) {
+  <style>
+    nav { padding: 1rem; background: #f5f5f5; }
+    main { padding: 2rem; min-height: 60vh; }
+    footer { padding: 1rem; text-align: center; color: #666; }
+  </style>
+  <nav>
+    <a href="/">Home</a>
+    <a href="/about">About</a>
+  </nav>
+  <main>
+    {props.children}
+  </main>
+  <footer>
+    <p>© 2026 Vesk</p>
+  </footer>
+}

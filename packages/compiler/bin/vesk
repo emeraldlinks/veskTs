@@ -1,0 +1,557 @@
+#!/usr/bin/env node
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync, watch } from 'fs';
+import { dirname, basename, resolve, join, relative, extname } from 'path';
+import { compileClient } from '../src/client-codegen.js';
+import { ssg, compileFile, renderPage, renderFullPage } from '../src/server-codegen.js';
+import { scanRoutes, collectSources, generateRouteManifest, matchUrl, extractMiddleware } from '../src/router.js';
+import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute, parseCookies } from '../src/api-routes.js';
+import { collectMiddlewareChain, executeMiddlewareChain } from '../src/middleware.js';
+import { createServer } from 'node:http';
+
+const args = process.argv.slice(2);
+const cmd = args[0];
+
+function usage(code = 0) {
+	console.error(`Vesk CLI — Compiler-First Framework for the Post-VDOM Web`);
+	console.error(``);
+	console.error(`Usage:`);
+	console.error(`  vesk init [project-name]    Create a new Vesk project`);
+	console.error(`  vesk dev [port]             Start the dev server`);
+	console.error(`  vesk <file.vsk> [options]   Compile a .vsk file`);
+	console.error(`  vesk --router [options]     Build app/ with file-based routing`);
+	console.error(`  vesk --help                 Show this help`);
+	console.error(``);
+	console.error(`Options:`);
+	console.error(`  -o <file>     Output to file instead of stdout`);
+	console.error(`  --ssg         Generate static HTML (Static Site Generation)`);
+	console.error(`  --props <json>  Custom props for SSG`);
+	console.error(`  --router      File-based routing (scans ./app/)`);
+	process.exit(code);
+}
+
+if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
+	usage(args.length === 0 ? 1 : 0);
+}
+
+// ── init ─────────────────────────────────────────────────────
+if (cmd === 'init') {
+	const projectName = args[1] || '.';
+	const targetDir = projectName === '.' ? process.cwd() : resolve(process.cwd(), projectName);
+	if (targetDir !== process.cwd() && existsSync(targetDir)) {
+		console.error(`vesk: directory "${projectName}" already exists`);
+		process.exit(1);
+	}
+	const { execSync } = await import('child_process');
+	const cliBin = resolve(dirname(import.meta.url.replace('file://', '')), '../../cli/src/index.js');
+	execSync(`node "${cliBin}" init ${args.slice(1).map(a => `"${a}"`).join(' ')}`, { stdio: 'inherit' });
+	process.exit(0);
+}
+
+// ── dev ──────────────────────────────────────────────────────
+if (cmd === 'dev') {
+	const projectDir = process.cwd();
+	const appDirPath = resolve(projectDir, 'app');
+	const publicDir = resolve(projectDir, 'public');
+	const port = parseInt(args[1], 10) || 3000;
+
+	if (!existsSync(appDirPath)) {
+		console.error(`vesk: app/ directory not found. Run "vesk init" first.`);
+		process.exit(1);
+	}
+
+	const runtimeDir = resolve(projectDir, 'node_modules', '@vesk/runtime', 'src');
+	if (!existsSync(runtimeDir)) {
+		console.error(`vesk: @vesk/runtime not found. Run npm install first.`);
+		process.exit(1);
+	}
+
+	const apiDir = resolve(projectDir, 'app', 'api');
+	let routeTree = scanRoutes(appDirPath);
+	let apiRouteTree = scanApiRoutes(apiDir);
+	let clientBundle = '';
+	let runtimeBundle = '';
+	const compileCache = new Map();
+
+	function getCachedCompile(filePath) {
+		const cached = compileCache.get(filePath);
+		if (cached) {
+			try {
+				const mtime = statSync(filePath).mtimeMs;
+				if (cached.mtime === mtime) return cached;
+			} catch {}
+		}
+		return null;
+	}
+
+	function cacheCompile(filePath, data) {
+		let mtime;
+		try { mtime = statSync(filePath).mtimeMs; } catch { mtime = Date.now(); }
+		compileCache.set(filePath, { mtime, ...data });
+	}
+
+	function invalidateCache(filePath) {
+		compileCache.delete(filePath);
+	}
+
+	function bundleRuntime() {
+		try {
+			const files = ['track.js', 'context.js', 'hydrate.js', 'resource.js', 'reconcile.js', 'bindings.js', 'router.js', 'request.js'];
+			let code = '';
+			for (const f of files) {
+				const p = join(runtimeDir, f);
+				if (existsSync(p)) {
+					let src = readFileSync(p, 'utf-8');
+					src = src.replace(/^import\s+.*?from\s+['"].\/.*?['"];?\n?/gm, '');
+					src = src.replace(/^export\s+/gm, '');
+					code += `// --- ${f} ---\n${src}\n`;
+				}
+			}
+			const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
+			const exportNames = indexSrc.match(/export\s*\{\s*([^}]+)\s*\}\s*from/g)
+				?.flatMap(m => m.replace(/export\s*\{\s*|\s*\}\s*from/g, '').split(',').map(s => s.trim())) || [];
+			code += `// --- exports ---\n`;
+			for (const name of [...new Set(exportNames)]) if (name) code += `export { ${name} };\n`;
+			runtimeBundle = code;
+			console.error(`vesk: runtime bundle: ${code.length} bytes`);
+		} catch (e) { console.error(`vesk: runtime bundle error:`, e.message); }
+	}
+
+	function buildClientBundle() {
+		try {
+			const seen = new Set();
+			const sources = collectSources(routeTree);
+			clientBundle = '';
+			for (const [compName, sourcePath] of sources) {
+				if (seen.has(sourcePath)) continue;
+				seen.add(sourcePath);
+				const src = readFileSync(sourcePath, 'utf-8');
+				const code = compileClient(src, null, { forceClient: true });
+				if (code) {
+					clientBundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/runtime.js'`) + '\n';
+				}
+			}
+			clientBundle += `\nconst __routeTree = ${JSON.stringify(routeTree)};\n`;
+			clientBundle += `const __router = createFileRouter(__routeTree);\n`;
+			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
+			console.error(`vesk: client bundle: ${clientBundle.length} bytes`);
+		} catch (e) { console.error(`vesk: client build error:`, e.message); }
+	}
+
+	bundleRuntime();
+	buildClientBundle();
+
+		try {
+			let debounceTimer = null;
+			const onFileChange = (filename) => {
+				if (!filename) return;
+				if (debounceTimer) clearTimeout(debounceTimer);
+				debounceTimer = setTimeout(() => {
+					try {
+						if (filename.endsWith('.vsk')) {
+							routeTree = scanRoutes(appDirPath);
+							buildClientBundle();
+							invalidateCache(resolve(appDirPath, filename));
+							console.error(`vesk: rebuilt (${filename})`);
+						}
+						if (filename.endsWith('.js') || filename.endsWith('.ts') || filename.endsWith('.vsk')) {
+							apiRouteTree = scanApiRoutes(apiDir);
+						}
+					} catch (e) { console.error(`vesk: rebuild error:`, e.message); }
+				}, 200);
+			};
+			watch(appDirPath, { recursive: true }, (eventType, filename) => onFileChange(filename));
+		} catch (e) { console.error(`vesk: file watching unavailable`); }
+
+	const MIME = {
+		'.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
+		'.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
+		'.html': 'text/html', '.json': 'application/json',
+	};
+
+	const server = createServer(async (req, res) => {
+		const url = new URL(req.url, `http://localhost:${port}`);
+
+		if (url.pathname === '/_vesk/runtime.js') {
+			res.writeHead(200, { 'Content-Type': 'application/javascript' });
+			res.end(runtimeBundle);
+			return;
+		}
+		if (url.pathname === '/_vesk/client.js') {
+			res.writeHead(200, { 'Content-Type': 'application/javascript' });
+			res.end(clientBundle);
+			return;
+		}
+
+		if (url.pathname !== '/') {
+			const staticPath = join(publicDir, url.pathname);
+			if (existsSync(staticPath) && statSync(staticPath).isFile()) {
+				const ext = extname(staticPath);
+				res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+				res.end(readFileSync(staticPath));
+				return;
+			}
+		}
+
+		// ── API Routes ──
+		if (url.pathname.startsWith('/api')) {
+			const apiMatch = matchApiUrl(apiRouteTree, url.pathname);
+			if (apiMatch) {
+				try {
+					const webRequest = buildWebRequest(req, url);
+					const apiPath = resolve(projectDir, apiMatch.node.filePath);
+					const response = await executeApiRoute(apiPath, webRequest.method, webRequest, apiMatch.params);
+					const body = await response.text();
+					const headers = {};
+					response.headers.forEach((v, k) => { headers[k] = v; });
+					res.writeHead(response.status, headers);
+					res.end(body);
+				} catch (e) {
+					res.writeHead(500, { 'Content-Type': 'application/json' });
+					res.end(JSON.stringify({ error: e.message }));
+				}
+				return;
+			}
+		}
+
+		const match = matchUrl(routeTree, url.pathname);
+		if (!match) {
+			res.writeHead(404, { 'Content-Type': 'text/html' });
+			res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
+			return;
+		}
+
+		const urlParts = url.pathname.split('/').filter(Boolean);
+		const cleanChain = [];
+		let segIdx = 0;
+		for (const node of match.nodes) {
+			if (node.fullPath === '/') cleanChain.push(node);
+			else if (!node.isGroup && node.segmentCount > 0) {
+				if (segIdx < urlParts.length) { cleanChain.push(node); segIdx++; }
+			} else cleanChain.push(node);
+		}
+
+		// ── Middleware (onion model) + SSR ──
+		try {
+		const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
+
+		async function renderSSR() {
+			const chain = cleanChain;
+			let body = '';
+			let head = '';
+			function compName(src) {
+				const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
+				return m ? m[1] : null;
+			}
+			function getRenderOptions(filePath) {
+				const cached = getCachedCompile(filePath);
+				if (cached) return { cached };
+				const src = readFileSync(filePath, 'utf-8');
+				const compiled = compileFile(src);
+				cacheCompile(filePath, compiled);
+				return { cached: compiled };
+			}
+			for (let i = chain.length - 1; i >= 0; i--) {
+				const node = chain[i];
+				const pagePath = resolve(appDirPath, node.sourceDir, 'page.vsk');
+				const layoutPath = resolve(appDirPath, node.sourceDir, 'layout.vsk');
+				if (i === chain.length - 1 && node.page && existsSync(pagePath)) {
+					const src = readFileSync(pagePath, 'utf-8');
+					const opts = getRenderOptions(pagePath);
+					const result = renderPage(src, compName(src) || node.page, { params: match.params }, new Map(), opts);
+					body = result.body; head = result.head || '';
+				}
+				if (node.layout && existsSync(layoutPath)) {
+					const src = readFileSync(layoutPath, 'utf-8');
+					const opts = getRenderOptions(layoutPath);
+					const result = renderPage(src, compName(src) || node.layout, { children: body }, new Map(), opts);
+					body = result.body; head = (result.head || '') + head;
+				}
+			}
+			const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir, 'layout.vsk')));
+			let html;
+			if (hasLayout) {
+				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body><div id="root">\n${body}\n</div></body>\n</html>`;
+			} else {
+				const leaf = chain.find(n => n.page);
+				if (leaf) {
+					const src = readFileSync(resolve(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
+					html = renderFullPage(src, compName(src) || leaf.page, { params: match.params });
+				} else throw new Error('No page or layout matched');
+			}
+			return html;
+		}
+
+		let mwLocals = {};
+		if (mwChain.length > 0) {
+			const mwReq = new Request(`http://localhost${url.pathname}${url.search}`, {
+				headers: req.headers,
+				method: req.method,
+			});
+			const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
+				onLast: async (rewrite) => {
+					// Middleware called next() — render the page
+					if (rewrite) {
+						// Rewrite happened — update URL/path for rendering
+						url.pathname = rewrite;
+					}
+					const prev = globalThis.__vesk_request;
+					globalThis.__vesk_request = {
+						headers: Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])),
+						url: req.url,
+						method: req.method,
+						cookies: parseCookies(req.headers.cookie || ''),
+						locals: mwLocals,
+					};
+					try {
+						const html = await renderSSR();
+						return new Response(html, {
+							headers: { 'Content-Type': 'text/html' },
+						});
+					} finally {
+						globalThis.__vesk_request = prev;
+					}
+				},
+			});
+			mwLocals = mwResult.locals;
+			if (mwResult.response) {
+				res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
+				res.end(await mwResult.response.text());
+				return;
+			}
+			// If middleware called next() and we got here, it already rendered via onLast
+		} else {
+			// No middleware — direct SSR
+			const prev = globalThis.__vesk_request;
+			globalThis.__vesk_request = {
+				headers: Object.fromEntries(Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])),
+				url: req.url,
+				method: req.method,
+				cookies: parseCookies(req.headers.cookie || ''),
+				locals: {},
+			};
+			try {
+				const html = await renderSSR();
+				res.writeHead(200, { 'Content-Type': 'text/html' });
+				res.end(html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n</body>`));
+			} finally {
+				globalThis.__vesk_request = prev;
+			}
+			return;
+		}
+	} catch (e) {
+			if (e.name === 'Redirect') {
+				res.writeHead(e.status || 302, { Location: e.url });
+				res.end(`<!DOCTYPE html><html><body><a href="${e.url}">Redirect</a></body></html>`);
+			} else if (e.name === 'NotFoundError') {
+				res.writeHead(404, { 'Content-Type': 'text/html' });
+				res.end(`<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>`);
+			} else {
+				res.writeHead(500, { 'Content-Type': 'text/html' });
+				res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}\n${e.stack}</pre></body></html>`);
+			}
+		}
+	});
+
+	server.listen(port, () => {
+		console.error(`vesk dev server at http://localhost:${port}`);
+	});
+	await new Promise(() => {});
+}
+
+function countRoutes(nodes) {
+	let n = 0;
+	for (const node of nodes) {
+		if (node.page) n++;
+		n += countRoutes(node.children || []);
+	}
+	return n;
+}
+
+const isSsg = args.includes('--ssg');
+const isRouter = args.includes('--router');
+const outIndex = args.indexOf('-o');
+const outputArg = outIndex !== -1 ? args[outIndex + 1] : null;
+const propsIndex = args.indexOf('--props');
+const propsRaw = propsIndex !== -1 ? args[propsIndex + 1] : null;
+
+// ── Router mode ────────────────────────────────────────────────
+if (isRouter) {
+	const appDir = resolve('./app');
+
+	if (!existsSync(appDir)) {
+		console.error(`vesk: app directory not found at ${appDir}`);
+		console.error(`Create an app/ directory with page.vsk and layout.vsk files`);
+		process.exit(1);
+	}
+
+	try {
+		const tree = scanRoutes(appDir);
+		if (tree.length === 0) {
+			console.error('vesk: no routes found in', appDir);
+			process.exit(1);
+		}
+
+		const hasLayout = tree.some(n => n.layout);
+		const hasPage = tree.some(n => n.page);
+
+		let output = `// Vesk Router — auto-generated from ${appDir}\n`;
+		output += `import { createFileRouter, Link, Outlet, NavLink, useNavigate, useParams, usePathname, useSearchParams } from '@vesk/runtime';\n\n`;
+
+		// Compile each .vsk source
+		const sources = collectSources(tree);
+		const seen = new Set();
+		let hasOutputComponents = false;
+		const actualNames = {};
+
+		for (const [compName, sourceRel] of sources) {
+			const sourcePath = resolve(appDir, sourceRel);
+			if (seen.has(sourcePath)) continue;
+			seen.add(sourcePath);
+			try {
+				const src = readFileSync(sourcePath, 'utf-8');
+				const code = compileClient(src, null, { forceClient: true });
+				if (!code) continue;
+				// Strip runtime imports (they'll be in the HTML page)
+				let cleaned = code.replace(/^import\s.*from\s['"]@vesk\/runtime['"];?\n?/gm, '');
+	// Strip duplicate __components = {} and __cleanup (keep only first with content)
+	if (hasOutputComponents) {
+		cleaned = cleaned.replace(/^(?:const|let|var)\s+__components\s*=\s*\{\};\n?/m, '');
+		cleaned = cleaned.replace(/function __cleanup[\s\S]*?\n\}/g, '');
+	}
+				hasOutputComponents = true;
+				// Extract actual component names from __components["Foo"] assignments
+				const nameRegex = /__components\["(\w+)"\]\s*=\s*\(/g;
+				let match;
+				while ((match = nameRegex.exec(cleaned)) !== null) {
+					actualNames[compName] = match[1];
+				}
+				output += `// --- ${sourceRel} ---\n`;
+				output += cleaned;
+				output += '\n';
+			} catch (e) {
+				console.error(`vesk: failed to compile ${sourceRel}: ${e.message}`);
+			}
+		}
+
+		// Patch route tree with actual component names
+		function patchTree(nodes) {
+			for (const node of nodes) {
+				if (node.page && actualNames[node.page]) node.page = actualNames[node.page];
+				if (node.layout && actualNames[node.layout]) node.layout = actualNames[node.layout];
+				patchTree(node.children || []);
+			}
+		}
+		patchTree(tree);
+
+		// Collect middleware (all levels)
+		const middlewareFiles = [];
+		function collectMW(nodes) {
+			for (const node of nodes) {
+				if (node.hasMiddleware) {
+					const mwPath = resolve(appDir, node.sourceDir, 'middleware.vsk');
+					if (existsSync(mwPath)) middlewareFiles.push({ path: mwPath, node });
+				}
+				collectMW(node.children || []);
+			}
+		}
+		collectMW(tree);
+
+		// Route tree
+		output += `\n// Route tree\n`;
+		output += `const __routeTree = ${JSON.stringify(tree, null, 2)};\n\n`;
+
+		// Middleware
+		if (middlewareFiles.length > 0) {
+			output += `// Middleware chain (root → leaf)\n`;
+			const mwCode = [];
+			for (const { path: mwPath, node } of middlewareFiles) {
+				const src = extractMiddleware(mwPath);
+				if (src) {
+					mwCode.push(src);
+				}
+			}
+			output += `const __middleware = [${mwCode.join(',\n')}];\n\n`;
+		}
+
+		// Bootstrap: Wait for DOM, then start the router
+		output += `// Entry point\n`;
+		output += `if (typeof document !== 'undefined') {\n`;
+		output += `  if (document.readyState === 'loading') {\n`;
+		output += `    document.addEventListener('DOMContentLoaded', () => {\n`;
+		if (middlewareFiles.length > 0) {
+			output += `      const router = createFileRouter(__routeTree, { middleware: __middleware });\n`;
+		} else {
+			output += `      const router = createFileRouter(__routeTree);\n`;
+		}
+		output += `      router.start();\n`;
+		output += `    });\n`;
+		output += `  } else {\n`;
+		if (middlewareSrc) {
+			output += `    const router = createFileRouter(__routeTree, { middleware: __middleware });\n`;
+		} else {
+			output += `    const router = createFileRouter(__routeTree);\n`;
+		}
+		output += `    router.start();\n`;
+		output += `  }\n`;
+		output += `}\n\n`;
+		output += `export { createFileRouter, Link, Outlet, NavLink, useNavigate, useParams, usePathname, useSearchParams };\n`;
+		output += `export default __routeTree;\n`;
+
+		if (outputArg) {
+			writeFileSync(outputArg, output);
+			const routeCount = countRoutes(tree);
+			const base = basename(outputArg);
+			console.error(`vesk: wrote ${base} (${seen.size} components, ${routeCount} routes)`);
+		} else {
+			process.stdout.write(output);
+		}
+	} catch (e) {
+		console.error(`vesk: router build failed: ${e.message}`);
+		process.exit(1);
+	}
+	process.exit(0);
+}
+
+// ── Standard mode ──────────────────────────────────────────────
+const inputFile = args[0];
+
+let source;
+try {
+	source = readFileSync(inputFile, 'utf-8');
+} catch (e) {
+	console.error(`vesk: cannot read "${inputFile}": ${e.message}`);
+	process.exit(1);
+}
+
+if (isSsg) {
+	try {
+		const customProps = propsRaw ? JSON.parse(propsRaw) : undefined;
+		const { html: page, props } = ssg(source, null, customProps);
+
+		const base = basename(inputFile, '.vsk');
+		if (outputArg) {
+			mkdirSync(outputArg, { recursive: true });
+			writeFileSync(resolve(outputArg, base + '.html'), page);
+			writeFileSync(resolve(outputArg, base + '.json'), props + '\n');
+		} else {
+			process.stdout.write(page);
+		}
+	} catch (e) {
+		console.error(`vesk: ssg failed: ${e.message}`);
+		process.exit(1);
+	}
+} else {
+	let code;
+	try {
+		code = compileClient(source);
+	} catch (e) {
+		console.error(`vesk: compilation failed: ${e.message}`);
+		process.exit(1);
+	}
+
+	if (outputArg) {
+		writeFileSync(outputArg, code + '\n');
+	} else {
+		process.stdout.write(code + '\n');
+	}
+}

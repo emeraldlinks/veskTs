@@ -5,14 +5,14 @@
  * grammar extensions: component declarations, reactive bindings, etc.
  */
 import * as acorn from 'acorn';
-import { tsPlugin } from '@sveltejs/acorn-typescript';
+import { tsPlugin } from './acorn-ts-plugin/index.js';
 import { VeskPlugin } from './vesk-plugin.js';
 
 /**
  * Create the Vesk parser (Acorn + TypeScript + Vesk plugin).
  */
 export function createBaseParser() {
-  return acorn.Parser.extend(tsPlugin({ jsx: true }), VeskPlugin());
+  return acorn.Parser.extend(tsPlugin(), VeskPlugin());
 }
 
 /**

@@ -1,0 +1,10 @@
+export component Counter(props: { initial: number }) {
+	let &[count] = track(props.initial);
+	<style>
+		.val { font-weight: bold; }
+	</style>
+	<div>
+		<span class="val">{count}</span>
+		<button>Increment</button>
+	</div>
+}

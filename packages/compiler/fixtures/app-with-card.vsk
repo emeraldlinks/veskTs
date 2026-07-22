@@ -1,0 +1,7 @@
+import { Card } from './card.vsk';
+
+export component App {
+	<Card title="Hello World">
+		<p>This is child content</p>
+	</Card>
+}
