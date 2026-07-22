@@ -20,7 +20,9 @@
   "devDependencies": {
     "@rollup/rollup-android-arm64": "^4.62.2",
     "@rollup/wasm-node": "^4.62.2",
+    "@tailwindcss/postcss": "^4.3.3",
     "happy-dom": "^20.11.0",
+    "tailwindcss": "^4.3.3",
     "typescript": "^5.8.0",
     "vitest": "^3.2.0"
   }

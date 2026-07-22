@@ -2,11 +2,10 @@
 
 > Living task tracker. Read at start of every session. Update after every unit of work.
 
-**Current phase:** 4 (Framework features — context, error boundaries, suspense, routing)
+**Current phase:** 5 (CLI + Dev Tooling)
 
 **Total tests:** 386 passing (69 parser + 69 server + 104 client + 41 integration + 22 runtime + 14 CLI + 8 SSG + 14 compiler router + 11 runtime router + 17 E2E router demo + 17 fixtures)
-
-**Note:** 90 tests added: 14 compiler router, 11 runtime router, 17 E2E router demo, plus routing fixture with 17 scans/matches/renders + 17 fixture files + 17 CLI output
+**Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
 
 ---
 
@@ -82,12 +81,13 @@
 - [x] **Router runtime** — `createRouter` (manual), `createFileRouter` (file-based), `Link`, `NavLink`, `Outlet`, `useNavigate`, `useParams`, `usePathname`, `useSearchParams`. Layout chain rendering with `{props.children}`.
 - [x] **CLI `--router` flag** — scans `app/` directory, compiles all `.vsk` files, generates unified output with route tree and router bootstrap.
 - [x] **SSR route matching** — `matchUrl()` in compiler router matches URL path against route tree, extracts params. Full E2E demo with 5 routes (root, about, blog layout, blog/[slug]).
-- [ ] **Dev server / HMR** — `vesk dev` with file watching, hot reload
-- [ ] **Production demo** — real `.vsk` app served with SSR + hydrate
+- [x] **Dev server / HMR** — `vesk dev` with file watching, incremental HMR, WebSocket broadcast, floating dev menu, surgical component-update (eval + applyPageUpdate for page/component, full navigate for layout)
+- [x] **Production demo** — `vesk build` + `vesk start` serving SSR with hydration, global CSS, static files, dynamic routes, API routes, 404
+- [x] **CSS pipeline** — global.css detection, build copy to static/, `<link>` tag in SSR HTML, dev server CSS watching + rebuild
 - [ ] **npm packaging** — publish `@vesk/compiler` and `@vesk/runtime`
-- [ ] **Suspense / async resources** — async data loading with fallback states
+- [ ] **Suspense / async resources** — async data loading with fallback states (needs compiler-level `SuspenseBlock` IR node; `if (loading)` + OpaqueDynamicRegion works today)
 - [ ] **Transitions / animations** — built-in transition directives on element mount/unmount
-- [ ] **Portals / Teleport** — render DOM nodes to a different parent
+- [x] **Portal** — `Portal` runtime component moves DOM nodes to `props.target`. Requires `{#client}` blocks for SSR-free content. 56 tests passing.
 - [ ] **Form actions** — progressive enhancement form handling (like SvelteKit/Solid)
 - [ ] **Headless component primitives** — Show, For, Switch/Match as components
 
@@ -103,8 +103,10 @@
 
 ## Phase 5 — CLI + Dev Tooling
 
-- [ ] `vesk dev` — dev server with HMR
-- [ ] `vesk build` — production build
+- [x] `vesk dev` — dev server with HMR
+- [x] `vesk build` — production build (output to .vesk/)
+- [x] `vesk start` — production server (serve from .vesk/ with SSR/static/API/404)
+- [ ] `vesk init` creates `src/global.css` (Tailwind entrypoint)
 - [ ] `packages/adapters/vite` — vite-plugin-vesk
 - [ ] Write `/docu/cli/commands.md`
 

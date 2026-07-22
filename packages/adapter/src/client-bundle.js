@@ -58,7 +58,7 @@ export async function generateClientBundle(routeTree, appDir) {
   const runtimeFiles = [
     'track.js', 'context.js', 'hydrate.js', 'resource.js',
     'reconcile.js', 'bindings.js', 'router.js', 'request.js',
-    'hmr-client.js',
+    'portal.js', 'hmr-client.js',
   ];
   let runtimeCode = '';
   for (const f of runtimeFiles) {

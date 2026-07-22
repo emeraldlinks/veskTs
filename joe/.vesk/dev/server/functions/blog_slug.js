@@ -12,7 +12,7 @@ const _comp = "BlogPost";
 
 export async function handle(request) {
   const url = new URL(request.url);
-  const urlParts: string[] = url.pathname.split('/').filter(Boolean);
+  const urlParts = url.pathname.split('/').filter(Boolean);
   const params = { "slug": urlParts[0] };
 
   const html = renderFullPage(_src, _comp, { params }, new Map(), { hydrate: true, cssUrl: "/_vesk/static/global.css" });

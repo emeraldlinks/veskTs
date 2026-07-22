@@ -1427,6 +1427,25 @@ function headers() {
 	});
 }
 
+// --- portal.js ---
+function Portal(props, __registry, __ctx) {
+  if (typeof document === 'undefined') return '';
+  const target = typeof props.target === 'string'
+    ? document.querySelector(props.target)
+    : props.target;
+  if (!target) return document.createComment('portal: no target');
+  if (props.children != null) {
+    if (typeof props.children === 'function') {
+      const frag = document.createDocumentFragment();
+      props.children(frag);
+      target.appendChild(frag);
+    } else {
+      target.appendChild(props.children);
+    }
+  }
+  return document.createComment('portal');
+}
+
 // --- hmr-client.js ---
 // Vesk HMR Client — dev-only, injected into client bundle
 (function() {
@@ -1634,6 +1653,7 @@ export { Context };
 export { getActiveComponent };
 export { setActiveComponent };
 export { createResource };
+export { Portal };
 export { reconcile };
 export { cookies };
 export { headers };
@@ -1717,23 +1737,35 @@ __components["RootLayout"] = (props, __registry, __hydrate) => {
 	const $root = __hydrate.root;
 const $n0 = __hydrate.nextElement("nav");
 $n0.setAttribute("class", "flex gap-4 px-6 py-3 border-b bg-white nav-root");
-const $n1 = (() => { const __el = NavLink({ "href": "/", "class": "font-medium" }, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();
-$n0.appendChild($n1);
-const $n2 = (() => { const __el = NavLink({ "href": "/about", "class": "font-medium" }, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();
-$n0.appendChild($n2);
-const $n3 = (() => { const __el = NavLink({ "href": "/blog", "class": "font-medium" }, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();
+const $n1 = (() => { const $f = document.createDocumentFragment();
+const $n2 = document.createTextNode("Home");
+$f.appendChild($n2);
+return $f; })();
+const $n3 = (() => { const __el = NavLink({ "href": "/", "class": "font-medium", children: $n1 }, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();
 $n0.appendChild($n3);
+const $n4 = (() => { const $f = document.createDocumentFragment();
+const $n5 = document.createTextNode("About");
+$f.appendChild($n5);
+return $f; })();
+const $n6 = (() => { const __el = NavLink({ "href": "/about", "class": "font-medium", children: $n4 }, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();
+$n0.appendChild($n6);
+const $n7 = (() => { const $f = document.createDocumentFragment();
+const $n8 = document.createTextNode("Blog");
+$f.appendChild($n8);
+return $f; })();
+const $n9 = (() => { const __el = NavLink({ "href": "/blog", "class": "font-medium", children: $n7 }, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();
+$n0.appendChild($n9);
 	if ($n0.parentNode !== $root) $root.appendChild($n0);
-const $n4 = __hydrate.nextElement("main");
-$n4.setAttribute("class", "p-4");
+const $n10 = __hydrate.nextElement("main");
+$n10.setAttribute("class", "p-4");
 if (props.children !== undefined && props.children !== null) {
   if (typeof props.children === 'function') {
-    props.children(__hydrate.subWalker($n4));
+    props.children(__hydrate.subWalker($n10));
   } else {
-    $n4.appendChild(props.children);
+    $n10.appendChild(props.children);
   }
 }
-	if ($n4.parentNode !== $root) $root.appendChild($n4);
+	if ($n10.parentNode !== $root) $root.appendChild($n10);
 	return $root;
 	} finally {
 		setActiveComponent(__prev);

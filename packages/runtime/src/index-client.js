@@ -4,5 +4,6 @@ export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, use
 export { bindValue, bindChecked, bindGroup } from './bindings.js';
 export { createContext, Context, getActiveComponent, setActiveComponent } from './context.js';
 export { createResource } from './resource.js';
+export { Portal } from './portal.js';
 export { reconcile } from './reconcile.js';
 export { cookies, headers, locals } from './request.js';

@@ -23,7 +23,7 @@ const _pageComp = "BlogList";
 
 export async function handle(request) {
   const url = new URL(request.url);
-  const urlParts: string[] = url.pathname.split('/').filter(Boolean);
+  const urlParts = url.pathname.split('/').filter(Boolean);
   const params = {};
 
   const page = renderPage(_pageSrc, _pageComp, { params }, new Map(), { hydrate: true });

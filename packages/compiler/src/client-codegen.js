@@ -430,7 +430,7 @@ function emitComponentCall(ctx, node, tracked) {
 		return `${JSON.stringify(p.name)}: ${transformTracked(p.value, tracked)}`;
 	});
 
-	if (node.children.length > 0 && !ctx.hydrate) {
+	if (node.children.length > 0) {
 		const frag = ctx.n();
 		ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
 		for (const child of node.children) {
