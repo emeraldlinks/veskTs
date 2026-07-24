@@ -1,0 +1,6 @@
+node_modules/
+dist/
+.vesk/
+.vsk-cache/
+*.log
+.DS_Store

@@ -1,0 +1,15 @@
+component Blog {
+	<h1 class="text-3xl font-bold mb-4">Blog</h1>
+	<div class="bg-white rounded-lg p-5 mb-4 shadow-sm border border-gray-100">
+		<h2 class="text-lg font-semibold mb-1">
+			<a href="/blog/hello-world" class="text-gray-900 no-underline hover:text-blue-600">Hello World</a>
+		</h2>
+		<p class="text-gray-400 text-sm">First post powered by Vesk</p>
+	</div>
+	<div class="bg-white rounded-lg p-5 mb-4 shadow-sm border border-gray-100">
+		<h2 class="text-lg font-semibold mb-1">
+			<a href="/blog/ssr-in-vesk" class="text-gray-900 no-underline hover:text-blue-600">SSR in Vesk</a>
+		</h2>
+		<p class="text-gray-400 text-sm">How server-side rendering works</p>
+	</div>
+}
