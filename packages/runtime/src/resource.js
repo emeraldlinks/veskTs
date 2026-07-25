@@ -1,21 +1,21 @@
-import { track } from './track.js';
+import { tracked, get, set } from './ripple-runtime.js';
 
 export function createResource(fn) {
-  const state = track({ loading: true, error: null, data: undefined });
+  const state = tracked({ loading: true, error: null, data: undefined });
 
   fn().then(
-    data => state.set({ loading: false, error: null, data }),
-    error => state.set({ loading: false, error, data: undefined })
+    data => set(state, { loading: false, error: null, data }),
+    error => set(state, { loading: false, error, data: undefined })
   );
 
   function resource() {
-    return state.get().data;
+    return get(state).data;
   }
   Object.defineProperty(resource, 'loading', {
-    get() { return state.get().loading; }
+    get() { return get(state).loading; }
   });
   Object.defineProperty(resource, 'error', {
-    get() { return state.get().error; }
+    get() { return get(state).error; }
   });
 
   return resource;

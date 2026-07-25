@@ -95,6 +95,7 @@ export function generateSsrFunction(routeNode, appDir, outDir) {
     paramsCode = 'const params = {};\n';
   }
 
+  const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
   const funcCode = [
     `import { renderFullPage, renderPage } from '../runtime.js';`,
     ``,
@@ -107,13 +108,13 @@ export function generateSsrFunction(routeNode, appDir, outDir) {
     hasLayout
       ? [
           `  const page = renderPage(_pageSrc, _pageComp, { params }, new Map(), { hydrate: true });`,
-          `  const html = renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, new Map(), { hydrate: true${cssOption} });`,
+          `  const html = renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, new Map(), { hydrate: true${cssOption}${clientScriptOption} });`,
           `  return new Response(html, {`,
           `    headers: { 'Content-Type': 'text/html' },`,
           `  });`,
         ].join('\n')
       : [
-          `  const html = renderFullPage(_src, _comp, { params }, new Map(), { hydrate: true${cssOption} });`,
+          `  const html = renderFullPage(_src, _comp, { params }, new Map(), { hydrate: true${cssOption}${clientScriptOption} });`,
           `  return new Response(html, {`,
           `    headers: { 'Content-Type': 'text/html' },`,
           `  });`,

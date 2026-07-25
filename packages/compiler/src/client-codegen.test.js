@@ -162,13 +162,13 @@ describe('Client Codegen — Reactivity', () => {
 		component App { let &[count] = track(0); return <div>{count}</div>; }
 	`, (code) => {
 		expect(code).toContain('track(');
-		expect(code).toContain('count.get()');
+		expect(code).toContain('get(count)');
 	});
 
 	bothModes('rewrites tracked variables to .get()', `
 		component App { let &[count] = track(0); return <div>{count}</div>; }
 	`, (code) => {
-		expect(code).toContain('count.get()');
+		expect(code).toContain('get(count)');
 	});
 
 	bothModes('includes runtime import', `
@@ -247,7 +247,7 @@ describe('Client Codegen — Event Handlers', () => {
 		expect(code).toContain('addEventListener');
 		expect(code).toContain('click');
 		expect(code).toContain('c.set');
-		expect(code).toContain('c.get()');
+		expect(code).toContain('get(c)');
 	});
 	// Statement mode
 	bothModes('addEventListener statement mode', `
@@ -259,7 +259,7 @@ describe('Client Codegen — Event Handlers', () => {
 		expect(code).toContain('addEventListener');
 		expect(code).toContain('click');
 		expect(code).toContain('c.set');
-		expect(code).toContain('c.get()');
+		expect(code).toContain('get(c)');
 	});
 
 	// Expression mode
@@ -343,7 +343,7 @@ describe('Client Codegen — Statement Mode', () => {
 		}
 	`, (code) => {
 		expect(code).toContain('track(');
-		expect(code).toContain('count.get()');
+		expect(code).toContain('get(count)');
 	});
 
 	bothModes('if with JSX', `
@@ -394,7 +394,7 @@ describe('Client Codegen — Statement Mode', () => {
 		}
 	`, (code) => {
 		expect(code).toContain('count.set(42)');
-		expect(code).toContain('count.get()');
+		expect(code).toContain('get(count)');
 	});
 });
 
@@ -445,7 +445,7 @@ describe('Client Codegen — Islands & Zero-JS Detection', () => {
 	`, (code) => {
 		expect(code).not.toBe('');
 		expect(code).toContain('track(');
-		expect(code).toContain('c.get()');
+		expect(code).toContain('get(c)');
 	});
 
 	bothModes('export component client works', `
@@ -517,7 +517,7 @@ describe('Client Codegen — Sub-Component Static Extraction', () => {
 		}
 	`, (code, mode) => {
 		expect(code).toContain('track(');
-		expect(code).toContain('count.get()');
+		expect(code).toContain('get(count)');
 		if (mode === 'hydrate') {
 			expect(code).toContain('nextElement'); // div or p
 		}

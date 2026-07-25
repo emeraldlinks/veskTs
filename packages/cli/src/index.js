@@ -436,6 +436,7 @@ if (cmd === 'dev') {
 	const { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } = await import('../../compiler/src/api-routes.js');
 	const { collectMiddlewareChain, executeMiddlewareChain } = await import('../../compiler/src/middleware.js');
 	const { createServer } = await import('node:http');
+	const { WebSocketServer } = await import('ws');
 	const { watch, readFileSync, statSync, existsSync: fsExists } = await import('node:fs');
 	const { resolve: resolvePath, extname, join: joinPath } = await import('node:path');
 
@@ -451,16 +452,17 @@ if (cmd === 'dev') {
 
 	function bundleRuntime() {
 		try {
-			const files = [
-				'track.js', 'context.js', 'hydrate.js', 'resource.js',
-				'reconcile.js', 'bindings.js', 'router.js', 'request.js',
-			];
+		const files = [
+			'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
+			'context.js', 'hydrate.js', 'resource.js', 'portal.js',
+			'reconcile.js', 'bindings.js', 'router.js', 'request.js',
+		];
 			let code = '';
 			for (const f of files) {
 				const p = joinPath(runtimeDir, f);
 				if (fsExists(p)) {
 					let src = readFileSync(p, 'utf-8');
-					src = src.replace(/^import\s+.*?from\s+['"].\/.*?['"];?\n?/gm, '');
+					src = src.replace(/^import\s+[\s\S]*?from\s+['"].*?['"];?\n?/gm, '');
 					src = src.replace(/^export\s+/gm, '');
 					code += `// --- ${f} ---\n${src}\n`;
 				}
@@ -484,20 +486,92 @@ if (cmd === 'dev') {
 		try {
 			const seen = new Set();
 			const sources = collectSources(routeTree);
-			clientBundle = '';
+			const componentLines = [];
+			const hydratorLines = [];
+			const aliasLines = [];
+			const hydratorAliasLines = [];
+			const runtimeImportNames = new Set();
+			runtimeImportNames.add('track');
+			runtimeImportNames.add('get');
+			runtimeImportNames.add('set');
+			runtimeImportNames.add('destroy_block');
+			runtimeImportNames.add('getActiveComponent');
+			runtimeImportNames.add('setActiveComponent');
+			runtimeImportNames.add('effect');
+			runtimeImportNames.add('createFileRouter');
+			runtimeImportNames.add('NavLink');
+			runtimeImportNames.add('Link');
+
 			for (const [compName, sourcePath] of sources) {
 				if (seen.has(sourcePath)) continue;
 				seen.add(sourcePath);
 				const src = readFileSync(sourcePath, 'utf-8');
-				const code = compileClient(src, null, { forceClient: true });
-				if (code) {
-					const fixed = code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/runtime.js'`);
-					clientBundle += fixed + '\n';
+
+				// Non-hydrate version — for SPA navigation
+				const compCode = compileClient(src, null, { forceClient: true });
+				if (compCode) {
+					const stripped = compCode
+						.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, (match) => {
+							const names = match.match(/\{([^}]*)\}/)?.[1] || '';
+							names.split(',').map(s => s.trim()).filter(Boolean).forEach(n => runtimeImportNames.add(n));
+							return '';
+						})
+						.replace(/^const __components = \{\};\s*\n?/gm, '')
+						.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '');
+					const withoutLeadingBlank = stripped.replace(/^\n+/, '').replace(/\n+$/, '');
+					componentLines.push(withoutLeadingBlank);
+					const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
+					if (actualName && actualName !== compName) {
+						aliasLines.push(`__components[${JSON.stringify(compName)}] = __components[${JSON.stringify(actualName)}];`);
+					}
+				}
+
+				// Hydrate version — for initial hydration
+				const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
+				if (hydCode) {
+					const stripped = hydCode
+						.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, (match) => {
+							const names = match.match(/\{([^}]*)\}/)?.[1] || '';
+							names.split(',').map(s => s.trim()).filter(Boolean).forEach(n => runtimeImportNames.add(n));
+							return '';
+						})
+						.replace(/^const __components = \{\};\s*\n?/gm, '')
+						.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '')
+						.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '')
+						.replace(/__components/g, '__hydrators');
+					const withoutLeadingBlank = stripped.replace(/^\n+/, '').replace(/\n+$/, '');
+					hydratorLines.push(withoutLeadingBlank);
+					const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
+					if (actualName && actualName !== compName) {
+						hydratorAliasLines.push(`__hydrators[${JSON.stringify(compName)}] = __hydrators[${JSON.stringify(actualName)}];`);
+					}
 				}
 			}
+
+			const importStr = [...runtimeImportNames].join(', ');
+			clientBundle = '';
+			clientBundle += `import { ${importStr} } from '/_vesk/runtime.js';\n\n`;
+			clientBundle += `const __components = {};\n\n`;
+			clientBundle += `const __hydrators = {};\n\n`;
+			clientBundle += `const __runtime_comps = __components;\n\n`;
+			clientBundle += componentLines.join('\n\n');
+			if (aliasLines.length > 0) {
+				clientBundle += '\n' + aliasLines.join('\n') + '\n';
+			}
+			if (hydratorLines.length > 0) {
+				clientBundle += '\n' + hydratorLines.join('\n') + '\n';
+			}
+			if (hydratorAliasLines.length > 0) {
+				clientBundle += '\n' + hydratorAliasLines.join('\n') + '\n';
+			}
+			clientBundle += `\nfunction __cleanup(start, end) {\n\tlet n = start.nextSibling;\n\twhile (n && n !== end) {\n\t\tconst next = n.nextSibling;\n\t\tn.remove();\n\t\tn = next;\n\t}\n}\n`;
 			const treeJson = JSON.stringify(routeTree);
 			clientBundle += `\nconst __routeTree = ${treeJson};\n`;
+			clientBundle += `function __resolveNames(nodes) { for (const n of nodes) { if (typeof n.page === 'string') { n._pageName = n.page; n.page = __components[n.page]; } if (typeof n.layout === 'string') { n._layoutName = n.layout; n.layout = __components[n.layout]; } if (n.children) __resolveNames(n.children); } }\n`;
+			clientBundle += `__resolveNames(__routeTree);\n`;
 			clientBundle += `const __router = createFileRouter(__routeTree);\n`;
+			clientBundle += `__router.__hydrators = __hydrators;\n`;
+			clientBundle += `globalThis.__vesk_router = __router;\n`;
 			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
 			console.error(`vesk: client bundle: ${clientBundle.length} bytes`);
 		} catch (e) {
@@ -516,8 +590,19 @@ if (cmd === 'dev') {
 				debounceTimer = setTimeout(async () => {
 					try {
 						routeTree = scanRoutes(appDirPath);
+						updateSourceMapping();
+						const changedSource = filename.startsWith('/') ? filename : joinPath(appDirPath, filename);
+						const changedComponents = sourceToComponents.get(changedSource) || [];
+
 						clientBundle = '';
 						await buildClientBundle();
+
+						if (changedComponents.length > 0 && typeof globalThis.__vesk_broadcastHmr === 'function') {
+							globalThis.__vesk_broadcastHmr({
+								type: 'update',
+								components: Object.fromEntries(changedComponents.map(name => [name, true]))
+							});
+						}
 						console.error(`vesk: rebuilt (${filename})`);
 					} catch (e) {
 						console.error(`vesk: rebuild error:`, e.message);
@@ -535,6 +620,8 @@ if (cmd === 'dev') {
 		'.html': 'text/html', '.json': 'application/json',
 	};
 
+	const HMR_CLIENT_SCRIPT = `if(typeof window!=='undefined'){try{const ws=new WebSocket('ws://'+(location.host||'localhost:3000')+'/_vesk/hmr');ws.onmessage=function(e){try{const msg=JSON.parse(e.data);if(msg.type==='update'){globalThis.__updatedComponents=new Set(Object.keys(msg.components));if(window.__vesk_router&&window.__vesk_router.hmrUpdate){window.__vesk_router.hmrUpdate();}}}catch(e){console.error('HMR parse error:',e)}};ws.onerror=function(){setTimeout(()=>location.reload(),1000)};}catch(e){}}`;
+
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url, `http://localhost:${port}`);
 
@@ -549,6 +636,13 @@ if (cmd === 'dev') {
 		if (url.pathname === '/_vesk/client.js') {
 			res.writeHead(200, { 'Content-Type': 'application/javascript' });
 			res.end(clientBundle);
+			return;
+		}
+
+		// HMR client script
+		if (url.pathname === '/_vesk/hmr.js') {
+			res.writeHead(200, { 'Content-Type': 'application/javascript' });
+			res.end(HMR_CLIENT_SCRIPT);
 			return;
 		}
 
@@ -624,7 +718,7 @@ if (cmd === 'dev') {
 				if (i === chain.length - 1 && node.page && fsExists(pageFilePath)) {
 					const src = readFileSync(pageFilePath, 'utf-8');
 					const compName = extractCompName(src) || node.page;
-					const result = renderPage(src, compName, { params: match.params });
+					const result = renderPage(src, compName, { params: match.params }, new Map(), { hydrate: true });
 					body = result.body;
 					head = result.head || '';
 				}
@@ -632,7 +726,7 @@ if (cmd === 'dev') {
 				if (node.layout && fsExists(layoutFilePath)) {
 					const src = readFileSync(layoutFilePath, 'utf-8');
 					const compName = extractCompName(src) || node.layout;
-					const result = renderPage(src, compName, { children: body });
+					const result = renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
 					body = result.body;
 					head = (result.head || '') + head;
 				}
@@ -641,13 +735,15 @@ if (cmd === 'dev') {
 			const hasLayout = chain.some(n => n.layout && fsExists(resolvePath(appDirPath, n.sourceDir, 'layout.vsk')));
 			let html;
 			if (hasLayout) {
-				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n${body}\n</body>\n</html>`;
+				const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
+				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
 			} else {
 				const leaf = chain.find(n => n.page);
 				if (leaf) {
 					const src = readFileSync(resolvePath(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
 					const compName = extractCompName(src) || leaf.page;
-					html = renderFullPage(src, compName, { params: match.params });
+					html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js' });
+					html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
 				} else {
 					throw new Error('No page or layout matched');
 				}
@@ -726,7 +822,7 @@ if (cmd === 'dev') {
 				globalThis.__vesk_request = ctx;
 				try {
 					const html = await renderSSR();
-					const injected = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n</body>`);
+					const injected = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
 					res.writeHead(200, { 'Content-Type': 'text/html' });
 					res.end(injected);
 				} finally {
@@ -751,6 +847,41 @@ if (cmd === 'dev') {
 	server.listen(port, () => {
 		console.error(`vesk dev server at http://localhost:${port}`);
 	});
+
+	// Track source file -> component name mapping for HMR
+	const sourceToComponents = new Map();
+	function updateSourceMapping() {
+		sourceToComponents.clear();
+		for (const [compName, sourcePath] of collectSources(routeTree)) {
+			const existing = sourceToComponents.get(sourcePath) || [];
+			existing.push(compName);
+			sourceToComponents.set(sourcePath, existing);
+		}
+	}
+	updateSourceMapping();
+
+	const hmrClients = new Set();
+	const wss = new WebSocketServer({ noServer: true });
+	wss.on('connection', (ws) => {
+		hmrClients.add(ws);
+		ws.on('close', () => hmrClients.delete(ws));
+	});
+	server.on('upgrade', (req, socket, head) => {
+		if (req.url === '/_vesk/hmr') {
+			wss.handleUpgrade(req, socket, head, (ws) => {
+				wss.emit('connection', ws, req);
+			});
+		} else {
+			socket.destroy();
+		}
+	});
+
+	globalThis.__vesk_broadcastHmr = (update) => {
+		const msg = JSON.stringify(update);
+		for (const ws of hmrClients) {
+			if (ws.readyState === 1) ws.send(msg);
+		}
+	};
 
 	// Don't exit — keep serving
 	await new Promise(() => {});

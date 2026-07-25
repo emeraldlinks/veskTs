@@ -44,8 +44,12 @@ export async function bundleRuntime(appDir, outDir) {
 
   const entryFile = resolve(outDir, 'server', `.runtime-entry-${buildId++}.mjs`);
   const entryContent = [
-    `import { renderPage, renderFullPage } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
+    `import { renderPage, renderFullPage, setRuntimeModule } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
     `import { parseCookies } from ${JSON.stringify(resolve(compilerRoot, 'api-routes.js'))};`,
+    `import * as __veskRuntime from ${JSON.stringify(resolve(runtimeRoot, 'index-server.js'))};`,
+    ``,
+    `// Inject runtime module so server-codegen can find components like NavLink, Link, etc.`,
+    `setRuntimeModule(__veskRuntime);`,
     ``,
     `// Server-side runtime hooks — read from globalThis.__vesk_request`,
     `export function cookies() {`,

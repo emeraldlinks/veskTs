@@ -1,9 +1,0 @@
-component BlogList {
-	<div class="blog-list" data-testid="blog-list">
-		<h1 class="text-xl font-bold" data-testid="blog-title">Blog Posts</h1>
-		<ul>
-			<li><a href="/blog/first-post" data-testid="post-link-1">First Post</a></li>
-			<li><a href="/blog/second-post" data-testid="post-link-2">Second Post</a></li>
-		</ul>
-	</div>
-}

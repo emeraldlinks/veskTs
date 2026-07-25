@@ -54,9 +54,10 @@ export async function generateClientBundle(routeTree, appDir) {
   }
   walk(routeTree);
 
-  // Bundle client runtime
+  // Bundle client runtime — ripple reactivity first, then utilities
   const runtimeFiles = [
-    'track.js', 'context.js', 'hydrate.js', 'resource.js',
+    'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
+    'context.js', 'hydrate.js', 'resource.js',
     'reconcile.js', 'bindings.js', 'router.js', 'request.js',
     'portal.js', 'hmr-client.js',
   ];
@@ -65,7 +66,7 @@ export async function generateClientBundle(routeTree, appDir) {
     const p = join(runtimeDir, f);
     if (existsSync(p)) {
       let src = readFileSync(p, 'utf-8');
-      src = src.replace(/^import\s+.*?from\s+['"].\/.*?['"];?\n?/gm, '');
+      src = src.replace(/^import\s+[\s\S]*?from\s+['"].\/.*?['"];?\n?/gm, '');
       src = src.replace(/^export\s+/gm, '');
       runtimeCode += `// --- ${f} ---\n${src}\n`;
     }

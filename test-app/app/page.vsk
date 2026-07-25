@@ -1,6 +1,7 @@
 import {track} from "@vesk/runtime"
 component Home (){
   const &[count] = track(10)
+ 
 	<h1 class="text-4xl font-bold mb-2">Welcome to Vesk</h1>
 	<p class="text-gray-500 mb-4">
 		A compiler-first reactive UI framework for the post-VDOM web.
@@ -19,5 +20,52 @@ component Home (){
 	<style>.gg {
 		color: red;
 	} </style>
+
+<Appx />
+<Appxx count={count} />
+
+
 	</div>
 }
+
+
+
+
+component Throws(props) {
+	if (props.fail) throw new Error(props.msg);
+	return <p>OK</p>
+}
+
+
+
+export component Appx {
+	try {
+		<Throws fail={true} msg="Boom!" />
+	} catch(e) {
+		<p class="error">Error: {e.message}</p>
+	}
+}
+
+component Throw(props) client {
+	 function name(){
+	console.log("function test for test name in component")
+	return "test name"
+  }
+	<p>{name()}</p>
+
+	if (props.count < 15) throw new Error(props.msg);
+		return <p>OK {props.count} </p>
+}
+
+
+
+
+export component Appxx(props)  {
+	<p> Count: {props.count} </p>
+	try {
+		<Throw count={props.count} msg={`Insufficient! ${props.count} `}/>
+	} catch(e) {
+		<p class="error">Error: {e.message}</p>
+	}
+}
+

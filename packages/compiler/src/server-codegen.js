@@ -18,10 +18,81 @@ import {
 	SlotNode,
 } from './ir.js';
 import { compileClient, isStaticIR } from './client-codegen.js';
+
+const VOID_ELEMENTS = new Set([
+	'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
+]);
+const RAW_TEXT_ELEMENTS = new Set(['style','script','title']);
+
+function prettifyHtml(html) {
+	let out = '';
+	let depth = 0;
+	let inRaw = false;
+	let rawTag = '';
+	const tokens = html.replace(/>\s+</g, '><').split(/(<[^>]+>)/);
+	for (const token of tokens) {
+		if (!token) continue;
+		if (!token.startsWith('<')) {
+			const text = token.trim();
+			if (inRaw) {
+				out += token;
+			} else if (text) {
+				out += '\t'.repeat(depth) + text + '\n';
+			}
+			continue;
+		}
+		const isClose = token[1] === '/';
+		const isComment = token.startsWith('<!--');
+		if (isComment) {
+			out += '\t'.repeat(depth) + token + '\n';
+			continue;
+		}
+		const tagMatch = token.match(/^<\/?([a-zA-Z][a-zA-Z0-9-]*)/);
+		if (!tagMatch) {
+			out += token;
+			continue;
+		}
+		const tag = tagMatch[1].toLowerCase();
+		const selfClose = token.endsWith('/>');
+		if (isClose) {
+			if (inRaw && tag === rawTag) inRaw = false;
+			depth = Math.max(0, depth - 1);
+			out += '\t'.repeat(depth) + token + '\n';
+		} else {
+			out += '\t'.repeat(depth) + token + '\n';
+			if (!selfClose && !VOID_ELEMENTS.has(tag)) {
+				depth++;
+				if (RAW_TEXT_ELEMENTS.has(tag)) {
+					inRaw = true;
+					rawTag = tag;
+				}
+			}
+		}
+	}
+	return out.trimEnd();
+}
 import { parse } from './parser.js';
 import { generateIR } from './ir-generator.js';
-import { createRequire } from 'module';
-const __require = createRequire(import.meta.url);
+let __cachedRuntimeModule = null;
+
+export function setRuntimeModule(mod) {
+	__cachedRuntimeModule = mod;
+}
+
+try {
+	const runtimeDir = new URL('../../runtime/src/index-server.js', import.meta.url).href;
+	__cachedRuntimeModule = await import(runtimeDir);
+} catch {}
+if (!__cachedRuntimeModule) {
+	try {
+		const { createRequire } = await import('module');
+		const __require = createRequire(import.meta.url);
+		for (const p of ['@vesk/runtime']) {
+			try { __cachedRuntimeModule = __require(p); break; } catch {}
+		}
+	} catch {}
+}
+if (!__cachedRuntimeModule) __cachedRuntimeModule = {};
 
 let __vskImportedNames = null;
 
@@ -440,6 +511,10 @@ function componentCallToJS(node, importedNames) {
 	const compName = node.componentName;
 	const isImported = importedNames && importedNames.has(compName);
 	const callee = isImported ? compName : `__registry.get(${JSON.stringify(compName)})`;
+	if (__vskHydrate) {
+		const id = __vskId++;
+		return `__out.push('<div data-vsk="${id}">' + (${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`;
+	}
 	return `__out.push(${callee}(${propsObj}, __registry, __vesk) || '');`;
 }
 
@@ -545,7 +620,7 @@ function buildParamInit(paramNames) {
 	return `const { ${destructured.join(', ')} } = props;`;
 }
 
-export { buildComponentMap };
+export { buildComponentMap, prettifyHtml };
 
 /**
  * Render a component to HTML for SSR.
@@ -570,18 +645,15 @@ function loadRuntimeImports(importStrs) {
 			}
 		}
 	}
-	const paths = ['@vesk/runtime', __runtimePath];
-	for (const p of paths) {
-		try {
-			const mod = __require(p);
-			const result = {};
-			if (mod.getActiveComponent) result.getActiveComponent = mod.getActiveComponent;
-			if (mod.setActiveComponent) result.setActiveComponent = mod.setActiveComponent;
-			for (const name of names) {
-				if (name in mod) result[name] = mod[name];
-			}
-			return result;
-		} catch {}
+	const mod = __cachedRuntimeModule;
+	if (mod) {
+		const result = {};
+		if (mod.getActiveComponent) result.getActiveComponent = mod.getActiveComponent;
+		if (mod.setActiveComponent) result.setActiveComponent = mod.setActiveComponent;
+		for (const name of names) {
+			if (name in mod) result[name] = mod[name];
+		}
+		return result;
 	}
 	return {};
 }
@@ -759,8 +831,11 @@ ${bodyHtml}${scriptBlock}</body>
 export function renderFullPage(source, componentName, props = {}, registry = new Map(), options = {}) {
 	const rendered = renderPage(source, componentName, props, registry, options);
 	const headHtml = rendered.head;
-	const bodyHtml = rendered.body;
+	const bodyHtml = prettifyHtml(rendered.body);
 	const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
+	const clientScript = options.clientScriptUrl
+		? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
+		: '';
 	return `<!DOCTYPE html>
 <html>
 <head>
@@ -768,8 +843,10 @@ export function renderFullPage(source, componentName, props = {}, registry = new
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 ${cssLink}${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
 <body>
-<div id="root">${bodyHtml}</div>
-</body>
+<div id="root">
+${bodyHtml}
+</div>
+${clientScript}</body>
 </html>`;
 }
 

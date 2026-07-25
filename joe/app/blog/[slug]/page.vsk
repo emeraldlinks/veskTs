@@ -1,6 +1,0 @@
-component BlogPost(props) {
-	<div class="blog-post" data-testid="blog-post">
-		<a href="/blog" data-testid="back-link">← Back to blog</a>
-		<h1 data-testid="post-title">Post: {props.params.slug}</h1>
-	</div>
-}

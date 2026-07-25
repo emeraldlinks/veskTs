@@ -47,15 +47,23 @@ function transformTracked(irNode, tracked) {
 				const info = context.state.get(node.left.name);
 				if (info) {
 					const right = context.visit(node.right);
+					const setCall = { type: 'Identifier', name: 'set' };
 					if (node.operator === '=') {
-						return callExpr(memberExpr(info.cellName, 'set'), [right]);
+						return callExpr(setCall, [
+							{ type: 'Identifier', name: info.cellName },
+							right,
+						]);
 					}
 					const op = node.operator.slice(0, -1);
-					return callExpr(memberExpr(info.cellName, 'set'), [
+					const getCall = { type: 'Identifier', name: 'get' };
+					return callExpr(setCall, [
+						{ type: 'Identifier', name: info.cellName },
 						{
 							type: 'BinaryExpression',
 							operator: op,
-							left: callExpr(memberExpr(info.cellName, 'get')),
+							left: callExpr(getCall, [
+								{ type: 'Identifier', name: info.cellName },
+							]),
 							right,
 						},
 					]);
@@ -68,11 +76,16 @@ function transformTracked(irNode, tracked) {
 				const info = context.state.get(node.argument.name);
 				if (info) {
 					const delta = node.operator === '++' ? 1 : -1;
-					return callExpr(memberExpr(info.cellName, 'set'), [
+					const setCall = { type: 'Identifier', name: 'set' };
+					const getCall = { type: 'Identifier', name: 'get' };
+					return callExpr(setCall, [
+						{ type: 'Identifier', name: info.cellName },
 						{
 							type: 'BinaryExpression',
 							operator: '+',
-							left: callExpr(memberExpr(info.cellName, 'get')),
+							left: callExpr(getCall, [
+								{ type: 'Identifier', name: info.cellName },
+							]),
 							right: { type: 'Literal', value: delta },
 						},
 					]);
@@ -102,7 +115,10 @@ function transformTracked(irNode, tracked) {
 			}
 			const info = context.state.get(node.name);
 			if (info && info.kind === 'virtual') {
-				return callExpr(memberExpr(info.cellName, 'get'));
+				const getCall = { type: 'Identifier', name: 'get' };
+				return callExpr(getCall, [
+					{ type: 'Identifier', name: info.cellName },
+				]);
 			}
 			return context.next();
 		},
@@ -186,7 +202,7 @@ class Ctx {
 	}
 }
 
-function emitNode(ctx, node, tracked, effectsVar, parentVar) {
+function emitNode(ctx, node, tracked, effectsVar, parentVar, compPrefix = '__components') {
 	if (node instanceof StaticNode) return emitStatic(ctx, node, tracked, effectsVar);
 	if (node instanceof TextNode) {
 		if (!node.value) return null;
@@ -201,7 +217,7 @@ function emitNode(ctx, node, tracked, effectsVar, parentVar) {
 		return null;
 	}
 	if (node instanceof ComponentRef) return null;
-	if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked);
+	if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked, parentVar, compPrefix);
 	if (node instanceof OpaqueDynamicRegion) return emitOpaque(ctx, node, tracked, parentVar);
 	if (node instanceof MapRegion) return emitMap(ctx, node, tracked, parentVar);
 	if (node instanceof ServerBlock) return null; // stripped from client bundle
@@ -424,10 +440,15 @@ function emitDynamicBinding(ctx, node, tracked, effectsVar) {
 	return v;
 }
 
-function emitComponentCall(ctx, node, tracked) {
+function emitComponentCall(ctx, node, tracked, parentVar, compPrefix = '__components') {
 	const propsEntries = node.props.map((p) => {
 		if (typeof p.value === 'string') return `${JSON.stringify(p.name)}: ${JSON.stringify(p.value)}`;
-		return `${JSON.stringify(p.name)}: ${transformTracked(p.value, tracked)}`;
+		const expr = transformTracked(p.value, tracked);
+		const simpleGet = expr.match(/^get\((\w+)\)$/);
+		if (simpleGet && tracked.has(simpleGet[1])) {
+			return `${JSON.stringify(p.name)}: ${simpleGet[1]}`;
+		}
+		return `${JSON.stringify(p.name)}: ${expr}`;
 	});
 
 	if (node.children.length > 0) {
@@ -441,49 +462,104 @@ function emitComponentCall(ctx, node, tracked) {
 		propsEntries.push(`children: ${frag}`);
 	}
 
-	const propsObj = `{ ${propsEntries.join(', ')} }`;
+const propsObj = `{ ${propsEntries.join(', ')} }`;
 	const v = ctx.n();
 	if (ctx.hydrate) {
 		const access = ctx.importedNames.has(node.componentName)
 			? node.componentName
 			: `__components[${JSON.stringify(node.componentName)}]`;
-		ctx.push(`const ${v} = (() => { const __el = ${access}(${propsObj}, __registry, __hydrate.subWalker(__hydrate.nextElement('div'))); return __el; })();`);
+		const subScope = ctx.inTryBody
+			? `__hydrate.subWalker(${parentVar})`
+			: `__hydrate.subWalker(__hydrate.nextElement())`;
+		ctx.push(`${access}(${propsObj}, __registry, ${subScope});`);
+		return null;
 	} else {
 		if (ctx.importedNames.has(node.componentName)) {
 			ctx.push(`const ${v} = ${node.componentName}(${propsObj});`);
 		} else {
-			ctx.push(`const ${v} = __components[${JSON.stringify(node.componentName)}](${propsObj});`);
+			ctx.push(`const ${v} = ${compPrefix}[${JSON.stringify(node.componentName)}](${propsObj});`);
 		}
 	}
 	return v;
 }
 
 function emitTryCatch(ctx, node, tracked, effectsVar, parentVar) {
-	const frag = ctx.n();
+	const anchor = ctx.n();
+	const endAnchor = ctx.n();
+	const effArr = ctx.n();
 	const catchParam = node.catchParamName || '__e';
-	ctx.push(`const ${frag} = document.createDocumentFragment();`);
-	ctx.push(`try {`);
-	for (const child of node.bodyTemplate) {
-		const childVar = emitNode(ctx, child, tracked, effectsVar, frag);
-		if (childVar) ctx.push(`${frag}.appendChild(${childVar});`);
-	}
-	if (node.catchBody.length > 0) {
-		ctx.push(`} catch(${catchParam}) {`);
+	const parent = parentVar || '$root';
+
+	ctx.push(`const ${anchor} = document.createComment('try');`);
+	ctx.push(`${parent}.appendChild(${anchor});`);
+	ctx.push(`let ${effArr} = [];`);
+	ctx.push(`const ${endAnchor} = document.createComment('try-end');`);
+
+	function emitRenderFunc(name, isCatch, hydMode, compPrefix = '__components') {
+		const savedHydrate = ctx.hydrate;
+		const savedInTryBody = ctx.inTryBody;
+		ctx.hydrate = hydMode;
+		if (hydMode && !isCatch) {
+			ctx.inTryBody = true;
+		}
+		ctx.push(`const ${name} = ${isCatch ? `(${catchParam}) =>` : '() =>'} {`);
+		ctx.push(indent(`const __p = ${anchor}.parentNode;`));
 		const savedEffects = ctx.effects;
 		ctx.effects = [];
-		for (const child of node.catchBody) {
-			const childVar = emitNode(ctx, child, tracked, null, frag);
-			if (childVar) ctx.push(`${frag}.appendChild(${childVar});`);
+		const body = isCatch ? node.catchBody : node.bodyTemplate;
+		let parentOverride = undefined;
+		if (hydMode && !isCatch) {
+			parentOverride = ctx.n();
+			ctx.push(`const ${parentOverride} = document.createDocumentFragment();`);
 		}
-		for (const eff of ctx.effects) ctx.push(eff);
+		for (const child of body) {
+			const childVar = emitNode(ctx, child, tracked, isCatch ? null : effArr, parentOverride, compPrefix);
+			if (childVar) ctx.push(indent(`__p.insertBefore(${childVar}, ${endAnchor});`));
+		}
+		for (const eff of ctx.effects) ctx.push(indent(eff));
 		ctx.effects = savedEffects;
+		ctx.hydrate = savedHydrate;
+		ctx.inTryBody = savedInTryBody;
+		ctx.push(`};`);
 	}
-	ctx.push(`}`);
-	if (parentVar) {
-		ctx.push(`${parentVar}.appendChild(${frag});`);
-		return null;
+
+	const tryRender = ctx.n();
+	emitRenderFunc(tryRender, false, ctx.hydrate);
+
+	let catchRender = null;
+	const hasCatch = node.catchBody.length > 0;
+	if (hasCatch) {
+		catchRender = ctx.n();
+		emitRenderFunc(catchRender, true, ctx.hydrate);
 	}
-	return frag;
+
+	ctx.push(`${parent}.appendChild(${endAnchor});`);
+
+	if (hasCatch) {
+		ctx.push(`try { ${tryRender}(); } catch(${catchParam}) { ${catchRender}(${catchParam}); }`);
+	} else {
+		ctx.push(`${tryRender}();`);
+	}
+
+	const tryRenderComp = ctx.n();
+	emitRenderFunc(tryRenderComp, false, false, '__runtime_comps');
+
+	let catchRenderComp = null;
+	if (hasCatch) {
+		catchRenderComp = ctx.n();
+		emitRenderFunc(catchRenderComp, true, false, '__runtime_comps');
+	}
+
+	ctx.effects.push(`{
+		effect(() => {
+			for (const e of ${effArr}) destroy_block(e);
+			${effArr}.length = 0;
+			__cleanup(${anchor}, ${endAnchor});
+			try { ${tryRenderComp}(); } catch(${catchParam}) { ${hasCatch ? `${catchRenderComp}(${catchParam});` : 'throw ${catchParam};'} }
+		});
+	}`);
+
+	return null;
 }
 
 function emitOpaque(ctx, node, tracked, parentVar) {
@@ -521,21 +597,26 @@ function emitOpaque(ctx, node, tracked, parentVar) {
 
 	ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
 
-	ctx.push(`if (${condExpr}) { ${conRenderName}(); }` + (hasElse ? ` else { ${altRenderName}(); }` : ''));
+	if (ctx.hydrate) {
+		// During hydration, SSR content is already in the DOM.
+		// Just track the condition for future updates.
+	} else {
+		ctx.push(`if (${condExpr}) { ${conRenderName}(); }` + (hasElse ? ` else { ${altRenderName}(); }` : ''));
+	}
 
 	ctx.effects.push(`{
-	let __iv = true;
-	effect(() => {
-		const __nv = ${condExpr};
-		if (__nv !== __iv) {
-			for (const e of ${effectsVar}) e.destroy();
-			${effectsVar}.length = 0;
-			__cleanup(${anchor}, ${endAnchor});
-			if (__nv) { ${conRenderName}(); }` + (hasElse ? ` else { ${altRenderName}(); }` : '') + `
-			__iv = __nv;
-		}
-	});
-}`);
+		let __iv = ${ctx.hydrate ? `!${condExpr}` : 'true'};
+		effect(() => {
+			const __nv = ${condExpr};
+			if (__nv !== __iv) {
+				for (const e of ${effectsVar}) destroy_block(e);
+				${effectsVar}.length = 0;
+				__cleanup(${anchor}, ${endAnchor});
+				if (__nv) { ${conRenderName}(); }` + (hasElse ? ` else { ${altRenderName}(); }` : '') + `
+				__iv = __nv;
+			}
+		});
+	}`);
 
 	return null;
 }
@@ -585,7 +666,7 @@ function emitMap(ctx, node, tracked, parentVar) {
 	let __first = true;
 	effect(() => {
 		if (__first) { __first = false; return; }
-		for (const e of ${effectsVar}) e.destroy();
+		for (const e of ${effectsVar}) destroy_block(e);
 		${effectsVar}.length = 0;
 		__cleanup(${anchor}, ${endAnchor});
 		for (const ${itemVar} of ${arrExpr}) {
@@ -605,6 +686,7 @@ function generateComponent(comp, importedNames = new Set(), hydrate = false) {
 	ctx.hydrate = hydrate;
 
 	ctx.push(hydrate ? '(props, __registry, __hydrate) => {' : '(props) => {');
+	ctx.push(indent(`props = reactiveProps(props);`));
 	ctx.push(indent(`const __prev = getActiveComponent();`));
 	ctx.push(indent(`setActiveComponent({ c: null, p: __prev });`));
 	ctx.push(indent(`try {`));
@@ -693,7 +775,10 @@ function isStaticIR(body) {
 		if (node instanceof StaticNode) {
 			for (const child of node.children) {
 				if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target) {
+					// Any non-event dynamic attribute makes the subtree non-static
 					if (child.target.startsWith('on') && child.target.length > 2) return false;
+					// class, style, and other attribute bindings also need client JS
+					return false;
 				}
 			}
 			if (!isStaticIR(node.children)) return false;
@@ -824,7 +909,7 @@ export function compileClient(source, _componentName, options = {}) {
 	}
 	const exportCode = exportLines.join('\n');
 
-	const runtimeNames = ['track', 'getActiveComponent', 'setActiveComponent'];
+	const runtimeNames = ['track', 'get', 'set', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'reactiveProps'];
 	if (ir.components.some(c => !isStaticIR(c.body))) runtimeNames.push('effect');
 	for (const name of usedRuntimeBindings(ir)) runtimeNames.push(name);
 	for (const name of ['batch', 'derived']) {

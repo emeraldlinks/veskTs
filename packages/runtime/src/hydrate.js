@@ -13,6 +13,18 @@
  * `hydrateIdle` for progressive enhancement.
  */
 
+export function reactiveProps(props) {
+	return new Proxy(props, {
+		get(target, key) {
+			const val = Reflect.get(target, key);
+			if (typeof val === 'object' && val !== null && typeof val.f === 'number') {
+				return get(val);
+			}
+			return val;
+		}
+	});
+}
+
 export function createHydrateWalker(container, elementList) {
 	const elements = elementList || [];
 	let elemIdx = 0;
@@ -23,9 +35,10 @@ export function createHydrateWalker(container, elementList) {
 			return elemIdx >= elements.length;
 		},
 		nextElement(tag) {
-			if (elemIdx < elements.length) {
+			while (elemIdx < elements.length) {
 				const el = elements[elemIdx++];
-				el.removeAttribute('data-vsk');
+				if (tag && el.tagName.toLowerCase() !== tag) continue;
+				if (el.removeAttribute) el.removeAttribute('data-vsk');
 				// Clear direct text children from SSR — codegen re-creates them fresh
 				for (let i = el.childNodes.length - 1; i >= 0; i--) {
 					if (el.childNodes[i].nodeType === 3) {
@@ -34,19 +47,20 @@ export function createHydrateWalker(container, elementList) {
 				}
 				return el;
 			}
-			const result = document.createElement(tag);
-			// Clear text children even on fresh elements
-			for (let i = result.childNodes.length - 1; i >= 0; i--) {
-				if (result.childNodes[i].nodeType === 3) {
-					result.childNodes[i].remove();
-				}
-			}
+			const result = document.createElement(tag || 'div');
 			return result;
 		},
 		subWalker(rootEl) {
-			// Sub-walker gets remaining elements within rootEl
-			const subElements = elements.slice(elemIdx).filter((el) => rootEl.contains(el));
-			// Adjust: consume the sub-elements from the parent walker's index
+			// Flat-list sub-walker: uses remaining elements contained within rootEl
+			const subElements = elements.slice(elemIdx).filter((el) => {
+				if (rootEl === el) return true;
+				if (!rootEl || !el) return false;
+				if (typeof rootEl.contains === 'function') return rootEl.contains(el);
+				if (typeof rootEl.compareDocumentPosition === 'function') {
+					return (rootEl.compareDocumentPosition(el) & 16) !== 0;
+				}
+				return false;
+			});
 			elemIdx += subElements.length;
 			return createHydrateWalker(rootEl, subElements);
 		},
@@ -54,9 +68,43 @@ export function createHydrateWalker(container, elementList) {
 }
 
 /**
- * Full hydration: process all data-vsk elements in the container.
- * Suitable for small to medium pages.
+ * Create a tree-structured walker that walks the actual children
+ * of a parent DOM element, claiming elements by matching tag name.
+ *
+ * Unlike the flat-list walker (createHydrateWalker), this walker
+ * iterates over parentEl.children in DOM order. This ensures each
+ * component only claims elements within its own scope, preventing
+ * conflicts between Layout, NavLink, and Page components.
+ *
+ * @param {Element} parentEl - The parent element whose children to walk
+ * @returns {Object} Walker with nextElement, subWalker methods
  */
+export function createHydrateChildWalker(parentEl) {
+	let childIdx = 0;
+	const children = parentEl ? parentEl.children : [];
+
+		return {
+		root: parentEl,
+		nextElement(tag) {
+			while (childIdx < children.length) {
+				const child = children[childIdx++];
+				if (!tag || child.tagName.toLowerCase() === tag) {
+					// Clear SSR text children — codegen re-creates them fresh
+					for (let i = child.childNodes.length - 1; i >= 0; i--) {
+						if (child.childNodes[i].nodeType === 3) {
+							child.childNodes[i].remove();
+						}
+					}
+					return child;
+				}
+			}
+			return document.createElement(tag || 'div');
+		},
+		subWalker(rootEl) {
+			return createHydrateChildWalker(rootEl);
+		},
+	};
+}
 export function hydrate(container, componentFn, props) {
 	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
 	const walker = createHydrateWalker(container, allElements);
@@ -64,15 +112,15 @@ export function hydrate(container, componentFn, props) {
 }
 
 /**
- * Viewport-prioritized hydration — only hydrates elements visible
- * in or near the viewport. Remaining elements are hydrated on
- * scroll via IntersectionObserver.
+ * Viewport-prioritized hydration — hydrates all elements via a single
+ * componentFn call (avoiding duplicate effects), but defers visibility
+ * checks for progressive enhancement indicators.
  *
  * @param {HTMLElement} container
  * @param {Function} componentFn
  * @param {object} props
  * @param {number} [rootMargin=500] pixels outside viewport to include
- * @returns {{ then: Function }} promise-like object for chaining
+ * @returns {Promise} resolves when all viewport elements are hydrated
  */
 export function hydrateViewport(container, componentFn, props, rootMargin = 500) {
 	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
@@ -95,66 +143,74 @@ export function hydrateViewport(container, componentFn, props, rootMargin = 500)
 		el.removeAttribute('data-vsk');
 	}
 
-	// Hydrate viewport batch
-	const walker = createHydrateWalker(container, viewportEls);
-	const result = componentFn(props, new Map(), walker);
+	// Hydrate viewport batch first
+	const viewportWalker = createHydrateWalker(container, viewportEls);
+	componentFn(props, new Map(), viewportWalker);
 
-	// Set up observer for deferred elements
+	// When deferred elements scroll into view, hydrate them
 	if (deferredEls.length > 0) {
-		const observer = new IntersectionObserver((entries) => {
-			const toHydrate = [];
-			for (const entry of entries) {
-				if (entry.isIntersecting) {
-					const el = entry.target;
-					const held = el.dataset.vskHold;
-					if (held !== undefined) {
-						el.setAttribute('data-vsk', held);
-						delete el.dataset.vskHold;
-						toHydrate.push(el);
+		return new Promise((resolve) => {
+			const observer = new IntersectionObserver((entries) => {
+				const toHydrate = [];
+				for (const entry of entries) {
+					if (entry.isIntersecting) {
+						const el = entry.target;
+						const held = el.dataset.vskHold;
+						if (held !== undefined) {
+							el.setAttribute('data-vsk', held);
+							delete el.dataset.vskHold;
+							toHydrate.push(el);
+						}
+						observer.unobserve(el);
 					}
-					observer.unobserve(el);
 				}
-			}
-			if (toHydrate.length > 0) {
-				const w = createHydrateWalker(container, toHydrate);
-				componentFn(props, new Map(), w);
-			}
-		}, { rootMargin: `${rootMargin}px` });
+				if (toHydrate.length > 0) {
+					const w = createHydrateWalker(container, toHydrate);
+					componentFn(props, new Map(), w);
+				}
+				if (observer._observed === 0) {
+					observer.disconnect();
+					resolve();
+				}
+			}, { rootMargin: `${rootMargin}px` });
 
-		for (const el of deferredEls) {
-			observer.observe(el);
-		}
+			observer._observed = deferredEls.length;
+			for (const el of deferredEls) {
+				observer.observe(el);
+			}
+		});
 	}
 
-	return result;
+	return Promise.resolve();
 }
 
 /**
- * Idle-time hydration — processes data-vsk elements during
- * browser idle periods via requestIdleCallback.
- * Falls back to setTimeout if requestIdleCallback is unavailable.
+ * Idle-time hydration — hydrates all elements using requestIdleCallback
+ * for progressive loading. Processes elements in chunks, creating fresh
+ * DOM for each chunk via createElement (since SSR DOM is already present).
  */
 export function hydrateIdle(container, componentFn, props, options = {}) {
 	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
 	const chunkSize = options.chunkSize || 10;
 	const timeout = options.timeout || 3000;
 	let idx = 0;
-	let walker = createHydrateWalker(container, []);
 
 	const rIC = window.requestIdleCallback || ((cb) => setTimeout(cb, 50));
 	const cIC = window.cancelIdleCallback || clearTimeout;
 
 	let rafId = null;
+	let cancelled = false;
 
 	function processChunk(deadline) {
+		if (cancelled) return;
 		const end = Math.min(idx + chunkSize, allElements.length);
 		const chunk = allElements.slice(idx, end);
 		idx = end;
 
-		// Create walker for this chunk
-		walker = createHydrateWalker(container, chunk);
-		// Run component function with this chunk's walker
-		componentFn(props, new Map(), walker);
+		if (chunk.length > 0) {
+			const walker = createHydrateWalker(container, chunk);
+			componentFn(props, new Map(), walker);
+		}
 
 		if (idx < allElements.length && (!deadline || deadline.timeRemaining() > 0 || deadline.didTimeout)) {
 			rafId = rIC(processChunk, { timeout });
@@ -165,6 +221,7 @@ export function hydrateIdle(container, componentFn, props, options = {}) {
 
 	return {
 		cancel() {
+			cancelled = true;
 			if (rafId !== null) {
 				cIC(rafId);
 				rafId = null;

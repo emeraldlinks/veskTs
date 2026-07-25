@@ -1,4 +1,5 @@
-import { track, effect } from './track.js';
+import { track, get, set, set_active_block, set_active_component } from './ripple-runtime.js';
+import { effect as createEffect, root } from './ripple-blocks.js';
 import { createContext } from './context.js';
 import { hydrate, createHydrateWalker } from './hydrate.js';
 
@@ -63,8 +64,26 @@ export function Outlet(props) {
 
 // ── Link Component ──────────────────────────────────────────────
 
-export function Link(props) {
+export function Link(props, registry, hydrate) {
 	const href = props.href || '#';
+	if (hydrate && hydrate.nextElement && !hydrate.done) {
+		const a = hydrate.nextElement('a');
+		if (props.children != null) {
+			if (typeof props.children === 'string' || typeof props.children === 'number') {
+				a.textContent = String(props.children);
+			} else if (props.children.textContent) {
+				a.textContent = props.children.textContent;
+			}
+		}
+		a.addEventListener('click', (e) => {
+			if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+			if (props.target === '_blank') return;
+			e.preventDefault();
+			const nav = useNavigate();
+			nav(href);
+		});
+		return document.createDocumentFragment();
+	}
 	const attrs = [
 		`href="${href.replace(/"/g, '&quot;')}"`,
 		props.class ? `class="${String(props.class).replace(/"/g, '&quot;')}"` : '',
@@ -87,7 +106,18 @@ export function Link(props) {
 	if (props.style) a.setAttribute('style', props.style);
 	if (props.target) a.target = props.target;
 	if (props.rel) a.rel = props.rel;
-	if (childStr) a.textContent = childStr;
+	if (childStr) {
+		a.textContent = childStr;
+	} else if (props.children != null) {
+		if (props.children.nodeType) {
+			a.appendChild(props.children);
+		} else if (Array.isArray(props.children)) {
+			for (const c of props.children) {
+				if (c && c.nodeType) a.appendChild(c);
+				else if (c != null) a.appendChild(document.createTextNode(String(c)));
+			}
+		}
+	}
 	a.addEventListener('click', (e) => {
 		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 		if (props.target === '_blank') return;
@@ -100,13 +130,40 @@ export function Link(props) {
 
 // ── NavLink Component ───────────────────────────────────────────
 
-export function NavLink(props) {
+export function NavLink(props, registry, hydrate) {
 	if (typeof document === 'undefined') {
-		return Link(props);
+		return Link(props, registry, hydrate);
 	}
-	const a = Link(props);
+	if (__isHydrating) {
+		// Hydration mode — claim existing <a> elements by href
+		const a = document.querySelector(`a[href="${props.href}"]`);
+		if (a) {
+			if (props.children != null) {
+				if (typeof props.children === 'string' || typeof props.children === 'number') {
+					a.textContent = String(props.children);
+				} else if (props.children.textContent) {
+					a.textContent = props.children.textContent;
+				}
+			}
+			a.addEventListener('click', (e) => {
+				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+				if (props.target === '_blank') return;
+				e.preventDefault();
+				const nav = useNavigate();
+				nav(props.href);
+			});
+			const path = usePathname();
+			const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href) && (path.length === props.href.length || path[props.href.length] === '/' || path[props.href.length] === '?'));
+			if (isActive) {
+				a.classList.add(props.activeClass || 'active');
+				if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
+			}
+			return document.createDocumentFragment();
+		}
+	}
+	const a = Link(props, registry, hydrate);
 	const path = usePathname();
-	const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href));
+		const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href) && (path.length === props.href.length || path[props.href.length] === '/' || path[props.href.length] === '?'));
 	if (isActive) {
 		a.classList.add(props.activeClass || 'active');
 		if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
@@ -115,6 +172,9 @@ export function NavLink(props) {
 }
 
 // ── Hooks ──────────────────────────────────────────────────────
+
+/** Set to true during initial hydration to signal components to claim SSR elements */
+let __isHydrating = false;
 
 const _state = {
 	path: track('/'),
@@ -129,27 +189,27 @@ export function useNavigate() {
 			router.navigate(path, opts);
 		} else {
 			window.history.pushState({}, '', path);
-			_state.path.set(path);
+			_state.path.value = path;
 		}
 	};
 }
 
 export function useParams() {
-	return _state.params.get();
+	return get(_state.params);
 }
 
 export function usePathname() {
-	return _state.path.get();
+	return get(_state.path);
 }
 
 export function useSearchParams() {
-	const s = _state.search.get();
+	const s = get(_state.search);
 	const sp = new URLSearchParams(s || '');
 	const setter = (next) => {
 		const q = typeof next === 'string' ? next : new URLSearchParams(next).toString();
-		_state.search.set(q);
+		_state.search.value = q;
 		const nav = useNavigate();
-		const path = _state.path.get();
+		const path = get(_state.path);
 		nav(path + (q ? '?' + q : ''), { replace: true });
 	};
 	return [sp, setter];
@@ -214,7 +274,7 @@ function collectLayouts(nodes, pathParts) {
 		const len = pathParts.length;
 		const matched = matchRouteNode(node, pathParts);
 		if (matched) {
-			const remaining = pathParts.slice(node.segmentCount || 1);
+			const remaining = pathParts.slice(node.segmentCount != null ? node.segmentCount : 1);
 			if (remaining.length > 0 && node.children.length > 0) {
 				const childLayouts = collectLayouts(node.children, remaining);
 				layouts.push(...childLayouts);
@@ -260,11 +320,13 @@ function flattenLayoutChain(tree, pathParts, result = []) {
 		}
 
 		const part = pathParts[0];
+		const segCount = node.segmentCount != null ? node.segmentCount : 1;
 
 		// Check if this node matches the current path segment
 		let matched = false;
 		if (node.fullPath === '/') {
-			matched = pathParts.length === 0 || pathParts.every(p => p === '');
+			// Root node always matches as a layout prefix
+			matched = true;
 		} else if (node.isCatchAll) {
 			matched = true;
 		} else if (node.isDynamic) {
@@ -274,12 +336,18 @@ function flattenLayoutChain(tree, pathParts, result = []) {
 		}
 
 		if (matched) {
-			if (node.layout) {
+			const consumeCount = node.isCatchAll ? pathParts.length : segCount;
+			const remaining = pathParts.slice(consumeCount);
+			const isLeaf = remaining.length === 0 || remaining.every(p => p === '');
+			if (isLeaf && node.page && node.layout) {
+				// Node serves as both layout and page — push once for layout
+				// renderMatch will also render its page component
+				result.push(node);
+				break;
+			} else if (node.layout) {
 				result.push(node);
 			}
-			const remaining = pathParts.slice(node.isCatchAll ? pathParts.length : 1);
-			if (remaining.length === 0 || remaining.every(p => p === '')) {
-				// This is the leaf — add the page
+			if (isLeaf) {
 				if (node.page) result.push(node);
 				break;
 			} else if (node.children.length > 0) {
@@ -298,86 +366,76 @@ function matchRoute(tree, pathname) {
 	const matchChain = flattenLayoutChain(tree, pathParts);
 	if (matchChain.length === 0) return null;
 
+	// Extract params by walking the match chain alongside path parts
 	const params = {};
+	let partIdx = 0;
 	for (const node of matchChain) {
-		if (node.isDynamic) {
-			let partIndex = 0;
-			let found = false;
-			for (let i = 0; i < tree.length; i++) {
-				if (tree[i].isGroup) continue;
-				if (tree[i].fullPath === '/') continue;
-				if (tree[i] === node) { found = true; break; }
-				partIndex++;
-			}
-			if (pathParts[partIndex]) {
-				const name = node.path.startsWith(':') ? node.path.slice(1) : node.path;
-				params[name] = decodeURIComponent(pathParts[partIndex]);
+		const segCount = node.segmentCount != null ? node.segmentCount : 1;
+		if (node.isDynamic && !node.isCatchAll) {
+			const name = node.path.startsWith(':') ? node.path.slice(1) : node.path;
+			if (partIdx < pathParts.length) {
+				params[name] = decodeURIComponent(pathParts[partIdx]);
 			}
 		}
 		if (node.isCatchAll) {
 			const name = node.path.startsWith(':') ? node.path.slice(1) : node.path;
-			let idx = 0;
-			for (let i = 0; i < tree.length; i++) {
-				if (tree[i].isGroup) continue;
-				if (tree[i] === node) break;
-				idx++;
-			}
-			params[name] = pathParts.slice(idx).map(decodeURIComponent).join('/');
+			params[name] = pathParts.slice(partIdx).map(decodeURIComponent).join('/');
 		}
+		partIdx += segCount;
 	}
 
 	return { matchChain, params };
 }
 
 function renderMatch(router, match, container) {
-	container.innerHTML = '';
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
-	// Find the page node (the last one in the chain that has a page component)
 	let pageNode = null;
 	for (let i = chain.length - 1; i >= 0; i--) {
 		if (chain[i].page) { pageNode = chain[i]; break; }
 	}
 
 	if (!pageNode) {
+		if (container.replaceChildren) {
+			container.replaceChildren();
+		} else {
+			container.innerHTML = '';
+		}
 		container.innerHTML = '<h1>404 — Not Found</h1>';
 		return;
 	}
 
-	// Collect layout nodes (everything before pageNode that has a layout)
-	const layoutNodes = chain.filter(n => n.layout && n !== pageNode);
+	const layoutNodes = chain.filter(n => n.layout);
+	const tempRoot = document.createDocumentFragment();
+	const clientWalker = createHydrateWalker(tempRoot, []);
 
-	// Create a client-side walker that creates fresh elements (no hydration)
-	const clientWalker = createHydrateWalker(container, []);
-
-	// Build the component tree: outermost layout wraps... wraps page
-	// We render top-down: each component receives children (the next inner component)
 	function renderLayoutChain(index) {
 		if (index >= layoutNodes.length) {
-			// Render the page
-			_state.params.set(paramValues);
-			_state.path.set(match.pathname || window.location.pathname);
-			_state.search.set(window.location.search || '');
-
+			_state.params.value = paramValues;
+			_state.path.value = match.pathname || window.location.pathname;
+			_state.search.value = window.location.search || '';
 			const pageProps = { params: paramValues, ...pageNode.props };
-			const dom = pageNode.page(pageProps, new Map(), clientWalker);
-			return dom;
+			return pageNode.page(pageProps, new Map(), clientWalker);
 		}
-
 		const node = layoutNodes[index];
-		// Create a fragment to hold the child content
 		const childDom = renderLayoutChain(index + 1);
-
-		// Wrap in the layout
 		const layoutProps = { children: childDom, params: paramValues };
-		const layoutDom = node.layout(layoutProps, new Map(), clientWalker);
-		return layoutDom;
+		return node.layout(layoutProps, new Map(), clientWalker);
 	}
 
-	const rootDom = renderLayoutChain(0);
+	let rootDom;
+	root(() => {
+		rootDom = renderLayoutChain(0);
+	});
+
 	if (rootDom && typeof rootDom === 'object' && rootDom.nodeType) {
-		container.appendChild(rootDom);
+		if (container.replaceChildren) {
+			container.replaceChildren(rootDom);
+		} else {
+			container.innerHTML = '';
+			container.appendChild(rootDom);
+		}
 	} else if (typeof rootDom === 'string') {
 		container.innerHTML = rootDom;
 	}
@@ -385,9 +443,10 @@ function renderMatch(router, match, container) {
 
 /**
  * Hydrate initial SSR content — claims existing DOM nodes instead of re-rendering.
- * Supports layout chains by passing children as hydrator functions: each layout
- * receives a function that hydrates the inner component with a subWalker,
- * enabling the SlotNode codegen to claim nested data-vsk elements correctly.
+ * Uses tree-structured walker scoped to each component's parent element.
+ * Each component claims elements from its parent's children by tag matching.
+ * Child components (via slot) receive a sub-walker scoped to the parent element.
+ * This ensures zero DOM mutations for the initial load.
  */
 function hydrateInitial(router, match, container) {
 	const chain = match.matchChain;
@@ -402,36 +461,57 @@ function hydrateInitial(router, match, container) {
 		return;
 	}
 
-	const layoutNodes = chain.filter(n => n.layout && n !== pageNode);
+	const layoutNodes = chain.filter(n => n.layout);
 
-	_state.params.set(paramValues);
-	_state.path.set(match.pathname || window.location.pathname);
-	_state.search.set(window.location.search || '');
+	_state.params.value = paramValues;
+	_state.path.value = match.pathname || window.location.pathname;
+	_state.search.value = window.location.search || '';
+
+	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
+	const walker = createHydrateWalker(container, allElements);
+
+	// Use hydrator versions of component functions
+	const hydrators = router.__hydrators;
+	const hydPage = hydrators && pageNode._pageName
+		? (hydrators[pageNode._pageName] || pageNode.page)
+		: pageNode.page;
+	const hydLayouts = layoutNodes.map(n => {
+		if (hydrators && n._layoutName) {
+			return hydrators[n._layoutName] || n.layout;
+		}
+		return n.layout;
+	});
 
 	if (layoutNodes.length === 0) {
-		hydrate(container, pageNode.page, { params: paramValues, ...pageNode.props });
+		__isHydrating = true;
+		root(() => {
+			hydPage({ params: paramValues, ...pageNode.props }, new Map(), walker);
+		});
+		__isHydrating = false;
 		return;
 	}
 
-	// Build a hydration chain: outermost layout receives children as a function,
-	// which when called hydrates the next level with a subWalker.
-	function createChildrenFn(index) {
-		return (childWalker) => {
-			if (index >= layoutNodes.length) {
-				// Page level
-				return pageNode.page({ params: paramValues, ...pageNode.props }, new Map(), childWalker);
-			}
-			const node = layoutNodes[index];
-			const childrenFn = createChildrenFn(index + 1);
-			return node.layout({ params: paramValues, children: childrenFn }, new Map(), childWalker);
-		};
+	__isHydrating = true;
+
+	function renderLayoutChain(index) {
+		if (index >= layoutNodes.length) {
+			return (subWalker) => {
+				hydPage({ params: paramValues, ...pageNode.props }, new Map(), subWalker);
+			};
+		}
+		const node = layoutNodes[index];
+		const hydLayout = hydLayouts[index];
+		const childHydrator = renderLayoutChain(index + 1);
+		const layoutProps = { children: childHydrator, params: paramValues };
+		hydLayout(layoutProps, new Map(), walker);
+		return null;
 	}
 
-	// Start hydration with the outermost layout
-	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
-	const walker = createHydrateWalker(container, allElements);
-	const topLayout = layoutNodes[0];
-	topLayout.layout({ params: paramValues, children: createChildrenFn(1) }, new Map(), walker);
+	root(() => {
+		renderLayoutChain(0);
+	});
+
+	__isHydrating = false;
 }
 
 // ── Create Router (Manual) ─────────────────────────────────────
@@ -479,9 +559,21 @@ export function createRouter(
 				}, { passive: true });
 			}
 
-			// Render initial route
+			// Render initial route — hydrate if SSR content exists
 			const path = window.location.pathname + window.location.search;
-			this.navigate(path, { replace: true });
+			if (container.children.length > 0) {
+				const url = new URL(path, window.location.origin);
+				const match = matchRoute(this.routeTree, url.pathname);
+				if (match) {
+					match.pathname = url.pathname;
+					hydrateInitial(this, match, container);
+					this._currentMatch = match;
+				} else {
+					this.navigate(path, { replace: true });
+				}
+			} else {
+				this.navigate(path, { replace: true });
+			}
 
 			return this;
 		},
@@ -503,8 +595,8 @@ export function createRouter(
 				window.history.replaceState({ path: url.pathname }, '', url.pathname);
 			}
 
-			_state.path.set(url.pathname);
-			_state.search.set(url.search);
+			_state.path.value = url.pathname;
+			_state.search.value = url.search;
 
 			renderMatch(this, match, this.container);
 			this._currentMatch = match;
@@ -515,32 +607,42 @@ export function createRouter(
 		},
 
 		get currentPath() {
-			return _state.path.get();
-		}
+			return get(_state.path);
+		},
+
+		hmrUpdate() {
+			const updated = globalThis.__updatedComponents;
+			if (!updated || updated.size === 0) return;
+			globalThis.__updatedComponents = new Set();
+			const path = window.location.pathname + window.location.search;
+			this.navigate(path, { replace: true });
+		},
 	};
 
 	return router;
 }
 
 function buildTreeFromMap(routes) {
-	const tree = [];
+	const root = [];
 	for (const [pattern, loader] of Object.entries(routes)) {
 		const parts = pattern.split('/').filter(Boolean);
 		const isDynamic = parts.some(p => p.startsWith(':'));
+		const isCatchAll = parts.some(p => p.startsWith('...'));
 		const node = {
 			path: parts[parts.length - 1] || '',
 			fullPath: pattern,
 			isGroup: false,
 			isDynamic,
-			isCatchAll: false,
-			page: null,
+			isCatchAll,
+			page: loader,
 			layout: null,
 			children: [],
+			segmentCount: parts.length || 1,
 			loader,
 		};
-		tree.push(node);
+		root.push(node);
 	}
-	return tree;
+	return root;
 }
 
 // ── Create File Router ─────────────────────────────────────────
@@ -561,6 +663,7 @@ export function createFileRouter(routeTree, options = {}) {
 		start() {
 			_currentRouter = this;
 			document.addEventListener('click', (e) => {
+				if (e.defaultPrevented) return;
 				const link = e.target.closest('a[href]');
 				if (!link) return;
 				if (link.hostname && link.hostname !== window.location.hostname) return;
@@ -571,25 +674,22 @@ export function createFileRouter(routeTree, options = {}) {
 				router.navigate(href);
 			});
 			window.addEventListener('popstate', () => {
-				router.navigate(window.location.pathname, { replace: true });
+				router.navigate(window.location.pathname + window.location.search, { replace: true });
 			});
 
 			const path = window.location.pathname;
-			const hasSsrContent = container.querySelector('[data-vsk]');
-
-			if (hasSsrContent) {
+			if (container.children.length > 0) {
 				const match = matchRoute(routeTree, path);
 				if (match) {
 					match.pathname = path;
-					_state.path.set(path);
-					_state.search.set(window.location.search);
 					hydrateInitial(router, match, container);
 					router._currentMatch = match;
-					return router;
+				} else {
+					router.navigate(path, { replace: true });
 				}
+			} else {
+				router.navigate(path, { replace: true });
 			}
-
-			router.navigate(path, { replace: true });
 			return router;
 		},
 
@@ -609,13 +709,14 @@ export function createFileRouter(routeTree, options = {}) {
 			async function runMwChain(index) {
 				if (index >= middlewareFns.length) {
 					// All middleware passed — render
+					const fullUrl = url.pathname + url.search;
 					if (!opts.replace) {
-						window.history.pushState({ path: url.pathname }, '', url.pathname);
+						window.history.pushState({ path: fullUrl }, '', fullUrl);
 					} else {
-						window.history.replaceState({ path: url.pathname }, '', url.pathname);
+						window.history.replaceState({ path: fullUrl }, '', fullUrl);
 					}
-					_state.path.set(url.pathname);
-					_state.search.set(url.search);
+					_state.path.value = url.pathname;
+					_state.search.value = url.search;
 					renderFn(router, match, container);
 					router._currentMatch = match;
 					return;
@@ -654,16 +755,24 @@ export function createFileRouter(routeTree, options = {}) {
 				} else {
 					window.history.replaceState({ path: url.pathname }, '', url.pathname);
 				}
-				_state.path.set(url.pathname);
-				_state.search.set(url.search);
+				_state.path.value = url.pathname;
+				_state.search.value = url.search;
 				renderFn(router, match, container);
 				router._currentMatch = match;
 			}
 		},
 
 		get currentPath() {
-			return _state.path.get();
-		}
+			return get(_state.path);
+		},
+
+		hmrUpdate() {
+			const updated = globalThis.__updatedComponents;
+			if (!updated || updated.size === 0) return;
+			globalThis.__updatedComponents = new Set();
+			const path = window.location.pathname + window.location.search;
+			this.navigate(path, { replace: true });
+		},
 	};
 
 	return router;

@@ -4,6 +4,30 @@ import { createServer } from 'node:http';
 import { build } from './index.js';
 import { createHmrServer } from './hmr.js';
 
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+function makeWebRequest(nodeReq, url) {
+  const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
+  const method = nodeReq.method || 'GET';
+  let _bodyBuffer = null;
+  async function getBody() {
+    if (_bodyBuffer) return _bodyBuffer;
+    const chunks = [];
+    for await (const chunk of nodeReq) chunks.push(chunk);
+    _bodyBuffer = Buffer.concat(chunks);
+    return _bodyBuffer;
+  }
+  const webRequest = new Request(parsedUrl, { method, headers: nodeReq.headers, body: null });
+  webRequest.json = async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } };
+  webRequest.text = async () => (await getBody()).toString('utf-8');
+  webRequest.clone = () => webRequest;
+  return webRequest;
+}
+
 const MIME = {
   '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -43,8 +67,12 @@ export async function startDevServer(appDir, options = {}) {
 
     // ── Static files ──
     if (url.pathname.startsWith('/_vesk/static/')) {
-      const relPath = url.pathname.replace('/_vesk/static/', '');
+      const relPath = url.pathname.replace('/_vesk/static/', '').replace(/\.\./g, '');
       const staticPath = resolve(devDir, 'static', relPath);
+      // Path traversal check
+      if (!staticPath.startsWith(resolve(devDir, 'static'))) {
+        res.writeHead(403); res.end('Forbidden'); return;
+      }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
         const ext = extname(staticPath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
@@ -55,7 +83,11 @@ export async function startDevServer(appDir, options = {}) {
 
     // Public files (served at root)
     if (url.pathname !== '/') {
-      const publicPath = resolve(publicDir, url.pathname.slice(1));
+      const sanitized = url.pathname.replace(/\.\./g, '');
+      const publicPath = resolve(publicDir, sanitized.slice(1));
+      if (!publicPath.startsWith(publicDir)) {
+        res.writeHead(403); res.end('Forbidden'); return;
+      }
       if (existsSync(publicPath) && statSync(publicPath).isFile()) {
         const ext = extname(publicPath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
@@ -68,14 +100,11 @@ export async function startDevServer(appDir, options = {}) {
     if (config && url.pathname.startsWith('/api')) {
       const apiRoute = config.routes.find(r => r.type === 'api' && matchPath(r.path, url.pathname));
       if (apiRoute) {
-        const handlerPath = resolve(devDir, apiRoute.function);
+          const handlerPath = resolve(devDir, apiRoute.function);
         if (existsSync(handlerPath)) {
           try {
             const mod = await import(`${handlerPath}?t=${lastBuild}`);
-            const webRequest = new Request(url.href, {
-              method: req.method || 'GET',
-              headers: req.headers,
-            });
+            const webRequest = makeWebRequest(req, url.href);
             const response = await mod.handle(webRequest);
             const body = await response.text();
             res.writeHead(response.status, Object.fromEntries(response.headers));
@@ -93,14 +122,11 @@ export async function startDevServer(appDir, options = {}) {
     if (config) {
       const ssrRoute = config.routes.find(r => r.type === 'ssr' && matchPath(r.path, url.pathname));
       if (ssrRoute) {
-        const handlerPath = resolve(devDir, ssrRoute.function);
+          const handlerPath = resolve(devDir, ssrRoute.function);
         if (existsSync(handlerPath)) {
           try {
             const mod = await import(`${handlerPath}?t=${lastBuild}`);
-            const webRequest = new Request(url.href, {
-              method: req.method || 'GET',
-              headers: req.headers,
-            });
+            const webRequest = makeWebRequest(req, url.href);
             const response = await mod.handle(webRequest);
             const body = await response.text();
 
@@ -109,7 +135,30 @@ export async function startDevServer(appDir, options = {}) {
             res.end(body);
           } catch (e) {
             res.writeHead(500, { 'Content-Type': 'text/html' });
-            res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}</pre></body></html>`);
+            res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>`);
+          }
+          return;
+        }
+      }
+    }
+
+    // ── SPA Fallback — serve root route for unmatched non-API, non-static routes ──
+    if (config) {
+      const rootRoute = config.routes.find(r => r.type === 'ssr' && r.path === '/');
+      if (rootRoute) {
+        const handlerPath = resolve(devDir, rootRoute.function);
+        if (existsSync(handlerPath)) {
+          try {
+            const mod = await import(`${handlerPath}?t=${lastBuild}`);
+            const webRequest = makeWebRequest(req, url.href);
+            const response = await mod.handle(webRequest);
+            const body = await response.text();
+            const headers = Object.fromEntries(response.headers);
+            res.writeHead(200, headers);
+            res.end(body);
+          } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'text/html' });
+            res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>`);
           }
           return;
         }
@@ -118,7 +167,7 @@ export async function startDevServer(appDir, options = {}) {
 
     // ── 404 ──
     res.writeHead(404, { 'Content-Type': 'text/html' });
-    res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
+    res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>`);
   });
 
   // ── Start HMR WebSocket server ──

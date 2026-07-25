@@ -13,6 +13,25 @@ export function VeskPlugin(config = {}) {
 				super(options, input);
 			}
 
+			#isBlockContext() {
+				const ctx = this.curContext();
+				return ctx && (ctx.token === "{" || ctx.token === "function");
+			}
+
+			readToken(code) {
+				if (this.#componentDepth > 0 && code === 60 && !this.inType && this.#isBlockContext()) {
+					const next = this.input.charCodeAt(this.pos + 1);
+					if (next === 47 || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
+						const savedExprAllowed = this.exprAllowed;
+						this.exprAllowed = true;
+						const result = super.readToken(code);
+						this.exprAllowed = savedExprAllowed;
+						return result;
+					}
+				}
+				return super.readToken(code);
+			}
+
 			isLet(context) {
 				if (!this.isContextual('let')) return false;
 
@@ -304,6 +323,7 @@ export function VeskPlugin(config = {}) {
 				}
 				return super.checkUnreserved(ref);
 			}
+
 		}
 
 		return VeskParser;

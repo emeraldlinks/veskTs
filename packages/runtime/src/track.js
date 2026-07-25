@@ -94,7 +94,10 @@ export class Cell {
 	 */
 	#notify() {
 		if (batchDepth > 0) {
-			batchQueue[batchQueue.length - 1].add(...this.#subscribers);
+			const queue = batchQueue[batchQueue.length - 1];
+			for (const sub of this.#subscribers) {
+				queue.add(sub);
+			}
 			return;
 		}
 		// Snapshot: effect.run() unsubscribes then re-subscribes, which would
@@ -120,6 +123,9 @@ export class Effect {
 	/** @type {boolean} */
 	#active = false;
 
+	/** @type {boolean} */
+	#destroyed = false;
+
 	/**
 	 * @param {() => void} fn
 	 */
@@ -130,6 +136,7 @@ export class Effect {
 
 	/** Run the effect, re-tracking dependencies. */
 	run() {
+		if (this.#destroyed) return;
 		if (!this.#active && batchDepth > 0) {
 			batchQueue[batchQueue.length - 1].add(this);
 			return;
@@ -164,6 +171,7 @@ export class Effect {
 		}
 		this.#deps.clear();
 		this.#active = false;
+		this.#destroyed = true;
 	}
 }
 
@@ -204,6 +212,11 @@ export function batch(fn) {
 		if (batchDepth === 0 && pending) {
 			for (const e of pending) {
 				e.run();
+			}
+		} else if (batchDepth > 0 && pending) {
+			const parentQueue = batchQueue[batchQueue.length - 1];
+			for (const e of pending) {
+				parentQueue.add(e);
 			}
 		}
 	}

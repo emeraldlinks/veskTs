@@ -1,3 +1,5 @@
+import { destroy_block } from './ripple-blocks.js';
+
 export function reconcile(anchor, endAnchor, items, keyFn, createItem) {
   const parent = anchor.parentNode;
   const map = new Map();
@@ -19,7 +21,7 @@ export function reconcile(anchor, endAnchor, items, keyFn, createItem) {
       if (!newSet.has(key)) {
         removeRange(marker, endAnchor);
         marker.remove();
-        for (const e of effs) e.destroy();
+        for (const e of effs) destroy_block(e);
         map.delete(key);
       }
     }

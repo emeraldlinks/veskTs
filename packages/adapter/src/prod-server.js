@@ -2,6 +2,30 @@ import { readFileSync, existsSync, statSync } from 'fs';
 import { resolve, extname } from 'path';
 import { createServer } from 'node:http';
 
+async function readBody(req) {
+  const chunks = [];
+  for await (const chunk of req) chunks.push(chunk);
+  return Buffer.concat(chunks);
+}
+
+function makeWebRequest(nodeReq, url) {
+  const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
+  const method = nodeReq.method || 'GET';
+  let _bodyBuffer = null;
+  async function getBody() {
+    if (_bodyBuffer) return _bodyBuffer;
+    const chunks = [];
+    for await (const chunk of nodeReq) chunks.push(chunk);
+    _bodyBuffer = Buffer.concat(chunks);
+    return _bodyBuffer;
+  }
+  const webRequest = new Request(parsedUrl, { method, headers: nodeReq.headers, body: null });
+  webRequest.json = async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } };
+  webRequest.text = async () => (await getBody()).toString('utf-8');
+  webRequest.clone = () => webRequest;
+  return webRequest;
+}
+
 const MIME = {
   '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
@@ -64,8 +88,11 @@ export function startProdServer(outDir, options = {}) {
 
     // ── Static files (under /_vesk/static/) ──
     if (url.pathname.startsWith('/_vesk/static/')) {
-      const relPath = url.pathname.replace('/_vesk/static/', '');
+      const relPath = url.pathname.replace('/_vesk/static/', '').replace(/\.\./g, '');
       const staticPath = resolve(staticDir, relPath);
+      if (!staticPath.startsWith(staticDir)) {
+        res.writeHead(403); res.end('Forbidden'); return;
+      }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
         const ext = extname(staticPath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
@@ -96,10 +123,7 @@ export function startProdServer(outDir, options = {}) {
             const mod = await loadFunction(route.function);
             if (mod) {
               try {
-                const webRequest = new Request(url.href, {
-                  method: req.method || 'GET',
-                  headers: req.headers,
-                });
+                const webRequest = makeWebRequest(req, url.href);
                 const response = await mod.handle(webRequest);
                 const body = await response.text();
                 res.writeHead(response.status, Object.fromEntries(response.headers));
@@ -124,10 +148,7 @@ export function startProdServer(outDir, options = {}) {
           const mod = await loadFunction(route.function);
           if (mod) {
             try {
-              const webRequest = new Request(url.href, {
-                method: req.method || 'GET',
-                headers: req.headers,
-              });
+              const webRequest = makeWebRequest(req, url.href);
               const response = await mod.handle(webRequest);
               const body = await response.text();
               const headers = Object.fromEntries(response.headers);
@@ -136,7 +157,7 @@ export function startProdServer(outDir, options = {}) {
               return;
             } catch (e) {
               res.writeHead(500, { 'Content-Type': 'text/html' });
-              res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}</pre></body></html>`);
+              res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>`);
               return;
             }
           }
@@ -144,9 +165,32 @@ export function startProdServer(outDir, options = {}) {
       }
     }
 
+    // ── SPA Fallback — serve root route for unmatched routes ──
+    if (config) {
+      const rootRoute = config.routes.find(r => r.type === 'ssr' && r.path === '/');
+      if (rootRoute) {
+        const mod = await loadFunction(rootRoute.function);
+        if (mod) {
+          try {
+            const webRequest = makeWebRequest(req, url.href);
+            const response = await mod.handle(webRequest);
+            const body = await response.text();
+            const headers = Object.fromEntries(response.headers);
+            res.writeHead(200, headers);
+            res.end(body);
+            return;
+          } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'text/html' });
+            res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>`);
+            return;
+          }
+        }
+      }
+    }
+
     // ── 404 ──
     res.writeHead(404, { 'Content-Type': 'text/html' });
-    res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
+    res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>`);
   });
 
   server.listen(port, () => {

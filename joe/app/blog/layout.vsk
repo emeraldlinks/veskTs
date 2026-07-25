@@ -1,6 +1,0 @@
-component BlogLayout(props) {
-	<div class="blog-layout border-2 border-blue-300 rounded p-4">
-		<h2 class="text-lg font-semibold text-blue-700">Blog</h2>
-		{props.children}
-	</div>
-}
