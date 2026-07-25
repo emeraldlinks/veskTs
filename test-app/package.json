@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/compiler": "file:../packages/compiler",
-    "@vesk/runtime": "file:../packages/runtime",
+    "@vesk/adapter": "file:../packages/adapter",
     "@vesk/cli": "file:../packages/cli",
-    "@vesk/adapter": "file:../packages/adapter"
+    "@vesk/compiler": "file:../packages/compiler",
+    "@vesk/runtime": "file:../packages/runtime"
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "tailwindcss": "^4.0.0"
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.8.0"
   }
 }

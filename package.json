@@ -17,11 +17,13 @@
   ],
   "scripts": {
     "test": "node scripts/test.js",
+    "test:hydration": "cd test-app && npx vesk build && cd .. && node hydration-test.mjs",
     "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json"
   },
   "devDependencies": {
     "@rollup/wasm-node": "^4.62.2",
     "happy-dom": "^20.11.0",
+    "linkedom": "^0.18.13",
     "typescript": "^5.8.0"
   }
 }

@@ -324,8 +324,7 @@ function staticNodeToJS(node) {
 	let openTag = `<${node.tag}`;
 	const subtreeNeedsJS = __vskHydrate && !isStaticIR(node.children);
 	if (subtreeNeedsJS) {
-		const id = __vskId++;
-		openTag += ` data-vsk="${id}"`;
+		lines.push(`__out.push('<!--vsk-->');`);
 	}
 	for (const attr of node.attributes) {
 		// Strip event handler attributes from SSR — bound via addEventListener on client
@@ -513,8 +512,7 @@ function componentCallToJS(node, importedNames, isAsync = false) {
 	const callee = isImported ? compName : `__registry.get(${JSON.stringify(compName)})`;
 	const awaitKw = isAsync ? 'await ' : '';
 	if (__vskHydrate) {
-		const id = __vskId++;
-		return `__out.push('<div data-vsk="${id}">' + (${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`;
+		return `__out.push('<!--vsk--><div>' + (${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`;
 	}
 	return `__out.push(${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '');`;
 }
@@ -636,7 +634,7 @@ export { buildComponentMap, prettifyHtml };
  * @param {object} [props]
  * @param {Map} [registry] - component registry for cross-file references
  * @param {object} [options]
- * @param {boolean} [options.hydrate] - emit data-vsk markers for client hydration
+ * @param {boolean} [options.hydrate] - emit <!--vsk--> comment markers for client hydration
  */
 const __runtimePath = new URL('../runtime/src/index-client.js', import.meta.url).pathname;
 

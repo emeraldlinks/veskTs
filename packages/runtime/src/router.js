@@ -467,8 +467,7 @@ function hydrateInitial(router, match, container) {
 	_state.path.value = match.pathname || window.location.pathname;
 	_state.search.value = window.location.search || '';
 
-	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
-	const walker = createHydrateWalker(container, allElements);
+	const walker = createHydrateWalker(container);
 
 	// Use hydrator versions of component functions
 	const hydrators = router.__hydrators;

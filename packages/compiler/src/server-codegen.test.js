@@ -545,36 +545,35 @@ describe('IR Generation', () => {
 // ============================================================
 describe('Sub-Component Static Extraction', () => {
 
-	it('static subtree omits data-vsk in hydrate mode', () => {
+	it('static subtree omits <!--vsk--> in hydrate mode', () => {
 		const html = render(`component App { return <div><span>Static</span></div>; }`, 'App', {}, new Map(), { hydrate: true });
-		// <div> contains a fully static <span> → no data-vsk on either
-		expect(html).not.toContain('data-vsk');
+		// <div> contains a fully static <span> → no <!--vsk--> on either
+		expect(html).not.toContain('<!--vsk-->');
 	});
 
-	it('dynamic element gets data-vsk', () => {
+	it('dynamic element gets <!--vsk-->', () => {
 		const html = render(`component App(props: { n: number }) { return <div>{props.n}</div>; }`, 'App', { n: 42 }, new Map(), { hydrate: true });
-		expect(html).toContain('data-vsk="');
+		expect(html).toContain('<!--vsk-->');
 	});
 
-	it('static child inside dynamic container lacks data-vsk', () => {
+	it('static child inside dynamic container lacks <!--vsk--> markers', () => {
 		const html = render(`component App(props: { n: number }) { return <div class="outer"><span>Static</span><p>{props.n}</p></div>; }`, 'App', { n: 7 }, new Map(), { hydrate: true });
-		expect(html).toContain('data-vsk="0"');
-		expect(html).toContain('data-vsk="1"');
-		// The <span> should NOT have data-vsk (fully static subtree)
-		// The <p> with DynamicBinding should have data-vsk
+		expect(html.match(/<!--vsk-->/g)).toHaveLength(2);
+		// The <span> should NOT have <!--vsk--> (fully static subtree)
+		// The <p> with DynamicBinding should have <!--vsk-->
 		expect(html).toContain('<span>Static</span>');
-		expect(html).toContain('<p data-vsk="1">7</p>');
+		expect(html).toContain('<!--vsk--><p>7</p>');
 	});
 
-	it('non-hydrate mode never has data-vsk markers', () => {
+	it('non-hydrate mode never has <!--vsk--> markers', () => {
 		const html = render(`component App(props: { n: number }) { return <div>{props.n}</div>; }`, 'App', { n: 1 }, new Map(), { hydrate: false });
-		expect(html).not.toContain('data-vsk');
+		expect(html).not.toContain('<!--vsk-->');
 	});
 
 	it('deeply nested static subtree gets no markers', () => {
 		const html = render(`component App(props: { n: number }) { return <div><article><section><p>Deep</p></section></article><span>{props.n}</span></div>; }`, 'App', { n: 3 }, new Map(), { hydrate: true });
 		// Only the dynamic <span> and its dynamic ancestors get markers
-		expect(html).toContain('<span data-vsk="1">3</span>');
+		expect(html).toContain('<!--vsk--><span>3</span>');
 		// The static <article>/<section>/<p> chain has NO markers
 		expect(html).toContain('<article><section><p>Deep</p></section></article>');
 	});

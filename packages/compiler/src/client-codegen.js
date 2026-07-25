@@ -475,8 +475,8 @@ const propsObj = `{ ${propsEntries.join(', ')} }`;
 		const subScope = ctx.inTryBody
 			? `__hydrate.subWalker(${parentVar})`
 			: `__hydrate.subWalker(__hydrate.nextElement())`;
-		ctx.push(`${access}(${propsObj}, __registry, ${subScope});`);
-		return null;
+		ctx.push(`const ${v} = ${access}(${propsObj}, __registry, ${subScope});`);
+		return v;
 	} else {
 		if (ctx.importedNames.has(node.componentName)) {
 			ctx.push(`const ${v} = ${node.componentName}(${propsObj});`);

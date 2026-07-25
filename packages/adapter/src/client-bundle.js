@@ -27,7 +27,7 @@ export async function generateClientBundle(routeTree, appDir) {
   const runtimeDir = findRuntimeSrc(appDir);
 
   const seen = new Set();
-  let bundle = '';
+  let bundle = 'const __components = {};\n';
   const aliasLines = [];
 
   function walk(nodes) {
@@ -38,7 +38,8 @@ export async function generateClientBundle(routeTree, appDir) {
         const src = readFileSync(pagePath, 'utf-8');
         const code = compileClient(src, null, { hydrate: true, forceClient: true });
         if (code) {
-          bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`) + '\n';
+          bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`)
+                        .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '') + '\n';
           const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
           if (actualName && actualName !== node.page) {
             aliasLines.push(`__components[${JSON.stringify(node.page)}] = __components[${JSON.stringify(actualName)}];`);
@@ -51,7 +52,8 @@ export async function generateClientBundle(routeTree, appDir) {
         const src = readFileSync(layoutPath, 'utf-8');
         const code = compileClient(src, null, { hydrate: true, forceClient: true });
         if (code) {
-          bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`) + '\n';
+          bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`)
+                        .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '') + '\n';
           const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
           if (actualName && actualName !== node.layout) {
             aliasLines.push(`__components[${JSON.stringify(node.layout)}] = __components[${JSON.stringify(actualName)}];`);

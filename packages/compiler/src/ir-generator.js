@@ -351,6 +351,8 @@ function processBlockBody(source, block) {
 	if (block.type === 'JSXExpressionContainer') {
 		return [new DynamicBinding(toExpression(source, block.expression))];
 	}
+	const raw = getSource(source, block);
+	if (raw) return [new RuntimeStatement(raw, block, source)];
 	return [];
 }
 

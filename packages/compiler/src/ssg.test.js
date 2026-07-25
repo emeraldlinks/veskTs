@@ -26,7 +26,7 @@ function extractDataScript(html) {
 }
 
 function hasHydrationMarkers(html) {
-	return /data-vsk="\d+"/.test(html);
+	return /<!--vsk-->/.test(html);
 }
 
 function hasClientCode(html) {

@@ -1,18 +1,3 @@
-/**
- * Vesk hydration runtime.
- *
- * Uses `data-vsk` attributes on server-rendered elements to match
- * them with the client codegen's imperative DOM creation calls.
- * After matching, the attribute is removed to avoid re-matching.
- *
- * Text nodes: NOT matched individually. Instead, `nextElement` clears
- * the matched element's direct SSR text children; the codegen
- * re-creates them fresh via `document.createTextNode`.
- *
- * Supports time-sliced hydration via `hydrateViewport` and
- * `hydrateIdle` for progressive enhancement.
- */
-
 export function reactiveProps(props) {
 	return new Proxy(props, {
 		get(target, key) {
@@ -25,21 +10,34 @@ export function reactiveProps(props) {
 	});
 }
 
-export function createHydrateWalker(container, elementList) {
-	const elements = elementList || [];
-	let elemIdx = 0;
+const _SHOW_COMMENT = 128;
+const _FILTER_ACCEPT = 1;
+const _FILTER_SKIP = 2;
+
+function collectVskMarkers(container) {
+	const markers = [];
+	const walker = document.createTreeWalker(container, _SHOW_COMMENT, {
+		acceptNode: (node) => (node.textContent === 'vsk' ? _FILTER_ACCEPT : _FILTER_SKIP),
+	});
+	while (walker.nextNode()) markers.push(walker.currentNode);
+	return markers;
+}
+
+export function createHydrateWalker(container, markerList) {
+	const markers = markerList || (container ? collectVskMarkers(container) : []);
+	let markerIdx = 0;
 
 	return {
 		root: container,
 		done() {
-			return elemIdx >= elements.length;
+			return markerIdx >= markers.length;
 		},
 		nextElement(tag) {
-			while (elemIdx < elements.length) {
-				const el = elements[elemIdx++];
-				if (tag && el.tagName.toLowerCase() !== tag) continue;
-				if (el.removeAttribute) el.removeAttribute('data-vsk');
-				// Clear direct text children from SSR — codegen re-creates them fresh
+			while (markerIdx < markers.length) {
+				const marker = markers[markerIdx++];
+				const el = marker.nextElementSibling;
+				marker.remove();
+				if (tag && (!el || el.tagName.toLowerCase() !== tag)) continue;
 				for (let i = el.childNodes.length - 1; i >= 0; i--) {
 					if (el.childNodes[i].nodeType === 3) {
 						el.childNodes[i].remove();
@@ -47,49 +45,31 @@ export function createHydrateWalker(container, elementList) {
 				}
 				return el;
 			}
-			const result = document.createElement(tag || 'div');
-			return result;
+			return document.createElement(tag || 'div');
 		},
 		subWalker(rootEl) {
-			// Flat-list sub-walker: uses remaining elements contained within rootEl
-			const subElements = elements.slice(elemIdx).filter((el) => {
-				if (rootEl === el) return true;
-				if (!rootEl || !el) return false;
-				if (typeof rootEl.contains === 'function') return rootEl.contains(el);
-				if (typeof rootEl.compareDocumentPosition === 'function') {
-					return (rootEl.compareDocumentPosition(el) & 16) !== 0;
-				}
+			const subMarkers = markers.slice(markerIdx).filter((m) => {
+				if (rootEl === m) return true;
+				if (!rootEl || !m) return false;
+				if (typeof rootEl.contains === 'function') return rootEl.contains(m);
 				return false;
 			});
-			elemIdx += subElements.length;
-			return createHydrateWalker(rootEl, subElements);
+			markerIdx += subMarkers.length;
+			return createHydrateWalker(rootEl, subMarkers);
 		},
 	};
 }
 
-/**
- * Create a tree-structured walker that walks the actual children
- * of a parent DOM element, claiming elements by matching tag name.
- *
- * Unlike the flat-list walker (createHydrateWalker), this walker
- * iterates over parentEl.children in DOM order. This ensures each
- * component only claims elements within its own scope, preventing
- * conflicts between Layout, NavLink, and Page components.
- *
- * @param {Element} parentEl - The parent element whose children to walk
- * @returns {Object} Walker with nextElement, subWalker methods
- */
 export function createHydrateChildWalker(parentEl) {
 	let childIdx = 0;
 	const children = parentEl ? parentEl.children : [];
 
-		return {
+	return {
 		root: parentEl,
 		nextElement(tag) {
 			while (childIdx < children.length) {
 				const child = children[childIdx++];
 				if (!tag || child.tagName.toLowerCase() === tag) {
-					// Clear SSR text children — codegen re-creates them fresh
 					for (let i = child.childNodes.length - 1; i >= 0; i--) {
 						if (child.childNodes[i].nodeType === 3) {
 							child.childNodes[i].remove();
@@ -105,61 +85,49 @@ export function createHydrateChildWalker(parentEl) {
 		},
 	};
 }
+
 export function hydrate(container, componentFn, props) {
-	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
-	const walker = createHydrateWalker(container, allElements);
+	const walker = createHydrateWalker(container);
 	return componentFn(props, new Map(), walker);
 }
 
-/**
- * Viewport-prioritized hydration — hydrates all elements via a single
- * componentFn call (avoiding duplicate effects), but defers visibility
- * checks for progressive enhancement indicators.
- *
- * @param {HTMLElement} container
- * @param {Function} componentFn
- * @param {object} props
- * @param {number} [rootMargin=500] pixels outside viewport to include
- * @returns {Promise} resolves when all viewport elements are hydrated
- */
 export function hydrateViewport(container, componentFn, props, rootMargin = 500) {
-	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
+	const allMarkers = collectVskMarkers(container);
 
-	// Split into viewport and deferred batches
-	const viewportEls = [];
-	const deferredEls = [];
-	for (const el of allElements) {
+	const viewportMarkers = [];
+	const deferredMarkers = [];
+	for (const marker of allMarkers) {
+		const el = marker.nextElementSibling;
+		if (!el) { deferredMarkers.push(marker); continue; }
 		const rect = el.getBoundingClientRect();
 		if (rect.bottom < -rootMargin || rect.top > window.innerHeight + rootMargin) {
-			deferredEls.push(el);
+			deferredMarkers.push(marker);
 		} else {
-			viewportEls.push(el);
+			viewportMarkers.push(marker);
 		}
 	}
 
-	// Temporarily hide deferred elements from querySelector
-	for (const el of deferredEls) {
-		el.dataset.vskHold = el.getAttribute('data-vsk') || '';
-		el.removeAttribute('data-vsk');
+	for (const marker of deferredMarkers) {
+		marker.textContent = 'vsk-hold';
 	}
 
-	// Hydrate viewport batch first
-	const viewportWalker = createHydrateWalker(container, viewportEls);
+	const viewportWalker = createHydrateWalker(container, viewportMarkers);
 	componentFn(props, new Map(), viewportWalker);
 
-	// When deferred elements scroll into view, hydrate them
-	if (deferredEls.length > 0) {
+	if (deferredMarkers.length > 0) {
 		return new Promise((resolve) => {
 			const observer = new IntersectionObserver((entries) => {
 				const toHydrate = [];
 				for (const entry of entries) {
 					if (entry.isIntersecting) {
 						const el = entry.target;
-						const held = el.dataset.vskHold;
-						if (held !== undefined) {
-							el.setAttribute('data-vsk', held);
-							delete el.dataset.vskHold;
-							toHydrate.push(el);
+						const siblings = el.parentNode ? Array.from(el.parentNode.childNodes) : [];
+						const heldMarker = siblings.find(
+							(n) => n.nodeType === 8 && n.textContent === 'vsk-hold' && n.nextElementSibling === el
+						);
+						if (heldMarker) {
+							heldMarker.textContent = 'vsk';
+							toHydrate.push(heldMarker);
 						}
 						observer.unobserve(el);
 					}
@@ -174,9 +142,10 @@ export function hydrateViewport(container, componentFn, props, rootMargin = 500)
 				}
 			}, { rootMargin: `${rootMargin}px` });
 
-			observer._observed = deferredEls.length;
-			for (const el of deferredEls) {
-				observer.observe(el);
+			observer._observed = deferredMarkers.length;
+			for (const marker of deferredMarkers) {
+				const el = marker.nextElementSibling;
+				if (el) observer.observe(el);
 			}
 		});
 	}
@@ -184,13 +153,8 @@ export function hydrateViewport(container, componentFn, props, rootMargin = 500)
 	return Promise.resolve();
 }
 
-/**
- * Idle-time hydration — hydrates all elements using requestIdleCallback
- * for progressive loading. Processes elements in chunks, creating fresh
- * DOM for each chunk via createElement (since SSR DOM is already present).
- */
 export function hydrateIdle(container, componentFn, props, options = {}) {
-	const allElements = Array.from(container.querySelectorAll('[data-vsk]'));
+	const allMarkers = collectVskMarkers(container);
 	const chunkSize = options.chunkSize || 10;
 	const timeout = options.timeout || 3000;
 	let idx = 0;
@@ -203,8 +167,8 @@ export function hydrateIdle(container, componentFn, props, options = {}) {
 
 	function processChunk(deadline) {
 		if (cancelled) return;
-		const end = Math.min(idx + chunkSize, allElements.length);
-		const chunk = allElements.slice(idx, end);
+		const end = Math.min(idx + chunkSize, allMarkers.length);
+		const chunk = allMarkers.slice(idx, end);
 		idx = end;
 
 		if (chunk.length > 0) {
@@ -212,7 +176,7 @@ export function hydrateIdle(container, componentFn, props, options = {}) {
 			componentFn(props, new Map(), walker);
 		}
 
-		if (idx < allElements.length && (!deadline || deadline.timeRemaining() > 0 || deadline.didTimeout)) {
+		if (idx < allMarkers.length && (!deadline || deadline.timeRemaining() > 0 || deadline.didTimeout)) {
 			rafId = rIC(processChunk, { timeout });
 		}
 	}
@@ -230,16 +194,21 @@ export function hydrateIdle(container, componentFn, props, options = {}) {
 	};
 }
 
-/**
- * Check if there are remaining hydration markers in the DOM.
- */
 export function needsHydration(container) {
-	return container.querySelector('[data-vsk]') !== null;
+	const walker = document.createTreeWalker(container, _SHOW_COMMENT, {
+		acceptNode: (node) => (node.textContent === 'vsk' ? _FILTER_ACCEPT : _FILTER_SKIP),
+	});
+	return walker.nextNode() !== null;
 }
 
-/**
- * Count remaining hydration markers.
- */
 export function hydrationCount(container) {
-	return container.querySelectorAll('[data-vsk]').length;
+	let count = 0;
+	const walker = document.createTreeWalker(container, _SHOW_COMMENT, {
+		acceptNode: (node) => {
+			if (node.textContent === 'vsk') { count++; return _FILTER_ACCEPT; }
+			return _FILTER_SKIP;
+		},
+	});
+	while (walker.nextNode());
+	return count;
 }

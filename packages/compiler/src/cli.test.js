@@ -79,7 +79,7 @@ describe('SSG (Static Site Generation)', () => {
 		expect(result.html).toContain('<!DOCTYPE html>');
 		expect(result.html).toContain('SSG Page');
 		expect(result.html).toContain('__VESK_DATA__');
-		expect(result.html).toContain('data-vsk="');
+		expect(result.html).toContain('<!--vsk-->');
 		expect(result.html).toContain('<script>');
 		expect(result.body).toContain('SSG Page');
 	});
