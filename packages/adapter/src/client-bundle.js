@@ -28,6 +28,7 @@ export async function generateClientBundle(routeTree, appDir) {
 
   const seen = new Set();
   let bundle = '';
+  const aliasLines = [];
 
   function walk(nodes) {
     for (const node of nodes) {
@@ -38,6 +39,10 @@ export async function generateClientBundle(routeTree, appDir) {
         const code = compileClient(src, null, { hydrate: true, forceClient: true });
         if (code) {
           bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`) + '\n';
+          const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
+          if (actualName && actualName !== node.page) {
+            aliasLines.push(`__components[${JSON.stringify(node.page)}] = __components[${JSON.stringify(actualName)}];`);
+          }
         }
       }
       const layoutPath = resolve(appDir, node.sourceDir, 'layout.vsk');
@@ -47,6 +52,10 @@ export async function generateClientBundle(routeTree, appDir) {
         const code = compileClient(src, null, { hydrate: true, forceClient: true });
         if (code) {
           bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`) + '\n';
+          const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
+          if (actualName && actualName !== node.layout) {
+            aliasLines.push(`__components[${JSON.stringify(node.layout)}] = __components[${JSON.stringify(actualName)}];`);
+          }
         }
       }
       walk(node.children || []);
@@ -80,7 +89,9 @@ export async function generateClientBundle(routeTree, appDir) {
     if (name) runtimeCode += `export { ${name} };\n`;
   }
 
+  const aliasCode = aliasLines.length > 0 ? aliasLines.join('\n') + '\n' : '';
   const fullBundle = runtimeCode + '\n' + bundle + '\n' +
+    aliasCode +
     `globalThis.__components = __components;\n` +
     `function __resolveNames(nodes) {\n` +
     `  for (const n of nodes) {\n` +
