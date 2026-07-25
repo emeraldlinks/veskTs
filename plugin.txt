@@ -1,0 +1,105 @@
+import { defineConfig } from '@vesk/compiler'
+import tailwindcss from '@vesk/plugin-tailwind'
+
+export default defineConfig({
+  plugins: [
+    tailwindcss({ entry: 'src/global.css' }),
+  ],
+})
+
+{
+  "name": "@vesk/plugin-tailwind",
+  "version": "0.0.1",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@tailwindcss/node": "^4.0.0",
+    "@tailwindcss/oxide": "^4.0.0"
+  }
+}
+
+
+// packages/compiler/src/config.js
+//
+// defineConfig() — the config helper users import in vesk.config.ts/.js.
+//
+// This is intentionally a plain identity function at runtime (same pattern
+// Vite, Vitest, and most JS tools use for their own defineConfig): its only
+// job is to give TypeScript/editor tooling a typed shape to check the config
+// object against, via the JSDoc typedef below (mirrored in config.d.ts for
+// consumers who want real .d.ts types rather than JSDoc inference).
+//
+// Config shape:
+//   {
+//     appDir?: string,       // default: './app'
+//     outDir?: string,       // default: './dist'
+//     publicDir?: string,    // default: './public'
+//     ssg?: { getStaticPaths?: () => Promise<{ paths: Array<{ params: object }> }> },
+//     plugins?: VeskPlugin[],
+//   }
+//
+// Plugin shape — see /docu/cli/plugin-api.md for the full contract:
+//   {
+//     name: string,
+//     onCSS?: (content: string, filePath: string) => Promise<string | null> | string | null,
+//     onFileWatch?: (filePath: string) => Promise<{ handled: boolean }> | { handled: boolean },
+//     onTransformJS?: (code: string, filePath: string) => Promise<string | null> | string | null,
+//     onBuildStart?: () => Promise<void> | void,
+//     onBuildEnd?: () => Promise<void> | void,
+//   }
+
+export function defineConfig(config) {
+	return config;
+}
+
+export function validateConfig(config) {
+	if (!config.plugins) return config;
+	if (!Array.isArray(config.plugins)) {
+		throw new Error('[vesk] config.plugins must be an array.');
+	}
+	for (const plugin of config.plugins) {
+		if (!plugin || typeof plugin !== 'object') {
+			throw new Error('[vesk] Each plugin must be an object returned by a plugin factory (e.g. tailwindcss()).');
+		}
+		if (typeof plugin.name !== 'string' || !plugin.name) {
+			throw new Error(
+				'[vesk] A plugin is missing a `name` property. If this is a Vite ' +
+				'plugin (e.g. from @tailwindcss/vite), it is not compatible with ' +
+				"the native Vesk CLI's plugin API — use a Vesk-native plugin " +
+				'instead (e.g. @vesk/plugin-tailwind).'
+			);
+		}
+		const hasKnownHook =
+			typeof plugin.onCSS === 'function' ||
+			typeof plugin.onFileWatch === 'function' ||
+			typeof plugin.onTransformJS === 'function' ||
+			typeof plugin.onBuildStart === 'function' ||
+			typeof plugin.onBuildEnd === 'function';
+		if (!hasKnownHook) {
+			throw new Error(
+				`[vesk] Plugin "${plugin.name}" implements none of the recognized ` +
+				'hooks (onCSS, onFileWatch, onTransformJS, onBuildStart, onBuildEnd) ' +
+				'— it will never be called. Check the plugin package version, or see ' +
+				'/docu/cli/plugin-api.md for the current hook contract.'
+			);
+		}
+	}
+	return config;
+}
+
+
+and every other things that makes ghe plugin work. users should be able to register other plugins thjs way.
+
+ves.config.ts
+import { defineConfig } from '@vesk/compiler'
+import tailwindcss from '@vesk/plugin-tailwind'
+
+export default defineConfig({
+  plugins: [
+    tailwindcss({ entry: 'src/global.css' }),
+  ],
+})
+

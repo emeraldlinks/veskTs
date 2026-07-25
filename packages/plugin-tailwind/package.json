@@ -1,0 +1,14 @@
+{
+  "name": "@vesk/plugin-tailwind",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Tailwind CSS v4 plugin for Vesk",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "dependencies": {
+    "@tailwindcss/node": "^4.0.0",
+    "@tailwindcss/oxide": "^4.0.0"
+  }
+}
