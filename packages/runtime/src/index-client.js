@@ -7,4 +7,3 @@ export { createContext, Context, getActiveComponent, setActiveComponent } from '
 export { createResource, setSsrData, clearSsrData, resolveSsrResources, useFetch } from './resource.js';
 export { Portal } from './portal.js';
 export { reconcile } from './reconcile.js';
-export { cookies, headers, locals, ServerResponse, withValidation, useBody, useParams, cors, webhook } from './request.js';

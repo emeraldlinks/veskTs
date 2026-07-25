@@ -50,10 +50,15 @@
               lastCompileMs = msg.time || 0;
               updateDot();
               if (typeof __router !== 'undefined') {
+                if (typeof __router.__updateComponents === 'function') {
+                  __router.__updateComponents(__router.routeTree);
+                }
                 if (msg.kind === 'layout') {
                   __router.navigate(window.location.pathname, { replace: true });
-                } else {
+                } else if (msg.kind === 'page') {
                   applyPageUpdate(msg.name);
+                } else {
+                  __router.navigate(window.location.pathname, { replace: true });
                 }
               }
               break;

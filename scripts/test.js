@@ -9,6 +9,7 @@ const root = resolve(__dirname, '..')
 const testDirs = [
   resolve(root, 'packages/compiler/src'),
   resolve(root, 'packages/runtime/src'),
+  resolve(root, 'packages/adapter/src'),
 ]
 
 let totalPassed = 0

@@ -81,8 +81,31 @@ export async function generateClientBundle(routeTree, appDir) {
   }
 
   const fullBundle = runtimeCode + '\n' + bundle + '\n' +
+    `globalThis.__components = __components;\n` +
+    `function __resolveNames(nodes) {\n` +
+    `  for (const n of nodes) {\n` +
+    `    if (typeof n.page === 'string') {\n` +
+    `      n._pageName = n.page;\n` +
+    `      n.page = __components[n.page];\n` +
+    `    }\n` +
+    `    if (typeof n.layout === 'string') {\n` +
+    `      n._layoutName = n.layout;\n` +
+    `      n.layout = __components[n.layout];\n` +
+    `    }\n` +
+    `    if (n.children) __resolveNames(n.children);\n` +
+    `  }\n` +
+    `}\n` +
+    `function __updateComponents(nodes) {\n` +
+    `  for (const n of nodes) {\n` +
+    `    if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName];\n` +
+    `    if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName];\n` +
+    `    if (n.children) __updateComponents(n.children);\n` +
+    `  }\n` +
+    `}\n` +
     `const __routeTree = ${JSON.stringify(routeTree)};\n` +
+    `__resolveNames(__routeTree);\n` +
     `const __router = createFileRouter(__routeTree);\n` +
+    `__router.__updateComponents = __updateComponents;\n` +
     `if (typeof document !== 'undefined') __router.start();\n`;
 
   return fullBundle;

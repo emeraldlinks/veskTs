@@ -608,13 +608,16 @@ if (cmd === 'dev') {
 			}
 			clientBundle += `\nfunction __cleanup(start, end) {\n\tlet n = start.nextSibling;\n\twhile (n && n !== end) {\n\t\tconst next = n.nextSibling;\n\t\tn.remove();\n\t\tn = next;\n\t}\n}\n`;
 			const treeJson = JSON.stringify(routeTree);
-			clientBundle += `\nconst __routeTree = ${treeJson};\n`;
-			clientBundle += `function __resolveNames(nodes) { for (const n of nodes) { if (typeof n.page === 'string') { n._pageName = n.page; n.page = __components[n.page]; } if (typeof n.layout === 'string') { n._layoutName = n.layout; n.layout = __components[n.layout]; } if (n.children) __resolveNames(n.children); } }\n`;
-			clientBundle += `__resolveNames(__routeTree);\n`;
-			clientBundle += `const __router = createFileRouter(__routeTree);\n`;
-			clientBundle += `__router.__hydrators = __hydrators;\n`;
-			clientBundle += `globalThis.__vesk_router = __router;\n`;
-			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
+	clientBundle += `\nconst __routeTree = ${treeJson};\n`;
+	clientBundle += `function __resolveNames(nodes) { for (const n of nodes) { if (typeof n.page === 'string') { n._pageName = n.page; n.page = __components[n.page]; } if (typeof n.layout === 'string') { n._layoutName = n.layout; n.layout = __components[n.layout]; } if (n.children) __resolveNames(n.children); } }\n`;
+	clientBundle += `function __updateComponents(nodes) { for (const n of nodes) { if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName]; if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName]; if (n.children) __updateComponents(n.children); } }\n`;
+	clientBundle += `__resolveNames(__routeTree);\n`;
+	clientBundle += `const __router = createFileRouter(__routeTree);\n`;
+	clientBundle += `__router.__hydrators = __hydrators;\n`;
+	clientBundle += `__router.__updateComponents = __updateComponents;\n`;
+	clientBundle += `globalThis.__vesk_router = __router;\n`;
+	clientBundle += `globalThis.__components = __components;\n`;
+	clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
 			console.error(`vesk: client bundle: ${clientBundle.length} bytes`);
 		} catch (e) {
 			console.error(`vesk: client build error:`, e.message);
@@ -640,9 +643,23 @@ if (cmd === 'dev') {
 						await buildClientBundle();
 
 						if (changedComponents.length > 0 && typeof globalThis.__vesk_broadcastHmr === 'function') {
+							let fnSources;
+							const exists = fsExists(changedSource);
+							if (exists) {
+								try {
+									const src = readFileSync(changedSource, 'utf-8');
+									let compCode = compileClient(src, null, { forceClient: true });
+									compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
+									compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
+									compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');
+									compCode = compCode.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+									if (compCode.trim()) fnSources = { _raw: compCode };
+								} catch (_) {}
+							}
 							globalThis.__vesk_broadcastHmr({
 								type: 'update',
-								components: Object.fromEntries(changedComponents.map(name => [name, true]))
+								components: Object.fromEntries(changedComponents.map(name => [name, true])),
+								fnSources
 							});
 						}
 						console.error(`vesk: rebuilt (${filename})`);
@@ -662,7 +679,7 @@ if (cmd === 'dev') {
 		'.html': 'text/html', '.json': 'application/json',
 	};
 
-	const HMR_CLIENT_SCRIPT = `if(typeof window!=='undefined'){try{const ws=new WebSocket('ws://'+(location.host||'localhost:3000')+'/_vesk/hmr');ws.onmessage=function(e){try{const msg=JSON.parse(e.data);if(msg.type==='update'){globalThis.__updatedComponents=new Set(Object.keys(msg.components));if(window.__vesk_router&&window.__vesk_router.hmrUpdate){window.__vesk_router.hmrUpdate();}}}catch(e){console.error('HMR parse error:',e)}};ws.onerror=function(){setTimeout(()=>location.reload(),1000)};}catch(e){}}`;
+	const HMR_CLIENT_SCRIPT = `if(typeof window!=='undefined'){try{const ws=new WebSocket('ws://'+(location.host||'localhost:3000')+'/_vesk/hmr');ws.onmessage=function(e){try{const msg=JSON.parse(e.data);if(msg.type==='update'){if(msg.fnSources){Object.values(msg.fnSources).forEach(function(fn){try{eval(fn)}catch(ex){console.error('HMR eval error:',ex)}})} globalThis.__updatedComponents=new Set(Object.keys(msg.components));if(window.__vesk_router&&window.__vesk_router.hmrUpdate){window.__vesk_router.hmrUpdate();}}}catch(e){console.error('HMR parse error:',e)}};ws.onerror=function(){setTimeout(()=>location.reload(),1000)};}catch(e){}}`;
 
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url, `http://localhost:${port}`);

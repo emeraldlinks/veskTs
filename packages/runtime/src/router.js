@@ -614,6 +614,9 @@ export function createRouter(
 			const updated = globalThis.__updatedComponents;
 			if (!updated || updated.size === 0) return;
 			globalThis.__updatedComponents = new Set();
+			if (typeof this.__updateComponents === 'function') {
+				this.__updateComponents(this.routeTree);
+			}
 			const path = window.location.pathname + window.location.search;
 			this.navigate(path, { replace: true });
 		},
@@ -770,6 +773,9 @@ export function createFileRouter(routeTree, options = {}) {
 			const updated = globalThis.__updatedComponents;
 			if (!updated || updated.size === 0) return;
 			globalThis.__updatedComponents = new Set();
+			if (typeof this.__updateComponents === 'function') {
+				this.__updateComponents(this.routeTree);
+			}
 			const path = window.location.pathname + window.location.search;
 			this.navigate(path, { replace: true });
 		},

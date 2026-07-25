@@ -1,0 +1,19 @@
+import { track } from '@vesk/runtime';
+
+component Home {
+	const count = track(0);
+	<div class="home-page">
+		<h1 class="text-2xl font-bold" data-testid="home-title">Home</h1>
+		<p data-testid="home-desc">Welcome to the Vesk test app</p>
+		<button class="btn-counter px-4 py-2 bg-blue-500 text-white rounded"
+			onClick={() => count.set(count.get() + 1)}
+			data-testid="counter-btn">
+			Count: <span data-testid="counter-value">{count.get()}</span>
+		</button>
+		<button class="px-4 py-2 bg-red-500 text-white rounded ml-2"
+			onClick={() => count.set(0)}
+			data-testid="reset-btn">
+			Reset
+		</button>
+	</div>
+}

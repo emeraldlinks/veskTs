@@ -12,6 +12,8 @@ import {
 	pause_block,
 	pre_effect,
 } from './ripple-blocks.js';
+
+export { destroy_non_branch_children };
 import {
 	ASYNC_DERIVED_READ_THROWN,
 	BLOCK_HAS_RUN,
@@ -67,7 +69,7 @@ let is_micro_task_queued = false;
 let clock = 0;
 /** @type {Block[]} */
 let queued_root_blocks = [];
-let disable_scoped_flush = false;
+export let disable_scoped_flush = false;
 /** @type {(() => void)[]} */
 let queued_microtasks = [];
 /** @type {number} */

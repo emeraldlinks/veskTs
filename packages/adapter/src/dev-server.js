@@ -42,6 +42,7 @@ export async function startDevServer(appDir, options = {}) {
 
   let config = null;
   let lastBuild = 0;
+  let ssrVersion = Date.now();
   let routeTree = [];
 
   async function doBuild() {
@@ -103,7 +104,7 @@ export async function startDevServer(appDir, options = {}) {
           const handlerPath = resolve(devDir, apiRoute.function);
         if (existsSync(handlerPath)) {
           try {
-            const mod = await import(`${handlerPath}?t=${lastBuild}`);
+            const mod = await import(`${handlerPath}?t=${ssrVersion}`);
             const webRequest = makeWebRequest(req, url.href);
             const response = await mod.handle(webRequest);
             const body = await response.text();
@@ -125,7 +126,7 @@ export async function startDevServer(appDir, options = {}) {
           const handlerPath = resolve(devDir, ssrRoute.function);
         if (existsSync(handlerPath)) {
           try {
-            const mod = await import(`${handlerPath}?t=${lastBuild}`);
+            const mod = await import(`${handlerPath}?t=${ssrVersion}`);
             const webRequest = makeWebRequest(req, url.href);
             const response = await mod.handle(webRequest);
             const body = await response.text();
@@ -149,7 +150,7 @@ export async function startDevServer(appDir, options = {}) {
         const handlerPath = resolve(devDir, rootRoute.function);
         if (existsSync(handlerPath)) {
           try {
-            const mod = await import(`${handlerPath}?t=${lastBuild}`);
+            const mod = await import(`${handlerPath}?t=${ssrVersion}`);
             const webRequest = makeWebRequest(req, url.href);
             const response = await mod.handle(webRequest);
             const body = await response.text();
@@ -226,9 +227,12 @@ export async function startDevServer(appDir, options = {}) {
         } else if (apiMiddlewareFiles.length > 0) {
           hmr.handleFileChange(apiMiddlewareFiles[0], doBuild, routeTree);
         } else if (vskFiles.length > 0) {
-          for (const f of vskFiles) {
-            hmr.handleFileChange(f, doBuild, routeTree);
-          }
+          (async () => {
+            for (const f of vskFiles) {
+              await hmr.handleFileChange(f, doBuild, routeTree);
+            }
+            ssrVersion = Date.now();
+          })();
         } else if (files.length > 0) {
           hmr.handleFileChange(files[0], doBuild, routeTree);
         }

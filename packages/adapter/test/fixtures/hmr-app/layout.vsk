@@ -1,0 +1,13 @@
+import { NavLink } from '@vesk/runtime';
+
+component RootLayout(props) {
+	<nav class="flex gap-4 px-6 py-3 border-b bg-white nav-root">
+		<NavLink href="/" class="font-medium">Home</NavLink>
+		<NavLink href="/about" class="font-medium">About</NavLink>
+		<NavLink href="/blog" class="font-medium">Blog</NavLink>
+	</nav>
+	<main class="p-4">{props.children}</main>
+	<footer class="text-center py-4 text-sm text-gray-400">
+		<p>Vesk Footer</p>
+	</footer>
+}
