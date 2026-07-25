@@ -1,8 +1,11 @@
 import { readFileSync, existsSync, watch, statSync } from 'fs';
-import { resolve, extname } from 'path';
+import { resolve, extname, dirname } from 'path';
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'url';
 import { build } from './index.js';
 import { createHmrServer } from './hmr.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function readBody(req) {
   const chunks = [];
@@ -39,6 +42,19 @@ export async function startDevServer(appDir, options = {}) {
   const port = options.port || 3000;
   const devDir = resolve(appDir, '..', '.vesk', 'dev');
   const publicDir = options.publicDir || resolve(appDir, '..', 'public');
+
+  // Scan external components from ./components/
+  let componentMap = new Map();
+  const monorepoRouter = resolve(__dirname, '..', '..', 'compiler', 'src', 'router.js');
+  const pkgRouter = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'src', 'router.js');
+  const routerPath = existsSync(monorepoRouter) ? monorepoRouter : (existsSync(pkgRouter) ? pkgRouter : null);
+  if (routerPath) {
+    const { scanComponents } = await import(routerPath);
+    const componentsDir = resolve(appDir, '..', 'components');
+    if (existsSync(componentsDir)) {
+      componentMap = scanComponents(componentsDir);
+    }
+  }
 
   let config = null;
   let lastBuild = 0;
@@ -82,17 +98,26 @@ export async function startDevServer(appDir, options = {}) {
       }
     }
 
-    // Public files (served at root)
+    // Public files (served at root — check source overrides first, then build output)
     if (url.pathname !== '/') {
       const sanitized = url.pathname.replace(/\.\./g, '');
-      const publicPath = resolve(publicDir, sanitized.slice(1));
-      if (!publicPath.startsWith(publicDir)) {
-        res.writeHead(403); res.end('Forbidden'); return;
-      }
-      if (existsSync(publicPath) && statSync(publicPath).isFile()) {
-        const ext = extname(publicPath);
+
+      // Source public/ dir (user overrides)
+      const sourcePath = resolve(publicDir, sanitized.slice(1));
+      if (sourcePath.startsWith(publicDir) && existsSync(sourcePath) && statSync(sourcePath).isFile()) {
+        const ext = extname(sourcePath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
-        res.end(readFileSync(publicPath));
+        res.end(readFileSync(sourcePath));
+        return;
+      }
+
+      // Build output static/public/ dir (auto-generated SEO files, favicon, etc.)
+      const buildPublicDir = resolve(devDir, 'static', 'public');
+      const buildPath = resolve(buildPublicDir, sanitized.slice(1));
+      if (buildPath.startsWith(buildPublicDir) && existsSync(buildPath) && statSync(buildPath).isFile()) {
+        const ext = extname(buildPath);
+        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        res.end(readFileSync(buildPath));
         return;
       }
     }
@@ -172,7 +197,7 @@ export async function startDevServer(appDir, options = {}) {
   });
 
   // ── Start HMR WebSocket server ──
-  const hmr = createHmrServer(server, appDir, devDir);
+  const hmr = createHmrServer(server, appDir, devDir, componentMap);
 
   // ── Watch src/ directory for CSS changes ──
   const srcDir = resolve(appDir, '..', 'src');

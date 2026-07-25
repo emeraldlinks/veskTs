@@ -86,6 +86,17 @@ export function startProdServer(outDir, options = {}) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
 
+    // ── Root-level public files (served at /) ──
+    const publicDir = resolve(staticDir, 'public');
+    const sanitized = url.pathname.replace(/\.\./g, '');
+    const rootFile = resolve(publicDir, sanitized.slice(1));
+    if (rootFile.startsWith(publicDir) && existsSync(rootFile) && statSync(rootFile).isFile()) {
+      const ext = extname(rootFile);
+      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      res.end(readFileSync(rootFile));
+      return;
+    }
+
     // ── Static files (under /_vesk/static/) ──
     if (url.pathname.startsWith('/_vesk/static/')) {
       const relPath = url.pathname.replace('/_vesk/static/', '').replace(/\.\./g, '');
@@ -149,11 +160,46 @@ export function startProdServer(outDir, options = {}) {
           if (mod) {
             try {
               const webRequest = makeWebRequest(req, url.href);
+
+              // Check ISR cache first
+              let cachedResult = null;
+              if (route.revalidate && route.revalidate > 0) {
+                const { pageIsr } = await import('@vesk/runtime');
+                cachedResult = await pageIsr(url.pathname, async () => {
+                  const response = await mod.handle(webRequest);
+                  return { html: await response.text(), headers: Object.fromEntries(response.headers) };
+                }, { revalidate: route.revalidate, tags: route.tags || [] });
+              }
+
+              if (cachedResult) {
+                res.writeHead(200, cachedResult.headers || { 'Content-Type': 'text/html' });
+                res.end(cachedResult.html);
+                return;
+              }
+
+              // Stream the SSR response chunk by chunk
               const response = await mod.handle(webRequest);
-              const body = await response.text();
-              const headers = Object.fromEntries(response.headers);
-              res.writeHead(response.status, headers);
-              res.end(body);
+              const contentType = response.headers.get('content-type') || 'text/html';
+              const contentLength = response.headers.get('content-length');
+              const headers = { 'Content-Type': contentType };
+              if (contentLength) headers['Content-Length'] = contentLength;
+
+              if (response.body && typeof response.body.getReader === 'function') {
+                res.writeHead(response.status, headers);
+                const reader = response.body.getReader();
+                const pump = () => {
+                  reader.read().then(({ done, value }) => {
+                    if (done) { res.end(); return; }
+                    res.write(value);
+                    pump();
+                  }).catch(() => res.end());
+                };
+                pump();
+              } else {
+                const body = await response.text();
+                res.writeHead(response.status, headers);
+                res.end(body);
+              }
               return;
             } catch (e) {
               res.writeHead(500, { 'Content-Type': 'text/html' });

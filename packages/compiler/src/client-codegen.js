@@ -753,6 +753,13 @@ function buildComponentMap(irRoot, hydrate = false) {
 	mapLines.push(`const __components = {};`);
 
 	for (const comp of irRoot.components) {
+		// Purely static components (no state, events, bindings, child components)
+		// need only a "claim" stub in hydrate mode — just return the existing SSR DOM
+		if (hydrate && isStaticComponent(comp)) {
+			const stub = `(props, __registry, __hydrate) => { return __hydrate.root; }`;
+			mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
+			continue;
+		}
 		const code = generateComponent(comp, irRoot.importedNames, hydrate);
 		mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
 	}
@@ -852,6 +859,33 @@ function findBindingInIR(nodes, names) {
 	return false;
 }
 
+/**
+ * Scan IR nodes for a specific component name used as a JSX tag or
+ * function call in expressions (for auto-import of Form, Field, etc.).
+ */
+function findFormNameInIR(nodes, name) {
+	const fnPattern = name + '(';
+	for (const node of nodes) {
+		if (node instanceof ComponentCall) {
+			if (node.componentName === name) return true;
+			for (const prop of node.props) {
+				if (prop.value && prop.value.raw && prop.value.raw.includes(fnPattern)) return true;
+			}
+			if (findFormNameInIR(node.children, name)) return true;
+		}
+		if (node instanceof DynamicBinding && node.expression && node.expression.raw) {
+			if (node.expression.raw.includes(fnPattern)) return true;
+		}
+		if (node instanceof RuntimeStatement && node.raw) {
+			if (node.raw.includes(fnPattern)) return true;
+		}
+		if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) {
+			if (findFormNameInIR(node.children, name)) return true;
+		}
+	}
+	return false;
+}
+
 function astHasBinding(ast, names) {
 	if (!ast) return false;
 	let found = false;
@@ -925,6 +959,13 @@ export function compileClient(source, _componentName, options = {}) {
 	}
 	if (ir.components.some(c => hasKeyedMap(c.body))) runtimeNames.push('reconcile');
 	if (options.hydrate) runtimeNames.push('hydrate');
+	// Auto-import form components and validation helpers
+	const formNames = ['Form', 'Field', 'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom'];
+	for (const name of formNames) {
+		if (!runtimeNames.includes(name) && findFormNameInIR(ir.components.flatMap(c => c.body), name)) {
+			runtimeNames.push(name);
+		}
+	}
 
 	const runtimeImport = `import { ${runtimeNames.join(', ')} } from '@vesk/runtime';`;
 

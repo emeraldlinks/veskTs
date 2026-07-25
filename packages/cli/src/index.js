@@ -13,16 +13,12 @@ function usage(code = 0) {
 	console.error(`Vesk CLI — Compiler-First Framework for the Post-VDOM Web`);
 	console.error(``);
 	console.error(`Usage:`);
-	console.error(`  vesk init [project-name]    Create a new Vesk project`);
-	console.error(`  vesk <file.vsk> [options]   Compile a .vsk file`);
-	console.error(`  vesk --router [options]     Build app/ with file-based routing`);
-	console.error(`  vesk --help                 Show this help`);
-	console.error(``);
-	console.error(`Options:`);
-	console.error(`  -o <file>     Output to file instead of stdout`);
-	console.error(`  --ssg         Generate static HTML (Static Site Generation)`);
-	console.error(`  --props <json>  Custom props for SSG`);
-	console.error(`  --router      File-based routing (scans ./app/)`);
+	console.error(`  vesk init [project-name]     Create a new Vesk project`);
+	console.error(`  vesk build [--seo] [--strict] Build app/ for production`);
+	console.error(`  vesk seo [--strict]           Run SEO analysis on app/`);
+	console.error(`  vesk start [port]             Start production server`);
+	console.error(`  vesk dev                      Start dev server with HMR`);
+	console.error(`  vesk --help                   Show this help`);
 	process.exit(code);
 }
 
@@ -404,9 +400,13 @@ if (cmd === 'build') {
     process.exit(1);
   }
 
+  const restArgs = process.argv.slice(3);
+  const seo = restArgs.includes('--seo');
+  const strict = restArgs.includes('--strict');
+
   const config = await loadConfig(projectDir);
   const plugins = config.plugins || [];
-  const opts = { publicDir, plugins };
+  const opts = { publicDir, plugins, seo, strictSeo: strict };
 
   const { build } = await import(resolve(__dirname, '../../adapter/src/index.js'));
   try {
@@ -414,6 +414,25 @@ if (cmd === 'build') {
     console.error(`vesk build: done`);
   } catch (e) {
     console.error(`vesk build: error — ${e.message}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
+
+// ── seo ──────────────────────────────────────────────────────
+if (cmd === 'seo') {
+  const projectDir = process.cwd();
+  const appDirPath = join(projectDir, 'app');
+  if (!existsSync(appDirPath)) {
+    console.error(`vesk seo: no app/ directory found in ${projectDir}`);
+    process.exit(1);
+  }
+
+  const strict = args.includes('--strict');
+  const { runSeoAudit } = await import(resolve(__dirname, '../../adapter/src/seo-audit.js'));
+  const audit = runSeoAudit(appDirPath);
+  if (strict && audit.errors > 0) {
+    console.error(`vesk seo: failed with ${audit.errors} error(s)`);
     process.exit(1);
   }
   process.exit(0);

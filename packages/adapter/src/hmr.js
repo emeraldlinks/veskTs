@@ -106,7 +106,7 @@ function buildParamExtraction(node, urlParts) {
   return parts;
 }
 
-function regenerateSsrFunction(routeNode, appDir, outDir) {
+function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map()) {
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
   const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
@@ -132,19 +132,34 @@ function regenerateSsrFunction(routeNode, appDir, outDir) {
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
   const paramExprs = buildParamExtraction(routeNode, urlParts);
   const paramsCode = paramExprs.length > 0 ? `const params = { ${paramExprs.join(', ')} };\n` : 'const params = {};\n';
+
+  // Build registry for external components
+  let registryCode = '';
+  const compRegEntries = [];
+  for (const [compName, compPath] of componentMap) {
+    const src = readFileSync(compPath, 'utf-8');
+    const escapedSrc = escapeSource(src);
+    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true });\n    return result.body;\n  })`);
+  }
+  if (compRegEntries.length > 0) {
+    registryCode = `const __componentRegistry = new Map();\n{\n${compRegEntries.join('\n')}\n}\n`;
+  } else {
+    registryCode = 'const __componentRegistry = new Map();\n';
+  }
+
   const funcCode = [
     `import { renderFullPage, renderPage } from '../runtime.js';`,
-    ``, src, ``,
+    ``, registryCode, src, ``,
     `export async function handle(request) {`,
     `  const url = new URL(request.url);`,
     `  const urlParts = url.pathname.split('/').filter(Boolean);`,
     `  ${paramsCode}`,
     hasLayout ? [
-      `  const page = renderPage(_pageSrc, _pageComp, { params }, new Map(), { hydrate: true });`,
-      `  const html = renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, new Map(), { hydrate: true${cssOption} });`,
+      `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
+      `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}, pageHead: page.head });`,
       `  return new Response(html, { headers: { 'Content-Type': 'text/html' } });`,
     ].join('\n') : [
-      `  const html = renderFullPage(_src, _comp, { params }, new Map(), { hydrate: true${cssOption} });`,
+      `  const html = await renderFullPage(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption} });`,
       `  return new Response(html, { headers: { 'Content-Type': 'text/html' } });`,
     ].join('\n'),
     `}`,
@@ -152,7 +167,7 @@ function regenerateSsrFunction(routeNode, appDir, outDir) {
   writeFileSync(funcPath, funcCode, 'utf-8');
 }
 
-export function createHmrServer(httpServer, appDir, devDir) {
+export function createHmrServer(httpServer, appDir, devDir, componentMap = new Map()) {
   const wss = new WebSocketServer({ server: httpServer, path: '/_vesk/hmr' });
   const clients = new Set();
 
@@ -206,7 +221,7 @@ export function createHmrServer(httpServer, appDir, devDir) {
         if (sourceDir !== null) {
           const routeNode = findRouteForSource(routeTree, sourceDir);
           if (routeNode) {
-            regenerateSsrFunction(routeNode, appDir, devDir);
+            regenerateSsrFunction(routeNode, appDir, devDir, componentMap);
           }
         }
 

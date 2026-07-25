@@ -706,6 +706,8 @@ export function generateIR(ast, source) {
 	const autoImportable = [
 		'useFetch', 'useRouter', 'useParams', 'usePathname', 'useSearchParams', 'useNavigate',
 		'useHead', 'useTitle',
+		'Form', 'Field', 'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom',
+		'Experiment',
 	];
 	const usedFunctions = new Set();
 	// Scan top-level code
@@ -714,16 +716,39 @@ export function generateIR(ast, source) {
 			if (code.includes(fn + '(')) usedFunctions.add(fn);
 		}
 	}
-	// Scan component body RuntimeStatements
-	for (const comp of components) {
-		for (const node of comp.body) {
+
+	function scanForAutoImport(nodes) {
+		for (const node of nodes) {
 			if (node instanceof RuntimeStatement && node.raw) {
 				for (const fn of autoImportable) {
 					if (node.raw.includes(fn + '(')) usedFunctions.add(fn);
 				}
 			}
+			if (node instanceof ComponentCall) {
+				if (autoImportable.includes(node.componentName)) {
+					usedFunctions.add(node.componentName);
+				}
+				for (const prop of node.props) {
+					if (prop.value && prop.value.raw) {
+						for (const fn of autoImportable) {
+							if (prop.value.raw.includes(fn + '(')) usedFunctions.add(fn);
+						}
+					}
+				}
+				scanForAutoImport(node.children);
+			}
+			if (node instanceof DynamicBinding && node.expression && node.expression.raw) {
+				for (const fn of autoImportable) {
+					if (node.expression.raw.includes(fn + '(')) usedFunctions.add(fn);
+				}
+			}
+			if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) {
+				scanForAutoImport(node.children);
+			}
 		}
 	}
+	scanForAutoImport(components.flatMap(c => c.body));
+
 	// Inject imports for detected functions
 	if (usedFunctions.size > 0) {
 		const existing = new Set();

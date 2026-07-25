@@ -856,10 +856,8 @@ ${bodyHtml}${scriptBlock}</body>
  * Also handles SSR resource tracking for createResource().
  */
 export async function renderFullPage(source, componentName, props = {}, registry = new Map(), options = {}) {
-	// Enable SSR data tracking mode for createResource()
 	globalThis.__vsk_ssr = true;
 	try {
-		// Call load function if present
 		let ssrProps = { ...props };
 		let serializedProps = null;
 		const ast = parse(source);
@@ -868,42 +866,43 @@ export async function renderFullPage(source, componentName, props = {}, registry
 			const __vesk = options.__vesk || loadRuntimeImports(ir.imports);
 			const loadResult = await callLoadFunction(ir.loadFn, props, __vesk);
 			if (loadResult && typeof loadResult === 'object') {
-				if (loadResult.props) {
-					ssrProps = { ...ssrProps, ...loadResult.props };
-				} else {
-					ssrProps = { ...ssrProps, ...loadResult };
-				}
+				if (loadResult.props) ssrProps = { ...ssrProps, ...loadResult.props };
+				else ssrProps = { ...ssrProps, ...loadResult };
 			}
 			serializedProps = JSON.stringify(ssrProps);
 		}
 		const rendered = renderPage(source, componentName, ssrProps, registry, { ...options, __vesk: options.__vesk || (ir.loadFn ? undefined : undefined) });
 
-		// Await any pending SSR resource promises (from createResource during render)
 		const ssrData = globalThis.__vsk_ssr_data || {};
 		if (globalThis.__vsk_ssr_promises?.length > 0) {
 			await Promise.allSettled(globalThis.__vsk_ssr_promises);
-			// Collect data for serialization
 			const collectedData = globalThis.__vsk_ssr_data || {};
 			Object.assign(ssrData, collectedData);
 		}
 		delete globalThis.__vsk_ssr_promises;
 
-		const headHtml = rendered.head;
+		// Merge page head with layout head (page overrides layout on key collisions)
+		let headHtml = rendered.head;
+		if (options.pageHead) {
+			const merged = mergeHeadHtml(options.pageHead, rendered.head);
+			headHtml = merged.html;
+			if (merged.conflicts.length > 0) {
+				for (const c of merged.conflicts) {
+					console.error(`vesk head conflict: ${c.message}`);
+				}
+			}
+		}
+
 		const bodyHtml = prettifyHtml(rendered.body);
 		const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
 		const clientScript = options.clientScriptUrl
 			? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
 			: '';
 
-		// Build serialized data scripts
 		const dataScripts = [];
-		if (serializedProps) {
-			dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
-		}
+		if (serializedProps) dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
 		const ssrDataKeys = Object.keys(ssrData);
-		if (ssrDataKeys.length > 0) {
-			dataScripts.push(`<script>const __vesk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
-		}
+		if (ssrDataKeys.length > 0) dataScripts.push(`<script>const __vesk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
 		const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
 
 		return `<!DOCTYPE html>
@@ -921,6 +920,85 @@ ${dataScriptBlock}${clientScript}</body>
 	} finally {
 		delete globalThis.__vsk_ssr;
 	}
+}
+
+/**
+ * Merge two head HTML strings by key. The second (pageHead) overrides the first (layoutHead)
+ * when keys collide. Returns merged HTML and any sibling-level conflicts found within pageHead.
+ */
+export function mergeHeadHtml(pageHead, layoutHead) {
+	const parseHead = (html) => {
+		const entries = [];
+		const tagRegex = /<(base|meta|link|script|style)[^>]*\/?>|<title[^>]*>[^<]*<\/title>/gi;
+		let m;
+		while ((m = tagRegex.exec(html)) !== null) {
+			entries.push(m[0]);
+		}
+		return entries;
+	};
+
+	const extractKey = (tagStr) => {
+		if (tagStr.startsWith('<title')) return 'title';
+		if (tagStr.startsWith('<base')) {
+			const h = tagStr.match(/href=["']([^"']+)["']/);
+			return h ? `base[href=${h[1]}]` : 'base';
+		}
+		if (tagStr.startsWith('<meta')) {
+			const n = tagStr.match(/\sname=["']([^"']+)["']/);
+			if (n) return `meta[name=${n[1]}]`;
+			const p = tagStr.match(/\sproperty=["']([^"']+)["']/);
+			if (p) return `meta[property=${p[1]}]`;
+			const c = tagStr.match(/\scharset=["']?([^"'\s>]+)/);
+			if (c) return `meta[charset]`;
+			return null;
+		}
+		if (tagStr.startsWith('<link')) {
+			const h = tagStr.match(/href=["']([^"']+)["']/);
+			if (h) return `link[href=${h[1]}]`;
+			return null;
+		}
+		if (tagStr.startsWith('<script')) {
+			const s = tagStr.match(/src=["']([^"']+)["']/);
+			if (s) return `script[src=${s[1]}]`;
+			return null;
+		}
+		return null;
+	};
+
+	const layoutEntries = parseHead(layoutHead);
+	const pageEntries = parseHead(pageHead);
+
+	const merged = new Map();
+	for (const tag of layoutEntries) {
+		const key = extractKey(tag);
+		if (key) merged.set(key, { html: tag, source: 'layout' });
+	}
+
+	const conflicts = [];
+	for (const tag of pageEntries) {
+		const key = extractKey(tag);
+		if (key) {
+			if (merged.has(key) && merged.get(key).source === 'page') {
+				// Two sibling page components set the same key — warn
+				conflicts.push({ key, message: `Sibling conflict for <head> key "${key}":\n  ${merged.get(key).html}\n  ${tag}` });
+			}
+			merged.set(key, { html: tag, source: 'page' });
+		}
+	}
+
+	const order = ['title', 'base', 'meta', 'link', 'script', 'style'];
+	const sorted = [...merged.values()].sort((a, b) => {
+		const ak = [...merged.entries()].find(e => e[1] === a)?.[0] || '';
+		const bk = [...merged.entries()].find(e => e[1] === b)?.[0] || '';
+		const ai = order.findIndex(o => ak.startsWith(o));
+		const bi = order.findIndex(o => bk.startsWith(o));
+		return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+	});
+
+	return {
+		html: sorted.map(e => e.html).join('\n'),
+		conflicts,
+	};
 }
 
 /**

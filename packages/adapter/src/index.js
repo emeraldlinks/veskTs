@@ -46,7 +46,7 @@ export async function build(appDir, options = {}) {
   for (const d of dirs) mkdirSync(d, { recursive: true });
 
   // ── Scan routes ──
-  const { scanRoutes } = await resolveCompilerApi('router.js');
+  const { scanRoutes, scanComponents } = await resolveCompilerApi('router.js');
   const { scanApiRoutes } = await resolveCompilerApi('api-routes.js');
   const { collectMiddlewareChain } = await resolveCompilerApi('middleware.js');
 
@@ -54,6 +54,14 @@ export async function build(appDir, options = {}) {
   if (routeTree.length === 0) {
     console.error('vesk build: no routes found in', appDir);
     return;
+  }
+
+  // ── Scan external components from project root ./components/ ──
+  const projectRoot = resolve(appDir, '..');
+  const componentsDir = resolve(projectRoot, 'components');
+  const componentMap = scanComponents(componentsDir);
+  if (componentMap.size > 0) {
+    console.error(`vesk build: ${componentMap.size} external components found in ${componentsDir}`);
   }
 
   const apiDir = resolve(appDir, 'api');
@@ -70,8 +78,19 @@ export async function build(appDir, options = {}) {
   function walk(nodes) {
     for (const node of nodes) {
       if (node.page) {
-        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir);
+        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap);
         writeFileSync(funcPath, funcCode, 'utf-8');
+        // Detect ISR config from page source
+        const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
+        if (existsSync(pagePath)) {
+          const src = readFileSync(pagePath, 'utf-8');
+          const revalidateMatch = src.match(/export\s+const\s+revalidate\s*=\s*(\d+)/);
+          if (revalidateMatch) node._revalidate = parseInt(revalidateMatch[1], 10);
+          const tagsMatch = src.match(/export\s+const\s+isrTags\s*=\s*\[([^\]]*)\]/);
+          if (tagsMatch) {
+            node._isrTags = tagsMatch[1].split(',').map(t => t.trim().replace(/['"]/g, '')).filter(Boolean);
+          }
+        }
         ssrRoutes.push(node);
         console.error(`vesk build: ssr  → server/functions/${name}.js  (${node.fullPath})`);
       }
@@ -109,7 +128,7 @@ export async function build(appDir, options = {}) {
 
   // ── Generate client bundle ──
   console.error('vesk build: bundling client runtime...');
-  const clientCode = await generateClientBundle(routeTree, appDir);
+  const clientCode = await generateClientBundle(routeTree, appDir, componentMap);
   writeFileSync(resolve(outDir, 'static', 'client.js'), clientCode, 'utf-8');
   console.error(`vesk build: client → static/client.js  (${clientCode.length} bytes)`);
 
@@ -152,6 +171,48 @@ export async function build(appDir, options = {}) {
     const { generateSsgRoutes } = await import('./static.js');
     prerenderedRoutes = await generateSsgRoutes(routeTree, appDir, outDir);
     console.error(`vesk build: ssg   → prerendered/  (${prerenderedRoutes.length} pages)`);
+  }
+
+  // ── Image optimization pipeline ──
+  {
+    const { optimizeImages } = await import('./image-pipeline.js');
+    await optimizeImages(appDir, outDir);
+  }
+
+  // ── SEO audit (only with --seo flag) ──
+  if (options.seo) {
+    const { runSeoAudit } = await import('./seo-audit.js');
+    const audit = runSeoAudit(appDir);
+    if (options.strictSeo && audit.errors > 0) {
+      throw new Error(`SEO audit failed with ${audit.errors} error(s) — fix them before deploying`);
+    }
+  }
+
+  // ── Auto-generate SEO files (sitemap.xml + robots.txt) ──
+  {
+    const { optimizeImages } = await import('./image-pipeline.js');
+    await optimizeImages(appDir, outDir);
+  }
+
+  // ── Auto-generate SEO files (sitemap.xml + robots.txt) ──
+  {
+    const { generateSitemap, generateRobotsTxt } = await import('./static.js');
+    const publicDir = resolve(outDir, 'static', 'public');
+    const siteUrl = options.siteUrl || 'http://localhost:3000';
+
+    const sitemapOverride = resolve(publicDir, 'sitemap.xml');
+    if (!existsSync(sitemapOverride)) {
+      const sitemap = generateSitemap(routeTree, ssrRoutes, prerenderedRoutes, { siteUrl });
+      writeFileSync(sitemapOverride, sitemap, 'utf-8');
+      console.error(`vesk build: seo   → static/public/sitemap.xml (${sitemap.length} bytes)`);
+    }
+
+    const robotsOverride = resolve(publicDir, 'robots.txt');
+    if (!existsSync(robotsOverride)) {
+      const robots = generateRobotsTxt(siteUrl);
+      writeFileSync(robotsOverride, robots, 'utf-8');
+      console.error(`vesk build: seo   → static/public/robots.txt (${robots.length} bytes)`);
+    }
   }
 
   // ── Write manifest ──

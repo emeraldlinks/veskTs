@@ -1,4 +1,4 @@
-import { isr, revalidatePath, revalidateTag, clearIsrCache } from './isr.js';
+import { isr, revalidatePath, revalidateTag, clearIsrCache, pageIsr, componentIsr, revalidateComponent } from './isr.js';
 
 let passed = 0;
 let failed = 0;
@@ -97,11 +97,8 @@ describe('ISR Cache', () => {
 		let callCount = 0;
 		const fetcher = async () => { callCount++; return { value: callCount }; };
 
-		// First call populates cache
 		await isr('/stale', fetcher, { revalidate: 60, tags: ['stale'] });
-		// Force expire by revalidating
 		await revalidatePath('/stale');
-		// Should fetch fresh
 		const r = await isr('/stale', fetcher, { revalidate: 60, tags: ['stale'] });
 		expect(r.data.value).toBe(2);
 	});
@@ -114,6 +111,81 @@ describe('ISR Cache', () => {
 		expect(r.data.x).toBe(1);
 		expect(callCount).toBe(1);
 	});
+});
+
+describe('pageIsr', () => {
+	beforeEach(() => clearIsrCache());
+
+	function beforeEach(fn) { fn(); }
+
+	it('caches HTML responses', async () => {
+		let callCount = 0;
+		const r = await pageIsr('/page', async () => { callCount++; return { html: '<h1>Hello</h1>', headers: { 'content-type': 'text/html' } }; }, { revalidate: 60 });
+		expect(r.html).toBe('<h1>Hello</h1>');
+		expect(callCount).toBe(1);
+	});
+
+	it('serves cached HTML on subsequent calls', async () => {
+		let callCount = 0;
+		const render = async () => { callCount++; return { html: `<h1>Count ${callCount}</h1>`, headers: {} }; };
+		await pageIsr('/cached-page', render, { revalidate: 60 });
+		const r = await pageIsr('/cached-page', render, { revalidate: 60 });
+		expect(r.html).toBe('<h1>Count 1</h1>');
+		expect(callCount).toBe(1);
+	});
+
+	it('returns stale marker when stale', async () => {
+		let callCount = 0;
+		const render = async () => { callCount++; return { html: `${callCount}`, headers: {} }; };
+		await pageIsr('/stale-page', render, { revalidate: 60 });
+		await revalidatePath('/stale-page');
+		const r = await pageIsr('/stale-page', render, { revalidate: 60 });
+		expect(r.stale).toBe(true);
+	});
+});
+
+describe('componentIsr', () => {
+  it('caches component HTML by key', async () => {
+    let callCount = 0;
+    const r = await componentIsr('header', async () => { callCount++; return '<header>Site</header>'; }, { revalidate: 60 });
+    expect(r).toBe('<header>Site</header>');
+    expect(callCount).toBe(1);
+  });
+
+  it('serves cached component HTML', async () => {
+    let callCount = 0;
+    const render = async () => { callCount++; return `<div>comp ${callCount}</div>`; };
+    await componentIsr('comp-cached', render, { revalidate: 60 });
+    const r = await componentIsr('comp-cached', render, { revalidate: 60 });
+    expect(r).toBe('<div>comp 1</div>');
+    expect(callCount).toBe(1);
+  });
+
+  it('revalidates component via revalidateComponent', async () => {
+    let callCount = 0;
+    const render = async () => { callCount++; return `count ${callCount}`; };
+    await componentIsr('comp-reval', render, { revalidate: 60 });
+    const r1 = await componentIsr('comp-reval', render, { revalidate: 60 });
+    expect(r1).toBe('count 1');
+    expect(callCount).toBe(1);
+    await revalidateComponent('comp-reval');
+    const r2 = await componentIsr('comp-reval', render, { revalidate: 60 });
+    expect(r2).toBe('count 2');
+    expect(callCount).toBe(2);
+  });
+
+  it('component and page ISR have separate caches', async () => {
+    let compCount = 0;
+    let pageCount = 0;
+    await componentIsr('shared-key', async () => { compCount++; return 'component'; }, { revalidate: 60 });
+    await pageIsr('/shared-key', async () => { pageCount++; return { html: 'page', headers: {} }; }, { revalidate: 60 });
+    const cr = await componentIsr('shared-key', async () => { compCount++; return 'component'; }, { revalidate: 60 });
+    const pr = await pageIsr('/shared-key', async () => { pageCount++; return { html: 'page', headers: {} }; }, { revalidate: 60 });
+    expect(compCount).toBe(1);
+    expect(pageCount).toBe(1);
+    expect(cr).toBe('component');
+    expect(pr.html).toBe('page');
+  });
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

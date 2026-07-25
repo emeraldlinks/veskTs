@@ -56,7 +56,7 @@ function buildParamExtraction(node, urlParts) {
   return parts;
 }
 
-export function generateSsrFunction(routeNode, appDir, outDir) {
+export function generateSsrFunction(routeNode, appDir, outDir, componentMap = new Map()) {
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
 
@@ -96,9 +96,25 @@ export function generateSsrFunction(routeNode, appDir, outDir) {
   }
 
   const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
+
+  // Build registry import for external components
+  let registryCode = '';
+  const compRegEntries = [];
+  for (const [compName, compPath] of componentMap) {
+    const src = readFileSync(compPath, 'utf-8');
+    const escapedSrc = escapeSource(src);
+    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true });\n    return result.body;\n  })`);
+  }
+  if (compRegEntries.length > 0) {
+    registryCode = `const __componentRegistry = new Map();\n{\n${compRegEntries.join('\n')}\n}\n`;
+  } else {
+    registryCode = 'const __componentRegistry = new Map();\n';
+  }
+
   const funcCode = [
     `import { renderFullPage, renderPage } from '../runtime.js';`,
     ``,
+    registryCode,
     src,
     ``,
     `export async function handle(request) {`,
@@ -107,14 +123,14 @@ export function generateSsrFunction(routeNode, appDir, outDir) {
     `  ${paramsCode}`,
     hasLayout
       ? [
-          `  const page = renderPage(_pageSrc, _pageComp, { params }, new Map(), { hydrate: true });`,
-          `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, new Map(), { hydrate: true${cssOption}${clientScriptOption} });`,
+          `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
+          `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption}, pageHead: page.head });`,
           `  return new Response(html, {`,
           `    headers: { 'Content-Type': 'text/html' },`,
           `  });`,
         ].join('\n')
       : [
-          `  const html = await renderFullPage(_src, _comp, { params }, new Map(), { hydrate: true${cssOption}${clientScriptOption} });`,
+          `  const html = await renderFullPage(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption} });`,
           `  return new Response(html, {`,
           `    headers: { 'Content-Type': 'text/html' },`,
           `  });`,
@@ -124,4 +140,5 @@ export function generateSsrFunction(routeNode, appDir, outDir) {
   ].join('\n');
 
   return { funcPath, funcCode, name };
+}
 }

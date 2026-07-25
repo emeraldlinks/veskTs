@@ -5,4 +5,8 @@ export { createResource, setSsrData, resolveSsrResources, useFetch } from './res
 export { Portal } from './portal.js';
 export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams as routerParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound, NotFoundError } from './router.js';
 export { cookies, headers, locals, ServerResponse, ServerRequest, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook } from './request.js';
-export { isr, revalidatePath, revalidateTag, clearIsrCache } from './isr.js';
+export { isr, revalidatePath, revalidateTag, clearIsrCache, pageIsr, componentIsr, revalidateComponent, isrConfigToRevalidate } from './isr.js';
+export { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSchema, OrganizationSchema, LocalBusinessSchema, VideoSchema } from './seo.js';
+export { Image } from './image.js';
+export { Experiment } from './experiment.js';
+export { Form, Field, required, email, minLength, maxLength, pattern, custom } from './form.js';

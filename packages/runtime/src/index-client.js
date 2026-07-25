@@ -1,9 +1,13 @@
 export { track, get, set, untrack, peek_tracked as peek, derived, flush_sync as flushSync, tick, schedule_update, queue_microtask, active_block, set_active_block, set_active_component, is_mutating_allowed, tracking, teardown, run_block, run_teardown, create_component_ctx, push_component, pop_component, with_block, with_scope, scope, safe_scope, set_tracking, set_active_reaction, is_block_dirty, destroy_non_branch_children, disable_scoped_flush } from './ripple-runtime.js';
 export { effect, user_effect, block, branch, root, render, pre_effect, destroy_block, destroy_block_children, pause_block, resume_block, is_destroyed, unlink_block, create_try_block, boundary_fn_running_block } from './ripple-blocks.js';
-export { hydrate, hydrateViewport, hydrateIdle, needsHydration, hydrationCount, createHydrateWalker, reactiveProps } from './hydrate.js';
+export { hydrate, hydrateViewport, hydrateIdle, hydrateOnInteraction, needsHydration, hydrationCount, createHydrateWalker, reactiveProps } from './hydrate.js';
 export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound } from './router.js';
 export { bindValue, bindChecked, bindGroup } from './bindings.js';
 export { createContext, Context, getActiveComponent, setActiveComponent } from './context.js';
 export { createResource, setSsrData, clearSsrData, resolveSsrResources, useFetch } from './resource.js';
 export { Portal } from './portal.js';
 export { reconcile } from './reconcile.js';
+export { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSchema, OrganizationSchema, LocalBusinessSchema, VideoSchema } from './seo.js';
+export { Image } from './image.js';
+export { Experiment } from './experiment.js';
+export { Form, Field, required, email, minLength, maxLength, pattern, custom } from './form.js';

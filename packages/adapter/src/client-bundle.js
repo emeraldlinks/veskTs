@@ -18,7 +18,7 @@ function findRuntimeSrc(appDir) {
   throw new Error('@vesk/runtime/src not found');
 }
 
-export async function generateClientBundle(routeTree, appDir) {
+export async function generateClientBundle(routeTree, appDir, componentMap = new Map()) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const monorepoClient = resolve(__dirname, '..', '..', 'compiler', 'src', 'client-codegen.js');
   const { compileClient } = existsSync(monorepoClient)
@@ -64,6 +64,22 @@ export async function generateClientBundle(routeTree, appDir) {
     }
   }
   walk(routeTree);
+
+  // ── External component files (./components/) ──
+  for (const [compName, compPath] of componentMap) {
+    if (seen.has(compPath)) continue;
+    seen.add(compPath);
+    const src = readFileSync(compPath, 'utf-8');
+    const code = compileClient(src, null, { hydrate: true, forceClient: true });
+    if (code) {
+      bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`)
+                    .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '') + '\n';
+      const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
+      if (actualName && actualName !== compName) {
+        aliasLines.push(`__components[${JSON.stringify(compName)}] = __components[${JSON.stringify(actualName)}];`);
+      }
+    }
+  }
 
   // Bundle client runtime — ripple reactivity first, then utilities
   const runtimeFiles = [

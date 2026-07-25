@@ -201,6 +201,37 @@ export function needsHydration(container) {
 	return walker.nextNode() !== null;
 }
 
+export function hydrateOnInteraction(container, componentFn, props, options = {}) {
+  const events = options.events || ['click', 'touchstart', 'focus', 'mouseenter'];
+  let hydrated = false;
+
+  function trigger(eventType) {
+    if (hydrated) return;
+    hydrated = true;
+
+    for (const ev of events) {
+      container.removeEventListener(ev, handler);
+    }
+
+    const markers = collectVskMarkers(container);
+    if (markers.length > 0) {
+      const walker = createHydrateWalker(container, markers);
+      componentFn(props, new Map(), walker);
+    }
+  }
+
+  const handler = (e) => trigger(e.type);
+
+  for (const ev of events) {
+    container.addEventListener(ev, handler, { once: true });
+  }
+
+  return {
+    cancel() { hydrated = true; for (const ev of events) container.removeEventListener(ev, handler); },
+    hydrateNow() { trigger('manual'); },
+  };
+}
+
 export function hydrationCount(container) {
 	let count = 0;
 	const walker = document.createTreeWalker(container, _SHOW_COMMENT, {

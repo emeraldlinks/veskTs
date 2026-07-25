@@ -587,6 +587,56 @@ it('no auto-import when builtins are not used', () => {
   assert(autoImports.length === 0, `unexpected auto-imports: ${JSON.stringify(autoImports)}`);
 });
 
+it('auto-imports Form and Field when used as JSX tags', () => {
+  const source = `component App {
+    return <Form action="/api/submit"><Field name="x" rules={[]}><input /></Field></Form>;
+  }`;
+  const ir = generateIR(parse(source), source);
+  const autoImports = ir.imports.filter(i => i.includes('@vesk/runtime'));
+  const hasForm = ir.imports.some(i => i.includes('Form'));
+  const hasField = ir.imports.some(i => i.includes('Field'));
+  assert(hasForm, `Form import missing: ${JSON.stringify(autoImports)}`);
+  assert(hasField, `Field import missing: ${JSON.stringify(autoImports)}`);
+});
+
+it('auto-imports validation helpers when used in prop expressions', () => {
+  const source = `component App {
+    return <Field name="email" rules={[required(), email()]}><input /></Field>;
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('required')), `required import missing: ${JSON.stringify(ir.imports)}`);
+  assert(ir.imports.some(i => i.includes('email')), `email import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+it('auto-imports minLength, maxLength, pattern, custom', () => {
+  const source = `component App {
+    return <Field name="pw" rules={[minLength(8), maxLength(64), pattern(/^\\w+$/), custom(v => v !== 'admin')]}><input /></Field>;
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('minLength')), `minLength missing`);
+  assert(ir.imports.some(i => i.includes('maxLength')), `maxLength missing`);
+  assert(ir.imports.some(i => i.includes('pattern')), `pattern missing`);
+  assert(ir.imports.some(i => i.includes('custom')), `custom missing`);
+});
+
+it('does not double-import when user already imported', () => {
+  const source = `import { Form, required } from '@vesk/runtime';
+  component App {
+    return <Form action="/api"><Field name="x" rules={[required()]}><input /></Field></Form>;
+  }`;
+  const ir = generateIR(parse(source), source);
+  const count = ir.imports.filter(i => i.includes('Form')).length;
+  assert(count === 1, `expected exactly 1 Form import, got ${count}: ${JSON.stringify(ir.imports)}`);
+});
+
+it('auto-imports Experiment when used as JSX tag', () => {
+  const source = `component App {
+    return <Experiment name="test" variants={[{content: "A"}]} />;
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('Experiment')), `Experiment import missing: ${JSON.stringify(ir.imports)}`);
+});
+
 // =============================================================
 // Runtime — useFetch
 // =============================================================

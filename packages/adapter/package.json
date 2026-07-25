@@ -16,7 +16,8 @@
   "dependencies": {
     "@vesk/compiler": "^0.1.0",
     "@vesk/runtime": "^0.1.0",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "sharp": "^0.35.3"
   },
   "devDependencies": {
     "typescript": "^5.8.0"

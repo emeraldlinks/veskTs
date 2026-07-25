@@ -72,6 +72,46 @@ export function scanRoutes(appDir, options = {}) {
 	return scanDirectory(appDir, appDir, '/', options);
 }
 
+function capitalize(s) {
+	return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+/**
+ * Scan a `components/` directory for reusable .vsk component files.
+ * Returns a Map of component name → source file path.
+ * Subdirectory nesting produces prefixed names (e.g. ui/Button.vsk → UiButton).
+ * @param {string} componentsDir
+ * @returns {Map<string, string>}
+ */
+export function scanComponents(componentsDir) {
+	const map = new Map();
+	if (!existsSync(componentsDir)) return map;
+
+	function walk(dir, prefix) {
+		let entries;
+		try { entries = readdirSync(dir); } catch { return; }
+		for (const entry of entries) {
+			const full = join(dir, entry);
+			let stat;
+			try { stat = statSync(full); } catch { continue; }
+			if (stat.isDirectory()) {
+				if (!entry.startsWith('_')) {
+					walk(full, prefix ? prefix + capitalize(entry) : capitalize(entry));
+				}
+			} else if (entry.endsWith('.vsk')) {
+				const name = prefix
+					? prefix + capitalize(entry.slice(0, -4))
+					: entry.slice(0, -4);
+				if (!map.has(name)) {
+					map.set(name, full);
+				}
+			}
+		}
+	}
+	walk(componentsDir, '');
+	return map;
+}
+
 /**
  * Recursively scan a directory for route files.
  */
