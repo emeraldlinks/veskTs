@@ -468,6 +468,11 @@ function processStatementModeBody(source, bodyStmts) {
 			nodes.push(...processForStatement(source, stmt));
 		} else if (stmt.type === 'ForStatement') {
 			nodes.push(...processForStatement(source, stmt));
+		} else if (stmt.type === 'ClassDeclaration') {
+			throw new Error(
+				`[vesk] class declarations are not supported inside Vesk components. ` +
+				`Use plain objects, factory functions, or import the class from an external module instead.`
+			);
 		} else {
 			// Non-JSX statements preserved as runtime statements
 			const raw = getSource(source, stmt);
@@ -494,15 +499,79 @@ function extractStyle(body) {
 	return { body: filtered, css: cssParts.join('\n') || null };
 }
 
+function validateBlocks(compName, isClient, body) {
+	for (const node of body) {
+		if (isClient) {
+			if (node instanceof ServerBlock) {
+				throw new Error(
+					`[vesk] {#server} block found in client island "${compName}". ` +
+					'Client islands render on both server and client, so {#server} blocks ' +
+					'have no effect — the content would never reach the client.\n\n' +
+					'  Remove the {#server} block:\n' +
+					`    component ${compName} client {\n` +
+					'      // content here is always rendered\n' +
+					'    }\n\n' +
+					'Or convert to a server-only component by removing the `client` keyword:\n' +
+					`    component ${compName} { ... }\n` +
+					'  and use {#client} blocks for interactive parts.\n'
+				);
+			}
+		} else {
+			if (node instanceof ClientBlock) {
+				throw new Error(
+					`[vesk] {#client} block found in component "${compName}", but this component is ` +
+					'not a client island. Client blocks are only allowed inside components ' +
+					'declared with the `client` keyword.\n\n' +
+					'  Add `client` to the component declaration:\n' +
+					`    component ${compName} client { ... }\n\n` +
+					'Or remove the {#client} block if the content can be server-rendered.\n\n' +
+					'  Server-only components cannot contain {#client} blocks because they\n' +
+					'  are stripped during SSR and never rendered to the client.\n'
+				);
+			}
+		}
+		if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock) {
+			validateBlocks(compName, isClient, node.children || []);
+		}
+	}
+}
+
 /**
  * Generate IR from a parsed Vesk AST.
  */
+/**
+ * Convert a TSEnumDeclaration AST node to a plain JS object declaration.
+ * Handles both numeric and string enums with forward + reverse mapping.
+ */
+function processEnum(node, source, exported) {
+	const name = node.id.name;
+	const pairs = [];
+	const reversePairs = [];
+	let autoVal = 0;
+	for (const member of node.members) {
+		const key = member.id.name;
+		let val;
+		if (member.initializer) {
+			val = getSource(source, member.initializer);
+		} else {
+			val = String(autoVal);
+		}
+		pairs.push(`${JSON.stringify(key)}: ${val}`);
+		reversePairs.push(`${val}: ${JSON.stringify(key)}`);
+		if (!member.initializer) autoVal++;
+	}
+	const allPairs = [...reversePairs, ...pairs].join(', ');
+	const prefix = exported ? `export const ${name}` : `const ${name}`;
+	return `${prefix} = { ${allPairs} };`;
+}
+
 export function generateIR(ast, source) {
 	/** @type {ComponentIR[]} */
 	const components = [];
 	const imports = [];
 	const importedNames = new Set();
 	let staticProps = null;
+	let loadFn = null;
 	const topLevelCode = [];
 
 	for (const node of ast.body) {
@@ -519,12 +588,27 @@ export function generateIR(ast, source) {
 		// Collect getStaticProps export for SSG
 		if (node.type === 'ExportNamedDeclaration' && node.declaration && !staticProps) {
 			const decl = node.declaration;
-			if (
-				(decl.type === 'FunctionDeclaration' && decl.id?.name === 'getStaticProps') ||
-				(decl.type === 'VariableDeclaration' &&
-					decl.declarations[0]?.id?.name === 'getStaticProps')
-			) {
+			const fnName = decl.type === 'FunctionDeclaration'
+				? decl.id?.name
+				: decl.type === 'VariableDeclaration'
+					? decl.declarations[0]?.id?.name
+					: null;
+			if (fnName === 'getStaticProps') {
 				staticProps = getSource(source, decl);
+				continue;
+			}
+		}
+
+		// Collect load function for SSR data fetching
+		if (node.type === 'ExportNamedDeclaration' && node.declaration && !loadFn) {
+			const decl = node.declaration;
+			const fnName = decl.type === 'FunctionDeclaration'
+				? decl.id?.name
+				: decl.type === 'VariableDeclaration'
+					? decl.declarations[0]?.id?.name
+					: null;
+			if (fnName === 'load') {
+				loadFn = getSource(source, decl);
 				continue;
 			}
 		}
@@ -543,6 +627,15 @@ export function generateIR(ast, source) {
 
 		if (inner.type === 'ComponentDeclaration') {
 			// handled below
+		} else if (inner.type === 'ClassDeclaration') {
+			throw new Error(
+				`[vesk] class declarations are not supported in .vsk files. ` +
+				`Import classes from external modules or use factory functions instead.`
+			);
+		} else if (inner.type === 'TSEnumDeclaration') {
+			const code = processEnum(inner, source, exported);
+			topLevelCode.push(code);
+			continue;
 		} else {
 			topLevelCode.push(getSource(source, node));
 			continue;
@@ -551,11 +644,13 @@ export function generateIR(ast, source) {
 		const name = inner.id.name;
 		const paramNames = getParamNames(inner.params);
 		const bodyStmts = inner.body.body;
+		const isClientComp = !!inner.client;
 
 		if (isStatementMode(bodyStmts)) {
 			const raw = processStatementModeBody(source, bodyStmts);
 			const { body, css } = extractStyle(raw);
-			const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client });
+			validateBlocks(name, isClientComp, body);
+			const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async });
 			comp.style = css;
 			components.push(comp);
 		} else {
@@ -565,15 +660,15 @@ export function generateIR(ast, source) {
 			/** @type {import('./ir.js').IRNode[]} */
 			const preamble = [];
 
-			for (const stmt of bodyStmts) {
-				if (stmt.type === 'VeskBlock') {
-					const inner = processStatementModeBody(source, stmt.body);
-					if (stmt.tag === 'server') {
-						preamble.push(new ServerBlock(inner));
-					} else if (stmt.tag === 'client') {
-						preamble.push(new ClientBlock(inner));
-					}
-				} else if (stmt.type === 'ReturnStatement') {
+		for (const stmt of bodyStmts) {
+			if (stmt.type === 'VeskBlock') {
+				const inner = processStatementModeBody(source, stmt.body);
+				if (stmt.tag === 'server') {
+					preamble.push(new ServerBlock(inner));
+				} else if (stmt.tag === 'client') {
+					preamble.push(new ClientBlock(inner));
+				}
+			} else if (stmt.type === 'ReturnStatement') {
 					mainReturn = stmt;
 				} else if (isTrackDeclaration(stmt)) {
 					const elements = stmt.declarations[0].id.elements;
@@ -585,6 +680,11 @@ export function generateIR(ast, source) {
 					if (refName) preamble.push(new ComponentRef(refName));
 				} else if (stmt.type === 'IfStatement' && !mainReturn && stmt.consequent.type !== 'ThrowStatement') {
 					guardClauses.push(stmt);
+				} else if (stmt.type === 'ClassDeclaration') {
+					throw new Error(
+						`[vesk] class declarations are not supported inside Vesk components. ` +
+						`Use plain objects, factory functions, or import the class from an external module instead.`
+					);
 				} else {
 					const raw = getSource(source, stmt);
 					if (raw) preamble.push(new RuntimeStatement(raw, stmt, source));
@@ -593,11 +693,49 @@ export function generateIR(ast, source) {
 
 			const guardBody = buildGuardChain(source, guardClauses, mainReturn);
 			const { body, css } = extractStyle([...preamble, ...guardBody]);
-			const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client });
+			validateBlocks(name, isClientComp, body);
+			const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async });
 			comp.style = css;
 			components.push(comp);
 		}
 	}
 
-	return new IRRoot(components, imports, importedNames, staticProps, topLevelCode);
+	// Auto-import detection — scan source for built-in functions used without explicit import
+	const autoImportable = [
+		'useFetch', 'useRouter', 'useParams', 'usePathname', 'useSearchParams', 'useNavigate',
+		'useHead', 'useTitle',
+	];
+	const usedFunctions = new Set();
+	// Scan top-level code
+	for (const code of topLevelCode) {
+		for (const fn of autoImportable) {
+			if (code.includes(fn + '(')) usedFunctions.add(fn);
+		}
+	}
+	// Scan component body RuntimeStatements
+	for (const comp of components) {
+		for (const node of comp.body) {
+			if (node instanceof RuntimeStatement && node.raw) {
+				for (const fn of autoImportable) {
+					if (node.raw.includes(fn + '(')) usedFunctions.add(fn);
+				}
+			}
+		}
+	}
+	// Inject imports for detected functions
+	if (usedFunctions.size > 0) {
+		const existing = new Set();
+		for (const imp of imports) {
+			const match = imp.match(/import\s+\{([^}]+)\}\s+from\s+['"]@vesk\/runtime['"]/);
+			if (match) {
+				for (const n of match[1].split(',')) existing.add(n.trim().split(/\s+as\s+/).pop());
+			}
+		}
+		const missing = [...usedFunctions].filter(f => !existing.has(f));
+		if (missing.length > 0) {
+			imports.push(`import { ${missing.join(', ')} } from '@vesk/runtime';`);
+		}
+	}
+
+	return new IRRoot(components, imports, importedNames, staticProps, loadFn, topLevelCode);
 }

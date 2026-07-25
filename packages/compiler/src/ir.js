@@ -46,6 +46,8 @@ export class IRRoot {
 	importedNames;
 	/** @type {string | null} */
 	staticProps;
+	/** @type {string | null} */
+	loadFn;
 	/** @type {string[]} */
 	topLevelCode;
 
@@ -54,13 +56,15 @@ export class IRRoot {
 	 * @param {string[]} [imports]
 	 * @param {Set<string>} [importedNames]
 	 * @param {string | null} [staticProps]
+	 * @param {string | null} [loadFn]
 	 * @param {string[]} [topLevelCode]
 	 */
-	constructor(components, imports = [], importedNames = new Set(), staticProps = null, topLevelCode = []) {
+	constructor(components, imports = [], importedNames = new Set(), staticProps = null, loadFn = null, topLevelCode = []) {
 		this.components = components;
 		this.imports = imports;
 		this.importedNames = importedNames;
 		this.staticProps = staticProps;
+		this.loadFn = loadFn;
 		this.topLevelCode = topLevelCode;
 	}
 }

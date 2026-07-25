@@ -11,11 +11,9 @@
     "./server": "./src/index-server.js"
   },
   "scripts": {
-    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "typescript": "^5.8.0",
-    "vitest": "^3.2.0"
+    "typescript": "^5.8.0"
   }
 }

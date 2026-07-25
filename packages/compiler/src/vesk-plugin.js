@@ -73,25 +73,48 @@ export function VeskPlugin(config = {}) {
 			}
 
 			parseStatement(context, ...args) {
+				// async component → async flag set on the ComponentDeclaration
+				if (this.type === tt.name && this.value === 'async') {
+					const afterAsync = this.input.slice(this.end).trimStart();
+					if (afterAsync.startsWith('component') && (afterAsync.length === 9 || ' \t\r\n{'.includes(afterAsync[9]))) {
+						this.next();
+						const node = this.parseComponentDeclaration(/* async */ true);
+						return node;
+					}
+				}
+
 				if (this.type === tt.name && this.value === 'component') {
-					return this.parseComponentDeclaration();
+					return this.parseComponentDeclaration(/* async */ false);
 				}
 
 				if (this.type === tt._export) {
 					const rest = this.input.slice(this.pos).trimStart();
-					if (rest.startsWith('component') && (rest.length === 9 || ' \t\r\n{'.includes(rest[9]))) {
+					if (rest.startsWith('default async component') && (rest.length === 23 || ' \t\r\n{'.includes(rest[23]))) {
+						this.next(); this.next(); this.next(); // export default async
 						const node = this.startNode();
-						this.next();
-						node.declaration = this.parseComponentDeclaration();
+						node.declaration = this.parseComponentDeclaration(/* async */ true);
+						node.default = true;
+						return this.finishNode(node, 'ExportDefaultDeclaration');
+					}
+					if (rest.startsWith('async component') && (rest.length === 15 || ' \t\r\n{'.includes(rest[15]))) {
+						this.next(); this.next(); // export async
+						const node = this.startNode();
+						node.declaration = this.parseComponentDeclaration(/* async */ true);
 						return this.finishNode(node, 'ExportNamedDeclaration');
 					}
 					if (rest.startsWith('default component') && (rest.length === 17 || ' \t\r\n{'.includes(rest[17]))) {
 						const node = this.startNode();
 						this.next();
 						this.next();
-						node.declaration = this.parseComponentDeclaration();
+						node.declaration = this.parseComponentDeclaration(/* async */ false);
 						node.default = true;
 						return this.finishNode(node, 'ExportDefaultDeclaration');
+					}
+					if (rest.startsWith('component') && (rest.length === 9 || ' \t\r\n{'.includes(rest[9]))) {
+						const node = this.startNode();
+						this.next();
+						node.declaration = this.parseComponentDeclaration(/* async */ false);
+						return this.finishNode(node, 'ExportNamedDeclaration');
 					}
 				}
 
@@ -238,29 +261,36 @@ export function VeskPlugin(config = {}) {
 				return this.finishNode(node, 'VeskBlock');
 			}
 
-			parseComponentDeclaration() {
+			parseComponentDeclaration(isAsync = false) {
 				const node = this.startNode();
+				node.async = isAsync;
 				this.next();
 				node.id = this.parseIdent();
 				if (typeof this.tsTryParseTypeParameters === 'function') {
 					const typeParameters = this.tsTryParseTypeParameters(this.tsParseConstModifier);
 					if (typeParameters) node.typeParameters = typeParameters;
 				}
-				this.enterScope(2);
+				this.enterScope(2 | (isAsync ? 4 : 0));
+
+				// Parse optional `client` keyword before params: component App client(props) { ... }
+				node.client = this.type === tt.name && this.value === 'client' ? (this.next(), true) : false;
+
 				if (this.type === tt.parenL) {
 					this.parseFunctionParams(node);
 				} else {
 					node.params = [];
 				}
 
-				// Parse optional `client` keyword (islands marker)
-				node.client = this.type === tt.name && this.value === 'client' ? (this.next(), true) : false;
+				// Parse optional `client` keyword after params: component App(props) client { ... }
+				if (!node.client && this.type === tt.name && this.value === 'client') {
+					node.client = true;
+					this.next();
+				}
 
 				this.#componentDepth++;
 				node.body = this.parseBlock(false);
 				this.#componentDepth--;
 
-				node.async = false;
 				this.exitScope();
 				this.finishNode(node, 'ComponentDeclaration');
 				return node;

@@ -25,3 +25,8 @@ export {
 	ComponentCall,
 	Expression,
 } from './ir.js';
+
+/** @typedef {import('./config.js').VeskPlugin} VeskPlugin */
+/** @typedef {import('./config.js').VeskConfig} VeskConfig */
+
+export { defineConfig, validateConfig } from './config.js';

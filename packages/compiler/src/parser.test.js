@@ -9,7 +9,7 @@
  * - Error: `component` as regular identifier
  * - Full §2.4 example parsing
  *
- * NOTE: vitest is unavailable on this platform (rollup android-arm64 binary issue).
+ * NOTE: Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  * Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  */
 import { parse } from './parser.js';

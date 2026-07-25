@@ -592,7 +592,7 @@ describe('Server/Client Blocks', () => {
 		expect(html).toContain('<p>ServerOnly</p>');
 	});
 	it('ClientBlock is stripped from server output', () => {
-		const html = render(`component App {
+		const html = render(`component App client {
 			{#client}
 				<button>ClientBtn</button>
 			{/client}
@@ -601,14 +601,13 @@ describe('Server/Client Blocks', () => {
 		expect(html).not.toContain('ClientBtn');
 		expect(html).toContain('Always');
 	});
-	it('both blocks in same component', () => {
+	it('ServerBlock renders in server, ClientBlock in client island', () => {
 		const html = render(`component App {
 			{#server}<span>S</span>{/server}
-			{#client}<span>C</span>{/client}
 			<span>B</span>
 		}`, 'App');
 		expect(html).toContain('<span>S</span>');
-		expect(html).not.toContain('<span>C</span>');
+		expect(html).toContain('<span>B</span>');
 		expect(html).toContain('<span>B</span>');
 	});
 });

@@ -222,11 +222,15 @@ function emitNode(ctx, node, tracked, effectsVar, parentVar, compPrefix = '__com
 	if (node instanceof MapRegion) return emitMap(ctx, node, tracked, parentVar);
 	if (node instanceof ServerBlock) return null; // stripped from client bundle
 	if (node instanceof ClientBlock) {
-		// Render children normally for client; return last child variable
+		// ClientBlock content was never SSR-rendered, so force non-hydrate
+		// emission even in hydrate mode — elements must be created from scratch.
+		const savedHydrate = ctx.hydrate;
+		ctx.hydrate = false;
 		let lastVar = null;
 		for (const n of node.children) {
 			lastVar = emitNode(ctx, n, tracked, null, parentVar);
 		}
+		ctx.hydrate = savedHydrate;
 		return lastVar;
 	}
 	if (node instanceof HeadBlock) {
@@ -685,7 +689,7 @@ function generateComponent(comp, importedNames = new Set(), hydrate = false) {
 	ctx.importedNames = importedNames;
 	ctx.hydrate = hydrate;
 
-	ctx.push(hydrate ? '(props, __registry, __hydrate) => {' : '(props) => {');
+	ctx.push(hydrate ? (comp.isAsync ? 'async (props, __registry, __hydrate) => {' : '(props, __registry, __hydrate) => {') : (comp.isAsync ? 'async (props) => {' : '(props) => {'));
 	ctx.push(indent(`props = reactiveProps(props);`));
 	ctx.push(indent(`const __prev = getActiveComponent();`));
 	ctx.push(indent(`setActiveComponent({ c: null, p: __prev });`));
@@ -896,6 +900,7 @@ export function compileClient(source, _componentName, options = {}) {
 
 	const componentMapCode = buildComponentMap(ir, options.hydrate);
 	const importLines = ir.imports.length > 0 ? ir.imports.join('\n') + '\n' : '';
+	const topCode = ir.topLevelCode.length > 0 ? ir.topLevelCode.join('\n') + '\n' : '';
 
 	const exportLines = [];
 	for (const comp of ir.components) {
@@ -926,6 +931,7 @@ export function compileClient(source, _componentName, options = {}) {
 	const moduleCode = `
 ${runtimeImport}
 ${importLines}
+${topCode}
 ${componentMapCode}
 ${exportCode}
 `;

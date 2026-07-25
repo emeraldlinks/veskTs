@@ -123,7 +123,7 @@ function exprJS(raw) {
 	return `(${raw})`;
 }
 
-function irNodeToJS(node, importedNames) {
+function irNodeToJS(node, importedNames, isAsync = false) {
 	importedNames = importedNames || __vskImportedNames;
 	if (node instanceof StaticNode) return staticNodeToJS(node);
 	if (node instanceof TextNode) {
@@ -137,11 +137,11 @@ function irNodeToJS(node, importedNames) {
 	if (node instanceof SwitchBlock) return switchBlockToJS(node);
 	if (node instanceof TryCatch) return tryCatchToJS(node);
 	if (node instanceof ComponentRef) return '';
-	if (node instanceof ComponentCall) return componentCallToJS(node, importedNames);
+	if (node instanceof ComponentCall) return componentCallToJS(node, importedNames, isAsync);
 	if (node instanceof ServerBlock) {
 		const lines = [];
 		for (const n of node.children) {
-			const code = irNodeToJS(n, importedNames);
+			const code = irNodeToJS(n, importedNames, isAsync);
 			if (code) lines.push(code);
 		}
 		return lines.join('\n');
@@ -498,7 +498,7 @@ function forLoopToJS(node) {
 	return lines.join('\n');
 }
 
-function componentCallToJS(node, importedNames) {
+function componentCallToJS(node, importedNames, isAsync = false) {
 	const propsEntries = node.props.map((p) => {
 		if (typeof p.value === 'string') return `${JSON.stringify(p.name)}: ${JSON.stringify(p.value)}`;
 		return `${JSON.stringify(p.name)}: ${exprJS(p.value.raw)}`;
@@ -511,11 +511,12 @@ function componentCallToJS(node, importedNames) {
 	const compName = node.componentName;
 	const isImported = importedNames && importedNames.has(compName);
 	const callee = isImported ? compName : `__registry.get(${JSON.stringify(compName)})`;
+	const awaitKw = isAsync ? 'await ' : '';
 	if (__vskHydrate) {
 		const id = __vskId++;
-		return `__out.push('<div data-vsk="${id}">' + (${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`;
+		return `__out.push('<div data-vsk="${id}">' + (${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`;
 	}
-	return `__out.push(${callee}(${propsObj}, __registry, __vesk) || '');`;
+	return `__out.push(${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '');`;
 }
 
 function childrenToHTML(nodes) {
@@ -554,7 +555,7 @@ function generateFunctionBody(comp, importedNames) {
 	}
 
 	for (const node of comp.body) {
-		const code = irNodeToJS(node, importedNames);
+		const code = irNodeToJS(node, importedNames, comp.isAsync);
 		if (code) lines.push(code);
 	}
 
@@ -577,7 +578,12 @@ function buildComponentMap(irRoot, useSharedScope) {
 		const bodyCode = generateFunctionBody(comp, importedNames);
 		const paramInit = buildParamInit(comp.paramNames);
 		const code = `${scopeDecl}${paramInit}\n${bodyCode}`;
-		const fn = new Function('props', '__registry', '__vesk', code);
+		let fn;
+		if (comp.isAsync) {
+			fn = new Function('props', '__registry', '__vesk', `return (async () => {\n${code}\n})()`);
+		} else {
+			fn = new Function('props', '__registry', '__vesk', code);
+		}
 		map.set(comp.name, fn);
 	}
 	__vskImportedNames = null;
@@ -711,7 +717,12 @@ export function render(source, componentName, props = {}, registry = new Map(), 
 	const fullRegistry = new Map([...registry, ...componentMap]);
 	const __vesk = options.__vesk || loadRuntimeImports(ir.imports);
 	evalTopLevelCode(ir.topLevelCode, __vesk);
-	return renderFn(props, fullRegistry, __vesk);
+	const result = renderFn(props, fullRegistry, __vesk);
+	const targetComp = ir.components.find((c) => c.name === componentName);
+	if (targetComp?.isAsync) {
+		return result.then ? result : Promise.resolve(result);
+	}
+	return result;
 }
 
 /**
@@ -729,13 +740,29 @@ export function renderPage(source, componentName, props = {}, registry = new Map
 		componentMap = compiled.componentMap;
 		__vesk = compiled.__vesk;
 	}
+
+	// Enable SSR tracking for createResource during render
+	globalThis.__vsk_ssr = true;
 	const renderFn = componentMap.get(componentName);
 	if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
 	const fullRegistry = new Map([...registry, ...componentMap]);
-	const bodyHtml = renderFn(props, fullRegistry, __vesk);
+	let bodyHtml;
+	try {
+		bodyHtml = renderFn(props, fullRegistry, __vesk);
+	} finally {
+		delete globalThis.__vsk_ssr;
+	}
+
 	const targetComp = ir.components.find((c) => c.name === componentName);
+	if (targetComp?.isAsync) {
+		return (async () => ({
+			body: await bodyHtml,
+			head: renderHeadHtml(targetComp, props),
+			props
+		}))();
+	}
 	const headHtml = targetComp ? renderHeadHtml(targetComp, props) : '';
-	return { body: bodyHtml, head: headHtml };
+	return { body: bodyHtml, head: headHtml, props };
 }
 
 /**
@@ -783,7 +810,7 @@ export async function ssg(source, componentName, customProps, options = {}) {
 	});
 
 	// Server-render: only add hydration markers if client code exists
-	const rendered = renderPage(source, componentName, props, options.registry || new Map(), { hydrate: needsClient });
+	const rendered = await renderPage(source, componentName, props, options.registry || new Map(), { hydrate: needsClient });
 	const bodyHtml = rendered.body;
 	const headHtml = rendered.head;
 
@@ -827,16 +854,61 @@ ${bodyHtml}${scriptBlock}</body>
 /**
  * Full-page SSR — returns a complete HTML document as a string.
  * Wraps renderPage() output in a proper HTML5 document with <head> and <body>.
+ * If the source has a `load` export, it is called before render to fetch SSR data.
+ * Also handles SSR resource tracking for createResource().
  */
-export function renderFullPage(source, componentName, props = {}, registry = new Map(), options = {}) {
-	const rendered = renderPage(source, componentName, props, registry, options);
-	const headHtml = rendered.head;
-	const bodyHtml = prettifyHtml(rendered.body);
-	const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
-	const clientScript = options.clientScriptUrl
-		? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
-		: '';
-	return `<!DOCTYPE html>
+export async function renderFullPage(source, componentName, props = {}, registry = new Map(), options = {}) {
+	// Enable SSR data tracking mode for createResource()
+	globalThis.__vsk_ssr = true;
+	try {
+		// Call load function if present
+		let ssrProps = { ...props };
+		let serializedProps = null;
+		const ast = parse(source);
+		const ir = generateIR(ast, source);
+		if (ir.loadFn) {
+			const __vesk = options.__vesk || loadRuntimeImports(ir.imports);
+			const loadResult = await callLoadFunction(ir.loadFn, props, __vesk);
+			if (loadResult && typeof loadResult === 'object') {
+				if (loadResult.props) {
+					ssrProps = { ...ssrProps, ...loadResult.props };
+				} else {
+					ssrProps = { ...ssrProps, ...loadResult };
+				}
+			}
+			serializedProps = JSON.stringify(ssrProps);
+		}
+		const rendered = renderPage(source, componentName, ssrProps, registry, { ...options, __vesk: options.__vesk || (ir.loadFn ? undefined : undefined) });
+
+		// Await any pending SSR resource promises (from createResource during render)
+		const ssrData = globalThis.__vsk_ssr_data || {};
+		if (globalThis.__vsk_ssr_promises?.length > 0) {
+			await Promise.allSettled(globalThis.__vsk_ssr_promises);
+			// Collect data for serialization
+			const collectedData = globalThis.__vsk_ssr_data || {};
+			Object.assign(ssrData, collectedData);
+		}
+		delete globalThis.__vsk_ssr_promises;
+
+		const headHtml = rendered.head;
+		const bodyHtml = prettifyHtml(rendered.body);
+		const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
+		const clientScript = options.clientScriptUrl
+			? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
+			: '';
+
+		// Build serialized data scripts
+		const dataScripts = [];
+		if (serializedProps) {
+			dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
+		}
+		const ssrDataKeys = Object.keys(ssrData);
+		if (ssrDataKeys.length > 0) {
+			dataScripts.push(`<script>const __vesk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+		}
+		const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
+
+		return `<!DOCTYPE html>
 <html>
 <head>
 	<meta charset="utf-8" />
@@ -846,8 +918,11 @@ ${cssLink}${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</he
 <div id="root">
 ${bodyHtml}
 </div>
-${clientScript}</body>
+${dataScriptBlock}${clientScript}</body>
 </html>`;
+	} finally {
+		delete globalThis.__vsk_ssr;
+	}
 }
 
 /**
@@ -881,6 +956,31 @@ async function callStaticProps(fnSource) {
 	const result = fn();
 	const resolved = result && typeof result.then === 'function' ? await result : result;
 	return resolved && resolved.props ? resolved.props : resolved;
+}
+
+/**
+ * Evaluate a `load` function during SSR (sync or async).
+ * The load function receives ({ params, request, fetch, url }) and returns
+ * either { props: {...} } or a plain object to merge into props.
+ */
+async function callLoadFunction(fnSource, currentProps, __vesk) {
+	const isAsync = fnSource.trimStart().startsWith('async');
+	// Build context object for load function
+	// The load function receives ({ params, request, fetch, url }) — SvelteKit-style
+	const ctx = {
+		params: currentProps.params || {},
+		request: currentProps.request || null,
+		fetch: globalThis.fetch,
+		url: currentProps.url || '',
+	};
+	const ctxCode = `const __ctx = ${JSON.stringify(ctx)};\n`;
+	const wrapper = isAsync
+		? `return (async () => {\n${ctxCode}\n${fnSource}\nreturn await load(__ctx);\n})()`
+		: `return (() => {\n${ctxCode}\n${fnSource}\nreturn load(__ctx);\n})()`;
+	const fn = new Function(wrapper);
+	const result = fn();
+	const resolved = result && typeof result.then === 'function' ? await result : result;
+	return resolved;
 }
 
 

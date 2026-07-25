@@ -25,6 +25,14 @@ function resolveCompilerApi(name) {
 export async function build(appDir, options = {}) {
   const outDir = resolve(options.outDir || resolve(appDir, '..', '.vesk'));
   const publicDir = options.publicDir || resolve(appDir, '..', 'public');
+  const plugins = options.plugins || [];
+
+  // ── Plugin onBuildStart ──
+  for (const plugin of plugins) {
+    if (typeof plugin.onBuildStart === 'function') {
+      await plugin.onBuildStart();
+    }
+  }
 
   console.error(`vesk build: output → ${outDir}`);
 
@@ -109,17 +117,33 @@ export async function build(appDir, options = {}) {
   copyStaticAssets(publicDir, outDir);
   console.error(`vesk build: static → static/public/`);
 
-  // ── Copy global CSS (src/global.css or src/app.css) ──
+  // ── Process CSS through plugin pipeline ──
   const srcDir = resolve(appDir, '..', 'src');
   const cssSrc = resolve(srcDir, 'global.css');
   const altCssSrc = resolve(srcDir, 'app.css');
   const cssTarget = resolve(outDir, 'static', 'global.css');
+
+  let cssContent = null;
+  let cssSourcePath = null;
   if (existsSync(cssSrc)) {
-    copyFileSync(cssSrc, cssTarget);
-    console.error(`vesk build: css  → static/global.css  (${readFileSync(cssSrc).length} bytes)`);
+    cssContent = readFileSync(cssSrc, 'utf-8');
+    cssSourcePath = cssSrc;
   } else if (existsSync(altCssSrc)) {
-    copyFileSync(altCssSrc, cssTarget);
-    console.error(`vesk build: css  → static/global.css  (from src/app.css)`);
+    cssContent = readFileSync(altCssSrc, 'utf-8');
+    cssSourcePath = altCssSrc;
+  }
+
+  if (cssContent !== null) {
+    for (const plugin of plugins) {
+      if (typeof plugin.onCSS === 'function') {
+        const result = await plugin.onCSS(cssContent, cssSourcePath);
+        if (result !== null && typeof result === 'string') {
+          cssContent = result;
+        }
+      }
+    }
+    writeFileSync(cssTarget, cssContent, 'utf-8');
+    console.error(`vesk build: css  → static/global.css  (${cssContent.length} bytes)`);
   }
 
   // ── SSG pre-rendering ──
@@ -134,6 +158,13 @@ export async function build(appDir, options = {}) {
   const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled);
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error(`vesk build: config → config.json`);
+
+  // ── Plugin onBuildEnd ──
+  for (const plugin of plugins) {
+    if (typeof plugin.onBuildEnd === 'function') {
+      await plugin.onBuildEnd();
+    }
+  }
 
   console.error(`\nvesk build: done (${outDir})`);
   return { routeTree, apiTree, ssrRoutes, apiRoutes, manifest };

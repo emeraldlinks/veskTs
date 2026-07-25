@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
-import { resolve, join, basename } from 'path';
+import { resolve, join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -72,10 +72,10 @@ if (cmd === 'init') {
 			'@vesk/runtime': '^0.1.0',
 			'@vesk/cli': '^0.1.0',
 			'@vesk/adapter': '^0.1.0',
+			'@vesk/plugin-tailwind': '^0.1.0',
 		},
 		devDependencies: {
 			typescript: '^5.8.0',
-			tailwindcss: '^4.0.0',
 		},
 	}, null, 2) + '\n');
 
@@ -83,25 +83,23 @@ if (cmd === 'init') {
 	// vesk.config.ts — Vesk compiler configuration
 	// ═══════════════════════════════════════════════════════════
 	writeFileSync(join(targetDir, 'vesk.config.ts'), [
-		`/** @type {import('@vesk/compiler').VeskConfig} */`,
-		`export default {`,
-		`\t// Root directory for file-based routing (default: ./app)`,
+		`import { defineConfig } from '@vesk/compiler'`,
+		`import tailwindcss from '@vesk/plugin-tailwind'`,
+		``,
+		`export default defineConfig({`,
 		`\tappDir: './app',`,
-		``,
-		`\t// Output directory for compiled assets (default: ./dist)`,
 		`\toutDir: './dist',`,
-		``,
-		`\t// Public directory served as static files (default: ./public)`,
 		`\tpublicDir: './public',`,
-		``,
-		`\t// Configure SSG routes (static paths for dynamic routes)`,
+		`\tplugins: [`,
+		`\t\ttailwindcss({ entry: 'src/global.css' }),`,
+		`\t],`,
 		`\tssg: {`,
 		`\t\t// Example: pre-render blog posts`,
 		`\t\t// getStaticPaths: async () => {`,
 		`\t\t//   return { paths: [{ params: { slug: 'hello-world' } }, { params: { slug: 'ssr-in-vesk' } }] };`,
 		`\t\t// },`,
 		`\t},`,
-		`};`,
+		`});`,
 		'',
 	].join('\n'));
 
@@ -131,22 +129,8 @@ if (cmd === 'init') {
 			},
 		},
 		include: ['**/*.vsk', '**/*.js', '**/*.ts'],
-		exclude: ['node_modules', 'dist', 'vite.config.js'],
+		exclude: ['node_modules', 'dist'],
 	}, null, 2) + '\n');
-
-	// ═══════════════════════════════════════════════════════════
-	// vite.config.js — Vite config for client-side preview (optional)
-	// ═══════════════════════════════════════════════════════════
-	writeFileSync(join(targetDir, 'vite.config.js'), [
-		`import { defineConfig } from 'vite';`,
-		`import tailwindcss from '@tailwindcss/vite';`,
-		`import { VeskPlugin } from '@vesk/compiler';`,
-		``,
-		`export default defineConfig({`,
-		`\tplugins: [tailwindcss(), VeskPlugin()],`,
-		`});`,
-		'',
-	].join('\n'));
 
 	// ═══════════════════════════════════════════════════════════
 	// tailwind.config.js — Tailwind CSS v4 (PostCSS config)
@@ -322,13 +306,6 @@ if (cmd === 'init') {
 		'',
 	].join('\n'));
 
-	// ── .env ─────────────────────────────────────────────────
-	writeFileSync(join(targetDir, '.env'), [
-		`# Vesk environment variables`,
-		`VITE_API_URL=http://localhost:3000`,
-		'',
-	].join('\n'));
-
 	// ═══════════════════════════════════════════════════════════
 	// app/api/hello/route.ts — Sample API route
 	// ═══════════════════════════════════════════════════════════
@@ -384,6 +361,38 @@ if (cmd === 'init') {
 	process.exit(0);
 }
 
+// ── Config loader ──────────────────────────────────────────────
+async function loadConfig(projectDir) {
+  const jsPath = join(projectDir, 'vesk.config.js');
+  const tsPath = join(projectDir, 'vesk.config.ts');
+  let configPath = null;
+  if (existsSync(jsPath)) configPath = jsPath;
+  else if (existsSync(tsPath)) configPath = tsPath;
+
+  if (!configPath) return {};
+
+  const { defineConfig, validateConfig } = await import(
+    resolve(__dirname, '../../compiler/src/config.js')
+  );
+
+  let raw;
+  if (configPath.endsWith('.ts')) {
+    const { transpile } = await import('typescript');
+    const src = readFileSync(configPath, 'utf-8');
+    const result = transpile(src, { module: 99, target: 99 });
+    const tmpFile = join(projectDir, '.vesk', 'config.tmp.js');
+    mkdirSync(dirname(tmpFile), { recursive: true });
+    writeFileSync(tmpFile, result, 'utf-8');
+    raw = (await import(tmpFile)).default;
+  } else {
+    raw = (await import(configPath)).default;
+  }
+
+  const config = typeof defineConfig === 'function' ? defineConfig(raw) : raw;
+  if (typeof validateConfig === 'function') validateConfig(config);
+  return config;
+}
+
 // ── build ────────────────────────────────────────────────────
 if (cmd === 'build') {
   const projectDir = process.cwd();
@@ -395,9 +404,13 @@ if (cmd === 'build') {
     process.exit(1);
   }
 
+  const config = await loadConfig(projectDir);
+  const plugins = config.plugins || [];
+  const opts = { publicDir, plugins };
+
   const { build } = await import(resolve(__dirname, '../../adapter/src/index.js'));
   try {
-    await build(appDirPath, { publicDir });
+    await build(appDirPath, opts);
     console.error(`vesk build: done`);
   } catch (e) {
     console.error(`vesk build: error — ${e.message}`);
@@ -444,6 +457,35 @@ if (cmd === 'dev') {
 	if (!fsExists(runtimeDir)) {
 		console.error(`vesk: @vesk/runtime not found. Run npm install first.`);
 		process.exit(1);
+	}
+
+	const devConfig = await loadConfig(projectDir);
+	const devPlugins = devConfig.plugins || [];
+
+	// Build CSS through plugin pipeline
+	let devCssContent = '';
+	const srcDir = joinPath(projectDir, 'src');
+	const cssPath = joinPath(srcDir, 'global.css');
+	const altCssPath = joinPath(srcDir, 'app.css');
+	if (fsExists(cssPath)) {
+		devCssContent = readFileSync(cssPath, 'utf-8');
+	} else if (fsExists(altCssPath)) {
+		devCssContent = readFileSync(altCssPath, 'utf-8');
+	}
+	if (devCssContent) {
+		for (const plugin of devPlugins) {
+			if (typeof plugin.onBuildStart === 'function') {
+				await plugin.onBuildStart();
+			}
+		}
+		for (const plugin of devPlugins) {
+			if (typeof plugin.onCSS === 'function') {
+				const result = await plugin.onCSS(devCssContent, cssPath);
+				if (result !== null && typeof result === 'string') {
+					devCssContent = result;
+				}
+			}
+		}
 	}
 
 	let routeTree = scanRoutes(appDirPath);
@@ -636,6 +678,13 @@ if (cmd === 'dev') {
 		if (url.pathname === '/_vesk/client.js') {
 			res.writeHead(200, { 'Content-Type': 'application/javascript' });
 			res.end(clientBundle);
+			return;
+		}
+
+		// Static CSS (processed through plugins)
+		if (url.pathname === '/_vesk/static/global.css') {
+			res.writeHead(200, { 'Content-Type': 'text/css' });
+			res.end(devCssContent);
 			return;
 		}
 

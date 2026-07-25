@@ -31,6 +31,15 @@ export interface RouteNode {
   segmentCount: number;
 }
 
+export interface VeskPlugin {
+  name: string;
+  onCSS?: (content: string, filePath: string) => Promise<string | null> | string | null;
+  onFileWatch?: (filePath: string) => Promise<{ handled: boolean }> | { handled: boolean };
+  onTransformJS?: (code: string, filePath: string) => Promise<string | null> | string | null;
+  onBuildStart?: () => Promise<void> | void;
+  onBuildEnd?: () => Promise<void> | void;
+}
+
 export interface VeskConfig {
   appDir?: string;
   outDir?: string;
@@ -38,7 +47,11 @@ export interface VeskConfig {
   ssg?: {
     getStaticPaths?: () => Promise<{ paths: { params: Record<string, string> }[] }>;
   };
+  plugins?: VeskPlugin[];
 }
+
+export function defineConfig(config: VeskConfig): VeskConfig;
+export function validateConfig(config: VeskConfig): VeskConfig;
 
 export class IRRoot { constructor(body: any[], source: string, options?: any); }
 export class ComponentIR { constructor(name: string, params: any[], body: any[], options?: any); }
