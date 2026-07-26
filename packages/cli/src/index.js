@@ -516,7 +516,8 @@ if (cmd === 'dev') {
 		const files = [
 			'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
 			'context.js', 'hydrate.js', 'resource.js', 'portal.js',
-			'reconcile.js', 'bindings.js', 'router.js', 'request.js',
+			'reconcile.js', 'bindings.js', 'router.js',
+			'seo.js', 'image.js', 'experiment.js', 'form.js',
 		];
 			let code = '';
 			for (const f of files) {
@@ -565,6 +566,7 @@ if (cmd === 'dev') {
 
 			for (const [compName, sourcePath] of sources) {
 				if (seen.has(sourcePath)) continue;
+				if (sourcePath.endsWith('middleware.vsk')) continue;
 				seen.add(sourcePath);
 				const src = readFileSync(sourcePath, 'utf-8');
 

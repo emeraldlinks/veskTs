@@ -25,5 +25,8 @@
     "happy-dom": "^20.11.0",
     "linkedom": "^0.18.13",
     "typescript": "^5.8.0"
+  },
+  "dependencies": {
+    "puppeteer": "^25.3.0"
   }
 }

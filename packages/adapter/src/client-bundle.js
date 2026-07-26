@@ -85,8 +85,9 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
   const runtimeFiles = [
     'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
     'context.js', 'hydrate.js', 'resource.js',
-    'reconcile.js', 'bindings.js', 'router.js', 'request.js',
+    'reconcile.js', 'bindings.js', 'router.js',
     'portal.js', 'hmr-client.js',
+    'seo.js', 'image.js', 'experiment.js', 'form.js',
   ];
   let runtimeCode = '';
   for (const f of runtimeFiles) {

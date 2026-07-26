@@ -1,4 +1,4 @@
-function isSSR() {
+function formIsSSR() {
   return typeof document === 'undefined';
 }
 
@@ -33,7 +33,7 @@ export function custom(fn, msg) {
 export function Field(props) {
   const { name, label, rules = [], children, errorClass, class: className, style, ...rest } = props;
 
-  if (isSSR()) {
+  if (formIsSSR()) {
     const labelHtml = label ? `<label>${label}</label>` : '';
     const errStyle = 'display:none';
     const errCls = errorClass ? ` class="${errorClass}"` : '';
@@ -74,7 +74,7 @@ export function Field(props) {
 export function Form(props) {
   const { children, onSubmit, onError, onSuccess, action, method = 'POST', class: className, style, ...rest } = props;
 
-  if (isSSR()) {
+  if (formIsSSR()) {
     const attrs = { action, method };
     if (className) attrs.class = className;
     if (style) attrs.style = style;

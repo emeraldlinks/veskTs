@@ -47,11 +47,7 @@ export component Appx {
 }
 
 component Throw(props) client {
-	 function name(){
-	console.log("function test for test name in component")
-	return "test name"
-  }
-	<p>{name()}</p>
+
 
 	if (props.count < 15) throw new Error(props.msg);
 		return <p>OK {props.count} </p>

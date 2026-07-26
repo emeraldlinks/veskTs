@@ -621,7 +621,7 @@ export function createRouter(
 
 			// Set up click delegation
 			document.addEventListener('click', (e) => {
-				const link = e.target.closest('a[href]');
+				const link = e.target?.nodeType === 1 ? e.target.closest('a[href]') : null;
 				if (!link) return;
 				if (link.hostname && link.hostname !== window.location.hostname) return;
 				const href = link.getAttribute('href');
@@ -638,7 +638,7 @@ export function createRouter(
 
 			if (prefetch) {
 				document.addEventListener('mouseenter', (e) => {
-					const link = e.target.closest('a[href]');
+					const link = e.target?.nodeType === 1 ? e.target.closest('a[href]') : null;
 					if (link) this.prefetch(link.getAttribute('href'));
 				}, { passive: true });
 			}
@@ -790,7 +790,7 @@ export function createFileRouter(routeTree, options = {}) {
 
 			document.addEventListener('click', (e) => {
 				if (e.defaultPrevented) return;
-				const link = e.target.closest('a[href]');
+				const link = e.target?.nodeType === 1 ? e.target.closest('a[href]') : null;
 				if (!link) return;
 				if (link.hostname && link.hostname !== window.location.hostname) return;
 				const href = link.getAttribute('href');
@@ -806,7 +806,7 @@ export function createFileRouter(routeTree, options = {}) {
 
 			if (options.prefetch !== false) {
 				document.addEventListener('mouseenter', (e) => {
-					const link = e.target.closest('a[href]');
+					const link = e.target?.nodeType === 1 ? e.target.closest('a[href]') : null;
 					if (link) router.prefetch(link.getAttribute('href'));
 				}, { passive: true });
 			}
