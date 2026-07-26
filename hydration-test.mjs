@@ -217,8 +217,96 @@ async function main() {
     await page.close();
   }
 
-  // ── Test 8: Streaming (chunked transfer) ──────────
-  console.log('\n=== TEST 8: Streaming ===');
+  // ── Test 8: Tailwind CSS (separated global.css + _tailwind.css) ──
+  console.log('\n=== TEST 8: Tailwind CSS ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    // All tailwind utilities live in _tailwind.css (auto-generated)
+    const twCss = await page.evaluate(async () => {
+      try {
+        const res = await fetch('/_vesk/static/_tailwind.css');
+        const css = await res.text();
+        return {
+          ok: res.ok,
+          length: css.length,
+          hasTheme: css.includes('@layer theme'),
+          hasText4xl: css.includes('text-4xl'),
+          hasFontBold: css.includes('font-bold'),
+        };
+      } catch (e) { return { error: e.message }; }
+    });
+    assert(twCss.ok, '_tailwind.css fetched OK');
+    assert(twCss.length > 1000, '_tailwind.css has content (' + twCss.length + ' bytes)');
+    assert(twCss.hasTheme, '_tailwind.css contains @layer theme');
+    assert(twCss.hasText4xl, '_tailwind.css contains text-4xl utility');
+    assert(twCss.hasFontBold, '_tailwind.css contains font-bold utility');
+
+    // User CSS (global.css) should NOT contain tailwind-generated content
+    const userCss = await page.evaluate(async () => {
+      try {
+        const res = await fetch('/_vesk/static/global.css');
+        const css = await res.text();
+        return {
+          ok: res.ok,
+          length: css.length,
+          hasTheme: css.includes('@layer theme'),
+          hasText4xl: css.includes('text-4xl'),
+          hasFontBold: css.includes('font-bold'),
+          hasImport: css.includes("@import 'tailwindcss'"),
+          hasLayerBase: css.includes('@layer base'),
+        };
+      } catch (e) { return { error: e.message }; }
+    });
+    assert(userCss.ok, 'global.css fetched OK');
+    assert(!userCss.hasTheme, 'global.css does NOT contain @layer theme');
+    assert(!userCss.hasText4xl, 'global.css does NOT contain text-4xl utility');
+    assert(!userCss.hasFontBold, 'global.css does NOT contain font-bold utility');
+    assert(!userCss.hasImport, 'global.css does NOT contain @import tailwindcss');
+
+    // Verify both CSS links are present in the page HTML
+    const cssLinks = await page.evaluate(() => {
+      const links = document.querySelectorAll('link[rel="stylesheet"]');
+      return Array.from(links).map(l => l.href);
+    });
+    assert(cssLinks.length >= 2, `at least 2 stylesheet links (got ${cssLinks.length})`);
+    assert(cssLinks.some(h => h.includes('_tailwind.css')), 'includes _tailwind.css link');
+    assert(cssLinks.some(h => h.includes('global.css')), 'includes global.css link');
+
+    // Verify elements use tailwind classes and they compute correct styles
+    const h1Styles = await page.evaluate(() => {
+      const h1 = document.querySelector('h1');
+      if (!h1) return null;
+      const cs = getComputedStyle(h1);
+      return {
+        fontSize: cs.fontSize,
+        fontWeight: cs.fontWeight,
+        marginBottom: cs.marginBottom,
+      };
+    });
+    assert(h1Styles !== null, 'h1 exists');
+    assert(h1Styles.fontSize === '36px', 'h1 font-size is 36px (text-4xl = 2.25rem)');
+    assert(h1Styles.fontWeight === '700', 'h1 font-weight is 700 (font-bold)');
+
+    // Verify nav links use tailwind classes
+    const navLinkStyles = await page.evaluate(() => {
+      const link = document.querySelector('nav a');
+      if (!link) return null;
+      const cs = getComputedStyle(link);
+      return {
+        textDecoration: cs.textDecoration,
+        fontWeight: cs.fontWeight,
+      };
+    });
+    assert(navLinkStyles !== null, 'nav link exists');
+    assert(navLinkStyles.textDecoration.includes('none'), 'nav link has no-underline');
+
+    await page.close();
+  }
+
+  // ── Test 9: Streaming (chunked transfer) ──────────
+  console.log('\n=== TEST 9: Streaming ===');
   {
     const page = await browser.newPage();
     const response = await page.goto(BASE, { waitUntil: 'networkidle0' });
@@ -235,8 +323,8 @@ async function main() {
     await page.close();
   }
 
-  // ── Test 9: Hydration strategies (via page.evaluate) ──
-  console.log('\n=== TEST 9: Hydration strategies ===');
+  // ── Test 10: Hydration strategies (via page.evaluate) ──
+  console.log('\n=== TEST 10: Hydration strategies ===');
   {
     const page = await browser.newPage();
     await page.goto(BASE, { waitUntil: 'networkidle0' });
@@ -281,8 +369,8 @@ async function main() {
     await page.close();
   }
 
-  // ── Test 10: Server codegen streaming exports ──
-  console.log('\n=== TEST 10: Server renderPageStream ===');
+  // ── Test 11: Server codegen streaming exports ──
+  console.log('\n=== TEST 11: Server renderPageStream ===');
   {
     // Verify the server function signature by checking the generated HTML
     const page = await browser.newPage();

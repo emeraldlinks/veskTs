@@ -1,0 +1,20 @@
+import { NavLink } from '@vesk/runtime';
+
+component Layout(props) {
+	<nav class="flex nav gap-6 px-8 py-4 border-b border-gray-200 bg-white">
+		<NavLink href="/" class="text-gray-500 hover:text-black font-medium no-underline">Home</NavLink>
+		<NavLink href="/about" class="text-gray-500 hover:text-black font-medium no-underline">About</NavLink>
+		<NavLink href="/blog" class="text-gray-500 hover:text-black font-medium no-underline">Blog</NavLink>
+	</nav>
+	<style> 
+	.nav {
+		margin-left: 20px;
+		display: flex;
+		gap: 10px;
+	}
+	</style>
+	<main class="max-w-3xl mx-auto my-8 px-4">{props.children}</main>
+	<footer class="text-center py-8 text-gray-400 text-sm">
+		<p>Powered by Vesk</p>
+	</footer>
+}

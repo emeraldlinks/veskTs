@@ -6,7 +6,7 @@ export default defineConfig({
 	outDir: './dist',
 	publicDir: './public',
 	plugins: [
-		tailwindcss({ entry: 'src/global.css', appDir: 'app' }),
+		tailwindcss({ entry: 'src/global.css' }),
 	],
 	ssg: {},
-})
+});

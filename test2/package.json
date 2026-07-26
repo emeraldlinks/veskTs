@@ -1,0 +1,22 @@
+{
+  "name": "test2",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vesk dev",
+    "build": "vesk build",
+    "start": "vesk start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vesk/adapter": "file:../packages/adapter",
+    "@vesk/cli": "file:../packages/cli",
+    "@vesk/compiler": "file:../packages/compiler",
+    "@vesk/plugin-tailwind": "file:../packages/plugin-tailwind",
+    "@vesk/runtime": "file:../packages/runtime"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.8.0"
+  }
+}

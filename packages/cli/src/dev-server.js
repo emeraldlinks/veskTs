@@ -35,28 +35,39 @@ export async function startDevServer(port, projectDir, config) {
 	const devPlugins = config.plugins || [];
 
 	// ── CSS processing ───────────────────────────────────────────
-	let devCssContent = '';
+	let devUserCssContent = '';
+	let devTailwindCssContent = '';
 	const srcDir = join(projectDir, 'src');
 	const cssPath = join(srcDir, 'global.css');
 	const altCssPath = join(srcDir, 'app.css');
+	let rawCss = '';
 	if (existsSync(cssPath)) {
-		devCssContent = readFileSync(cssPath, 'utf-8');
+		rawCss = readFileSync(cssPath, 'utf-8');
 	} else if (existsSync(altCssPath)) {
-		devCssContent = readFileSync(altCssPath, 'utf-8');
+		rawCss = readFileSync(altCssPath, 'utf-8');
 	}
-	if (devCssContent) {
+	if (rawCss) {
 		for (const plugin of devPlugins) {
 			if (typeof plugin.onBuildStart === 'function') {
 				await plugin.onBuildStart();
 			}
 		}
+
+		// User-facing CSS: strip tailwind directives (@import 'tailwindcss', @theme {}, @layer base|components|utilities, @utility)
+		devUserCssContent = stripTailwindDirectives(rawCss);
+
+		// Tailwind CSS: pass raw CSS through plugins (each plugin extracts its directives internally)
+		devTailwindCssContent = rawCss;
 		for (const plugin of devPlugins) {
 			if (typeof plugin.onCSS === 'function') {
-				const result = await plugin.onCSS(devCssContent, cssPath);
+				const result = await plugin.onCSS(rawCss, cssPath);
 				if (result !== null && typeof result === 'string') {
-					devCssContent = result;
+					devTailwindCssContent = result;
 				}
 			}
+		}
+		if (devUserCssContent === devTailwindCssContent || devUserCssContent === rawCss) {
+			devTailwindCssContent = devUserCssContent;
 		}
 	}
 
@@ -320,7 +331,12 @@ export async function startDevServer(port, projectDir, config) {
 		}
 		if (url.pathname === '/_vesk/static/global.css') {
 			res.writeHead(200, { 'Content-Type': 'text/css' });
-			res.end(devCssContent);
+			res.end(devUserCssContent);
+			return;
+		}
+		if (url.pathname === '/_vesk/static/_tailwind.css') {
+			res.writeHead(200, { 'Content-Type': 'text/css' });
+			res.end(devTailwindCssContent);
 			return;
 		}
 		if (url.pathname === '/_vesk/hmr.js') {
@@ -368,7 +384,7 @@ export async function startDevServer(port, projectDir, config) {
 						const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen.js');
 						const nfSrc = readFileSync(nfPath, 'utf-8');
 						const nfCompName = extractCompName(nfSrc) || rootNode.notFound;
-						notFoundHtml = await rfp(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true });
+						notFoundHtml = await rfp(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
 					} catch {}
 				}
 			}
@@ -428,13 +444,13 @@ export async function startDevServer(port, projectDir, config) {
 			let html;
 			if (hasLayout) {
 				const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
-				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
 			} else {
 				const leaf = chain.find(n => n.page);
 				if (leaf) {
 					const src = readFileSync(resolve(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
 					const compName = extractCompName(src) || leaf.page;
-					html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js' });
+					html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
 					html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
 				} else {
 					throw new Error('No page or layout matched');
@@ -458,7 +474,7 @@ export async function startDevServer(port, projectDir, config) {
 				if (leaf) {
 					const src = readFileSync(resolve(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
 					const compName = extractCompName(src) || leaf.page;
-					yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js' });
+					yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
 				} else {
 					throw new Error('No page or layout matched');
 				}
@@ -492,7 +508,7 @@ export async function startDevServer(port, projectDir, config) {
 
 			// Yield shell before body
 			const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
-			yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n';
+			yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n';
 			if (head) yield '\t' + head.split('\n').join('\n\t') + '\n';
 			yield '</head>\n<body>\n<div id="root">\n';
 			yield prettifyHtml(body);
@@ -563,7 +579,7 @@ export async function startDevServer(port, projectDir, config) {
 									const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen.js');
 									const nfSrc = readFileSync(nfPath, 'utf-8');
 									const nfCompName = extractCompName(nfSrc) || node.notFound;
-									const html = await rfp(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true });
+									const html = await rfp(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
 									notFoundHtml = html.replace('</body>',
 										`\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
 								} catch {}
@@ -615,6 +631,37 @@ export async function startDevServer(port, projectDir, config) {
 
 	// Don't exit — keep serving
 	await new Promise(() => {});
+}
+
+/**
+ * Strip tailwind-specific directives from CSS, leaving only user-authored styles.
+ * Removes @import 'tailwindcss', @source, @theme {}, @layer base|components|utilities {},
+ * and @utility {} blocks.
+ * @param {string} css - raw CSS content
+ * @returns {string} CSS with tailwind directives removed
+ */
+function stripTailwindDirectives(css) {
+  const blockStart = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/;
+  css = css.replace(/^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$/gm, '');
+  css = css.replace(/^\s*@source\s+['"][^'"]+['"]\s*;?\s*$/gm, '');
+  const lines = css.split('\n');
+  const result = [];
+  let i = 0;
+  while (i < lines.length) {
+    if (blockStart.test(lines[i].trim())) {
+      let braceCount = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
+      i++;
+      while (i < lines.length && braceCount > 0) {
+        braceCount += (lines[i].match(/\{/g) || []).length;
+        braceCount -= (lines[i].match(/\}/g) || []).length;
+        i++;
+      }
+      continue;
+    }
+    result.push(lines[i]);
+    i++;
+  }
+  return result.join('\n').trim();
 }
 
 /**

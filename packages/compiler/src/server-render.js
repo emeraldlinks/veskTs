@@ -162,8 +162,8 @@ export async function ssg(source, componentName, customProps, options = {}) {
 		? `\n<script>const __vesk_props = ${serializedProps};\n<\/script>\n<script>${clientCode}</script>\n`
 		: `\n<script>const __vesk_props = ${serializedProps};\n<\/script>\n`;
 
-	const cssUrl = options.cssUrl || '';
-	const cssLink = cssUrl ? `\t<link rel="stylesheet" href="${cssUrl}" />\n` : '';
+	const cssUrls = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
+	const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
 	const html = `<!DOCTYPE html>
 <html>
 <head>
@@ -239,7 +239,8 @@ export async function renderFullPage(source, componentName, props = {}, registry
 		}
 
 		const bodyHtml = prettifyHtml(rendered.body);
-		const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
+		const cssUrls = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
+		const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
 		const clientScript = options.clientScriptUrl
 			? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
 			: '';
@@ -316,7 +317,8 @@ export async function* renderPageStream(source, componentName, props = {}, regis
 	resetVskState(!!options.hydrate);
 
 	const targetComp = ir.components.find((c) => c.name === componentName);
-	const cssLink = options.cssUrl ? `\t<link rel="stylesheet" href="${options.cssUrl}" />\n` : '';
+	const cssUrls = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
+	const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
 
 	yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n';
 	if (cssLink) yield cssLink;
