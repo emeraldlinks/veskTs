@@ -1,438 +1,32 @@
-import { track, get, set, set_active_block, set_active_component } from './ripple-runtime.js';
-import { effect as createEffect, root } from './ripple-blocks.js';
-import { createContext } from './context.js';
-import { hydrate, createHydrateWalker } from './hydrate.js';
-
-// ── Redirect — throws a redirect that SSR can catch ───────────
-
-export class Redirect extends Error {
-	constructor(url, status = 302) {
-		super(`Redirect to ${url}`);
-		this.url = url;
-		this.status = status;
-		this.name = 'Redirect';
-	}
-}
-
-export function redirect(url, status = 302) {
-	throw new Redirect(url, status);
-}
-
-/** 308 Permanent Redirect */
-export function permanentRedirect(url) {
-	throw new Redirect(url, 308);
-}
-
-// ── NotFound — triggers a 404 response ──────────────────────────
-
-export class NotFoundError extends Error {
-	constructor(msg = 'Not Found') {
-		super(msg);
-		this.name = 'NotFoundError';
-	}
-}
-
-/** Trigger a 404 — caught by dev server or API route executor */
-export function notFound() {
-	throw new NotFoundError();
-}
-
-// ── Router Context ──────────────────────────────────────────────
-
-const RouterCtx = createContext(null);
-
-let _currentRouter = null;
-let _outletId = 0;
-
-// ── Outlet Component ───────────────────────────────────────────
-
-export function Outlet(props) {
-	const router = RouterCtx.get();
-	if (!router) return document.createComment('outlet');
-	const div = document.createElement('div');
-	div.setAttribute('data-vesk-outlet', String(_outletId++));
-	div.style.display = 'contents';
-	if (router._outletPlaceholders) {
-		router._outletPlaceholders.push(div);
-	}
-	const seg = router._currentSegments && router._currentSegments[router._depth];
-	if (seg && seg.rendered) {
-		div.appendChild(seg.rendered);
-	}
-	return div;
-}
-
-// ── Link Component ──────────────────────────────────────────────
-
-export function Link(props, registry, hydrate) {
-	const href = props.href || '#';
-	if (hydrate && hydrate.nextElement && !hydrate.done) {
-		const a = hydrate.nextElement('a');
-		if (props.children != null) {
-			if (typeof props.children === 'string' || typeof props.children === 'number') {
-				a.textContent = String(props.children);
-			} else if (props.children.textContent) {
-				a.textContent = props.children.textContent;
-			}
-		}
-		a.addEventListener('click', (e) => {
-			if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-			if (props.target === '_blank') return;
-			e.preventDefault();
-			const nav = useNavigate();
-			nav(href);
-		});
-		return document.createDocumentFragment();
-	}
-	const attrs = [
-		`href="${href.replace(/"/g, '&quot;')}"`,
-		props.class ? `class="${String(props.class).replace(/"/g, '&quot;')}"` : '',
-		props.style ? `style="${String(props.style).replace(/"/g, '&quot;')}"` : '',
-		props.target ? `target="${String(props.target).replace(/"/g, '&quot;')}"` : '',
-		props.rel ? `rel="${String(props.rel).replace(/"/g, '&quot;')}"` : '',
-	].filter(Boolean).join(' ');
-	let childStr = '';
-	if (props.children != null) {
-		childStr = typeof props.children === 'string' ? props.children
-			: typeof props.children === 'number' ? String(props.children)
-			: '';
-	}
-	if (typeof document === 'undefined') {
-		return `<a ${attrs}>${childStr}</a>`;
-	}
-	const a = document.createElement('a');
-	a.href = href;
-	if (props.class) a.className = props.class;
-	if (props.style) a.setAttribute('style', props.style);
-	if (props.target) a.target = props.target;
-	if (props.rel) a.rel = props.rel;
-	if (childStr) {
-		a.textContent = childStr;
-	} else if (props.children != null) {
-		if (props.children.nodeType) {
-			a.appendChild(props.children);
-		} else if (Array.isArray(props.children)) {
-			for (const c of props.children) {
-				if (c && c.nodeType) a.appendChild(c);
-				else if (c != null) a.appendChild(document.createTextNode(String(c)));
-			}
-		}
-	}
-	a.addEventListener('click', (e) => {
-		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-		if (props.target === '_blank') return;
-		e.preventDefault();
-		const nav = useNavigate();
-		nav(href);
-	});
-	return a;
-}
-
-// ── NavLink Component ───────────────────────────────────────────
-
-export function NavLink(props, registry, hydrate) {
-	if (typeof document === 'undefined') {
-		return Link(props, registry, hydrate);
-	}
-	if (__isHydrating) {
-		// Hydration mode — claim existing <a> elements by href
-		const a = document.querySelector(`a[href="${props.href}"]`);
-		if (a) {
-			if (props.children != null) {
-				if (typeof props.children === 'string' || typeof props.children === 'number') {
-					a.textContent = String(props.children);
-				} else if (props.children.textContent) {
-					a.textContent = props.children.textContent;
-				}
-			}
-			a.addEventListener('click', (e) => {
-				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-				if (props.target === '_blank') return;
-				e.preventDefault();
-				const nav = useNavigate();
-				nav(props.href);
-			});
-			const path = usePathname();
-			const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href) && (path.length === props.href.length || path[props.href.length] === '/' || path[props.href.length] === '?'));
-			if (isActive) {
-				a.classList.add(props.activeClass || 'active');
-				if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
-			}
-			return document.createDocumentFragment();
-		}
-	}
-	const a = Link(props, registry, hydrate);
-	const path = usePathname();
-		const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href) && (path.length === props.href.length || path[props.href.length] === '/' || path[props.href.length] === '?'));
-	if (isActive) {
-		a.classList.add(props.activeClass || 'active');
-		if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
-	}
-	return a;
-}
-
-// ── Hooks ──────────────────────────────────────────────────────
-
-/** Set to true during initial hydration to signal components to claim SSR elements */
-let __isHydrating = false;
-
-const _state = {
-	path: track('/'),
-	params: track({}),
-	search: track(''),
-};
-
-// ── Scroll Restoration ──────────────────────────────────────────
-const _scrollPositions = new Map();
-let _isPopStateNavigation = false;
-
-// ── Loading / Error / NotFound helpers ────────────────────────────
-function findLoadingComponent(chain) {
-	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].loading) return chain[i].loading;
-	}
-	return null;
-}
-
-function findErrorComponent(chain) {
-	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].error) return chain[i].error;
-	}
-	return null;
-}
-
-function findNotFoundComponent(chain) {
-	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].notFound) return chain[i].notFound;
-	}
-	return null;
-}
-
-function showLoadingInContainer(container, loadingFn, params) {
-	const tempRoot = document.createDocumentFragment();
-	const walker = createHydrateWalker(tempRoot, []);
-	const loadingContent = loadingFn({ params }, new Map(), walker);
-	container.replaceChildren();
-	if (loadingContent && typeof loadingContent === 'object' && loadingContent.nodeType) {
-		container.appendChild(loadingContent);
-	} else if (typeof loadingContent === 'string') {
-		container.innerHTML = loadingContent;
-	}
-}
-
-function handleScroll(pathname, isReplace) {
-	if (typeof window === 'undefined' || typeof window.scrollTo !== 'function') return;
-	if (_isPopStateNavigation) {
-		_isPopStateNavigation = false;
-		const savedY = _scrollPositions.get(pathname);
-		requestAnimationFrame(() => {
-			window.scrollTo(0, savedY !== undefined ? savedY : 0);
-		});
-	} else if (!isReplace) {
-		requestAnimationFrame(() => window.scrollTo(0, 0));
-	}
-}
-
-export function useNavigate() {
-	const router = RouterCtx.get() || _currentRouter;
-	return (path, opts = {}) => {
-		if (router && router.navigate) {
-			router.navigate(path, opts);
-		} else {
-			window.history.pushState({}, '', path);
-			_state.path.value = path;
-		}
-	};
-}
-
-export function useParams() {
-	return get(_state.params);
-}
-
-export function usePathname() {
-	return get(_state.path);
-}
-
-export function useSearchParams() {
-	const s = get(_state.search);
-	const sp = new URLSearchParams(s || '');
-	const setter = (next) => {
-		const q = typeof next === 'string' ? next : new URLSearchParams(next).toString();
-		_state.search.value = q;
-		const nav = useNavigate();
-		const path = get(_state.path);
-		nav(path + (q ? '?' + q : ''), { replace: true });
-	};
-	return [sp, setter];
-}
-
-export function useRouter() {
-	const router = RouterCtx.get() || _currentRouter;
-	return {
-		push: (href) => router?.navigate?.(href),
-		replace: (href) => router?.navigate?.(href, { replace: true }),
-		back: () => window.history.back(),
-		forward: () => window.history.forward(),
-		refresh: () => router?.navigate?.(window.location.pathname, { replace: true }),
-		prefetch: (href) => router?.prefetch?.(href),
-	};
-}
-
-// ── Route Tree Types ───────────────────────────────────────────
-
-/*
- * RouteNode:
- *   path: string           // URL segment ('' for root, ':param' for dynamic, '*' for catch-all)
- *   fullPath: string       // Full URL pattern
- *   isGroup: boolean       // Route group (no URL segment)
- *   isDynamic: boolean     // [param] segment
- *   isCatchAll: boolean    // [...param] segment
- *   page: Function|null    // Page component
- *   layout: Function|null  // Layout component
- *   loading: Function|null // Loading component
- *   error: Function|null   // Error boundary component
- *   notFound: Function|null // Not-found component
- *   children: RouteNode[]
- *   layouts: RouteNode[]   // Flattened layout chain for this route
+/**
+ * Vesk Router — core router implementation.
+ *
+ * Provides createRouter (manual) and createFileRouter (file-based) APIs,
+ * plus defineRoute/buildRouteTree for compiler-generated routes.
+ *
+ * @module router
  */
 
-function compileRoutePattern(fullPath) {
-	const paramNames = [];
-	const parts = fullPath.split('/').filter(Boolean);
-	let regexStr = '^';
-	for (const part of parts) {
-		if (part.startsWith(':')) {
-			const name = part.slice(1);
-			paramNames.push(name);
-			regexStr += '/([^/]+)';
-		} else if (part === '*') {
-			regexStr += '(?:/(.*))?';
-		} else {
-			regexStr += '/' + part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-		}
-	}
-	regexStr += '$';
-	return { regex: new RegExp(regexStr), paramNames };
-}
+import { track, get, set } from './ripple-runtime.js';
+import { root } from './ripple-blocks.js';
+import { createHydrateWalker, hydrateViewport, hydrateIdle, hydrateOnInteraction } from './hydrate.js';
+import { matchRoute, flattenLayoutChain, buildTreeFromMap } from './router-match.js';
+import {
+	__isHydrating, setIsHydrating, _state, _scrollPositions,
+	_isPopStateNavigation, setIsPopStateNavigation, setCurrentRouter,
+	showLoadingInContainer, handleScroll, findLoadingComponent,
+	findErrorComponent, findNotFoundComponent, RouterCtx, getCurrentRouter,
+	Outlet, Link, NavLink, useNavigate, useParams, usePathname,
+	useSearchParams, useRouter, Redirect, redirect, permanentRedirect,
+	NotFoundError, notFound,
+} from './router-components.js';
 
-function collectLayouts(nodes, pathParts) {
-	const layouts = [];
-	for (const node of nodes) {
-		if (node.isGroup) {
-			const childLayouts = collectLayouts(node.children, pathParts);
-			layouts.push(...childLayouts);
-			continue;
-		}
-		if (node.layout) {
-			layouts.push({ layout: node.layout, node });
-		}
-		const len = pathParts.length;
-		const matched = matchRouteNode(node, pathParts);
-		if (matched) {
-			const remaining = pathParts.slice(node.segmentCount != null ? node.segmentCount : 1);
-			if (remaining.length > 0 && node.children.length > 0) {
-				const childLayouts = collectLayouts(node.children, remaining);
-				layouts.push(...childLayouts);
-			}
-		}
-	}
-	return layouts;
-}
-
-function matchRouteNode(node, pathParts) {
-	if (node.isGroup) return false;
-	if (pathParts.length === 0) return node.fullPath === '/';
-	const part = pathParts[0];
-	if (node.isCatchAll) return true;
-	if (node.isDynamic) return true;
-	return node.path === part;
-}
-
-function extractParams(node, pathParts) {
-	const params = {};
-	let idx = 0;
-	for (const node of node._matchChain || []) {
-		if (node.isDynamic && pathParts[idx]) {
-			const name = node.path.slice(1); // remove ':'
-			params[name] = decodeURIComponent(pathParts[idx]);
-		} else if (node.isCatchAll) {
-			const name = node.path.slice(1); // remove ':'
-			params[name] = pathParts.slice(idx).map(decodeURIComponent).join('/');
-		}
-		if (!node.isGroup) idx++;
-	}
-	return params;
-}
-
-// ── Route Tree Matching ────────────────────────────────────────
-
-function flattenLayoutChain(tree, pathParts, result = []) {
-	for (let i = 0; i < tree.length; i++) {
-		const node = tree[i];
-		if (node.isGroup) {
-			flattenLayoutChain(node.children, pathParts, result);
-			continue;
-		}
-
-		const part = pathParts[0];
-		const segCount = node.segmentCount != null ? node.segmentCount : 1;
-
-		// Check if this node matches the current path segment
-		let matched = false;
-		if (node.fullPath === '/') {
-			// Root node always matches as a layout prefix
-			matched = true;
-		} else if (node.isCatchAll) {
-			matched = true;
-		} else if (node.isDynamic) {
-			matched = part !== undefined;
-		} else {
-			matched = node.path === part;
-		}
-
-		if (matched) {
-			const consumeCount = node.isCatchAll ? pathParts.length : segCount;
-			const remaining = pathParts.slice(consumeCount);
-			const isLeaf = remaining.length === 0 || remaining.every(p => p === '');
-			result.push(node);
-			if (isLeaf) {
-				break;
-			} else if (node.children.length > 0) {
-				flattenLayoutChain(node.children, remaining, result);
-				break;
-			}
-		}
-	}
-	return result;
-}
-
-// ── Router Implementation ──────────────────────────────────────
-
-function matchRoute(tree, pathname) {
-	const pathParts = pathname.split('/').filter(Boolean);
-	const matchChain = flattenLayoutChain(tree, pathParts);
-	if (matchChain.length === 0) return null;
-
-	// Extract params by walking the match chain alongside path parts
-	const params = {};
-	let partIdx = 0;
-	for (const node of matchChain) {
-		const segCount = node.segmentCount != null ? node.segmentCount : 1;
-		if (node.isDynamic && !node.isCatchAll) {
-			const name = node.path.startsWith(':') ? node.path.slice(1) : node.path;
-			if (partIdx < pathParts.length) {
-				params[name] = decodeURIComponent(pathParts[partIdx]);
-			}
-		}
-		if (node.isCatchAll) {
-			const name = node.path.startsWith(':') ? node.path.slice(1) : node.path;
-			params[name] = pathParts.slice(partIdx).map(decodeURIComponent).join('/');
-		}
-		partIdx += segCount;
-	}
-
-	return { matchChain, params };
-}
+// ── Re-export all component/hook/error symbols ─────────────────
+export {
+	Outlet, Link, NavLink,
+	useNavigate, useParams, usePathname, useSearchParams, useRouter,
+	Redirect, redirect, permanentRedirect, NotFoundError, notFound,
+};
 
 function renderMatch(router, match, container) {
 	const chain = match.matchChain;
@@ -539,14 +133,7 @@ function renderMatch(router, match, container) {
 	}
 }
 
-/**
- * Hydrate initial SSR content — claims existing DOM nodes instead of re-rendering.
- * Uses tree-structured walker scoped to each component's parent element.
- * Each component claims elements from its parent's children by tag matching.
- * Child components (via slot) receive a sub-walker scoped to the parent element.
- * This ensures zero DOM mutations for the initial load.
- */
-function hydrateInitial(router, match, container) {
+function hydrateInitial(router, match, container, strategy) {
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
@@ -574,9 +161,6 @@ function hydrateInitial(router, match, container) {
 	_state.path.value = match.pathname || window.location.pathname;
 	_state.search.value = window.location.search || '';
 
-	const walker = createHydrateWalker(container);
-
-	// Use hydrator versions of component functions
 	const hydrators = router.__hydrators;
 	const hydPage = hydrators && pageNode._pageName
 		? (hydrators[pageNode._pageName] || pageNode.page)
@@ -589,20 +173,37 @@ function hydrateInitial(router, match, container) {
 	});
 
 	if (layoutNodes.length === 0) {
-		__isHydrating = true;
-		root(() => {
-			hydPage({ params: paramValues, ...pageNode.props }, new Map(), walker);
-		});
-		__isHydrating = false;
+		if (!strategy || strategy === 'full') {
+			const walker = createHydrateWalker(container);
+			setIsHydrating(true);
+			root(() => {
+				hydPage({ params: paramValues, ...pageNode.props }, new Map(), walker);
+			});
+			setIsHydrating(false);
+		} else if (strategy === 'viewport') {
+			hydrateViewport(container, hydPage, { params: paramValues, ...pageNode.props });
+		} else if (strategy === 'idle') {
+			hydrateIdle(container, hydPage, { params: paramValues, ...pageNode.props });
+		} else if (strategy === 'interaction') {
+			hydrateOnInteraction(container, hydPage, { params: paramValues, ...pageNode.props });
+		}
 		return;
 	}
 
-	__isHydrating = true;
+	setIsHydrating(true);
 
 	function renderLayoutChain(index) {
 		if (index >= layoutNodes.length) {
 			return (subWalker) => {
-				hydPage({ params: paramValues, ...pageNode.props }, new Map(), subWalker);
+				if (!strategy || strategy === 'full') {
+					hydPage({ params: paramValues, ...pageNode.props }, new Map(), subWalker);
+				} else if (strategy === 'viewport') {
+					hydrateViewport(subWalker.root, hydPage, { params: paramValues, ...pageNode.props });
+				} else if (strategy === 'idle') {
+					hydrateIdle(subWalker.root, hydPage, { params: paramValues, ...pageNode.props });
+				} else if (strategy === 'interaction') {
+					hydrateOnInteraction(subWalker.root, hydPage, { params: paramValues, ...pageNode.props });
+				}
 			};
 		}
 		const node = layoutNodes[index];
@@ -613,11 +214,12 @@ function hydrateInitial(router, match, container) {
 		return null;
 	}
 
+	const walker = createHydrateWalker(container);
 	root(() => {
 		renderLayoutChain(0);
 	});
 
-	__isHydrating = false;
+	setIsHydrating(false);
 }
 
 // ── Create Router (Manual) ─────────────────────────────────────
@@ -628,8 +230,8 @@ export function createRouter(
 ) {
 	const container = options.container || document.getElementById('root');
 	const prefetch = options.prefetch !== false;
+	const hydrateStrategy = options.hydrate || 'full';
 
-	// Build route tree from flat route map
 	const routeTree = buildTreeFromMap(routes, options);
 
 	const router = {
@@ -641,9 +243,8 @@ export function createRouter(
 		_depth: 0,
 
 		start() {
-			_currentRouter = this;
+			setCurrentRouter(this);
 
-			// Scroll restoration
 			if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
 				window.history.scrollRestoration = 'manual';
 			}
@@ -660,7 +261,6 @@ export function createRouter(
 				}, { passive: true });
 			}
 
-			// Set up click delegation
 			document.addEventListener('click', (e) => {
 				const link = e.target?.nodeType === 1 ? e.target.closest('a[href]') : null;
 				if (!link) return;
@@ -673,7 +273,7 @@ export function createRouter(
 			});
 
 			window.addEventListener('popstate', () => {
-				_isPopStateNavigation = true;
+				setIsPopStateNavigation(true);
 				this.navigate(window.location.href, { replace: true });
 			});
 
@@ -684,14 +284,13 @@ export function createRouter(
 				}, { passive: true });
 			}
 
-			// Render initial route — hydrate if SSR content exists
 			const path = window.location.pathname + window.location.search;
 			if (container.children.length > 0) {
 				const url = new URL(path, window.location.origin);
 				const match = matchRoute(this.routeTree, url.pathname);
 				if (match) {
 					match.pathname = url.pathname;
-					hydrateInitial(this, match, container);
+					hydrateInitial(this, match, container, hydrateStrategy);
 					this._currentMatch = match;
 				} else {
 					this.navigate(path, { replace: true });
@@ -714,12 +313,10 @@ export function createRouter(
 
 			match.pathname = url.pathname;
 
-			// Save scroll position for current page
 			if (!_isPopStateNavigation) {
 				_scrollPositions.set(window.location.pathname, window.scrollY);
 			}
 
-			// Check for loading component
 			const loadingFn = findLoadingComponent(match.matchChain);
 
 			const doRender = () => {
@@ -770,40 +367,16 @@ export function createRouter(
 	return router;
 }
 
-function buildTreeFromMap(routes) {
-	const root = [];
-	for (const [pattern, loader] of Object.entries(routes)) {
-		const parts = pattern.split('/').filter(Boolean);
-		const isDynamic = parts.some(p => p.startsWith(':'));
-		const isCatchAll = parts.some(p => p.startsWith('...'));
-		const node = {
-			path: parts[parts.length - 1] || '',
-			fullPath: pattern,
-			isGroup: false,
-			isDynamic,
-			isCatchAll,
-			page: loader,
-			layout: null,
-			loading: null,
-			error: null,
-			notFound: null,
-			children: [],
-			segmentCount: parts.length || 1,
-			loader,
-		};
-		root.push(node);
-	}
-	return root;
-}
-
 // ── Create File Router ─────────────────────────────────────────
 
 export function createFileRouter(routeTree, options = {}) {
 	const container = options.container || document.getElementById('root');
 	const middleware = options.middleware || null;
 	const renderFn = options.render || renderMatch;
+	const hydrateStrategy = options.hydrate || 'full';
 
 	const router = {
+		_hydrateStrategy: hydrateStrategy,
 		routeTree,
 		container,
 		_currentMatch: null,
@@ -812,9 +385,8 @@ export function createFileRouter(routeTree, options = {}) {
 		_depth: 0,
 
 		start() {
-			_currentRouter = this;
+			setCurrentRouter(this);
 
-			// Scroll restoration: take manual control so we can cache positions
 			if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
 				window.history.scrollRestoration = 'manual';
 			}
@@ -844,7 +416,7 @@ export function createFileRouter(routeTree, options = {}) {
 				router.navigate(href);
 			});
 			window.addEventListener('popstate', () => {
-				_isPopStateNavigation = true;
+				setIsPopStateNavigation(true);
 				router.navigate(window.location.pathname + window.location.search, { replace: true });
 			});
 
@@ -860,7 +432,7 @@ export function createFileRouter(routeTree, options = {}) {
 				const match = matchRoute(routeTree, path);
 				if (match) {
 					match.pathname = path;
-					hydrateInitial(router, match, container);
+					hydrateInitial(router, match, container, hydrateStrategy);
 					router._currentMatch = match;
 				} else {
 					router.navigate(path, { replace: true });
@@ -896,15 +468,12 @@ export function createFileRouter(routeTree, options = {}) {
 
 			match.pathname = url.pathname;
 
-			// Save scroll position for current page before navigating
 			if (!_isPopStateNavigation) {
 				_scrollPositions.set(window.location.pathname, window.scrollY);
 			}
 
-			// Check for loading component
 			const loadingFn = findLoadingComponent(match.matchChain);
 
-			// Run middleware chain (onion model)
 			const middlewareFns = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
 
 			const doRender = () => {
@@ -953,11 +522,9 @@ export function createFileRouter(routeTree, options = {}) {
 			}
 
 			if (middlewareFns.length > 0 || loadingFn) {
-				// Show loading immediately (for async middleware or to allow paint)
 				if (loadingFn) {
 					showLoadingInContainer(container, loadingFn, match.params);
 				}
-				// Defer actual render to next microtask so loading can paint
 				Promise.resolve().then(() => {
 					if (middlewareFns.length > 0) {
 						runMwChain(0);

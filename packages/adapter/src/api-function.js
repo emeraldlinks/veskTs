@@ -1,3 +1,10 @@
+/**
+ * API route function generation for Vesk.
+ * Generates the serverless function wrapper for each API route,
+ * handling route matching, parameter extraction, and response serialization.
+ * @module api-function
+ */
+
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 

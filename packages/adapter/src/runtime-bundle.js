@@ -44,7 +44,7 @@ export async function bundleRuntime(appDir, outDir) {
 
   const entryFile = resolve(outDir, 'server', `.runtime-entry-${buildId++}.mjs`);
   const entryContent = [
-    `import { renderPage, renderFullPage, setRuntimeModule } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
+    `import { renderPage, renderFullPage, renderPageStream, setRuntimeModule } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
     `import { parseCookies } from ${JSON.stringify(resolve(compilerRoot, 'api-routes.js'))};`,
     `import * as __veskRuntime from ${JSON.stringify(resolve(runtimeRoot, 'index-server.js'))};`,
     ``,
@@ -82,7 +82,7 @@ export async function bundleRuntime(appDir, outDir) {
     `  return req.locals || {};`,
     `}`,
     ``,
-    `export { renderPage, renderFullPage, parseCookies };`,
+    `export { renderPage, renderFullPage, renderPageStream, parseCookies };`,
   ].join('\n');
   writeFileSync(entryFile, entryContent, 'utf-8');
 

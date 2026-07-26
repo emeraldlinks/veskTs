@@ -217,6 +217,93 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 8: Streaming (chunked transfer) ──────────
+  console.log('\n=== TEST 8: Streaming ===');
+  {
+    const page = await browser.newPage();
+    const response = await page.goto(BASE, { waitUntil: 'networkidle0' });
+    const headers = response.headers();
+    const encoding = headers['transfer-encoding'] || '';
+    assert(encoding === 'chunked', `Transfer-Encoding: ${encoding}`);
+
+    // Verify the response came in multiple chunks (would need raw socket to verify chunks,
+    // but at minimum check the content is complete)
+    const html = await page.content();
+    assert(html.includes('<!DOCTYPE html>'), 'full HTML doctype');
+    assert(html.includes('Welcome to Vesk'), 'page content present');
+    assert(html.includes('</html>'), 'closing html tag');
+    await page.close();
+  }
+
+  // ── Test 9: Hydration strategies (via page.evaluate) ──
+  console.log('\n=== TEST 9: Hydration strategies ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    // Verify hydration module functions are accessible
+    const modulesAccessible = await page.evaluate(async () => {
+      try {
+        const hyd = await import('/_vesk/runtime.js');
+        return {
+          hasHydrateViewport: typeof hyd.hydrateViewport === 'function',
+          hasHydrateIdle: typeof hyd.hydrateIdle === 'function',
+          hasHydrateOnInteraction: typeof hyd.hydrateOnInteraction === 'function',
+          hasCollectVskMarkers: typeof hyd.collectVskMarkers === 'function',
+          hasCreateHydrateWalker: typeof hyd.createHydrateWalker === 'function',
+          hasHydrateInitial: typeof hyd.hydrateInitial === 'function',
+        };
+      } catch (e) {
+        return { error: e.message };
+      }
+    });
+    assert(!modulesAccessible.error, 'No error loading runtime module');
+    assert(modulesAccessible.hasHydrateViewport, 'hydrateViewport exported');
+    assert(modulesAccessible.hasHydrateIdle, 'hydrateIdle exported');
+    assert(modulesAccessible.hasHydrateOnInteraction, 'hydrateOnInteraction exported');
+    assert(modulesAccessible.hasCollectVskMarkers, 'collectVskMarkers exported');
+    assert(modulesAccessible.hasCreateHydrateWalker, 'createHydrateWalker exported');
+
+    // Verify markers exist in the SSR HTML (not yet claimed)
+    const markersInfo = await page.evaluate(() => {
+      const root = document.getElementById('root');
+      if (!root) return { error: 'no root' };
+      const walker = document.createTreeWalker(root, 128, {
+        acceptNode: (n) => n.textContent === 'vsk' ? 1 : 2,
+      });
+      let count = 0;
+      while (walker.nextNode()) count++;
+      return { markerCount: count };
+    });
+    // After full hydration, markers should be claimed (removed), so count should be 0
+    assert(markersInfo.markerCount === 0, `All markers claimed (${markersInfo.markerCount} remaining)`);
+
+    await page.close();
+  }
+
+  // ── Test 10: Server codegen streaming exports ──
+  console.log('\n=== TEST 10: Server renderPageStream ===');
+  {
+    // Verify the server function signature by checking the generated HTML
+    const page = await browser.newPage();
+    const response = await page.goto(BASE, { waitUntil: 'networkidle0' });
+    const html = await response.text();
+
+    // The streaming render should place head BEFORE body
+    const headIdx = html.indexOf('<head>');
+    const bodyIdx = html.indexOf('<body>');
+    const rootIdx = html.indexOf('<div id="root">');
+    const h1Idx = html.indexOf('Welcome to Vesk');
+
+    assert(headIdx >= 0, 'has <head>');
+    assert(bodyIdx >= 0, 'has <body>');
+    assert(headIdx < bodyIdx, '<head> before <body>');
+    assert(bodyIdx < rootIdx, '<body> before <div id="root">');
+    assert(rootIdx < h1Idx, '<div id="root"> before content');
+
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

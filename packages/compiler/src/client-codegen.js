@@ -1,3 +1,10 @@
+/**
+ * Client-side code generation for Vesk components.
+ * Compiles .vsk IR into client-side JavaScript that creates DOM elements,
+ * sets up reactivity, and includes hydration markers.
+ * @module client-codegen
+ */
+
 import { walk } from 'zimmerframe';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';

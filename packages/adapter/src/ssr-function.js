@@ -1,3 +1,10 @@
+/**
+ * Server-side rendering function generation for Vesk.
+ * Generates the SSR entry function for each page/layout, wrapping the
+ * compiler's renderPage/renderPageStream APIs with the correct source code.
+ * @module ssr-function
+ */
+
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 
@@ -112,7 +119,7 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
   }
 
   const funcCode = [
-    `import { renderFullPage, renderPage } from '../runtime.js';`,
+    `import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';`,
     ``,
     registryCode,
     src,
@@ -130,8 +137,16 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
           `  });`,
         ].join('\n')
       : [
-          `  const html = await renderFullPage(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption} });`,
-          `  return new Response(html, {`,
+          `  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption} });`,
+          `  return new Response(new ReadableStream({`,
+          `    async start(controller) {`,
+          `      const enc = new TextEncoder();`,
+          `      for await (const chunk of stream) {`,
+          `        controller.enqueue(enc.encode(chunk));`,
+          `      }`,
+          `      controller.close();`,
+          `    },`,
+          `  }), {`,
           `    headers: { 'Content-Type': 'text/html' },`,
           `  });`,
         ].join('\n'),

@@ -148,7 +148,7 @@ function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map
   }
 
   const funcCode = [
-    `import { renderFullPage, renderPage } from '../runtime.js';`,
+    `import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';`,
     ``, registryCode, src, ``,
     `export async function handle(request) {`,
     `  const url = new URL(request.url);`,
@@ -159,8 +159,16 @@ function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map
       `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}, pageHead: page.head });`,
       `  return new Response(html, { headers: { 'Content-Type': 'text/html' } });`,
     ].join('\n') : [
-      `  const html = await renderFullPage(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption} });`,
-      `  return new Response(html, { headers: { 'Content-Type': 'text/html' } });`,
+      `  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption} });`,
+      `  return new Response(new ReadableStream({`,
+      `    async start(controller) {`,
+      `      const enc = new TextEncoder();`,
+      `      for await (const chunk of stream) {`,
+      `        controller.enqueue(enc.encode(chunk));`,
+      `      }`,
+      `      controller.close();`,
+      `    },`,
+      `  }), { headers: { 'Content-Type': 'text/html' } });`,
     ].join('\n'),
     `}`,
   ].join('\n');

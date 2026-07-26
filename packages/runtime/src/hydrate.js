@@ -11,10 +11,10 @@ export function reactiveProps(props) {
 }
 
 const _SHOW_COMMENT = 128;
-const _FILTER_ACCEPT = 1;
-const _FILTER_SKIP = 2;
+export const _FILTER_ACCEPT = 1;
+export const _FILTER_SKIP = 2;
 
-function collectVskMarkers(container) {
+export function collectVskMarkers(container) {
 	const markers = [];
 	const walker = document.createTreeWalker(container, _SHOW_COMMENT, {
 		acceptNode: (node) => (node.textContent === 'vsk' ? _FILTER_ACCEPT : _FILTER_SKIP),

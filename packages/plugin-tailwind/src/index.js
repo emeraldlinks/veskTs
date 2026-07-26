@@ -1,3 +1,10 @@
+/**
+ * Vesk Tailwind CSS plugin.
+ * Scans .vsk files for class attributes, builds a purge-able content list,
+ * runs the Tailwind CLI to generate the final CSS, and handles HMR rebuilds.
+ * @module plugin-tailwind
+ */
+
 import { readFileSync, existsSync, globSync } from 'fs'
 import { resolve } from 'path'
 

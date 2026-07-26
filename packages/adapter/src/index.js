@@ -1,3 +1,10 @@
+/**
+ * Vesk adapter — build API for production deployment.
+ * Orchestrates runtime bundling, SSR function generation, API function generation,
+ * static file copying, client bundle generation, and production server startup.
+ * @module adapter
+ */
+
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';

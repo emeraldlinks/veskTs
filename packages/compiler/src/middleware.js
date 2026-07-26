@@ -1,3 +1,10 @@
+/**
+ * Middleware chain collection and execution for Vesk.
+ * Implements the onion model: outermost middleware runs first on the way in,
+ * last on the way out, with URL rewrite and short-circuit support.
+ * @module middleware
+ */
+
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { extractMiddleware } from './router.js';
