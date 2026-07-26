@@ -9,8 +9,7 @@
     "vesk": "./bin/vesk"
   },
   "exports": {
-    ".": "./src/index.js",
-    "./types": "./src/types/index.d.ts"
+    ".": "./src/index.js"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

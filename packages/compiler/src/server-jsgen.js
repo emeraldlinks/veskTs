@@ -263,6 +263,9 @@ function componentCallToJS(node, importedNames, isAsync = false) {
 		if (typeof p.value === 'string') return `${JSON.stringify(p.name)}: ${JSON.stringify(p.value)}`;
 		return `${JSON.stringify(p.name)}: ${exprJS(p.value.raw)}`;
 	});
+	for (const sp of node.spreadProps) {
+		propsEntries.push(`...${exprJS(sp.raw)}`);
+	}
 	if (node.children.length > 0) {
 		const childCode = childrenToHTML(node.children);
 		propsEntries.push(`children: ${JSON.stringify(childCode)}`);

@@ -462,6 +462,11 @@ function emitComponentCall(ctx, node, tracked, parentVar, compPrefix = '__compon
 		return `${JSON.stringify(p.name)}: ${expr}`;
 	});
 
+	for (const sp of node.spreadProps) {
+		const expr = transformTracked(sp, tracked);
+		propsEntries.push(`...${expr}`);
+	}
+
 	if (node.children.length > 0) {
 		const frag = ctx.n();
 		ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
@@ -746,13 +751,8 @@ function generateComponent(comp, importedNames = new Set(), hydrate = false) {
 
 function buildParamInit(paramNames) {
 	if (paramNames.length === 1 && paramNames[0] === 'props') return '';
-	const destructured = [];
-	for (const name of paramNames) {
-		destructured.push(`${name}: props.${name}`);
-	}
-	if (destructured.length === 0) return '';
-	if (destructured.length === 1) return `const { ${destructured[0]} } = props;`;
-	return `const { ${destructured.join(', ')} } = props;`;
+	if (paramNames.length === 0) return '';
+	return `const { ${paramNames.join(', ')} } = props;`;
 }
 
 function buildComponentMap(irRoot, hydrate = false) {

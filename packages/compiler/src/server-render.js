@@ -25,7 +25,6 @@ import { buildComponentMap } from './server-jsgen.js';
  * @returns {{ ir: object, componentMap: Map<string, Function>, __vesk: object }}
  */
 export function compileFile(source) {
-	resetVskState(false);
 	const ast = parse(source);
 	const ir = generateIR(ast, source);
 	const componentMap = buildComponentMap(ir, true);

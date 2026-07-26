@@ -47,10 +47,17 @@ function isTrackDeclaration(decl) {
 	);
 }
 
-function getParamNames(params) {
+function getParamNames(params, source) {
 	return params.map((p) => {
 		if (p.type === 'Identifier') return [p.name];
-		if (p.type === 'ObjectPattern') return p.properties.map((prop) => prop.key.name);
+		if (p.type === 'ObjectPattern') return p.properties.map((prop) => {
+			const name = prop.key.name || prop.key.value;
+			if (prop.value.type === 'AssignmentPattern') {
+				const defaultSrc = source.slice(prop.value.right.start, prop.value.right.end);
+				return `${name} = ${defaultSrc}`;
+			}
+			return name;
+		});
 		if (p.type === 'ArrayPattern') return p.elements.map((el) => el?.name ?? '_');
 		return ['_'];
 	}).flat();
@@ -202,19 +209,21 @@ function processJSXElement(source, element) {
 
 	// Self-closing child component
 	if (!isHTMLTag(tagName) && selfClosing) {
-		const props = extractProps(source, element);
-		return [new ComponentCall(tagName, props)];
+		const { props, spreadProps } = extractProps(source, element);
+		return [new ComponentCall(tagName, props, [], spreadProps)];
 	}
 
 	// Component with children
 	if (!isHTMLTag(tagName)) {
-		const props = extractProps(source, element);
+		const { props, spreadProps } = extractProps(source, element);
 		const children = processJSXChildren(source, element.children || []);
-		return [new ComponentCall(tagName, props, children)];
+		return [new ComponentCall(tagName, props, children, spreadProps)];
 	}
 
 	// HTML element
-	const attributes = element.openingElement.attributes.map((attr) => processAttribute(source, attr));
+	const attributes = element.openingElement.attributes
+		.filter((attr) => attr.type !== 'JSXSpreadAttribute')
+		.map((attr) => processAttribute(source, attr));
 	const staticAttrs = [];
 	/** @type {import('./ir.js').IRNode[]} */
 	const attrBindings = [];
@@ -244,15 +253,24 @@ function processJSXElement(source, element) {
 }
 
 function extractProps(source, element) {
-	return element.openingElement.attributes.map((attr) => ({
-		name: attr.name.type === 'JSXIdentifier' ? attr.name.name : getSource(source, attr.name),
-		value:
-			attr.value === null
-				? new Expression('true')
-				: attr.value.type === 'JSXExpressionContainer'
-					? toExpression(source, attr.value.expression)
-					: new Expression(JSON.stringify(attr.value.value)),
-	}));
+	const props = [];
+	const spreadProps = [];
+	for (const attr of element.openingElement.attributes) {
+		if (attr.type === 'JSXSpreadAttribute') {
+			spreadProps.push(toExpression(source, attr.argument));
+		} else {
+			props.push({
+				name: attr.name.type === 'JSXIdentifier' ? attr.name.name : getSource(source, attr.name),
+				value:
+					attr.value === null
+						? new Expression('true')
+						: attr.value.type === 'JSXExpressionContainer'
+							? toExpression(source, attr.value.expression)
+							: new Expression(JSON.stringify(attr.value.value)),
+			});
+		}
+	}
+	return { props, spreadProps };
 }
 
 /**
@@ -644,7 +662,7 @@ export function generateIR(ast, source) {
 		}
 
 		const name = inner.id.name;
-		const paramNames = getParamNames(inner.params);
+		const paramNames = getParamNames(inner.params, source);
 		const bodyStmts = inner.body.body;
 		const isClientComp = !!inner.client;
 

@@ -6,9 +6,18 @@
   "main": "./src/index-client.js",
   "types": "./src/index-client.d.ts",
   "exports": {
-    ".": "./src/index-client.js",
-    "./client": "./src/index-client.js",
-    "./server": "./src/index-server.js"
+    ".": {
+      "types": "./src/index-client.d.ts",
+      "default": "./src/index-client.js"
+    },
+    "./client": {
+      "types": "./src/index-client.d.ts",
+      "default": "./src/index-client.js"
+    },
+    "./server": {
+      "types": "./src/index-server.d.ts",
+      "default": "./src/index-server.js"
+    }
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

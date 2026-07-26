@@ -256,6 +256,8 @@ export class ComponentCall {
 	componentName;
 	/** @type {{ name: string, value: Expression }[]} */
 	props;
+	/** @type {Expression[]} */
+	spreadProps;
 	/** @type {IRNode[]} */
 	children;
 
@@ -263,11 +265,13 @@ export class ComponentCall {
 	 * @param {string} componentName
 	 * @param {{ name: string, value: Expression }[]} props
 	 * @param {IRNode[]} [children]
+	 * @param {Expression[]} [spreadProps]
 	 */
-	constructor(componentName, props, children = []) {
+	constructor(componentName, props, children = [], spreadProps = []) {
 		this.componentName = componentName;
 		this.props = props;
 		this.children = children;
+		this.spreadProps = spreadProps;
 	}
 }
 

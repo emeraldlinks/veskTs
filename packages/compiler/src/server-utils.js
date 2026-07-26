@@ -201,13 +201,8 @@ export function buildParamInit(paramNames) {
 	if (paramNames.length === 1 && paramNames[0] === 'props') {
 		return '';
 	}
-	const destructured = [];
-	for (const name of paramNames) {
-		destructured.push(`${name}: props.${name}`);
-	}
-	if (destructured.length === 0) return '';
-	if (destructured.length === 1) return `const { ${destructured[0]} } = props;`;
-	return `const { ${destructured.join(', ')} } = props;`;
+	if (paramNames.length === 0) return '';
+	return `const { ${paramNames.join(', ')} } = props;`;
 }
 
 // ── Runtime module cache ─────────────────────────────────────────

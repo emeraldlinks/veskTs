@@ -18,7 +18,7 @@
   ],
   "scripts": {
     "test": "node scripts/test.js",
-    "test:hydration": "cd test-app && npx vesk build && cd .. && node hydration-test.mjs",
+    "test:hydration": "node hydration-test.mjs",
     "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json"
   },
   "devDependencies": {

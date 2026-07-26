@@ -80,7 +80,7 @@ export async function startDevServer(port, projectDir, config) {
 			const files = [
 				'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
 				'context.js', 'hydrate.js', 'resource.js', 'portal.js',
-				'reconcile.js', 'bindings.js', 'router.js',
+				'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
 				'seo.js', 'image.js', 'experiment.js', 'form.js',
 			];
 			let code = '';
@@ -89,6 +89,7 @@ export async function startDevServer(port, projectDir, config) {
 				if (existsSync(p)) {
 					let src = readFileSync(p, 'utf-8');
 					src = src.replace(/^import\s+[\s\S]*?from\s+['"].*?['"];?\n?/gm, '');
+					src = src.replace(/^export\s*\{\s*[\s\S]*?\};?\n?/gm, '');
 					src = src.replace(/^export\s+/gm, '');
 					code += `// --- ${f} ---\n${src}\n`;
 				}

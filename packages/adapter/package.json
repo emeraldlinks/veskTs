@@ -4,6 +4,7 @@
   "type": "module",
   "description": "Vesk adapter — builds deployable .vesk/ output for Deno and Node serverless",
   "main": "./src/index.js",
+  "types": "./src/index.d.ts",
   "bin": {
     "vesk-build": "./src/index.js"
   },
