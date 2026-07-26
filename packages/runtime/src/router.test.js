@@ -1,4 +1,4 @@
-import { buildRouteTree, defineRoute, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams } from './router.js';
+import { buildRouteTree, defineRoute, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from './router.js';
 
 let passed = 0;
 let failed = 0;
@@ -28,6 +28,20 @@ function expect(actual) {
 		},
 		toBeDefined() { if (actual === undefined) throw new Error(`expected defined, got undefined`); },
 		toBeGreaterThanOrEqual(expected) { if (actual < expected) throw new Error(`expected ${actual} >= ${expected}`); },
+		toThrow(expected) {
+			if (typeof actual !== 'function') throw new Error('expected a function');
+			try {
+				actual();
+				throw new Error('expected function to throw but it did not');
+			} catch (e) {
+				if (e.message === 'expected function to throw but it did not') throw e;
+				if (expected) {
+					if (typeof expected === 'string' && !e.message.includes(expected)) {
+						throw new Error(`expected error to contain "${expected}", got "${e.message}"`);
+					}
+				}
+			}
+		},
 	};
 }
 
@@ -37,6 +51,17 @@ if (typeof globalThis.window !== 'undefined' && !globalThis.window.location.orig
 }
 
 // ── Mock DOM for testing ───────────────────────────────────────
+function computeTextContent(el) {
+	if (el.nodeType === 3) return el.textContent || '';
+	if (el.nodeType !== 1 && el.nodeType !== 11) return '';
+	let text = '';
+	for (const c of (el.children || [])) {
+		if (c.nodeType === 3) text += c.textContent || '';
+		else if (c.nodeType === 1) text += computeTextContent(c);
+	}
+	return text;
+}
+
 function makeEl(tag) {
 	const children = [];
 	const attrs = {};
@@ -46,7 +71,14 @@ function makeEl(tag) {
 		children,
 		attributes: attrs,
 		className: '',
-		textContent: '',
+		get textContent() { return computeTextContent(this); },
+		set textContent(v) {
+			children.length = 0;
+			if (v != null) {
+				const tn = { nodeType: 3, textContent: String(v), data: String(v) };
+				children.push(tn);
+			}
+		},
 		style: {},
 		parentNode: null,
 		setAttribute(k, v) { attrs[k] = String(v); },
@@ -55,6 +87,7 @@ function makeEl(tag) {
 		addEventListener() {},
 		removeEventListener() {},
 		appendChild(c) { children.push(c); if (c && typeof c === 'object') c.parentNode = this; },
+		replaceChildren(...args) { children.length = 0; for (const a of args) { children.push(a); if (a && typeof a === 'object') a.parentNode = this; } },
 		insertBefore(c, ref) { const idx = ref ? children.indexOf(ref) : children.length; children.splice(idx, 0, c); },
 		remove() { if (this.parentNode) { const idx = this.parentNode.children.indexOf(this); if (idx > -1) this.parentNode.children.splice(idx, 1); } },
 		querySelector() { return null; },
@@ -90,12 +123,19 @@ function setupMockDom() {
 		addEventListener() {},
 		body: makeEl('body'),
 	};
+	let _rAFQueue = [];
 	global.window = {
 		location: { pathname: '/', search: '', href: 'http://localhost/', origin: 'http://localhost' },
+		scrollY: 0,
+		scrollTo(x, y) { this.scrollY = y; },
+		requestAnimationFrame(fn) { _rAFQueue.push(fn); },
+		flushRAF() { const q = _rAFQueue; _rAFQueue = []; for (const fn of q) fn(); },
 		history: {
 			_stack: ['http://localhost/'],
 			pushState(d, t, u) { this._stack.push(u); },
 			replaceState(d, t, u) { this._stack[this._stack.length - 1] = u; },
+			get scrollRestoration() { return this._sr; },
+			set scrollRestoration(v) { this._sr = v; },
 		},
 		addEventListener() {},
 	};
@@ -194,6 +234,124 @@ test('createFileRouter navigates to nested route', () => {
 	const router = createFileRouter(tree, { container });
 	router.navigate('/about', { replace: true });
 	expect(container.children.length).toBeGreaterThanOrEqual(0);
+});
+
+// ── Loading / Error / Prefetch / Scroll tests ──────────────────
+
+test('buildRouteTree preserves loading and error', () => {
+	const loadingFn = () => document.createTextNode('Loading');
+	const errorFn = () => document.createTextNode('Error');
+	const tree = buildRouteTree([
+		{ path: '/', page: () => document.createTextNode('Home'), loading: loadingFn, error: errorFn },
+	]);
+	expect(tree[0].loading).toBe(loadingFn);
+	expect(tree[0].error).toBe(errorFn);
+});
+
+test('useRouter includes prefetch method', () => {
+	const router = useRouter();
+	expect(typeof router.prefetch).toBe('function');
+});
+
+test('Loading component shown during deferred navigation', async () => {
+	const container = document.createElement('div');
+	const loadingFn = () => {
+		const el = document.createElement('div');
+		el.textContent = 'Loading...';
+		return el;
+	};
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Page Content';
+		return el;
+	};
+	const tree = buildRouteTree([
+		{ path: '/', page: pageFn, loading: loadingFn },
+	]);
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+	// Loading should be shown immediately (before microtask)
+	expect(container.textContent).toBe('Loading...');
+	// Wait for microtask to complete deferred render
+	await new Promise(r => setTimeout(r, 0));
+	expect(container.textContent).toBe('Page Content');
+});
+
+test('Error component rendered when page throws', () => {
+	const container = document.createElement('div');
+	const errorFn = (props) => {
+		const el = document.createElement('div');
+		el.textContent = 'Error: ' + (props.error ? props.error.message : 'unknown');
+		return el;
+	};
+	const pageFn = () => { throw new Error('Boom!'); };
+	const tree = buildRouteTree([
+		{ path: '/', page: pageFn, error: errorFn },
+	]);
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+	expect(container.textContent).toContain('Error:');
+	expect(container.textContent).toContain('Boom!');
+});
+
+test('Error re-thrown when no error component', () => {
+	const container = document.createElement('div');
+	const pageFn = () => { throw new Error('Boom!'); };
+	const tree = buildRouteTree([
+		{ path: '/', page: pageFn },
+	]);
+	const router = createFileRouter(tree, { container });
+	expect(() => router.navigate('/', { replace: true })).toThrow('Boom!');
+});
+
+test('Prefetch stores match for path', () => {
+	const container = document.createElement('div');
+	const pageFn = () => document.createTextNode('Home');
+	const tree = buildRouteTree([
+		{ path: '/', page: pageFn },
+		{ path: '/about', page: () => document.createTextNode('About') },
+	]);
+	const router = createFileRouter(tree, { container });
+	router.prefetch('/about');
+	expect(router._prefetched).toBeTruthy();
+	expect(router._prefetched.has('/about')).toBe(true);
+	const match = router._prefetched.get('/about');
+	expect(match.matchChain).toBeTruthy();
+});
+
+test('Error component receives retry function', () => {
+	const container = document.createElement('div');
+	let retryFn = null;
+	const errorFn = (props) => {
+		retryFn = props.retry;
+		const el = document.createElement('div');
+		el.textContent = 'Error occurred';
+		return el;
+	};
+	const pageFn = () => { throw new Error('Oops'); };
+	const tree = buildRouteTree([
+		{ path: '/', page: pageFn, error: errorFn },
+	]);
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+	expect(retryFn).toBeTruthy();
+	expect(typeof retryFn).toBe('function');
+});
+
+test('Error component receives params', () => {
+	const container = document.createElement('div');
+	let capturedParams = null;
+	const errorFn = (props) => {
+		capturedParams = props.params;
+		return document.createTextNode('Error');
+	};
+	const pageFn = () => { throw new Error('Oops'); };
+	const tree = buildRouteTree([
+		{ path: '/', page: pageFn, error: errorFn },
+	]);
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+	expect(capturedParams).toBeTruthy();
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

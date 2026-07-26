@@ -182,6 +182,50 @@ const _state = {
 	search: track(''),
 };
 
+// ── Scroll Restoration ──────────────────────────────────────────
+const _scrollPositions = new Map();
+let _isPopStateNavigation = false;
+
+// ── Loading / Error helpers ────────────────────────────────────
+function findLoadingComponent(chain) {
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].loading) return chain[i].loading;
+	}
+	return null;
+}
+
+function findErrorComponent(chain) {
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].error) return chain[i].error;
+	}
+	return null;
+}
+
+function showLoadingInContainer(container, loadingFn, params) {
+	const tempRoot = document.createDocumentFragment();
+	const walker = createHydrateWalker(tempRoot, []);
+	const loadingContent = loadingFn({ params }, new Map(), walker);
+	container.replaceChildren();
+	if (loadingContent && typeof loadingContent === 'object' && loadingContent.nodeType) {
+		container.appendChild(loadingContent);
+	} else if (typeof loadingContent === 'string') {
+		container.innerHTML = loadingContent;
+	}
+}
+
+function handleScroll(pathname, isReplace) {
+	if (typeof window === 'undefined' || typeof window.scrollTo !== 'function') return;
+	if (_isPopStateNavigation) {
+		_isPopStateNavigation = false;
+		const savedY = _scrollPositions.get(pathname);
+		requestAnimationFrame(() => {
+			window.scrollTo(0, savedY !== undefined ? savedY : 0);
+		});
+	} else if (!isReplace) {
+		requestAnimationFrame(() => window.scrollTo(0, 0));
+	}
+}
+
 export function useNavigate() {
 	const router = RouterCtx.get() || _currentRouter;
 	return (path, opts = {}) => {
@@ -223,6 +267,7 @@ export function useRouter() {
 		back: () => window.history.back(),
 		forward: () => window.history.forward(),
 		refresh: () => router?.navigate?.(window.location.pathname, { replace: true }),
+		prefetch: (href) => router?.prefetch?.(href),
 	};
 }
 
@@ -425,9 +470,30 @@ function renderMatch(router, match, container) {
 	}
 
 	let rootDom;
-	root(() => {
-		rootDom = renderLayoutChain(0);
-	});
+	try {
+		root(() => {
+			rootDom = renderLayoutChain(0);
+		});
+	} catch (error) {
+		const errorFn = findErrorComponent(chain);
+		if (errorFn) {
+			const retry = () => {
+				if (router && router.navigate) {
+					router.navigate(window.location.pathname, { replace: true });
+				}
+			};
+			const errorProps = { error, retry, params: paramValues };
+			const errorDom = errorFn(errorProps, new Map(), clientWalker);
+			if (errorDom && typeof errorDom === 'object' && errorDom.nodeType) {
+				if (container.replaceChildren) container.replaceChildren(errorDom);
+				else { container.innerHTML = ''; container.appendChild(errorDom); }
+			} else if (typeof errorDom === 'string') {
+				container.innerHTML = errorDom;
+			}
+			return;
+		}
+		throw error;
+	}
 
 	if (rootDom && typeof rootDom === 'object' && rootDom.nodeType) {
 		if (container.replaceChildren) {
@@ -535,6 +601,24 @@ export function createRouter(
 
 		start() {
 			_currentRouter = this;
+
+			// Scroll restoration
+			if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
+				window.history.scrollRestoration = 'manual';
+			}
+			if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+				let _scrollTimer = null;
+				window.addEventListener('scroll', () => {
+					if (_scrollTimer) return;
+					_scrollTimer = setTimeout(() => {
+						if (window.scrollY !== undefined) {
+							_scrollPositions.set(window.location.pathname, window.scrollY);
+						}
+						_scrollTimer = null;
+					}, 100);
+				}, { passive: true });
+			}
+
 			// Set up click delegation
 			document.addEventListener('click', (e) => {
 				const link = e.target.closest('a[href]');
@@ -548,6 +632,7 @@ export function createRouter(
 			});
 
 			window.addEventListener('popstate', () => {
+				_isPopStateNavigation = true;
 				this.navigate(window.location.href, { replace: true });
 			});
 
@@ -588,21 +673,41 @@ export function createRouter(
 
 			match.pathname = url.pathname;
 
-			if (!opts.replace) {
-				window.history.pushState({ path: url.pathname }, '', url.pathname);
-			} else {
-				window.history.replaceState({ path: url.pathname }, '', url.pathname);
+			// Save scroll position for current page
+			if (!_isPopStateNavigation) {
+				_scrollPositions.set(window.location.pathname, window.scrollY);
 			}
 
-			_state.path.value = url.pathname;
-			_state.search.value = url.search;
+			// Check for loading component
+			const loadingFn = findLoadingComponent(match.matchChain);
 
-			renderMatch(this, match, this.container);
-			this._currentMatch = match;
+			const doRender = () => {
+				if (!opts.replace) {
+					window.history.pushState({ path: url.pathname }, '', url.pathname);
+				} else {
+					window.history.replaceState({ path: url.pathname }, '', url.pathname);
+				}
+				_state.path.value = url.pathname;
+				_state.search.value = url.search;
+				renderMatch(this, match, this.container);
+				this._currentMatch = match;
+				handleScroll(url.pathname, opts.replace);
+			};
+
+			if (loadingFn) {
+				showLoadingInContainer(this.container, loadingFn, match.params);
+				Promise.resolve().then(() => doRender());
+			} else {
+				doRender();
+			}
 		},
 
 		prefetch(path) {
-			// For manual routes, could preload lazy components
+			const url = new URL(path, window.location.origin);
+			const match = matchRoute(this.routeTree, url.pathname);
+			if (!match) return;
+			this._prefetched = this._prefetched || new Map();
+			this._prefetched.set(url.pathname, match);
 		},
 
 		get currentPath() {
@@ -664,6 +769,25 @@ export function createFileRouter(routeTree, options = {}) {
 
 		start() {
 			_currentRouter = this;
+
+			// Scroll restoration: take manual control so we can cache positions
+			if (typeof window !== 'undefined' && 'scrollRestoration' in window.history) {
+				window.history.scrollRestoration = 'manual';
+			}
+			if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+				let _scrollTimer = null;
+				const _onScroll = () => {
+					if (_scrollTimer) return;
+					_scrollTimer = setTimeout(() => {
+						if (window.scrollY !== undefined) {
+							_scrollPositions.set(window.location.pathname, window.scrollY);
+						}
+						_scrollTimer = null;
+					}, 100);
+				};
+				window.addEventListener('scroll', _onScroll, { passive: true });
+			}
+
 			document.addEventListener('click', (e) => {
 				if (e.defaultPrevented) return;
 				const link = e.target.closest('a[href]');
@@ -676,8 +800,16 @@ export function createFileRouter(routeTree, options = {}) {
 				router.navigate(href);
 			});
 			window.addEventListener('popstate', () => {
+				_isPopStateNavigation = true;
 				router.navigate(window.location.pathname + window.location.search, { replace: true });
 			});
+
+			if (options.prefetch !== false) {
+				document.addEventListener('mouseenter', (e) => {
+					const link = e.target.closest('a[href]');
+					if (link) router.prefetch(link.getAttribute('href'));
+				}, { passive: true });
+			}
 
 			const path = window.location.pathname;
 			if (container.children.length > 0) {
@@ -705,22 +837,34 @@ export function createFileRouter(routeTree, options = {}) {
 
 			match.pathname = url.pathname;
 
+			// Save scroll position for current page before navigating
+			if (!_isPopStateNavigation) {
+				_scrollPositions.set(window.location.pathname, window.scrollY);
+			}
+
+			// Check for loading component
+			const loadingFn = findLoadingComponent(match.matchChain);
+
 			// Run middleware chain (onion model)
 			const middlewareFns = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
 
+			const doRender = () => {
+				const fullUrl = url.pathname + url.search;
+				if (!opts.replace) {
+					window.history.pushState({ path: fullUrl }, '', fullUrl);
+				} else {
+					window.history.replaceState({ path: fullUrl }, '', fullUrl);
+				}
+				_state.path.value = url.pathname;
+				_state.search.value = url.search;
+				renderFn(router, match, container);
+				router._currentMatch = match;
+				handleScroll(url.pathname, opts.replace);
+			};
+
 			async function runMwChain(index) {
 				if (index >= middlewareFns.length) {
-					// All middleware passed — render
-					const fullUrl = url.pathname + url.search;
-					if (!opts.replace) {
-						window.history.pushState({ path: fullUrl }, '', fullUrl);
-					} else {
-						window.history.replaceState({ path: fullUrl }, '', fullUrl);
-					}
-					_state.path.value = url.pathname;
-					_state.search.value = url.search;
-					renderFn(router, match, container);
-					router._currentMatch = match;
+					doRender();
 					return;
 				}
 
@@ -749,19 +893,30 @@ export function createFileRouter(routeTree, options = {}) {
 				}
 			}
 
-			if (middlewareFns.length > 0) {
-				runMwChain(0);
-			} else {
-				if (!opts.replace) {
-					window.history.pushState({ path: url.pathname }, '', url.pathname);
-				} else {
-					window.history.replaceState({ path: url.pathname }, '', url.pathname);
+			if (middlewareFns.length > 0 || loadingFn) {
+				// Show loading immediately (for async middleware or to allow paint)
+				if (loadingFn) {
+					showLoadingInContainer(container, loadingFn, match.params);
 				}
-				_state.path.value = url.pathname;
-				_state.search.value = url.search;
-				renderFn(router, match, container);
-				router._currentMatch = match;
+				// Defer actual render to next microtask so loading can paint
+				Promise.resolve().then(() => {
+					if (middlewareFns.length > 0) {
+						runMwChain(0);
+					} else {
+						doRender();
+					}
+				});
+			} else {
+				doRender();
 			}
+		},
+
+		prefetch(path) {
+			const url = new URL(path, window.location.origin);
+			const match = matchRoute(routeTree, url.pathname);
+			if (!match) return;
+			router._prefetched = router._prefetched || new Map();
+			router._prefetched.set(url.pathname, match);
 		},
 
 		get currentPath() {
@@ -804,6 +959,8 @@ export function buildRouteTree(definitions) {
 			isCatchAll,
 			page: def.page || null,
 			layout: def.layout || null,
+			loading: def.loading || null,
+			error: def.error || null,
 			children: (def.children || []).map(c => {
 				const cParts = c.path.split('/').filter(Boolean);
 				return {

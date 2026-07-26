@@ -276,6 +276,8 @@ export function generateRouteManifest(tree, options = {}) {
 		const parts = [];
 		if (node.page) parts.push(`page: ${node.page}`);
 		if (node.layout) parts.push(`layout: ${node.layout}`);
+		if (node.loading) parts.push(`loading: ${node.loading}`);
+		if (node.error) parts.push(`error: ${node.error}`);
 		if (node.children.length > 0) {
 			const childCodes = node.children.map(c => genNode(c));
 			parts.push(`children: [\n${childCodes.map(c => '\t\t' + c).join(',\n')}\n\t]`);

@@ -141,4 +141,3 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
 
   return { funcPath, funcCode, name };
 }
-}
