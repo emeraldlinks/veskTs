@@ -186,7 +186,7 @@ const _state = {
 const _scrollPositions = new Map();
 let _isPopStateNavigation = false;
 
-// ── Loading / Error helpers ────────────────────────────────────
+// ── Loading / Error / NotFound helpers ────────────────────────────
 function findLoadingComponent(chain) {
 	for (let i = chain.length - 1; i >= 0; i--) {
 		if (chain[i].loading) return chain[i].loading;
@@ -197,6 +197,13 @@ function findLoadingComponent(chain) {
 function findErrorComponent(chain) {
 	for (let i = chain.length - 1; i >= 0; i--) {
 		if (chain[i].error) return chain[i].error;
+	}
+	return null;
+}
+
+function findNotFoundComponent(chain) {
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].notFound) return chain[i].notFound;
 	}
 	return null;
 }
@@ -282,6 +289,9 @@ export function useRouter() {
  *   isCatchAll: boolean    // [...param] segment
  *   page: Function|null    // Page component
  *   layout: Function|null  // Layout component
+ *   loading: Function|null // Loading component
+ *   error: Function|null   // Error boundary component
+ *   notFound: Function|null // Not-found component
  *   children: RouteNode[]
  *   layouts: RouteNode[]   // Flattened layout chain for this route
  */
@@ -384,16 +394,8 @@ function flattenLayoutChain(tree, pathParts, result = []) {
 			const consumeCount = node.isCatchAll ? pathParts.length : segCount;
 			const remaining = pathParts.slice(consumeCount);
 			const isLeaf = remaining.length === 0 || remaining.every(p => p === '');
-			if (isLeaf && node.page && node.layout) {
-				// Node serves as both layout and page — push once for layout
-				// renderMatch will also render its page component
-				result.push(node);
-				break;
-			} else if (node.layout) {
-				result.push(node);
-			}
+			result.push(node);
 			if (isLeaf) {
-				if (node.page) result.push(node);
 				break;
 			} else if (node.children.length > 0) {
 				flattenLayoutChain(node.children, remaining, result);
@@ -442,6 +444,20 @@ function renderMatch(router, match, container) {
 	}
 
 	if (!pageNode) {
+		const notFoundFn = findNotFoundComponent(chain);
+		if (notFoundFn) {
+			const tempRoot = document.createDocumentFragment();
+			const walker = createHydrateWalker(tempRoot, []);
+			const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
+			const nfDom = notFoundFn(nfProps, new Map(), walker);
+			if (nfDom && typeof nfDom === 'object' && nfDom.nodeType) {
+				if (container.replaceChildren) container.replaceChildren(nfDom);
+				else { container.innerHTML = ''; container.appendChild(nfDom); }
+			} else if (typeof nfDom === 'string') {
+				container.innerHTML = nfDom;
+			}
+			return;
+		}
 		if (container.replaceChildren) {
 			container.replaceChildren();
 		} else {
@@ -475,6 +491,22 @@ function renderMatch(router, match, container) {
 			rootDom = renderLayoutChain(0);
 		});
 	} catch (error) {
+		if (error && error.name === 'NotFoundError') {
+			const notFoundFn = findNotFoundComponent(chain);
+			if (notFoundFn) {
+				const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
+				const nfDom = notFoundFn(nfProps, new Map(), clientWalker);
+				if (nfDom && typeof nfDom === 'object' && nfDom.nodeType) {
+					if (container.replaceChildren) container.replaceChildren(nfDom);
+					else { container.innerHTML = ''; container.appendChild(nfDom); }
+				} else if (typeof nfDom === 'string') {
+					container.innerHTML = nfDom;
+				}
+				return;
+			}
+			container.innerHTML = '<h1>404 — Not Found</h1>';
+			return;
+		}
 		const errorFn = findErrorComponent(chain);
 		if (errorFn) {
 			const retry = () => {
@@ -523,6 +555,15 @@ function hydrateInitial(router, match, container) {
 		if (chain[i].page) { pageNode = chain[i]; break; }
 	}
 	if (!pageNode) {
+		const notFoundFn = findNotFoundComponent(chain);
+		if (notFoundFn) {
+			const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
+			const walker2 = createHydrateWalker(container);
+			root(() => {
+				notFoundFn(nfProps, new Map(), walker2);
+			});
+			return;
+		}
 		container.innerHTML = '<h1>404 — Not Found</h1>';
 		return;
 	}
@@ -743,6 +784,9 @@ function buildTreeFromMap(routes) {
 			isCatchAll,
 			page: loader,
 			layout: null,
+			loading: null,
+			error: null,
+			notFound: null,
 			children: [],
 			segmentCount: parts.length || 1,
 			loader,
@@ -831,7 +875,22 @@ export function createFileRouter(routeTree, options = {}) {
 			const url = pathname instanceof URL ? pathname : new URL(pathname, window.location.origin);
 			const match = matchRoute(routeTree, url.pathname);
 			if (!match) {
-				container.innerHTML = '<h1>404 — Not Found</h1>';
+				const chain = flattenLayoutChain(routeTree, url.pathname.split('/').filter(Boolean));
+				const notFoundFn = findNotFoundComponent(chain);
+				if (notFoundFn) {
+					const tempRoot = document.createDocumentFragment();
+					const walker = createHydrateWalker(tempRoot, []);
+					const nfProps = { params: {}, url: url.pathname };
+					const nfDom = notFoundFn(nfProps, new Map(), walker);
+					if (nfDom && typeof nfDom === 'object' && nfDom.nodeType) {
+						if (container.replaceChildren) container.replaceChildren(nfDom);
+						else { container.innerHTML = ''; container.appendChild(nfDom); }
+					} else if (typeof nfDom === 'string') {
+						container.innerHTML = nfDom;
+					}
+				} else {
+					container.innerHTML = '<h1>404 — Not Found</h1>';
+				}
 				return;
 			}
 
@@ -961,6 +1020,7 @@ export function buildRouteTree(definitions) {
 			layout: def.layout || null,
 			loading: def.loading || null,
 			error: def.error || null,
+			notFound: def.notFound || null,
 			children: (def.children || []).map(c => {
 				const cParts = c.path.split('/').filter(Boolean);
 				return {
@@ -970,6 +1030,9 @@ export function buildRouteTree(definitions) {
 					isDynamic: cParts.some(p => p.startsWith(':')),
 					isCatchAll: cParts.some(p => p === '*'),
 					isGroup: false,
+					loading: null,
+					error: null,
+					notFound: null,
 					segmentCount: Math.max(1, cParts.length),
 					children: [],
 				};

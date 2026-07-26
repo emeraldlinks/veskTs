@@ -25,6 +25,22 @@
   "activationEvents": [
     "onLanguage:vsk"
   ],
+  "configuration": {
+    "title": "Vesk",
+    "properties": {
+      "vesk.tailwind.completion": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable Tailwind CSS class completion in class attributes"
+      },
+      "vesk.lsp.trace.server": {
+        "type": "string",
+        "enum": ["off", "messages", "verbose"],
+        "default": "off",
+        "description": "Trace LSP server communication"
+      }
+    }
+  },
   "main": "./dist/extension.js",
   "contributes": {
     "languages": [

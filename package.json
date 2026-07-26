@@ -22,12 +22,14 @@
     "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json"
   },
   "devDependencies": {
+    "@rollup/plugin-commonjs": "^29.0.3",
+    "@rollup/plugin-json": "^6.1.0",
+    "@rollup/plugin-node-resolve": "^16.0.3",
+    "@rollup/plugin-typescript": "^12.3.0",
     "@rollup/wasm-node": "^4.62.2",
-    "happy-dom": "^20.11.0",
     "linkedom": "^0.18.13",
+    "puppeteer-core": "^25.3.0",
+    "tslib": "^2.8.1",
     "typescript": "^5.8.0"
-  },
-  "dependencies": {
-    "puppeteer": "^25.3.0"
   }
 }

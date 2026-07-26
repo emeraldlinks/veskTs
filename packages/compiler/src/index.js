@@ -30,3 +30,4 @@ export {
 /** @typedef {import('./config.js').VeskConfig} VeskConfig */
 
 export { defineConfig, validateConfig } from './config.js';
+export { scanRoutes, scanComponents, collectSources, matchUrl } from './router.js';

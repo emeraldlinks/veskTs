@@ -1,274 +1,231 @@
 /**
  * Hydration test using real SSR output from the test-app.
- * Tests SSR structure, hydration claiming, reactivity, SPA navigation.
+ * Launches headless Chromium via puppeteer-core against a running dev server.
  *
  * Usage: node hydration-test.mjs
- * Prerequisite: cd test-app && npx vesk build
+ * Prerequisite: cd test-app && npm run dev (or vesk dev) running on port 3000
  */
-import { parseHTML } from 'linkedom';
-import { readFileSync, existsSync } from 'fs';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import puppeteer from 'puppeteer-core';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const RUNTIME_JS = resolve(__dirname, 'test-app', '.vesk', 'server', 'runtime.js');
-const CLIENT_JS = resolve(__dirname, 'test-app', '.vesk', 'static', 'client.js');
-const PAGE_SRC = resolve(__dirname, 'test-app', 'app', 'page.vsk');
-const LAYOUT_SRC = resolve(__dirname, 'test-app', 'app', 'layout.vsk');
-
+const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
+const BASE = 'http://localhost:3000';
 let passed = 0;
 let failed = 0;
-function assert(cond, msg) {
-  if (cond) { passed++; console.log(`  \u2713 ${msg}`); }
+let browser;
+
+async function assert(condition, msg) {
+  if (condition) { passed++; console.log(`  \u2713 ${msg}`); }
   else { failed++; console.log(`  \u2717 ${msg}`); }
-}
-function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-
-function setupFromHtml(html, url = 'http://localhost:3000/') {
-  const { document, window } = parseHTML(html);
-  const loc = new URL(url);
-  const location = {
-    protocol: loc.protocol, host: loc.host, hostname: loc.hostname,
-    port: loc.port, pathname: loc.pathname, search: loc.search,
-    hash: loc.hash, href: loc.href, origin: loc.origin,
-    ancestorOrigins: [], assign() {}, reload() {}, toString() { return this.href; },
-    replace(u) { this.href = new URL(u, this.href).href; },
-  };
-  const history = {
-    _stack: [{ url: location.href, state: null }], _index: 0, length: 1, state: null,
-    scrollRestoration: 'auto',
-    pushState(state, _, url) {
-      const r = new URL(url, location.href);
-      Object.assign(location, { href: r.href, pathname: r.pathname, search: r.search, hash: r.hash });
-      this._stack = this._stack.slice(0, ++this._index);
-      this._stack.push({ url: r.href, state }); this.length = this._stack.length; this.state = state;
-    },
-    replaceState(state, _, url) {
-      const r = new URL(url, location.href);
-      Object.assign(location, { href: r.href, pathname: r.pathname, search: r.search, hash: r.hash });
-      this._stack[this._index] = { url: r.href, state }; this.state = state;
-    },
-    go(delta) {
-      const i = this._index + delta;
-      if (i >= 0 && i < this._stack.length) {
-        this._index = i; const e = this._stack[i];
-        Object.assign(location, { href: e.url, pathname: new URL(e.url).pathname, search: new URL(e.url).search, hash: new URL(e.url).hash });
-        this.state = e.state; window.dispatchEvent(new window.Event('popstate'));
-      }
-    },
-    back() { this.go(-1); }, forward() { this.go(1); },
-  };
-  window.location = location; window.history = history;
-
-  const g = globalThis;
-  for (const [k, v] of Object.entries({
-    window, document, location, history, Event: window.Event,
-    CustomEvent: window.CustomEvent, Node: window.Node, Element: window.Element,
-    HTMLElement: window.HTMLElement, MutationObserver: window.MutationObserver,
-    console: g.console, URL: g.URL, setTimeout: g.setTimeout,
-    clearTimeout: g.clearTimeout, setInterval: g.setInterval,
-    clearInterval: g.clearInterval, requestAnimationFrame: cb => setTimeout(cb, 16),
-    cancelAnimationFrame: id => clearTimeout(id), WebSocket: function WebSocket() {},
-  })) g[k] = v;
-  try { g.navigator = { userAgent: 'linkedom' }; } catch(e) {
-    Object.defineProperty(g, 'navigator', { value: { userAgent: 'linkedom' }, configurable: true });
-  }
-  return { document, window };
-}
-
-function runClientBundle() {
-  const code = readFileSync(CLIENT_JS, 'utf-8');
-  new Function(code
-    .replace(/^import\s+.*?['"][^'"]+['"];?\s*\n?/gm, '')
-    .replace(/^export\s*\{[^}]+\}\s*;\s*\n?/gm, '')
-    .replace(/^export\s+(const|let|var|function|class)\s+/gm, '$1 ')
-    + '\nglobalThis.__NavLink = typeof NavLink !== "undefined" ? NavLink : undefined;'
-    + '\nglobalThis.__Link = typeof Link !== "undefined" ? Link : undefined;'
-  )();
-}
-
-async function getRealSsrHtml() {
-  const { renderPage, renderFullPage } = await import(RUNTIME_JS);
-  const pageSrc = readFileSync(PAGE_SRC, 'utf-8');
-  const layoutSrc = readFileSync(LAYOUT_SRC, 'utf-8');
-  const page = renderPage(pageSrc, 'Home', { params: {} }, new Map(), { hydrate: true });
-  const fullHtml = await renderFullPage(layoutSrc, 'Layout', { params: {}, children: page.body }, new Map(), { hydrate: true });
-  return fullHtml;
 }
 
 async function main() {
-  if (!existsSync(CLIENT_JS)) {
-    console.error('Client bundle not found. Run `cd test-app && npx vesk build` first.');
-    process.exit(1);
-  }
+  browser = await puppeteer.launch({
+    executablePath: CHROMIUM_PATH,
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+  });
 
-  // 1. Get real SSR HTML from test-app
-  console.log('=== SSR OUTPUT (from test-app) ===\n');
-  const rawHtml = await getRealSsrHtml();
-
-  const bodyMatch = rawHtml.match(/<body[^>]*>([\s\S]*)<\/body>/i);
-  const ssrBody = bodyMatch ? bodyMatch[1] : '';
-  console.log(ssrBody.trim() + '\n');
-
-  // 2. SSR assertions
-  console.log('=== SSR ASSERTIONS ===\n');
+  // ── Test 1: Initial load ──────────────────────────
+  console.log('\n=== TEST 1: Initial load ===');
   {
-    // NavLink SSR
-    assert(ssrBody.includes('<a href="/"'), 'SSR has <a href="/">');
-    assert(ssrBody.includes('<a href="/about"'), 'SSR has <a href="/about">');
-    assert(ssrBody.includes('<a href="/blog"'), 'SSR has <a href="/blog">');
-    assert(ssrBody.includes('Home'), 'SSR nav has Home label');
-    assert(ssrBody.includes('About'), 'SSR nav has About label');
-    assert(ssrBody.includes('Blog'), 'SSR nav has Blog label');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
 
-    // SSR hydration markers
-    assert(ssrBody.includes('<!--vsk-->'), 'SSR has <!--vsk--> markers');
-    const vskCount = (ssrBody.match(/<!--vsk-->/g) || []).length;
-    assert(vskCount >= 10, 'SSR has enough <!--vsk--> markers (' + vskCount + ')');
+    assert(errors.length === 0, 'Zero JS errors on load (got ' + errors.length + ': ' + errors.join(', ') + ')');
 
-    // SSR count value
-    const countMatch = ssrBody.match(/<p[^>]*>\s*(\d+)\s*<\/p>/);
-    assert(countMatch !== null, 'SSR has count <p> element');
-    if (countMatch) {
-      assert(countMatch[1] === '10', 'SSR count is 10 (got: ' + countMatch[1] + ')');
-    }
-  }
-
-  // 3. Post-hydration assertions
-  console.log('\n=== POST-HYDRATION ASSERTIONS ===\n');
-  {
-    setupFromHtml(rawHtml);
-    runClientBundle();
-    await wait(300);
-    const d = globalThis.document;
-    const NavLink = globalThis.__NavLink;
-
-    // NavLink function exists
-    assert(typeof NavLink === 'function', 'typeof NavLink === "function"');
-
-    // Count after hydration (still 10, no click yet)
-    const countPs = Array.from(d.querySelectorAll('main > p'));
-    const countText = countPs.map(p => p.textContent.trim()).find(t => /^\d+$/.test(t));
-    assert(countText === '10', 'count is 10 after hydration (got: ' + countText + ')');
-
-    // SSR elements claimed correctly
-    const nav = d.querySelector('nav');
-    assert(nav !== null, '<nav> exists after hydration');
-    assert(nav.textContent.includes('Home'), 'nav has Home link after hydration');
-
-    const links = d.querySelectorAll('nav a');
-    assert(links.length >= 3, 'nav has 3+ <a> links after hydration');
-    assert(links[0].getAttribute('href') === '/', 'first link href="/"');
-    assert(links[1].getAttribute('href') === '/about', 'second link href="/about"');
-    assert(links[2].getAttribute('href') === '/blog', 'third link href="/blog"');
-
-    // Page content hydrated correctly
-    const h1 = d.querySelector('h1');
-    assert(h1 !== null, '<h1> exists after hydration');
-    const main = d.querySelector('main');
-    assert(main !== null, '<main> exists after hydration');
-    const btn = d.querySelector('button');
-    assert(btn !== null, 'button exists after hydration');
-
-    // Direct NavLink call in create mode (simulating SPA)
-    if (typeof NavLink === 'function') {
-      const walker = { nextElement(tag) { return document.createElement(tag || 'div'); }, subWalker() { return this; }, done() { return true; } };
-      const result = NavLink({ href: '/test', children: 'TestLabel' }, new Map(), walker);
-      assert(typeof result === 'object', 'NavLink() returns object');
-      assert(result.nodeType === 1, 'NavLink() returns Element (nodeType=1)');
-      assert(result.tagName === 'A', 'NavLink() returns <a> element');
-      assert(result.textContent === 'TestLabel', 'NavLink() <a> has correct text');
-      assert(result.getAttribute('href') === '/test', 'NavLink() <a> has correct href');
-    }
-
-    // Direct Link call in create mode
-    const Link = globalThis.__Link;
-    assert(typeof Link === 'function', 'typeof Link === "function"');
-    if (typeof Link === 'function') {
-      const walker = { nextElement(tag) { return document.createElement(tag || 'div'); }, subWalker() { return this; }, done() { return true; } };
-      const result = Link({ href: '/link-test', children: 'LinkLabel' }, new Map(), walker);
-      assert(typeof result === 'object', 'Link() returns object');
-      assert(result.nodeType === 1, 'Link() returns Element (nodeType=1)');
-      assert(result.tagName === 'A', 'Link() returns <a> element');
-      assert(result.textContent === 'LinkLabel', 'Link() <a> has correct text');
-      assert(result.getAttribute('href') === '/link-test', 'Link() <a> has correct href');
-    }
-  }
-
-  // 4. Reactivity
-  console.log('\n=== REACTIVITY ===\n');
-  {
-    setupFromHtml(rawHtml);
-    runClientBundle();
-    await wait(200);
-    const d = globalThis.document;
-
-    const btn = d.querySelector('button');
-    assert(btn !== null, 'button exists');
-
-    // Count starts at 10 after hydration
-    const beforePs = Array.from(d.querySelectorAll('main > p'));
-    const beforeCount = beforePs.map(p => p.textContent.trim()).find(t => /^\d+$/.test(t));
-    assert(beforeCount === '10', 'initial count is 10 before click (got: ' + beforeCount + ')');
-
-    if (btn) {
-      const evt = new globalThis.Event('click', { bubbles: true });
-      Object.defineProperty(evt, 'button', { value: 0 });
-      btn.dispatchEvent(evt);
-      await wait(100);
-    }
-
-    const afterPs = Array.from(d.querySelectorAll('main > p'));
-    const afterCount = afterPs.map(p => p.textContent.trim()).find(t => /^\d+$/.test(t));
-    assert(afterCount === '11',
-      'count updated to 11 after click (got: ' + afterCount + ')');
-  }
-
-  // 5. SPA navigation
-  console.log('\n=== SPA NAVIGATION ===\n');
-  {
-    setupFromHtml(rawHtml);
-    runClientBundle();
-    await wait(200);
-    const d = globalThis.document;
-
-    const aboutLink = d.querySelector('nav a[href="/about"]');
-    assert(aboutLink !== null, 'About link exists before SPA');
-
-    if (aboutLink) {
-      const evt = new globalThis.Event('click', { bubbles: true });
-      Object.defineProperty(evt, 'button', { value: 0 });
-      aboutLink.dispatchEvent(evt);
-      await wait(300);
-    }
-
-    // URL changed
-    const path = globalThis.location.pathname;
-    assert(path === '/about' || path.endsWith('/about'), 'URL changed to /about, got: ' + path);
-
-    // Nav still exists with fresh links
-    const nav = d.querySelector('nav');
-    assert(nav !== null, 'nav exists after SPA navigation');
-
-    const navLinks = nav ? Array.from(nav.querySelectorAll('a')) : [];
-    assert(navLinks.length >= 3, 'nav has 3+ links after SPA (got: ' + navLinks.length + ')');
-    assert(navLinks.some(l => l.textContent.includes('Home')), 'nav has Home link after SPA');
-    assert(navLinks.some(l => l.textContent.includes('About')), 'nav has About link after SPA');
-    assert(navLinks.some(l => l.textContent.includes('Blog')), 'nav has Blog link after SPA');
-
-    navLinks.forEach((link, i) => {
-      assert(link.getAttribute('href') !== null, 'link ' + i + ' has href');
-      assert(link.textContent.trim().length > 0, 'link ' + i + ' has text');
+    const rootChildren = await page.evaluate(() => {
+      const root = document.getElementById('root');
+      return root ? root.children.length : 0;
     });
+    assert(rootChildren >= 3, `#root has ${rootChildren} children`);
+
+    const navText = await page.evaluate(() => {
+      const nav = document.querySelector('nav');
+      return nav ? nav.textContent.replace(/\s+/g, ' ').trim() : '';
+    });
+    assert(navText.includes('Home') && navText.includes('About') && navText.includes('Blog'),
+      'nav links: ' + navText);
+
+    const h1 = await page.evaluate(() => {
+      const el = document.querySelector('h1');
+      return el ? el.textContent.trim() : '';
+    });
+    assert(h1 === 'Welcome to Vesk', 'h1: ' + h1);
+
+    const paragraphs = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('main p')).map(p => p.textContent.trim());
+    });
+    assert(paragraphs.some(p => p === '10'), 'count shows 10');
+    assert(paragraphs.some(p => p.includes('Hurray')), 'shows Hurray message');
+
+    const hasButton = await page.evaluate(() => !!document.querySelector('button'));
+    assert(hasButton, 'button exists');
+
+    const footerText = await page.evaluate(() => {
+      const f = document.querySelector('footer');
+      return f ? f.textContent : '';
+    });
+    assert(footerText.includes('Powered by Vesk'), 'footer: ' + footerText.trim());
+
+    await page.close();
   }
 
-  const total = passed + failed;
-  console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${total} total \u2550\u2550\u2550`);
+  // ── Test 2: Reactivity (click button, count updates) ───
+  console.log('\n=== TEST 2: Reactivity ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    // Initial count should be 10
+    const before = await page.evaluate(() => {
+      const ps = Array.from(document.querySelectorAll('main p'));
+      return ps.map(p => p.textContent.trim());
+    });
+    assert(before.some(p => p === '10'), 'initial count is 10');
+
+    await page.click('button');
+    await new Promise(r => setTimeout(r, 200));
+
+    const after = await page.evaluate(() => {
+      const ps = Array.from(document.querySelectorAll('main p'));
+      return ps.map(p => p.textContent.trim());
+    });
+    assert(after.some(p => p === '11'), 'count updated to 11 after first click');
+
+    // Click 4 more times to reach 15
+    for (let i = 0; i < 4; i++) {
+      await page.click('button');
+      await new Promise(r => setTimeout(r, 50));
+    }
+
+    const afterFive = await page.evaluate(() => {
+      const ps = Array.from(document.querySelectorAll('main p'));
+      return ps.map(p => p.textContent.trim());
+    });
+    assert(afterFive.some(p => p === '15'), 'count updated to 15 after 5 clicks');
+
+    // At count >= 15, Throw should show "OK 15" instead of error
+    const hasOk = await page.evaluate(() => {
+      return document.body.textContent.includes('OK ');
+    });
+    assert(hasOk, 'OK content shown at count >= 15');
+
+    await page.close();
+  }
+
+  // ── Test 3: Error boundaries ─────────────────
+  console.log('\n=== TEST 3: Error boundaries ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    const errorsAt = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('.error')).map(e => e.textContent);
+    });
+    assert(errorsAt.some(t => t.includes('Boom!')), 'Appx shows Error: Boom!');
+    assert(errorsAt.some(t => t.includes('Insufficient')), 'Appxx shows Insufficient error');
+
+    await page.close();
+  }
+
+  // ── Test 4: SPA navigation ─────────────────────────────
+  console.log('\n=== TEST 4: SPA navigation ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    await page.click('a[href="/about"]');
+    await new Promise(r => setTimeout(r, 300));
+
+    const url = page.url();
+    assert(url.includes('/about'), 'URL changed to /about');
+
+    const h1 = await page.evaluate(() => {
+      const el = document.querySelector('h1');
+      return el ? el.textContent.trim() : '';
+    });
+    assert(h1 === 'About Vesk', 'h1: ' + h1);
+
+    const hasNav = await page.evaluate(() => !!document.querySelector('nav'));
+    assert(hasNav, 'nav still exists after navigation');
+    await page.close();
+  }
+
+  // ── Test 5: Back navigation ───────────────────────────
+  console.log('\n=== TEST 5: Back navigation ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    await page.click('a[href="/about"]');
+    await new Promise(r => setTimeout(r, 200));
+
+    await page.goBack();
+    await new Promise(r => setTimeout(r, 300));
+
+    const url = page.url();
+    assert(url === BASE + '/' || url === BASE, 'URL back to root');
+
+    const h1 = await page.evaluate(() => {
+      const el = document.querySelector('h1');
+      return el ? el.textContent.trim() : '';
+    });
+    assert(h1 === 'Welcome to Vesk', 'h1 back to Welcome');
+    await page.close();
+  }
+
+  // ── Test 6: Dynamic route ─────────────────────────────
+  console.log('\n=== TEST 6: Dynamic route ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE + '/blog/hello-world', { waitUntil: 'networkidle0' });
+
+    const url = page.url();
+    assert(url.includes('/blog/hello-world'), 'URL at /blog/hello-world');
+
+    const h1 = await page.evaluate(() => {
+      const el = document.querySelector('h1');
+      return el ? el.textContent.trim() : '';
+    });
+    assert(h1.includes('Post:'), 'h1: ' + h1);
+
+    // Should show the slug in the content
+    const bodyText = await page.evaluate(() => document.body.textContent);
+    console.log('  [debug] body excerpt:', bodyText.trim().substring(0, 300).replace(/\s+/g, ' '));
+    assert(bodyText.includes('hello-world') || bodyText.includes('/hello-world'), 'slug shown in body');
+    await page.close();
+  }
+
+  // ── Test 7: No JS errors through interactions ─────────
+  console.log('\n=== TEST 7: No JS errors ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    await page.click('button');
+    await new Promise(r => setTimeout(r, 100));
+    await page.click('a[href="/about"]');
+    await new Promise(r => setTimeout(r, 200));
+    await page.goBack();
+    await new Promise(r => setTimeout(r, 200));
+
+    assert(errors.length === 0, 'Zero JS errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    await page.close();
+  }
+
+  // ── Results ────────────────────────────────────────
+  console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);
-  console.log('All tests passed!');
+  console.log('All hydration tests passed!');
+
+  await browser.close();
 }
 
 main().catch(e => {
-  process.stderr.write('Test error: ' + (e && e.stack || e) + '\n');
+  console.error('Test error:', e);
   process.exit(1);
 });

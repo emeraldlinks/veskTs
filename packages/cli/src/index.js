@@ -761,11 +761,29 @@ if (cmd === 'dev') {
 
 		// ── SSR route matching + layout composition ───────────────
 		const match = matchUrl(routeTree, url.pathname);
-		if (!match) {
-			res.writeHead(404, { 'Content-Type': 'text/html' });
-			res.end(`<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
-			return;
+
+	function extractCompName(src) {
+		const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
+		return m ? m[1] : null;
+	}
+	if (!match) {
+		const rootNode = routeTree.find(n => n.fullPath === '/');
+		let notFoundHtml = null;
+		if (rootNode && rootNode.notFound) {
+			const nfPath = resolvePath(appDirPath, rootNode.sourceDir, 'not-found.vsk');
+			if (fsExists(nfPath)) {
+				try {
+					const { renderFullPage } = await import('../../compiler/src/server-codegen.js');
+					const nfSrc = readFileSync(nfPath, 'utf-8');
+					const nfCompName = extractCompName(nfSrc) || rootNode.notFound;
+					notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true });
+				} catch {}
+			}
 		}
+		res.writeHead(404, { 'Content-Type': 'text/html' });
+		res.end(notFoundHtml || `<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
+		return;
+	}
 
 		// Clean chain: only keep nodes that correspond to actual URL segments.
 		const urlParts = url.pathname.split('/').filter(Boolean);
@@ -791,11 +809,6 @@ if (cmd === 'dev') {
 			const chain = cleanChain;
 			let body = '';
 			let head = '';
-
-			function extractCompName(src) {
-				const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-				return m ? m[1] : null;
-			}
 
 			for (let i = chain.length - 1; i >= 0; i--) {
 				const node = chain[i];
@@ -922,8 +935,28 @@ if (cmd === 'dev') {
 				res.writeHead(e.status || 302, { Location: e.url });
 				res.end(`<!DOCTYPE html><html><body><a href="${e.url}">Redirect</a></body></html>`);
 			} else if (e.name === 'NotFoundError') {
+				let notFoundHtml = null;
+				if (match && match.nodes) {
+					for (let i = match.nodes.length - 1; i >= 0; i--) {
+						const node = match.nodes[i];
+						if (node.notFound) {
+							const nfPath = resolvePath(appDirPath, node.sourceDir, 'not-found.vsk');
+							if (fsExists(nfPath)) {
+								try {
+									const { renderFullPage } = await import('../../compiler/src/server-codegen.js');
+									const nfSrc = readFileSync(nfPath, 'utf-8');
+									const nfCompName = extractCompName(nfSrc) || node.notFound;
+									const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true });
+									notFoundHtml = html.replace('</body>',
+										`\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
+								} catch {}
+							}
+							break;
+						}
+					}
+				}
 				res.writeHead(404, { 'Content-Type': 'text/html' });
-				res.end(`<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>`);
+				res.end(notFoundHtml || `<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>`);
 			} else {
 				res.writeHead(500, { 'Content-Type': 'text/html' });
 				res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}\n${e.stack}</pre></body></html>`);

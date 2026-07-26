@@ -10,6 +10,7 @@ export function compileClient(source: string, componentName?: string | null, opt
 export const compile: typeof compileClient;
 export function isStaticIR(body: any[]): boolean;
 export function scanRoutes(appDir: string, options?: { layoutCompName?: string; pageCompName?: string }): any[];
+export function scanComponents(componentsDir: string): Map<string, string>;
 export function collectSources(tree: any[]): Map<string, string>;
 export function generateRouteManifest(tree: any[], options?: { importPrefix?: string }): string;
 export function matchUrl(tree: any[], pathname: string): { nodes: any[]; params: Record<string, string> } | null;

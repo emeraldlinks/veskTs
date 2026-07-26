@@ -51,6 +51,7 @@ export function extractMiddleware(sourcePath) {
  * @property {string|null} layout - Component name for layout.vsk
  * @property {string|null} loading - Component name for loading.vsk
  * @property {string|null} error - Component name for error.vsk
+ * @property {string|null} notFound - Component name for not-found.vsk
  * @property {boolean} hasMiddleware - Route has middleware.ts in its subtree
  * @property {RouteNode[]} children - Child route nodes
  * @property {string} sourceDir - Directory containing source files
@@ -126,8 +127,8 @@ function scanDirectory(rootDir, dir, parentPath, options) {
 
 	// Sort: page/layout first, then alphabetical
 	entries.sort((a, b) => {
-		const aIsSpecial = a === 'page.vsk' || a === 'layout.vsk';
-		const bIsSpecial = b === 'page.vsk' || b === 'layout.vsk';
+		const aIsSpecial = a === 'page.vsk' || a === 'layout.vsk' || a === 'not-found.vsk';
+		const bIsSpecial = b === 'page.vsk' || b === 'layout.vsk' || b === 'not-found.vsk';
 		if (aIsSpecial && !bIsSpecial) return -1;
 		if (!aIsSpecial && bIsSpecial) return 1;
 		return a.localeCompare(b);
@@ -138,6 +139,7 @@ function scanDirectory(rootDir, dir, parentPath, options) {
 	let hasPage = false;
 	let hasLoading = false;
 	let hasError = false;
+	let hasNotFound = false;
 	let hasMiddleware = false;
 	let compName = options.compName || '';
 
@@ -146,6 +148,7 @@ function scanDirectory(rootDir, dir, parentPath, options) {
 		if (entry === 'page.vsk') { hasPage = true; continue; }
 		if (entry === 'loading.vsk') { hasLoading = true; continue; }
 		if (entry === 'error.vsk') { hasError = true; continue; }
+		if (entry === 'not-found.vsk') { hasNotFound = true; continue; }
 		if (entry === 'middleware.ts') { hasMiddleware = true; continue; }
 	}
 
@@ -189,6 +192,7 @@ function scanDirectory(rootDir, dir, parentPath, options) {
 		layout: hasLayout ? extractComponentName(dir, 'layout', rootDir) : null,
 		loading: hasLoading ? extractComponentName(dir, 'loading', rootDir) : null,
 		error: hasError ? extractComponentName(dir, 'error', rootDir) : null,
+		notFound: hasNotFound ? extractComponentName(dir, 'not-found', rootDir) : null,
 		hasMiddleware,
 		children: [],
 		sourceDir: dir,
@@ -235,6 +239,7 @@ function extractComponentName(dir, type, rootDir) {
 	if (type === 'layout') return 'Layout_' + capitalized;
 	if (type === 'loading') return 'Loading_' + capitalized;
 	if (type === 'error') return 'Error_' + capitalized;
+	if (type === 'not-found') return 'NotFound_' + capitalized;
 	return type + '_' + capitalized;
 }
 
@@ -248,12 +253,13 @@ export function collectSources(tree) {
 	let mwIdx = 0;
 	function walk(nodes) {
 		for (const node of nodes) {
-			if (node.page) map.set(node.page, join(node.sourceDir, 'page.vsk'));
-			if (node.layout) map.set(node.layout, join(node.sourceDir, 'layout.vsk'));
-			if (node.loading) map.set(node.loading, join(node.sourceDir, 'loading.vsk'));
-			if (node.error) map.set(node.error, join(node.sourceDir, 'error.vsk'));
+		if (node.page) map.set(node.page, join(node.sourceDir, 'page.vsk'));
+		if (node.layout) map.set(node.layout, join(node.sourceDir, 'layout.vsk'));
+		if (node.loading) map.set(node.loading, join(node.sourceDir, 'loading.vsk'));
+		if (node.error) map.set(node.error, join(node.sourceDir, 'error.vsk'));
+		if (node.notFound) map.set(node.notFound, join(node.sourceDir, 'not-found.vsk'));
 
-			walk(node.children);
+		walk(node.children);
 		}
 	}
 	walk(tree);
@@ -276,6 +282,7 @@ export function generateRouteManifest(tree, options = {}) {
 		if (node.layout) parts.push(`layout: ${node.layout}`);
 		if (node.loading) parts.push(`loading: ${node.loading}`);
 		if (node.error) parts.push(`error: ${node.error}`);
+		if (node.notFound) parts.push(`notFound: ${node.notFound}`);
 		if (node.children.length > 0) {
 			const childCodes = node.children.map(c => genNode(c));
 			parts.push(`children: [\n${childCodes.map(c => '\t\t' + c).join(',\n')}\n\t]`);
@@ -305,11 +312,12 @@ function flattenSources(tree) {
 	const map = new Map();
 	function walk(nodes) {
 		for (const node of nodes) {
-			if (node.page) map.set(node.page, node.sourceDir + '/page.vsk');
-			if (node.layout) map.set(node.layout, node.sourceDir + '/layout.vsk');
-			if (node.loading) map.set(node.loading, node.sourceDir + '/loading.vsk');
-			if (node.error) map.set(node.error, node.sourceDir + '/error.vsk');
-			walk(node.children);
+		if (node.page) map.set(node.page, node.sourceDir + '/page.vsk');
+		if (node.layout) map.set(node.layout, node.sourceDir + '/layout.vsk');
+		if (node.loading) map.set(node.loading, node.sourceDir + '/loading.vsk');
+		if (node.error) map.set(node.error, node.sourceDir + '/error.vsk');
+		if (node.notFound) map.set(node.notFound, node.sourceDir + '/not-found.vsk');
+		walk(node.children);
 		}
 	}
 	walk(tree);
