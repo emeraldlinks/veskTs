@@ -15,7 +15,6 @@
     "@vesk/runtime": "file:../packages/runtime"
   },
   "devDependencies": {
-    "@tailwindcss/vite": "^4.3.3",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.8.0"
   }

@@ -180,7 +180,7 @@ if (isRouter) {
 		function collectMW(nodes) {
 			for (const node of nodes) {
 				if (node.hasMiddleware) {
-					const mwPath = resolve(appDir, node.sourceDir, 'middleware.vsk');
+					const mwPath = resolve(appDir, node.sourceDir, 'middleware.ts');
 					if (existsSync(mwPath)) middlewareFiles.push({ path: mwPath, node });
 				}
 				collectMW(node.children || []);

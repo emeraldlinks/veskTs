@@ -51,7 +51,7 @@ export function extractMiddleware(sourcePath) {
  * @property {string|null} layout - Component name for layout.vsk
  * @property {string|null} loading - Component name for loading.vsk
  * @property {string|null} error - Component name for error.vsk
- * @property {boolean} hasMiddleware - Route has middleware.vsk in its subtree
+ * @property {boolean} hasMiddleware - Route has middleware.ts in its subtree
  * @property {RouteNode[]} children - Child route nodes
  * @property {string} sourceDir - Directory containing source files
  * @property {number} segmentCount - Number of URL segments this node consumes
@@ -146,7 +146,7 @@ function scanDirectory(rootDir, dir, parentPath, options) {
 		if (entry === 'page.vsk') { hasPage = true; continue; }
 		if (entry === 'loading.vsk') { hasLoading = true; continue; }
 		if (entry === 'error.vsk') { hasError = true; continue; }
-		if (entry === 'middleware.vsk') { hasMiddleware = true; continue; }
+		if (entry === 'middleware.ts') { hasMiddleware = true; continue; }
 	}
 
 	// Determine route path for this directory
@@ -252,9 +252,7 @@ export function collectSources(tree) {
 			if (node.layout) map.set(node.layout, join(node.sourceDir, 'layout.vsk'));
 			if (node.loading) map.set(node.loading, join(node.sourceDir, 'loading.vsk'));
 			if (node.error) map.set(node.error, join(node.sourceDir, 'error.vsk'));
-			if (node.hasMiddleware) {
-				map.set('__mw_' + mwIdx++, join(node.sourceDir, 'middleware.vsk'));
-			}
+
 			walk(node.children);
 		}
 	}

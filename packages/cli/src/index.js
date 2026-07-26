@@ -188,8 +188,8 @@ if (cmd === 'init') {
 		'',
 	].join('\n'));
 
-	// ── app/middleware.vsk — Root middleware with onion model ──
-	writeFileSync(join(appDir, 'middleware.vsk'), [
+	// ── app/middleware.ts — Root middleware with onion model ──
+	writeFileSync(join(appDir, 'middleware.ts'), [
 		`// Vesk Middleware — onion model (ctx, next)`,
 		`//`,
 		`// ctx = { request, params, url, locals, cookies }`,
@@ -566,7 +566,7 @@ if (cmd === 'dev') {
 
 			for (const [compName, sourcePath] of sources) {
 				if (seen.has(sourcePath)) continue;
-				if (sourcePath.endsWith('middleware.vsk')) continue;
+				if (sourcePath.endsWith('middleware.ts')) continue;
 				seen.add(sourcePath);
 				const src = readFileSync(sourcePath, 'utf-8');
 

@@ -53,7 +53,7 @@ export function collectMiddlewareChain(routeTree, url, appDir) {
 
 	function collectForNode(node) {
 		if (node.hasMiddleware) {
-			const mwPath = resolve(appDir, node.sourceDir, 'middleware.vsk');
+			const mwPath = resolve(appDir, node.sourceDir, 'middleware.ts');
 			if (existsSync(mwPath)) {
 				chain.push({ sourcePath: mwPath, node });
 			}
@@ -81,7 +81,7 @@ export function collectMiddlewareChain(routeTree, url, appDir) {
 
 /**
  * Load and prepare a middleware function from a source file.
- * Supports .vsk (via extractMiddleware) and .js/.ts (direct import).
+ * Supports .js/.ts (direct import).
  */
 export async function loadMiddleware(sourcePath) {
 	if (sourcePath.endsWith('.vsk')) {
