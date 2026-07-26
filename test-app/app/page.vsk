@@ -1,6 +1,7 @@
 import {track} from "@vesk/runtime"
 
 component Home (){
+	<Head> <title> VeskTS test app </title></Head>
   const &[count] = track(10)
   
  
