@@ -36,8 +36,9 @@ function expect(actual) {
   };
 }
 
+let _tmpCounter = 0;
 function tmpDir() {
-  const dir = resolve(tmpdir(), 'vesk-test-components-' + Date.now());
+  const dir = resolve(tmpdir(), 'vesk-test-components-' + Date.now() + '-' + (_tmpCounter++));
   mkdirSync(dir, { recursive: true });
   return dir;
 }
