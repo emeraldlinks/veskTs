@@ -1,0 +1,23 @@
+{
+  "name": "@vesk/lsp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Vesk Language Server Protocol server for .vsk files",
+  "main": "./dist/server.js",
+  "bin": {
+    "vesk-lsp": "./dist/server.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vesk/compiler": "*",
+    "vscode-languageserver": "^9.0.0",
+    "vscode-languageserver-textdocument": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.8.0"
+  }
+}

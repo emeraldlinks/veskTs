@@ -13,7 +13,8 @@
     "packages/cli",
     "packages/compiler",
     "packages/plugin-tailwind",
-    "packages/runtime"
+    "packages/runtime",
+    "packages/lsp"
   ],
   "scripts": {
     "test": "node scripts/test.js",

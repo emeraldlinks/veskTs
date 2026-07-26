@@ -1,0 +1,337 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Vesk",
+  "scopeName": "source.vsk",
+  "fileTypes": ["vsk"],
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#component-declaration" },
+    { "include": "#control-flow" },
+    { "include": "#imports" },
+    { "include": "#style-block" },
+    { "include": "#head-block" },
+    { "include": "#server-client-blocks" },
+    { "include": "#jsx-tags" },
+    { "include": "#template-expressions" },
+    { "include": "#reactive-declarations" },
+    { "include": "#strings" },
+    { "include": "#numbers" },
+    { "include": "#keywords" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.vsk",
+          "begin": "//",
+          "end": "$",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.vsk" } }
+        },
+        {
+          "name": "comment.block.vsk",
+          "begin": "/\\*",
+          "end": "\\*/",
+          "beginCaptures": { "0": { "name": "punctuation.definition.comment.vsk" } },
+          "endCaptures": { "0": { "name": "punctuation.definition.comment.vsk" } }
+        }
+      ]
+    },
+    "component-declaration": {
+      "patterns": [
+        {
+          "name": "meta.component.vsk",
+          "begin": "(?:(export)\\s+)?(?:(default)\\s+)?\\b(component)\\b",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.export.vsk" },
+            "2": { "name": "keyword.control.default.vsk" },
+            "3": { "name": "keyword.control.component.vsk" }
+          },
+          "end": "(?<=\\})",
+          "endCaptures": { "0": { "name": "punctuation.section.block.end.vsk" } },
+          "patterns": [
+            {
+              "name": "entity.name.function.component.vsk",
+              "match": "\\b([A-Za-z_$][\\w$]*)\\s*(?=\\(|\\{|$)",
+              "captures": {
+                "1": { "name": "entity.name.function.vsk" }
+              }
+            },
+            {
+              "name": "meta.component.params.vsk",
+              "begin": "\\(",
+              "beginCaptures": { "0": { "name": "punctuation.definition.parameters.begin.vsk" } },
+              "end": "\\)",
+              "endCaptures": { "0": { "name": "punctuation.definition.parameters.end.vsk" } },
+              "patterns": [
+                { "include": "#type-annotations" },
+                { "include": "#strings" },
+                { "include": "#comments" }
+              ]
+            },
+            {
+              "name": "meta.component.flags.vsk",
+              "match": "\\b(client|async)\\b",
+              "captures": { "0": { "name": "storage.modifier.vsk" } }
+            },
+            {
+              "name": "meta.component.body.vsk",
+              "begin": "\\{",
+              "beginCaptures": { "0": { "name": "punctuation.section.block.begin.vsk" } },
+              "end": "\\}",
+              "endCaptures": { "0": { "name": "punctuation.section.block.end.vsk" } },
+              "patterns": [
+                { "include": "source.vsk" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "control-flow": {
+      "patterns": [
+        {
+          "name": "keyword.control.vsk",
+          "match": "\\b(if|else|for|while|do|switch|case|break|continue|return|try|catch|finally|throw|async|await)\\b"
+        },
+        {
+          "name": "storage.type.vsk",
+          "match": "\\b(let|const|var|function|class|import|export|default|from|of|in)\\b"
+        }
+      ]
+    },
+    "imports": {
+      "name": "meta.import.vsk",
+      "begin": "\\b(import)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.import.vsk" } },
+      "end": "(?<=\\n|;)",
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#comments" },
+        { "match": "\\b(from)\\b", "captures": { "0": { "name": "keyword.control.from.vsk" } } }
+      ]
+    },
+    "style-block": {
+      "name": "meta.embedded.block.css.vsk",
+      "begin": "<style>",
+      "beginCaptures": { "0": { "name": "entity.name.tag.style.vsk" } },
+      "end": "</style>",
+      "endCaptures": { "0": { "name": "entity.name.tag.style.vsk" } },
+      "contentName": "source.css",
+      "patterns": [
+        { "include": "source.css" }
+      ]
+    },
+    "head-block": {
+      "name": "meta.head.vsk",
+      "begin": "(<)([Hh][Ee][Aa][Dd])(>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.vsk" },
+        "2": { "name": "entity.name.tag.head.vsk" },
+        "3": { "name": "punctuation.definition.tag.end.vsk" }
+      },
+      "end": "(</)([Hh][Ee][Aa][Dd])(>)",
+      "endCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.vsk" },
+        "2": { "name": "entity.name.tag.head.vsk" },
+        "3": { "name": "punctuation.definition.tag.end.vsk" }
+      },
+      "patterns": [
+        { "include": "#jsx-tags" },
+        { "include": "#template-expressions" },
+        { "include": "#strings" }
+      ]
+    },
+    "server-client-blocks": {
+      "patterns": [
+        {
+          "name": "meta.block.server.vsk",
+          "begin": "\\{#server\\}",
+          "beginCaptures": { "0": { "name": "keyword.control.server-block.vsk" } },
+          "end": "\\{\\/server\\}",
+          "endCaptures": { "0": { "name": "keyword.control.server-block.vsk" } },
+          "patterns": [{ "include": "source.vsk" }]
+        },
+        {
+          "name": "meta.block.client.vsk",
+          "begin": "\\{#client\\}",
+          "beginCaptures": { "0": { "name": "keyword.control.client-block.vsk" } },
+          "end": "\\{\\/client\\}",
+          "endCaptures": { "0": { "name": "keyword.control.client-block.vsk" } },
+          "patterns": [{ "include": "source.vsk" }]
+        }
+      ]
+    },
+    "jsx-tags": {
+      "patterns": [
+        { "include": "#jsx-tag-open" },
+        { "include": "#jsx-tag-close" },
+        { "include": "#jsx-tag-selfclose" },
+        { "include": "#jsx-comments" }
+      ]
+    },
+    "jsx-tag-open": {
+      "name": "meta.tag.jsx.vsk",
+      "begin": "(<)([A-Za-z_$][\\w$\\.\\-]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.vsk" },
+        "2": { "name": "entity.name.tag.vsk" }
+      },
+      "end": "(>)",
+      "endCaptures": { "1": { "name": "punctuation.definition.tag.end.vsk" } },
+      "patterns": [
+        { "include": "#jsx-attributes" },
+        { "include": "#template-expressions" },
+        { "include": "#strings" }
+      ]
+    },
+    "jsx-tag-close": {
+      "name": "meta.tag.jsx.vsk",
+      "begin": "(</)([A-Za-z_$][\\w$\\.\\-]*)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.vsk" },
+        "2": { "name": "entity.name.tag.vsk" }
+      },
+      "end": "(>)",
+      "endCaptures": { "1": { "name": "punctuation.definition.tag.end.vsk" } }
+    },
+    "jsx-tag-selfclose": {
+      "name": "meta.tag.jsx.vsk",
+      "begin": "(<)([A-Za-z_$][\\w$\\.\\-]*)(?=\\s+[^>]*/>)",
+      "beginCaptures": {
+        "1": { "name": "punctuation.definition.tag.begin.vsk" },
+        "2": { "name": "entity.name.tag.vsk" }
+      },
+      "end": "(/>)",
+      "endCaptures": { "1": { "name": "punctuation.definition.tag.end.vsk" } },
+      "patterns": [
+        { "include": "#jsx-attributes" },
+        { "include": "#template-expressions" },
+        { "include": "#strings" }
+      ]
+    },
+    "jsx-comments": {
+      "name": "comment.block.jsx.vsk",
+      "begin": "\\{!--",
+      "end": "--\\}"
+    },
+    "jsx-attributes": {
+      "patterns": [
+        {
+          "name": "entity.other.attribute-name.vsk",
+          "match": "\\b([a-zA-Z_$][\\w$]*)\\s*(?==)"
+        },
+        {
+          "name": "entity.other.attribute-name.vsk",
+          "match": "\\b([a-zA-Z_$][\\w$]*)\\b(?![=(])"
+        },
+        {
+          "name": "keyword.operator.event.vsk",
+          "match": "\\b(on[A-Z][a-zA-Z]*)\\s*="
+        }
+      ]
+    },
+    "template-expressions": {
+      "name": "meta.expression.vsk",
+      "begin": "\\{",
+      "beginCaptures": { "0": { "name": "punctuation.definition.template-expression.begin.vsk" } },
+      "end": "\\}",
+      "endCaptures": { "0": { "name": "punctuation.definition.template-expression.end.vsk" } },
+      "patterns": [
+        { "include": "#strings" },
+        { "include": "#numbers" },
+        { "include": "#comments" }
+      ]
+    },
+    "reactive-declarations": {
+      "name": "meta.reactive.vsk",
+      "begin": "\\b(let|const)\\s*(&)",
+      "beginCaptures": {
+        "1": { "name": "storage.type.vsk" },
+        "2": { "name": "keyword.operator.reactive.vsk" }
+      },
+      "end": "(?=\\n|;)",
+      "patterns": [
+        {
+          "name": "variable.other.readwrite.reactive.vsk",
+          "match": "\\b([a-zA-Z_$][\\w$]*)\\b"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.double.vsk",
+          "begin": "\"",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.vsk" } },
+          "end": "\"",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.vsk" } },
+          "patterns": [
+            { "match": "\\\\[\\s\\S]", "name": "constant.character.escape.vsk" }
+          ]
+        },
+        {
+          "name": "string.quoted.single.vsk",
+          "begin": "'",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.vsk" } },
+          "end": "'",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.vsk" } },
+          "patterns": [
+            { "match": "\\\\[\\s\\S]", "name": "constant.character.escape.vsk" }
+          ]
+        },
+        {
+          "name": "string.quoted.template.vsk",
+          "begin": "`",
+          "beginCaptures": { "0": { "name": "punctuation.definition.string.begin.vsk" } },
+          "end": "`",
+          "endCaptures": { "0": { "name": "punctuation.definition.string.end.vsk" } },
+          "patterns": [
+            { "match": "\\\\[\\s\\S]", "name": "constant.character.escape.vsk" },
+            { "include": "#template-expressions" }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "name": "constant.numeric.vsk",
+      "match": "\\b(\\d+\\.?\\d*|0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+)\\b"
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "name": "keyword.operator.vsk",
+          "match": "\\b(new|typeof|instanceof|void|delete|in|of)\\b"
+        },
+        {
+          "name": "keyword.operator.arithmetic.vsk",
+          "match": "[+\\-*/%]=?|\\b\\+\\+|--\\b"
+        },
+        {
+          "name": "keyword.operator.comparison.vsk",
+          "match": "===?|!==?|<=?|>=?|&&?|\\|\\|?"
+        },
+        {
+          "name": "variable.language.vsk",
+          "match": "\\b(this|super|arguments|null|undefined|true|false)\\b"
+        },
+        {
+          "name": "storage.type.annotation.vsk",
+          "match": "\\b(string|number|boolean|any|void|never|unknown|null|undefined|object|symbol|bigint)\\b"
+        }
+      ]
+    },
+    "type-annotations": {
+      "name": "meta.type.annotation.vsk",
+      "begin": ":",
+      "beginCaptures": { "0": { "name": "punctuation.definition.type.annotation.vsk" } },
+      "end": "(?=[,\\)\\{\\}])",
+      "patterns": [
+        { "include": "#keywords" },
+        { "include": "#strings" },
+        { "match": "\\|", "name": "keyword.operator.type.vsk" },
+        { "match": "&", "name": "keyword.operator.type.vsk" },
+        { "match": "\\b[A-Z][\\w$]*\\b", "name": "storage.type.generic.vsk" }
+      ]
+    }
+  }
+}

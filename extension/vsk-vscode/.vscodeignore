@@ -1,0 +1,9 @@
+.vscode/**
+src/**
+tsconfig.json
+*.map
+node_modules/.package-lock.json
+node_modules/.cache/**
+node_modules/undici-types/**
+node_modules/@types/**
+node_modules/typescript/**

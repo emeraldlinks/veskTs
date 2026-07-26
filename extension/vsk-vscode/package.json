@@ -1,0 +1,72 @@
+{
+  "name": "vesk-vscode",
+  "displayName": "Vesk Language Support",
+  "description": "Language support for .vsk component files",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MIT",
+  "publisher": "vesk",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Linters"
+  ],
+  "keywords": [
+    "vesk",
+    "vsk",
+    ".vsk"
+  ],
+  "activationEvents": [
+    "onLanguage:vsk"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "vsk",
+        "aliases": [
+          "Vesk",
+          "vsk"
+        ],
+        "extensions": [
+          ".vsk"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "vsk",
+        "scopeName": "source.vsk",
+        "path": "./syntaxes/vsk.tmLanguage.json"
+      }
+    ],
+    "commands": [
+      {
+        "command": "vesk.restartLsp",
+        "title": "Vesk: Restart Language Server"
+      }
+    ]
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "package": "vsce package"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.0",
+    "vscode-languageserver": "^9.0.0",
+    "vscode-languageserver-textdocument": "^1.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.8.0"
+  }
+}
