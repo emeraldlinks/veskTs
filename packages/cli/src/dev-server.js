@@ -219,6 +219,7 @@ export async function startDevServer(port, projectDir, config) {
 			clientBundle += `__router.__updateComponents = __updateComponents;\n`;
 			clientBundle += `globalThis.__vesk_router = __router;\n`;
 			clientBundle += `globalThis.__components = __components;\n`;
+			clientBundle += `globalThis.__vesk_hmr_eval = (code) => eval(code);\n`;
 			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
 			console.error(`vesk: client bundle: ${clientBundle.length} bytes`);
 		} catch (e) {
@@ -248,13 +249,38 @@ export async function startDevServer(port, projectDir, config) {
 	}
 	updateSourceMapping();
 
+	// ── CSS rebuild ────────────────────────────────────────────
+	async function rebuildTailwindCss() {
+		if (!rawCss) return;
+		try {
+			devUserCssContent = stripTailwindDirectives(rawCss);
+			devTailwindCssContent = rawCss;
+			for (const plugin of devPlugins) {
+				if (typeof plugin.onCSS === 'function') {
+					const result = await plugin.onCSS(rawCss, cssPath);
+					if (result !== null && typeof result === 'string') {
+						devTailwindCssContent = result;
+					}
+				}
+			}
+		} catch (e) {
+			console.error(`vesk: CSS rebuild error:`, e.message);
+		}
+	}
+
 	try {
 		let debounceTimer = null;
+		let cssDebounceTimer = null;
 		watch(appDirPath, { recursive: true }, (eventType, filename) => {
 			if (filename && filename.endsWith('.vsk')) {
 				if (debounceTimer) clearTimeout(debounceTimer);
 				debounceTimer = setTimeout(async () => {
+					const t0 = Date.now();
 					try {
+						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
+							globalThis.__vesk_broadcastHmr({ type: 'compiling' });
+						}
+
 						routeTree = scanRoutes(appDirPath);
 						updateSourceMapping();
 						const changedSource = filename.startsWith('/') ? filename : join(appDirPath, filename);
@@ -263,29 +289,72 @@ export async function startDevServer(port, projectDir, config) {
 						clientBundle = '';
 						await buildClientBundle();
 
-						if (changedComponents.length > 0 && typeof globalThis.__vesk_broadcastHmr === 'function') {
-							let fnSources;
-							const exists = existsSync(changedSource);
-							if (exists) {
-								try {
-									const src = readFileSync(changedSource, 'utf-8');
-									let compCode = compileClient(src, null, { forceClient: true });
-									compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
-									compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
-									compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');
-									compCode = compCode.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
-									if (compCode.trim()) fnSources = { _raw: compCode };
-								} catch (_) {}
+						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
+							if (changedComponents.length > 0) {
+								let fnSources;
+								let errorMessage = '';
+								const srcPath = existsSync(changedSource) ? changedSource : join(appDirPath, filename);
+								if (existsSync(srcPath)) {
+									try {
+										const src = readFileSync(srcPath, 'utf-8');
+										let compCode = compileClient(src, null, { forceClient: true });
+										compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
+										compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
+										compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');
+										compCode = compCode.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+										const actualName = extractCompName(src);
+										for (const cname of changedComponents) {
+											if (actualName && actualName !== cname) {
+												compCode += `\n__components[${JSON.stringify(cname)}] = __components[${JSON.stringify(actualName)}];\n`;
+											}
+										}
+										if (compCode.trim()) fnSources = { _raw: compCode };
+									} catch (e) {
+										errorMessage = e.message;
+										console.error(`vesk: HMR compile error for ${filename}:`, e.message);
+									}
+								} else {
+									console.error(`vesk: HMR source not found: ${srcPath}`);
+								}
+								if (fnSources) {
+									globalThis.__vesk_broadcastHmr({
+										type: 'update',
+										time: Date.now() - t0,
+										components: Object.fromEntries(changedComponents.map(name => [name, true])),
+										fnSources
+									});
+								} else if (errorMessage) {
+									globalThis.__vesk_broadcastHmr({
+										type: 'error',
+										message: errorMessage
+									});
+								} else {
+									globalThis.__vesk_broadcastHmr({ type: 'reload' });
+								}
+							} else {
+								globalThis.__vesk_broadcastHmr({ type: 'reload' });
 							}
-							globalThis.__vesk_broadcastHmr({
-								type: 'update',
-								components: Object.fromEntries(changedComponents.map(name => [name, true])),
-								fnSources
-							});
 						}
-						console.error(`vesk: rebuilt (${filename})`);
+						console.error(`vesk: rebuilt (${filename}) — ${Date.now() - t0}ms`);
 					} catch (e) {
 						console.error(`vesk: rebuild error:`, e.message);
+					}
+				}, 200);
+			} else if (filename && (filename.endsWith('.css'))) {
+				if (cssDebounceTimer) clearTimeout(cssDebounceTimer);
+				cssDebounceTimer = setTimeout(async () => {
+					try {
+						const cssFullPath = filename.startsWith('/') ? filename : join(appDirPath, filename);
+						if (existsSync(cssFullPath)) {
+							rawCss = readFileSync(cssFullPath, 'utf-8');
+						}
+						await rebuildTailwindCss();
+						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
+							globalThis.__vesk_broadcastHmr({ type: 'css-update' });
+						}
+						console.error(`vesk: CSS rebuilt`);
+					} catch (e) {
+						console.error(`vesk: CSS rebuild error:`, e.message);
 					}
 				}, 200);
 			}
@@ -301,8 +370,8 @@ export async function startDevServer(port, projectDir, config) {
 		'.html': 'text/html', '.json': 'application/json',
 	};
 
-	// ── HMR client script ───────────────────────────────────────
-	const HMR_CLIENT_SCRIPT = `if(typeof window!=='undefined'){try{const ws=new WebSocket('ws://'+(location.host||'localhost:3000')+'/_vesk/hmr');ws.onmessage=function(e){try{const msg=JSON.parse(e.data);if(msg.type==='update'){if(msg.fnSources){Object.values(msg.fnSources).forEach(function(fn){try{eval(fn)}catch(ex){console.error('HMR eval error:',ex)}})} globalThis.__updatedComponents=new Set(Object.keys(msg.components));if(window.__vesk_router&&window.__vesk_router.hmrUpdate){window.__vesk_router.hmrUpdate();}}}catch(e){console.error('HMR parse error:',e)}};ws.onerror=function(){setTimeout(()=>location.reload(),1000)};}catch(e){}}`;
+	// ── HMR client script — served from runtime package ───────────
+	const hmrClientPath = join(runtimeDir, 'hmr-client.js');
 
 	/**
 	 * Extract the component name from a .vsk source string.
@@ -341,7 +410,7 @@ export async function startDevServer(port, projectDir, config) {
 		}
 		if (url.pathname === '/_vesk/hmr.js') {
 			res.writeHead(200, { 'Content-Type': 'application/javascript' });
-			res.end(HMR_CLIENT_SCRIPT);
+			res.end(readFileSync(hmrClientPath, 'utf-8'));
 			return;
 		}
 

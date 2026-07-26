@@ -71,6 +71,23 @@ async function main() {
 		});
 		assert(!!domStable, 'DOM accessible after hydration');
 
+		const hasHmrOverlay = await page.evaluate(() => {
+			const el = document.getElementById('__vesk_dev');
+			return !!el;
+		});
+		assert(hasHmrOverlay, 'HMR dev overlay exists in DOM');
+		const hmrText = await page.evaluate(() => {
+			const el = document.getElementById('__vesk_dev');
+			return el ? el.textContent : '';
+		});
+		assert(hmrText.includes('Vesk'), 'HMR overlay shows "Vesk"');
+
+		const hmrDot = await page.evaluate(() => {
+			const dot = document.querySelector('#__vesk_dev .__v_dot');
+			return dot ? dot.className : '';
+		});
+		assert(hmrDot.includes('connected') || hmrDot.includes('loading'), 'HMR dot has status class: ' + hmrDot);
+
 		await page.close();
 	}
 

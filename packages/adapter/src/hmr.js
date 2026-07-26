@@ -213,16 +213,17 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
         const assignments = extractComponentAssignments(code);
 
         if (assignments.length > 0) {
-          const isLayout = filename === 'layout.vsk' || filename.endsWith('/layout.vsk');
-          const isPage = filename === 'page.vsk' || filename.endsWith('/page.vsk');
+          const components = {};
+          const fnSources = {};
           for (const { name, raw } of assignments) {
-            broadcast('component-update', {
-              name,
-              fnSource: raw,
-              kind: isLayout ? 'layout' : (isPage ? 'page' : 'component'),
-              time: Date.now() - start,
-            });
+            components[name] = true;
+            fnSources[name] = raw;
           }
+          broadcast('update', {
+            components,
+            fnSources,
+            time: Date.now() - start,
+          });
         }
 
         // Only regenerate SSR function for page/layout files
@@ -246,7 +247,7 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
       const start = Date.now();
       try {
         await doFullBuild();
-        broadcast('full-reload', { reason: `API: ${filename}`, time: Date.now() - start });
+        broadcast('reload', { reason: `API: ${filename}`, time: Date.now() - start });
         console.error(`vesk hmr: api ${filename} rebuilt (${Date.now() - start}ms)`);
       } catch (e) {
         broadcast('error', { message: e.message, file: filename });
@@ -259,7 +260,7 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
       const start = Date.now();
       try {
         await doFullBuild();
-        broadcast('full-reload', { reason: `Middleware: ${filename}`, time: Date.now() - start });
+        broadcast('reload', { reason: `Middleware: ${filename}`, time: Date.now() - start });
         console.error(`vesk hmr: middleware ${filename} rebuilt (${Date.now() - start}ms)`);
       } catch (e) {
         broadcast('error', { message: e.message, file: filename });
@@ -273,7 +274,7 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
       const start = Date.now();
       try {
         await doFullBuild();
-        broadcast('full-reload', { reason: `Config: ${filename}`, time: Date.now() - start });
+        broadcast('reload', { reason: `Config: ${filename}`, time: Date.now() - start });
         console.error(`vesk hmr: ${filename} rebuilt (${Date.now() - start}ms)`);
       } catch (e) {
         broadcast('error', { message: e.message, file: filename });
@@ -285,7 +286,7 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
     const start = Date.now();
     try {
       await doFullBuild();
-      broadcast('full-reload', { reason: `${filename} changed`, time: Date.now() - start });
+      broadcast('reload', { reason: `${filename} changed`, time: Date.now() - start });
     } catch (e) {
       broadcast('error', { message: e.message, file: filename });
     }
