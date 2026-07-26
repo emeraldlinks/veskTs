@@ -83,6 +83,7 @@ function runClientBundle() {
     .replace(/^export\s*\{[^}]+\}\s*;\s*\n?/gm, '')
     .replace(/^export\s+(const|let|var|function|class)\s+/gm, '$1 ')
     + '\nglobalThis.__NavLink = typeof NavLink !== "undefined" ? NavLink : undefined;'
+    + '\nglobalThis.__Link = typeof Link !== "undefined" ? Link : undefined;'
   )();
 }
 
@@ -178,6 +179,19 @@ async function main() {
       assert(result.tagName === 'A', 'NavLink() returns <a> element');
       assert(result.textContent === 'TestLabel', 'NavLink() <a> has correct text');
       assert(result.getAttribute('href') === '/test', 'NavLink() <a> has correct href');
+    }
+
+    // Direct Link call in create mode
+    const Link = globalThis.__Link;
+    assert(typeof Link === 'function', 'typeof Link === "function"');
+    if (typeof Link === 'function') {
+      const walker = { nextElement(tag) { return document.createElement(tag || 'div'); }, subWalker() { return this; }, done() { return true; } };
+      const result = Link({ href: '/link-test', children: 'LinkLabel' }, new Map(), walker);
+      assert(typeof result === 'object', 'Link() returns object');
+      assert(result.nodeType === 1, 'Link() returns Element (nodeType=1)');
+      assert(result.tagName === 'A', 'Link() returns <a> element');
+      assert(result.textContent === 'LinkLabel', 'Link() <a> has correct text');
+      assert(result.getAttribute('href') === '/link-test', 'Link() <a> has correct href');
     }
   }
 
