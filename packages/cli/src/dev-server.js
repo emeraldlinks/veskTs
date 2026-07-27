@@ -271,8 +271,19 @@ export async function startDevServer(port, projectDir, config) {
 	try {
 		let debounceTimer = null;
 		let cssDebounceTimer = null;
-		watch(appDirPath, { recursive: true }, (eventType, filename) => {
-			if (filename && filename.endsWith('.vsk')) {
+		const watchDirs = [appDirPath];
+		if (existsSync(srcDir)) watchDirs.push(srcDir);
+		for (const watchDir of watchDirs) {
+		watch(watchDir, { recursive: true }, (eventType, filename) => {
+			if (!filename) return;
+			const isVsk = filename.endsWith('.vsk');
+			const isCss = filename.endsWith('.css');
+			if (!isVsk && !isCss) return;
+
+			const fullPath = filename.startsWith('/') ? filename : join(watchDir, filename);
+			const fileExists = existsSync(fullPath);
+
+			if (isVsk) {
 				if (debounceTimer) clearTimeout(debounceTimer);
 				debounceTimer = setTimeout(async () => {
 					const t0 = Date.now();
@@ -283,8 +294,7 @@ export async function startDevServer(port, projectDir, config) {
 
 						routeTree = scanRoutes(appDirPath);
 						updateSourceMapping();
-						const changedSource = filename.startsWith('/') ? filename : join(appDirPath, filename);
-						const changedComponents = sourceToComponents.get(changedSource) || [];
+						const changedComponents = sourceToComponents.get(fullPath) || [];
 
 						clientBundle = '';
 						await buildClientBundle();
@@ -293,10 +303,9 @@ export async function startDevServer(port, projectDir, config) {
 							if (changedComponents.length > 0) {
 								let fnSources;
 								let errorMessage = '';
-								const srcPath = existsSync(changedSource) ? changedSource : join(appDirPath, filename);
-								if (existsSync(srcPath)) {
+								if (fileExists) {
 									try {
-										const src = readFileSync(srcPath, 'utf-8');
+										const src = readFileSync(fullPath, 'utf-8');
 										let compCode = compileClient(src, null, { forceClient: true });
 										compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
 										compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
@@ -314,7 +323,7 @@ export async function startDevServer(port, projectDir, config) {
 										console.error(`vesk: HMR compile error for ${filename}:`, e.message);
 									}
 								} else {
-									console.error(`vesk: HMR source not found: ${srcPath}`);
+									console.error(`vesk: HMR source not found: ${fullPath}`);
 								}
 								if (fnSources) {
 									globalThis.__vesk_broadcastHmr({
@@ -335,18 +344,22 @@ export async function startDevServer(port, projectDir, config) {
 								globalThis.__vesk_broadcastHmr({ type: 'reload' });
 							}
 						}
+						// Rebuild tailwind CSS — .vsk files may contain new tailwind classes
+						await rebuildTailwindCss();
+						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
+							globalThis.__vesk_broadcastHmr({ type: 'css-update' });
+						}
 						console.error(`vesk: rebuilt (${filename}) — ${Date.now() - t0}ms`);
 					} catch (e) {
 						console.error(`vesk: rebuild error:`, e.message);
 					}
 				}, 200);
-			} else if (filename && (filename.endsWith('.css'))) {
+			} else if (isCss) {
 				if (cssDebounceTimer) clearTimeout(cssDebounceTimer);
 				cssDebounceTimer = setTimeout(async () => {
 					try {
-						const cssFullPath = filename.startsWith('/') ? filename : join(appDirPath, filename);
-						if (existsSync(cssFullPath)) {
-							rawCss = readFileSync(cssFullPath, 'utf-8');
+						if (fileExists) {
+							rawCss = readFileSync(fullPath, 'utf-8');
 						}
 						await rebuildTailwindCss();
 						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
@@ -359,6 +372,7 @@ export async function startDevServer(port, projectDir, config) {
 				}, 200);
 			}
 		});
+		}
 	} catch (e) {
 		console.error(`vesk: file watching unavailable, serving without auto-rebuild`);
 	}

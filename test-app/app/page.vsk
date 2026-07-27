@@ -67,4 +67,3 @@ export component Appxx(props)  {
 		<p class="error">Error: {e.message}</p>
 	}
 }
-
