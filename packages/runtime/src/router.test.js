@@ -22,6 +22,7 @@ function expect(actual) {
 			if (!actual.includes(expected)) throw new Error(`expected to contain ${expected}`);
 		},
 		toBeTruthy() { if (!actual) throw new Error(`expected truthy, got ${actual}`); },
+		toBeFalsy() { if (actual) throw new Error(`expected falsy, got ${actual}`); },
 		toBeNull() { if (actual !== null) throw new Error(`expected null, got ${actual}`); },
 		not: {
 			toBeNull() { if (actual === null) throw new Error(`expected not null`); },
@@ -84,8 +85,9 @@ function makeEl(tag) {
 		setAttribute(k, v) { attrs[k] = String(v); },
 		getAttribute(k) { return attrs[k] || null; },
 		removeAttribute(k) { delete attrs[k]; },
-		addEventListener() {},
-		removeEventListener() {},
+		_listeners: {},
+		addEventListener(type, fn) { if (!this._listeners[type]) this._listeners[type] = []; this._listeners[type].push(fn); },
+		removeEventListener(type, fn) { if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(l => l !== fn); },
 		appendChild(c) { children.push(c); if (c && typeof c === 'object') c.parentNode = this; },
 		replaceChildren(...args) { children.length = 0; for (const a of args) { children.push(a); if (a && typeof a === 'object') a.parentNode = this; } },
 		insertBefore(c, ref) { const idx = ref ? children.indexOf(ref) : children.length; children.splice(idx, 0, c); if (c && typeof c === 'object') c.parentNode = this; },
@@ -121,7 +123,8 @@ function setupMockDom() {
 		head,
 		querySelector() { return null; },
 		querySelectorAll() { return []; },
-		addEventListener() {},
+		_listeners: {},
+		addEventListener(type, fn) { if (!this._listeners[type]) this._listeners[type] = []; this._listeners[type].push(fn); },
 		body: makeEl('body'),
 	};
 	let _rAFQueue = [];
@@ -138,11 +141,10 @@ function setupMockDom() {
 			get scrollRestoration() { return this._sr; },
 			set scrollRestoration(v) { this._sr = v; },
 		},
-		addEventListener() {},
+		_listeners: {},
+		addEventListener(type, fn) { if (!this._listeners[type]) this._listeners[type] = []; this._listeners[type].push(fn); },
 	};
 }
-
-setupMockDom();
 
 setupMockDom();
 
@@ -588,6 +590,50 @@ test('hmrUpdate on createRouter stores and swaps instances', () => {
 	expect(oldRoot.parentNode).toBeNull();
 	expect(container.textContent).toBe('Manual New');
 	expect(router.__componentInstances.get('Test')[0].root.textContent).toBe('Manual New');
+});
+
+// ── Link / NavLink / Anchor behavior tests ──────────────────
+
+test('Link attaches a click handler that calls preventDefault', () => {
+	const a = Link({ href: '/about', children: 'About' });
+	expect(a.tagName).toBe('A');
+	expect(a.href).toBe('/about');
+	expect(a._listeners.click).toBeTruthy();
+	expect(a._listeners.click.length).toBeGreaterThanOrEqual(1);
+});
+
+test('NavLink attaches a click handler', () => {
+	const a = NavLink({ href: '/', children: 'Home' });
+	expect(a._listeners.click).toBeTruthy();
+	expect(a._listeners.click.length).toBeGreaterThanOrEqual(1);
+});
+
+test('NavLink has active class when path matches', () => {
+	const a = NavLink({ href: '/', activeClass: 'is-active' });
+	expect(a.classList.contains('is-active')).toBe(true);
+});
+
+test('NavLink does not have active class when path does not match', () => {
+	const a = NavLink({ href: '/other' });
+	expect(a.classList.contains('active')).toBe(false);
+});
+
+test('createFileRouter does not intercept document clicks', () => {
+	const container = document.createElement('div');
+	const pageFn = () => document.createTextNode('Home');
+	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
+	const router = createFileRouter(tree, { container });
+	router.start();
+	// Document should NOT have a global click listener intercepting all <a> clicks
+	const doc = globalThis.document || global.document;
+	expect(doc._listeners.click).toBeFalsy();
+});
+
+test('plain anchor created via createElement has no Vesk listeners', () => {
+	const a = document.createElement('a');
+	a.href = '/plain';
+	// No listeners should be attached (it's just a plain element)
+	expect(a._listeners.click).toBeFalsy();
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

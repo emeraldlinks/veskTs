@@ -9,6 +9,37 @@ import { resolve, extname, join } from 'node:path';
 import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
 
+const LOG = {
+  reset: '\x1b[0m',
+  green: '\x1b[32m',
+  cyan: '\x1b[36m',
+  blue: '\x1b[34m',
+  yellow: '\x1b[33m',
+  red: '\x1b[31m',
+  gray: '\x1b[90m',
+  dim: '\x1b[2m',
+  method(m) {
+    const colors = { GET: '\x1b[32m', POST: '\x1b[34m', PUT: '\x1b[33m', PATCH: '\x1b[33m', DELETE: '\x1b[31m', HEAD: '\x1b[90m', OPTIONS: '\x1b[36m' };
+    return (colors[m] || '\x1b[37m') + m + '\x1b[0m';
+  },
+  status(s) {
+    if (s < 300) return '\x1b[32m' + s + '\x1b[0m';
+    if (s < 400) return '\x1b[36m' + s + '\x1b[0m';
+    if (s < 500) return '\x1b[33m' + s + '\x1b[0m';
+    return '\x1b[31m' + s + '\x1b[0m';
+  },
+  info(...args) { console.log('\x1b[2mvesk:\x1b[0m', ...args); },
+  ok(...args) { console.log('\x1b[32mvesk:\x1b[0m', ...args); },
+  warn(...args) { console.log('\x1b[33mvesk:\x1b[0m', ...args); },
+  err(...args) { console.log('\x1b[31mvesk:\x1b[0m', ...args); },
+  request(method, pathname, status, ms) {
+    const m = LOG.method(method);
+    const s = LOG.status(status);
+    const t = ms !== undefined ? ` \x1b[2m${ms}ms\x1b[0m` : '';
+    console.log(`  ${m} ${pathname} ${s}${t}`);
+  },
+};
+
 /**
  * Start the Vesk dev server.
  * Compiles routes, bundles runtime/client code, sets up file watching with HMR,
@@ -19,7 +50,7 @@ import { WebSocketServer } from 'ws';
  * @param {object} config - loaded vesk config object
  */
 export async function startDevServer(port, projectDir, config) {
-	const { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight } = await import('../../compiler/src/server-codegen.js');
+	const { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy } = await import('../../compiler/src/server-codegen.js');
 	const { compileClient } = await import('../../compiler/src/client-codegen.js');
 	const { scanRoutes, matchUrl, collectSources } = await import('../../compiler/src/router.js');
 	const { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } = await import('../../compiler/src/api-routes.js');
@@ -29,7 +60,7 @@ export async function startDevServer(port, projectDir, config) {
 	const publicDir = join(projectDir, 'public');
 	const runtimeDir = resolve(projectDir, 'node_modules', '@vesk/runtime', 'src');
 	if (!existsSync(runtimeDir)) {
-		console.error(`vesk: @vesk/runtime not found. Run npm install first.`);
+		LOG.err(`@vesk/runtime not found. Run npm install first.`);
 		process.exit(1);
 	}
 	const devPlugins = config.plugins || [];
@@ -114,9 +145,9 @@ export async function startDevServer(port, projectDir, config) {
 				if (name) code += `export { ${name} };\n`;
 			}
 			runtimeBundle = code;
-			console.error(`vesk: runtime bundle: ${code.length} bytes`);
+			LOG.info(`runtime bundle: ${code.length} bytes`);
 		} catch (e) {
-			console.error(`vesk: runtime bundle error:`, e.message);
+			LOG.err(`runtime bundle error:`, e.message);
 		}
 	}
 
@@ -221,9 +252,9 @@ export async function startDevServer(port, projectDir, config) {
 			clientBundle += `globalThis.__components = __components;\n`;
 			clientBundle += `globalThis.__vesk_hmr_eval = (code) => eval(code);\n`;
 			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
-			console.error(`vesk: client bundle: ${clientBundle.length} bytes`);
+			LOG.info(`client bundle: ${clientBundle.length} bytes`);
 		} catch (e) {
-			console.error(`vesk: client build error:`, e.message);
+			LOG.err(`client build error:`, e.message);
 		}
 	}
 
@@ -264,10 +295,11 @@ export async function startDevServer(port, projectDir, config) {
 				}
 			}
 		} catch (e) {
-			console.error(`vesk: CSS rebuild error:`, e.message);
+			LOG.err(`CSS rebuild error:`, e.message);
 		}
 	}
 
+	const apiWatchCache = new Map();
 	try {
 		let debounceTimer = null;
 		let cssDebounceTimer = null;
@@ -278,7 +310,8 @@ export async function startDevServer(port, projectDir, config) {
 			if (!filename) return;
 			const isVsk = filename.endsWith('.vsk');
 			const isCss = filename.endsWith('.css');
-			if (!isVsk && !isCss) return;
+			const isApiRoute = filename.endsWith('.ts') || filename.endsWith('.js') || filename.endsWith('.tsx');
+			if (!isVsk && !isCss && !isApiRoute) return;
 
 			const fullPath = filename.startsWith('/') ? filename : join(watchDir, filename);
 			const fileExists = existsSync(fullPath);
@@ -320,10 +353,10 @@ export async function startDevServer(port, projectDir, config) {
 										if (compCode.trim()) fnSources = { _raw: compCode };
 									} catch (e) {
 										errorMessage = e.message;
-										console.error(`vesk: HMR compile error for ${filename}:`, e.message);
+										LOG.err(`HMR compile error for ${filename}:`, e.message);
 									}
 								} else {
-									console.error(`vesk: HMR source not found: ${fullPath}`);
+									LOG.warn(`HMR source not found: ${fullPath}`);
 								}
 								if (fnSources) {
 									globalThis.__vesk_broadcastHmr({
@@ -333,9 +366,40 @@ export async function startDevServer(port, projectDir, config) {
 										fnSources
 									});
 								} else if (errorMessage) {
+									const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
+									const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
+									const fileMatch = errorMessage.match(/(?:in|at)\s+['"]?([^'":\s]+(?:\.[a-z]+))['"]?/i);
+									const line = lineMatch ? parseInt(lineMatch[1]) : 0;
+									const col = colMatch ? parseInt(colMatch[1]) : 0;
+									let file = fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
+									if (fileMatch) file = fileMatch[1];
+									let code = '';
+									if (line > 0 && fileExists) {
+										try {
+											const src = readFileSync(fullPath, 'utf-8');
+											const lines = src.split('\n');
+											const start = Math.max(0, line - 3);
+											const end = Math.min(lines.length, line + 2);
+											code = lines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n');
+										} catch {}
+									}
+									const tips = [];
+									if (errorMessage.toLowerCase().includes('unexpected token')) { tips.push('Check for missing or extra brackets, parentheses, or quotes.'); }
+									if (errorMessage.toLowerCase().includes('unexpected identifier')) { tips.push('A keyword or identifier is in an unexpected position. Check for typos.'); }
+									if (errorMessage.toLowerCase().includes('expected')) { tips.push('Check the syntax around the reported line for missing punctuation.'); }
+									if (errorMessage.toLowerCase().includes('not defined') || errorMessage.toLowerCase().includes('is not defined')) { tips.push('The variable or component may not be imported or declared.'); }
+									if (errorMessage.toLowerCase().includes('invalid')) { tips.push('Check the expression syntax around the reported location.'); }
+									if (errorMessage.toLowerCase().includes('component') && errorMessage.toLowerCase().includes('not')) { tips.push('Ensure the component is properly defined with the "component" keyword.'); }
+									if (tips.length === 0) tips.push('Review the code around the reported line for syntax or type errors.');
 									globalThis.__vesk_broadcastHmr({
 										type: 'error',
-										message: errorMessage
+										message: errorMessage,
+										file,
+										line,
+										column: col,
+										code,
+										stack: e.stack || '',
+										tips,
 									});
 								} else {
 									globalThis.__vesk_broadcastHmr({ type: 'reload' });
@@ -349,9 +413,9 @@ export async function startDevServer(port, projectDir, config) {
 						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
 							globalThis.__vesk_broadcastHmr({ type: 'css-update' });
 						}
-						console.error(`vesk: rebuilt (${filename}) — ${Date.now() - t0}ms`);
+						LOG.info(`rebuilt (${filename}) — ${Date.now() - t0}ms`);
 					} catch (e) {
-						console.error(`vesk: rebuild error:`, e.message);
+						LOG.err(`rebuild error:`, e.message);
 					}
 				}, 200);
 			} else if (isCss) {
@@ -365,16 +429,22 @@ export async function startDevServer(port, projectDir, config) {
 						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
 							globalThis.__vesk_broadcastHmr({ type: 'css-update' });
 						}
-						console.error(`vesk: CSS rebuilt`);
+						LOG.info(`CSS rebuilt`);
 					} catch (e) {
-						console.error(`vesk: CSS rebuild error:`, e.message);
+						LOG.err(`CSS rebuild error:`, e.message);
 					}
 				}, 200);
+			} else if (isApiRoute) {
+				const isInApi = fullPath.includes('/api/');
+				if (isInApi && fileExists) {
+					apiWatchCache.set(fullPath, Date.now());
+					LOG.info(`api route updated: ${filename}`);
+				}
 			}
 		});
 		}
 	} catch (e) {
-		console.error(`vesk: file watching unavailable, serving without auto-rebuild`);
+		LOG.warn(`file watching unavailable, serving without auto-rebuild`);
 	}
 
 	// ── MIME types ──────────────────────────────────────────────
@@ -397,9 +467,41 @@ export async function startDevServer(port, projectDir, config) {
 		return m ? m[1] : null;
 	}
 
+	// ── Rate limiter (if configured) ────────────────────────────
+	let rateLimiter = null;
+	if (config.security?.rateLimit) {
+		const rlConfig = config.security.rateLimit;
+		rateLimiter = createRateLimiter({ windowMs: rlConfig.windowMs || 60000, max: rlConfig.max || 100 });
+	}
+
 	// ── HTTP server ─────────────────────────────────────────────
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url, `http://localhost:${port}`);
+		const reqStart = Date.now();
+
+		const logRequest = (status) => {
+			if (url.pathname.startsWith('/_vesk')) return;
+			LOG.request(req.method || 'GET', url.pathname, status, Date.now() - reqStart);
+		};
+
+		// ── trustProxy — build enriched request context ────────────
+		const rawCtx = buildRequestContext(req);
+		if (config.security?.trustProxy) {
+			applyTrustProxy(rawCtx, config.security.trustProxy);
+		}
+
+		// ── Rate limiting check (before CORS) ──────────────────────
+		if (rateLimiter) {
+			const clientIp = rawCtx.ip || req.socket?.remoteAddress || 'unknown';
+			if (!rateLimiter.check(clientIp)) {
+				res.writeHead(429, {
+					'Content-Type': 'application/json',
+					'Retry-After': String(Math.ceil((config.security.rateLimit.windowMs || 60000) / 1000)),
+				});
+				res.end(JSON.stringify({ error: 'Too Many Requests', retryAfter: Math.ceil((config.security.rateLimit.windowMs || 60000) / 1000) }));
+				return;
+			}
+		}
 
 		// ── CORS ──────────────────────────────────────────────────
 		const reqOrigin = req.headers['origin'] || '';
@@ -454,20 +556,64 @@ export async function startDevServer(port, projectDir, config) {
 			}
 		}
 
-		// API routes
+		// Middleware chain (computed once, before API route check)
+		const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
+
+		// API routes (with middleware support)
 		const apiDirPath = join(appDirPath, 'api');
 		if (url.pathname.startsWith('/api') && existsSync(apiDirPath)) {
 			const apiRoutes = await scanApiRoutes(apiDirPath);
 			const apiMatch = matchApiUrl(apiRoutes, req.url || url.pathname);
 			if (apiMatch) {
-				const webRequest = buildWebRequest(req, req.url || url.pathname);
-				const response = await executeApiRoute(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params);
+				const { VeskRequest } = await import('@vesk/runtime/server');
+				// Buffer body once for both middleware and route handler
+				const bodyChunks = [];
+				for await (const chunk of req) bodyChunks.push(chunk);
+				const bodyBuffer = Buffer.concat(bodyChunks);
+				const requestUrl = req.url ? `http://localhost:${port}${req.url.startsWith('/') ? req.url : '/' + req.url}` : url.href;
+				const rawHeaders = Object.fromEntries(
+					Object.entries(req.headers).map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])
+				);
+				const rawCookies = {};
+				for (const pair of (req.headers.cookie || '').split(';')) {
+					const eq = pair.indexOf('=');
+					if (eq !== -1) {
+						const k = pair.slice(0, eq).trim();
+						const v = pair.slice(eq + 1).trim();
+						if (k) rawCookies[k] = v;
+					}
+				}
+
+				// Run middleware chain for API routes
+				let apiLocals = {};
+				if (mwChain.length > 0) {
+					const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
+					const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
+						plugins: config.plugins,
+						onLast: async () => new Response(null),
+					});
+					apiLocals = mwResult.locals || {};
+				}
+
+				// Build VeskRequest with body and pass middleware locals
+				const webRequest = new VeskRequest(requestUrl, {
+					method: req.method || 'GET',
+					headers: rawHeaders,
+					body: bodyBuffer.length ? bodyBuffer : null,
+				});
+				Object.defineProperty(webRequest, 'cookies', { get: () => rawCookies, enumerable: true });
+				webRequest.locals = apiLocals;
+				const response = await executeApiRoute(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
+				logRequest(response.status);
 				res.writeHead(response.status, Object.fromEntries(response.headers));
 				const body = await response.text();
 				res.end(body);
 				return;
 			}
 		}
+
+		// trustProxy — update request context for SSR handlers
+		const ctx = rawCtx;
 
 		// SSR route matching + layout composition
 		const match = matchUrl(routeTree, url.pathname);
@@ -486,6 +632,7 @@ export async function startDevServer(port, projectDir, config) {
 					} catch {}
 				}
 			}
+			logRequest(404);
 			res.writeHead(404, { 'Content-Type': 'text/html' });
 			res.end(notFoundHtml || `<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
 			return;
@@ -509,8 +656,6 @@ export async function startDevServer(port, projectDir, config) {
 		}
 
 		// Middleware (onion model) + SSR
-		const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
-
 		async function renderSSR() {
 			const chain = cleanChain;
 			let body = '';
@@ -542,8 +687,15 @@ export async function startDevServer(port, projectDir, config) {
 			let html;
 			if (hasLayout) {
 				const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
-				const secOpts = config.security ? `\t<!-- vesk: auto-escape enabled -->\n` : '';
-				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${secOpts}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+				let secMeta = '';
+				if (config.security) {
+					const s = config.security;
+					if (s.xFrameOptions !== false) secMeta += `\t<meta http-equiv="X-Frame-Options" content="${s.xFrameOptions || 'DENY'}" />\n`;
+					if (s.referrerPolicy !== false) secMeta += `\t<meta name="referrer" content="${s.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
+					if (s.contentSecurityPolicy !== false) secMeta += `\t<meta http-equiv="Content-Security-Policy" content="${(s.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
+					if (s.autoEscape !== false) secMeta += `\t<!-- vesk: auto-escape enabled -->\n`;
+				}
+				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
 			} else {
 				const leaf = chain.find(n => n.page);
 				if (leaf) {
@@ -608,7 +760,13 @@ export async function startDevServer(port, projectDir, config) {
 			// Yield shell before body
 			const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
 			yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n';
-			if (config.security) yield '\t<!-- vesk: auto-escape enabled -->\n';
+			if (config.security) {
+				const s = config.security;
+				if (s.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${s.xFrameOptions || 'DENY'}" />\n`;
+				if (s.referrerPolicy !== false) yield `\t<meta name="referrer" content="${s.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
+				if (s.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${(s.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
+				if (s.autoEscape !== false) yield '\t<!-- vesk: auto-escape enabled -->\n';
+			}
 			if (head) yield '\t' + head.split('\n').join('\n\t') + '\n';
 			yield '</head>\n<body>\n<div id="root">\n';
 			yield prettifyHtml(body);
@@ -624,9 +782,9 @@ export async function startDevServer(port, projectDir, config) {
 					method: req.method || 'GET',
 				});
 				const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
+					plugins: config.plugins,
 					onLast: async (rewrite) => {
 						if (rewrite) url.pathname = rewrite;
-						const ctx = buildRequestContext(req);
 						const prev = globalThis.__vesk_request;
 						globalThis.__vesk_request = ctx;
 						try {
@@ -640,17 +798,19 @@ export async function startDevServer(port, projectDir, config) {
 				});
 				mwLocals = mwResult.locals;
 				if (mwResult.response) {
+					if (typeof mwResult.response.build === 'function') mwResult.response.build();
+					logRequest(mwResult.response.status);
 					res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
 					res.end(await mwResult.response.text());
 					return;
 				}
 			} else {
-				const ctx = buildRequestContext(req);
 				const prev = globalThis.__vesk_request;
 				globalThis.__vesk_request = ctx;
 				try {
 					const stream = renderSSRStream();
 					const secHeaders = config.security ? securityHeaders(config.security) : {};
+					logRequest(200);
 					res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', ...secHeaders });
 					for await (const chunk of stream) {
 						if (chunk.includes('</body>')) {
@@ -667,7 +827,9 @@ export async function startDevServer(port, projectDir, config) {
 			}
 		} catch (e) {
 			if (e.name === 'Redirect') {
-				res.writeHead(e.status || 302, { Location: e.url });
+				const status = e.status || 302;
+				logRequest(status);
+				res.writeHead(status, { Location: e.url });
 				res.end(`<!DOCTYPE html><html><body><a href="${e.url}">Redirect</a></body></html>`);
 			} else if (e.name === 'NotFoundError') {
 				let notFoundHtml = null;
@@ -690,17 +852,41 @@ export async function startDevServer(port, projectDir, config) {
 						}
 					}
 				}
+				logRequest(404);
 				res.writeHead(404, { 'Content-Type': 'text/html' });
 				res.end(notFoundHtml || `<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>`);
 			} else {
+				let errorHtml = null;
+				if (match && match.nodes) {
+					for (let i = match.nodes.length - 1; i >= 0; i--) {
+						const node = match.nodes[i];
+						if (node.error) {
+							const errPath = resolve(appDirPath, node.sourceDir, 'error.vsk');
+							if (existsSync(errPath)) {
+								try {
+									const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen.js');
+									const errSrc = readFileSync(errPath, 'utf-8');
+									const errCompName = extractCompName(errSrc) || node.error;
+									const errProps = { error: e.message, stack: e.stack, statusCode: 500, url: url.pathname };
+									const html = await rfp(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: config.security });
+									errorHtml = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
+								} catch (e2) {
+									LOG.err(`error page render failed: ${e2.message}`);
+								}
+							}
+							break;
+						}
+					}
+				}
+				logRequest(500);
 				res.writeHead(500, { 'Content-Type': 'text/html' });
-				res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}\n${e.stack}</pre></body></html>`);
+				res.end(errorHtml || `<!DOCTYPE html><html><body><h1>500</h1><pre>${e.message}\n${e.stack}</pre></body></html>`);
 			}
 		}
 	});
 
 	server.listen(port, () => {
-		console.error(`vesk dev server at http://localhost:${port}`);
+		LOG.ok(`dev server at http://localhost:${port}`);
 	});
 
 	// Update source mapping after initial route scan

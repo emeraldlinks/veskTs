@@ -2,7 +2,7 @@ import { readdirSync, statSync, existsSync } from 'fs';
 import { join, extname } from 'path';
 
 /**
- * Vesk API Routes — Next.js App Router-style file-based API.
+ * Vesk API Routes — file-based API route handling.
  *
  * Conventions:
  *   app/api/route.js              → GET /api
@@ -250,7 +250,7 @@ export function buildWebRequest(nodeReq, url) {
 	};
 	webRequest.clone = () => webRequest;
 
-	// Add cookies getter (NextRequest-compatible)
+	// Add cookies getter (VeskRequest-compatible)
 	const rawCookies = parseCookies(nodeReq.headers.cookie || '');
 	Object.defineProperty(webRequest, 'cookies', {
 		get: () => rawCookies,
@@ -276,10 +276,17 @@ export function buildWebRequest(nodeReq, url) {
  *   - ServerResponse.redirect / .rewrite / .next
  *   - Zod-validated request body parsing (via withValidation helper)
  */
-export async function executeApiRoute(filePath, method, request, params = {}, locals = {}) {
+export async function executeApiRoute(filePath, method, request, params = {}, locals = {}, devCache) {
 	let mod;
 	try {
-		mod = await import(filePath);
+		if (devCache && devCache.has(filePath)) {
+			const t = devCache.get(filePath);
+			const url = new URL('file://' + filePath);
+			url.searchParams.set('t', String(t));
+			mod = await import(url.href);
+		} else {
+			mod = await import(filePath);
+		}
 	} catch (e) {
 		return new Response(JSON.stringify({ error: 'Failed to load route module', details: e.message }), {
 			status: 500, headers: { 'Content-Type': 'application/json' },
@@ -344,7 +351,7 @@ export async function executeApiRoute(filePath, method, request, params = {}, lo
 		}
 
 		// Run globally registered beforeRequest hooks
-		const { runHooks: execHooks } = await import('@vesk/runtime');
+		const { runHooks: execHooks } = await import('@vesk/runtime/server');
 		let globalHookResult = await execHooks('beforeRequest', request, { params, locals });
 		if (globalHookResult instanceof Response) return globalHookResult;
 
@@ -368,6 +375,11 @@ export async function executeApiRoute(filePath, method, request, params = {}, lo
 		// Run globally registered afterRequest hooks
 		let globalAfterResult = await execHooks('afterRequest', request, response);
 		if (globalAfterResult instanceof Response) response = globalAfterResult;
+
+		// Auto-build VeskResponse to flush cookies + security headers
+		if (response?.constructor?.name === 'VeskResponse' && typeof response.build === 'function') {
+			response.build();
+		}
 
 		if (response instanceof Response) {
 			// Handle ServerResponse.rewrite — internal rewrite

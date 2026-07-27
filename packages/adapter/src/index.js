@@ -159,17 +159,50 @@ export async function build(appDir, options = {}) {
     cssSourcePath = altCssSrc;
   }
 
+  function stripTailwindDirectives(css) {
+    const blockStart = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/;
+    css = css.replace(/^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$/gm, '');
+    css = css.replace(/^\s*@source\s+['"][^'"]+['"]\s*;?\s*$/gm, '');
+    const lines = css.split('\n');
+    const result = [];
+    let i = 0;
+    while (i < lines.length) {
+      if (blockStart.test(lines[i].trim())) {
+        let braceCount = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
+        i++;
+        while (i < lines.length && braceCount > 0) {
+          braceCount += (lines[i].match(/\{/g) || []).length;
+          braceCount -= (lines[i].match(/\}/g) || []).length;
+          i++;
+        }
+        continue;
+      }
+      result.push(lines[i]);
+      i++;
+    }
+    return result.join('\n').trim();
+  }
+
   if (cssContent !== null) {
+    // User CSS: strip tailwind directives
+    const userCss = stripTailwindDirectives(cssContent);
+    const userCssTarget = resolve(outDir, 'static', 'global.css');
+    writeFileSync(userCssTarget, userCss, 'utf-8');
+    console.error(`vesk build: css  → static/global.css  (${userCss.length} bytes)`);
+
+    // Tailwind CSS: process through plugin pipeline
+    let twCss = cssContent;
     for (const plugin of plugins) {
       if (typeof plugin.onCSS === 'function') {
-        const result = await plugin.onCSS(cssContent, cssSourcePath);
+        const result = await plugin.onCSS(twCss, cssSourcePath);
         if (result !== null && typeof result === 'string') {
-          cssContent = result;
+          twCss = result;
         }
       }
     }
-    writeFileSync(cssTarget, cssContent, 'utf-8');
-    console.error(`vesk build: css  → static/global.css  (${cssContent.length} bytes)`);
+    const twCssTarget = resolve(outDir, 'static', '_tailwind.css');
+    writeFileSync(twCssTarget, twCss, 'utf-8');
+    console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
   }
 
   // ── SSG pre-rendering ──

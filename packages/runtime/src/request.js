@@ -522,6 +522,433 @@ export class ServerResponse extends Response {
 	}
 }
 
+// ── VeskRequest — enhanced ServerRequest with richer API ────────
+
+/**
+ * VeskRequest — Vesk's enhanced API route request.
+ *
+ * Extends ServerRequest with:
+ *   .query     — parsed URL query string object
+ *   .ip        — client IP address (respects trustProxy)
+ *   .protocol  — 'http' or 'https' (respects trustProxy)
+ *   .hostname  — host without port
+ *   .body      — cached parsed body (json, form, or text)
+ *
+ * Usage in API routes:
+ *   export async function GET(request: VeskRequest) {
+ *     const { page, limit } = request.query;
+ *     return Response.json({ results });
+ *   }
+ */
+export class VeskRequest extends ServerRequest {
+	constructor(input, init) {
+		super(input, init);
+		this._query = null;
+		this._ip = null;
+		this._protocol = null;
+		this._hostname = null;
+		this._body = null;
+		this._parsedUrl = null;
+	}
+
+	get parsedUrl() {
+		if (!this._parsedUrl) {
+			this._parsedUrl = new URL(this.url);
+		}
+		return this._parsedUrl;
+	}
+
+	/** Parsed URL query parameters as a plain object. */
+	get query() {
+		if (!this._query) {
+			const params = {};
+			for (const [k, v] of this.parsedUrl.searchParams) {
+				params[k] = v;
+			}
+			this._query = params;
+		}
+		return this._query;
+	}
+
+	set query(v) { this._query = v; }
+
+	/** Client IP address (from socket or X-Forwarded-For). */
+	get ip() {
+		if (!this._ip) {
+			const fwd = this.headers?.get('x-forwarded-for');
+			if (fwd) this._ip = fwd.split(',')[0].trim();
+			else this._ip = 'unknown';
+		}
+		return this._ip;
+	}
+
+	set ip(v) { this._ip = v; }
+
+	/** Protocol string ('http' or 'https'). */
+	get protocol() {
+		if (!this._protocol) {
+			const proto = this.headers?.get('x-forwarded-proto');
+			this._protocol = proto ? proto.split(',')[0].trim() : 'http';
+		}
+		return this._protocol;
+	}
+
+	set protocol(v) { this._protocol = v; }
+
+	/** Hostname without port. */
+	get hostname() {
+		if (!this._hostname) {
+			this._hostname = this.headers?.get('host')?.split(':')[0] || 'localhost';
+		}
+		return this._hostname;
+	}
+
+	set hostname(v) { this._hostname = v; }
+
+	/**
+	 * Parse the request body once and cache it.
+	 * Returns the parsed object based on Content-Type.
+	 */
+	get body() {
+		if (!this._bodyPromise) {
+			this._bodyPromise = this._parseBody();
+		}
+		return this._bodyPromise;
+	}
+
+	async _parseBody() {
+		const ct = this.headers?.get('content-type') || '';
+		if (ct.includes('json')) {
+			return await this.json();
+		} else if (ct.includes('form')) {
+			const fd = await this.formData();
+			return Object.fromEntries(fd.entries());
+		} else {
+			const text = await this.text();
+			try { return JSON.parse(text); } catch { return text; }
+		}
+	}
+
+	// ── Security overrides ──────────────────────────────────────
+	// Per-route/middleware overrides for security config.
+	// These are read by the server when building the response.
+
+	/** @type {object|null} */
+	get _security() {
+		if (!this.__security) this.__security = {};
+		return this.__security;
+	}
+
+	/**
+	 * Override Content-Security-Policy for this response.
+	 * @param {string|false} policy - CSP string, or false to disable
+	 */
+	setCsp(policy) {
+		this._security.contentSecurityPolicy = policy;
+	}
+
+	/**
+	 * Override rate limiting for this route.
+	 * @param {{ windowMs?: number, max?: number }|false} options - rate limit config, or false to disable
+	 */
+	setRateLimit(options) {
+		this._security.rateLimit = options;
+	}
+
+	/**
+	 * Enable or disable CSRF protection for this route.
+	 * @param {boolean} enable
+	 */
+	setCsrf(enable) {
+		this._security.csrf = enable;
+	}
+
+	/**
+	 * Set a custom security header on this response.
+	 * @param {string} name - header name (e.g. 'X-Frame-Options')
+	 * @param {string|false} value - header value, or false to omit
+	 */
+	setSecurityHeader(name, value) {
+		if (!this._security.customHeaders) this._security.customHeaders = {};
+		this._security.customHeaders[name] = value;
+	}
+
+	/**
+	 * Enable trustProxy for this route.
+	 * @param {boolean|string} enable - true to trust any proxy, or a specific IP
+	 */
+	setTrustProxy(enable) {
+		this._security.trustProxy = enable;
+	}
+
+	/**
+	 * Get accumulated security overrides (used internally by the server).
+	 * @returns {object}
+	 */
+	getSecurityOverrides() {
+		return this._security;
+	}
+}
+
+// ── VeskResponse — enhanced response with rich security & cookie API ──
+
+/**
+ * VeskResponse — Vesk's enhanced API route response.
+ *
+ * Static factories:
+ *   VeskResponse.json(data)        — JSON response
+ *   VeskResponse.redirect(url)     — redirect response
+ *   VeskResponse.html(html)        — HTML response
+ *   VeskResponse.rewrite(url)      — internal rewrite
+ *   VeskResponse.next()            — pass-through
+ *
+ * Instance methods:
+ *   .setCookie(name, value, opts)  — set a cookie
+ *   .clearCookie(name, opts)       — remove a cookie
+ *   .setCsp(policy)                — override CSP for this response
+ *   .setSecurityHeader(n, v)       — set any security header
+ *   .cache(ttl)                    — set Cache-Control
+ *   .noCache()                     — disable caching
+ */
+export class VeskResponse extends ServerResponse {
+	constructor(body, init) {
+		super(body, init);
+		this._cookieHeaders = [];
+		this._secHeaders = {};
+		this._finalStatus = null;
+	}
+
+	/**
+	 * Set the response status code (for chaining).
+	 * @param {number} code - HTTP status code
+	 * @returns {VeskResponse}
+	 */
+	setStatus(code) {
+		this._finalStatus = code;
+		return this;
+	}
+
+	/**
+	 * Override the status getter to respect _finalStatus from setStatus().
+	 */
+	get status() {
+		return this._finalStatus !== null ? this._finalStatus : super.status;
+	}
+
+	/**
+	 * Finalize the response: flush accumulated security headers.
+	 * Call this before returning the response from a route handler,
+	 * or let the framework call it automatically.
+	 * @returns {VeskResponse}
+	 */
+	build() {
+		this._flushSecurityHeaders();
+		return this;
+	}
+
+	/**
+	 * Override text() to auto-flush before serializing.
+	 */
+	async text() {
+		this._flushSecurityHeaders();
+		return super.text();
+	}
+
+	/**
+	 * Override json() instance method to auto-flush.
+	 */
+	async json() {
+		this._flushSecurityHeaders();
+		return super.json();
+	}
+
+	/**
+	 * Set a cookie on this response.
+	 * @param {string} name
+	 * @param {string} value
+	 * @param {object} [opts]
+	 * @param {number} [opts.maxAge]
+	 * @param {boolean} [opts.httpOnly=true]
+	 * @param {boolean} [opts.secure=true]
+	 * @param {'Lax'|'Strict'|'None'} [opts.sameSite='Lax']
+	 * @param {string} [opts.path='/']
+	 * @param {string} [opts.domain]
+	 * @param {boolean} [opts.signed] - sign the cookie value
+	 * @returns {VeskResponse}
+	 */
+	setCookie(name, value, opts = {}) {
+		const parts = [`${name}=${encodeURIComponent(value)}`];
+		if (opts.httpOnly !== false) parts.push('HttpOnly');
+		if (opts.secure !== false) parts.push('Secure');
+		parts.push('SameSite=' + (opts.sameSite || 'Lax'));
+		parts.push('Path=' + (opts.path || '/'));
+		if (opts.maxAge !== undefined) parts.push('Max-Age=' + opts.maxAge);
+		if (opts.domain) parts.push('Domain=' + opts.domain);
+		this._cookieHeaders.push(parts.join('; '));
+		return this;
+	}
+
+	/**
+	 * Clear a cookie by name.
+	 * @param {string} name
+	 * @param {object} [opts]
+	 * @param {string} [opts.path='/']
+	 * @param {string} [opts.domain]
+	 * @returns {VeskResponse}
+	 */
+	clearCookie(name, opts = {}) {
+		return this.setCookie(name, '', { ...opts, maxAge: 0 });
+	}
+
+	/**
+	 * Override Content-Security-Policy for this response.
+	 * @param {string|false} policy - CSP string, or false to disable
+	 * @returns {VeskResponse}
+	 */
+	setCsp(policy) {
+		this._secHeaders['Content-Security-Policy'] = policy === false ? null : policy;
+		return this;
+	}
+
+	/**
+	 * Set a custom security header on this response.
+	 * @param {string} name - header name (e.g. 'X-Frame-Options')
+	 * @param {string|false} value - header value, or false to omit
+	 * @returns {VeskResponse}
+	 */
+	setSecurityHeader(name, value) {
+		this._secHeaders[name] = value === false ? null : value;
+		return this;
+	}
+
+	/**
+	 * Set Cache-Control header (public).
+	 * @param {number} ttlSeconds - cache TTL in seconds
+	 * @returns {VeskResponse}
+	 */
+	cache(ttlSeconds) {
+		this.headers?.set('Cache-Control', `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`);
+		return this;
+	}
+
+	/**
+	 * Disable caching for this response.
+	 * @returns {VeskResponse}
+	 */
+	noCache() {
+		this.headers?.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+		this.headers?.set('Pragma', 'no-cache');
+		this.headers?.set('Expires', '0');
+		return this;
+	}
+
+	/**
+	 * Set CORS headers on this response.
+	 * @param {object} opts
+	 * @param {string} opts.origin - allowed origin
+	 * @param {string} [opts.methods] - allowed methods
+	 * @param {string} [opts.headers] - allowed headers
+	 * @param {boolean} [opts.credentials] - allow credentials
+	 * @returns {VeskResponse}
+	 */
+	cors(opts = {}) {
+		this.headers?.set('Access-Control-Allow-Origin', opts.origin || '*');
+		if (opts.methods) this.headers?.set('Access-Control-Allow-Methods', opts.methods);
+		if (opts.headers) this.headers?.set('Access-Control-Allow-Headers', opts.headers);
+		if (opts.credentials !== false) this.headers?.set('Access-Control-Allow-Credentials', 'true');
+		return this;
+	}
+
+	/** Flush accumulated security headers into the response headers. */
+	_flushSecurityHeaders() {
+		for (const [name, value] of Object.entries(this._secHeaders)) {
+			if (value === null) continue;
+			const existing = this.headers?.get(name);
+			if (!existing) this.headers?.set(name, value);
+		}
+		if (this._cookieHeaders.length > 0) {
+			this.headers?.set('Set-Cookie', this._cookieHeaders.join(', '));
+		}
+	}
+
+	// ── Static factories (override ServerResponse to return VeskResponse) ──
+
+	/**
+	 * Create a JSON response.
+	 * @param {unknown} body
+	 * @param {ResponseInit} [init]
+	 * @returns {VeskResponse}
+	 */
+	static json(body, init) {
+		return new VeskResponse(JSON.stringify(body), {
+			...init,
+			headers: { 'Content-Type': 'application/json', ...init?.headers },
+		});
+	}
+
+	/**
+	 * Create a redirect response.
+	 * @param {string} url
+	 * @param {number} [status]
+	 * @returns {VeskResponse}
+	 */
+	static redirect(url, status = 307) {
+		return new VeskResponse(null, { status, headers: { Location: url } });
+	}
+
+	/**
+	 * Internal rewrite.
+	 * @param {string} url
+	 * @returns {VeskResponse}
+	 */
+	static rewrite(url) {
+		return new VeskResponse(null, { status: 200, headers: { 'x-vesk-rewrite': url } });
+	}
+
+	/**
+	 * Pass through.
+	 * @returns {VeskResponse}
+	 */
+	static next() {
+		return new VeskResponse(null, { status: 200, headers: { 'x-vesk-next': '1' } });
+	}
+
+	/**
+	 * Create an HTML response.
+	 * @param {string} html
+	 * @param {ResponseInit} [init]
+	 * @returns {VeskResponse}
+	 */
+	static html(html, init) {
+		return new VeskResponse(html, {
+			...init,
+			headers: { 'Content-Type': 'text/html; charset=utf-8', ...init?.headers },
+		});
+	}
+}
+
+// ── Helper: apply a VeskRequest's security overrides to a VeskResponse ──
+
+/**
+ * Apply security overrides from a VeskRequest to a VeskResponse.
+ * Called internally by the server before sending the response.
+ * @param {VeskRequest} request
+ * @param {VeskResponse} response
+ */
+export function applyRequestSecurity(request, response) {
+	if (!request || !response) return;
+	const overrides = request.getSecurityOverrides?.() || {};
+	if (overrides.contentSecurityPolicy !== undefined) {
+		response.setCsp(overrides.contentSecurityPolicy);
+	}
+	if (overrides.customHeaders) {
+		for (const [name, value] of Object.entries(overrides.customHeaders)) {
+			response.setSecurityHeader(name, value);
+		}
+	}
+	response._flushSecurityHeaders();
+}
+
 /**
  * Request body validation helper — wraps a Zod schema and parses the
  * request body, returning a 400 Response on validation failure.
@@ -582,3 +1009,57 @@ export async function withValidation(request, schema, opts = {}) {
 		}, { status: 400 });
 	}
 }
+
+// ── Signed cookie helpers ─────────────────────────────────────
+// These delegate to the compiler's crypto-based implementation.
+// They are available at runtime for API route handlers.
+
+let _signImpl = null;
+
+async function _getImpl() {
+	if (_signImpl) return _signImpl;
+	try {
+		_signImpl = await import('../../compiler/src/server-utils.js');
+	} catch {
+		try {
+			const mod = await import('@vesk/compiler');
+			_signImpl = mod;
+		} catch {
+			_signImpl = { signCookie: null, unsignCookie: null, setSignedCookie: null, readSignedCookie: null };
+		}
+	}
+	return _signImpl;
+}
+
+/** Sign a cookie value with HMAC-SHA256 to prevent tampering. */
+export async function signCookie(name, value, host) {
+	const impl = await _getImpl();
+	if (impl.signCookie) return impl.signCookie(name, value, host);
+	throw new Error('signCookie: @vesk/compiler not available');
+}
+
+/** Verify and unsign a cookie value. Returns null if tampered. */
+export async function unsignCookie(name, signedValue, host) {
+	const impl = await _getImpl();
+	if (impl.unsignCookie) return impl.unsignCookie(name, signedValue, host);
+	throw new Error('unsignCookie: @vesk/compiler not available');
+}
+
+/**
+ * Set a signed cookie with standard cookie options (HttpOnly, Secure, SameSite, Path, Max-Age).
+ * Returns a Set-Cookie header string.
+ */
+export async function setSignedCookie(name, value, options = {}, host) {
+	const impl = await _getImpl();
+	if (impl.setSignedCookie) return impl.setSignedCookie(name, value, options, host);
+	throw new Error('setSignedCookie: @vesk/compiler not available');
+}
+
+/** Read and verify a signed cookie from a cookie string. Returns the unsigned value or null. */
+export async function readSignedCookie(name, cookieString, host) {
+	const impl = await _getImpl();
+	if (impl.readSignedCookie) return impl.readSignedCookie(name, cookieString, host);
+	throw new Error('readSignedCookie: @vesk/compiler not available');
+}
+
+

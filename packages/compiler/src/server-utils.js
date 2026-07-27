@@ -104,6 +104,51 @@ export function escapeHtml(str) {
 		.replace(/'/g, '&#39;');
 }
 
+// ── Secret redaction in logs ─────────────────────────────────────
+const SECRET_PATTERNS = [
+	{ pattern: /(sk_live_[a-zA-Z0-9]{20,})/g, replace: 'sk_live_***' },
+	{ pattern: /(sk_test_[a-zA-Z0-9]{20,})/g, replace: 'sk_test_***' },
+	{ pattern: /(ghp_[a-zA-Z0-9]{36,})/g, replace: 'ghp_***' },
+	{ pattern: /(gho_[a-zA-Z0-9]{36,})/g, replace: 'gho_***' },
+	{ pattern: /(xox[bpsra]-[a-zA-Z0-9-]{20,})/g, replace: 'xox-***' },
+	{ pattern: /(Bearer\s+)[a-zA-Z0-9._-]{20,}/g, replace: '$1***' },
+	{ pattern: /(Authorization:\s*Basic\s+)[a-zA-Z0-9+/=]{20,}/gi, replace: '$1***' },
+	{ pattern: /(-----BEGIN\s+(?:RSA\s+)?PRIVATE KEY-----)[\s\S]*?(-----END\s+(?:RSA\s+)?PRIVATE KEY-----)/g, replace: '$1***$2' },
+	{ pattern: /(['"]?(?:api[_-]?key|secret|password|token|auth|private[_-]?key|access[_-]?key|session[_-]?secret)[, }\]'"]*[:=]\s*['"]?)(?!.*\*\*\*)([^'"\s,}\]]{8,})(['"]?)/gi, replace: '$1***$3' },
+];
+
+/** Redact known secret patterns from a string. Returns the redacted string. */
+export function redactLog(str) {
+	if (!str || typeof str !== 'string') return str;
+	let result = str;
+	for (const { pattern, replace } of SECRET_PATTERNS) {
+		result = result.replace(pattern, replace);
+	}
+	return result;
+}
+
+const _origConsoleError = console.error;
+const _origConsoleLog = console.log;
+let _redactEnabled = true;
+
+/** Enable or disable automatic secret redaction in console output. Enabled by default. */
+export function setRedactLogging(enabled) {
+	_redactEnabled = enabled;
+}
+
+if (typeof console !== 'undefined') {
+	console.error = function(...args) {
+		_origConsoleError.apply(console, args.map(a =>
+			typeof a === 'string' && _redactEnabled ? redactLog(a) : a
+		));
+	};
+	console.log = function(...args) {
+		_origConsoleLog.apply(console, args.map(a =>
+			typeof a === 'string' && _redactEnabled ? redactLog(a) : a
+		));
+	};
+}
+
 /** Mark a string as safe HTML (bypasses auto-escaping). Use raw() only for trusted content. */
 export function raw(value) {
 	if (value == null) return '';
@@ -157,19 +202,19 @@ export function verifyCsrfToken(token, host) {
  * Reads the token from X-CSRF-Token header or _csrf body field.
  * Throws on invalid/missing token.
  */
-export function csrfGuard(request) {
+export function csrfGuard(request, host) {
 	if (!request || typeof request !== 'object') return;
 	const method = (request.method || 'GET').toUpperCase();
 	if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
 	const token = request.headers?.['x-csrf-token']
 		|| (request.body && request.body._csrf)
 		|| '';
-	if (!verifyCsrfToken(token)) {
+	if (!verifyCsrfToken(token, host || request.headers?.['host'])) {
 		throw new Error('CSRF validation failed');
 	}
 }
 
-// ── Cookie signing ────────────────────────────────────────────────
+// ── Cookie signing (HMAC-SHA256) ──────────────────────────────────
 const __cookieSecrets = new Map();
 
 function cookieSecret(host) {
@@ -180,45 +225,140 @@ function cookieSecret(host) {
 	return __cookieSecrets.get(host);
 }
 
-/** Sign a cookie value with HMAC to prevent tampering. */
-export function signCookie(name, value, host) {
+/**
+ * Sign a cookie value with HMAC-SHA256 to prevent tampering.
+ * Returns a string like `value.base64sig`.
+ */
+export async function signCookie(name, value, host) {
 	const secret = cookieSecret(host);
 	const payload = `${name}=${value}`;
-	let h = 0;
-	for (let i = 0; i < payload.length; i++) {
-		h = ((h << 5) - h + payload.charCodeAt(i)) | 0;
-	}
-	for (let i = 0; i < secret.length; i++) {
-		h = ((h << 5) - h + secret.charCodeAt(i)) | 0;
-	}
-	const sig = (h >>> 0).toString(36);
+	const enc = new TextEncoder();
+	const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+	const sig = await crypto.subtle.sign('HMAC', key, enc.encode(payload));
+	const sigB64 = btoa(String.fromCharCode(...new Uint8Array(sig))).replace(/=+$/, '');
+	return `${value}.${sigB64}`;
+}
+
+/** Sync fallback for cookie signing (uses Node.js crypto). */
+async function signCookieSync(name, value, host) {
+	const secret = cookieSecret(host);
+	const { createHmac } = await import('crypto');
+	const hmac = createHmac('sha256', secret);
+	hmac.update(`${name}=${value}`);
+	const sig = hmac.digest('base64').replace(/=+$/, '');
 	return `${value}.${sig}`;
 }
 
 /** Verify and unsign a cookie value. Returns null if tampered. */
-export function unsignCookie(name, signedValue, host) {
+export async function unsignCookie(name, signedValue, host) {
 	if (!signedValue || typeof signedValue !== 'string') return null;
 	const dot = signedValue.lastIndexOf('.');
 	if (dot === -1) return null;
 	const value = signedValue.slice(0, dot);
 	const sig = signedValue.slice(dot + 1);
-	const expectedSig = signCookie(name, value, host).split('.').pop();
+	let expectedSig;
+	try {
+		expectedSig = (await signCookie(name, value, host)).split('.').pop();
+	} catch {
+		expectedSig = (await signCookieSync(name, value, host)).split('.').pop();
+	}
 	return sig === expectedSig ? value : null;
+}
+
+/**
+ * Set a signed cookie header value with standard cookie options.
+ * Returns a string suitable for a Set-Cookie header.
+ *
+ * @param {string} name - Cookie name
+ * @param {string} value - Cookie value (will be signed)
+ * @param {object} [options]
+ * @param {boolean} [options.httpOnly=true] - Not accessible via JS
+ * @param {boolean} [options.secure=true] - HTTPS only
+ * @param {string} [options.sameSite='Lax'] - SameSite policy
+ * @param {string} [options.path='/'] - Cookie path
+ * @param {number} [options.maxAge] - Seconds until expiry (default: session)
+ * @param {string} [options.domain] - Cookie domain
+ * @param {string} [host] - Host for signing secret
+ * @returns {Promise<string>} Set-Cookie header value
+ */
+export async function setSignedCookie(name, value, options = {}, host) {
+	const signed = await signCookie(name, value, host);
+	const parts = [`${name}=${signed}`];
+	if (options.httpOnly !== false) parts.push('HttpOnly');
+	if (options.secure !== false) parts.push('Secure');
+	parts.push('SameSite=' + (options.sameSite || 'Lax'));
+	if (options.path !== undefined) parts.push('Path=' + options.path);
+	else parts.push('Path=/');
+	if (options.maxAge !== undefined) parts.push('Max-Age=' + options.maxAge);
+	if (options.domain) parts.push('Domain=' + options.domain);
+	return parts.join('; ');
+}
+
+/** Sync fallback for setSignedCookie. */
+export async function setSignedCookieSync(name, value, options = {}, host) {
+	const signed = await signCookieSync(name, value, host);
+	const parts = [`${name}=${signed}`];
+	if (options.httpOnly !== false) parts.push('HttpOnly');
+	if (options.secure !== false) parts.push('Secure');
+	parts.push('SameSite=' + (options.sameSite || 'Lax'));
+	if (options.path !== undefined) parts.push('Path=' + options.path);
+	else parts.push('Path=/');
+	if (options.maxAge !== undefined) parts.push('Max-Age=' + options.maxAge);
+	if (options.domain) parts.push('Domain=' + options.domain);
+	return parts.join('; ');
+}
+
+/**
+ * Read and verify a signed cookie from a cookie string (e.g. req.headers.cookie).
+ * Returns the unsigned value, or null if missing/tampered.
+ */
+export async function readSignedCookie(name, cookieString, host) {
+	if (!cookieString) return null;
+	const cookies = {};
+	for (const pair of cookieString.split(';')) {
+		const eq = pair.indexOf('=');
+		if (eq === -1) continue;
+		cookies[pair.slice(0, eq).trim()] = pair.slice(eq + 1).trim();
+	}
+	const signed = cookies[name];
+	if (!signed) return null;
+	return await unsignCookie(name, signed, host);
 }
 
 /**
  * Generate default security headers map for SSR responses.
  * Configurable via security section in vesk.config.
+ *
+ * CSP (Content-Security-Policy) tells the browser which sources
+ * of content (scripts, styles, images, fonts, etc.) are allowed
+ * to load on a page. This prevents XSS and data injection attacks
+ * by restricting what can execute or be displayed.
+ *
+ * The default policy is intentionally restrictive:
+ *   - Scripts: same-origin only
+ *   - Styles: same-origin only ('unsafe-inline' for dev convenience)
+ *   - Images: same-origin and data: URIs
+ *   - Fonts: same-origin only
+ *   - Frames: same-origin only
+ *   - Connections: same-origin only
+ *   - Objects: none
+ *   - Base URIs: same-origin only
+ *   - Form actions: same-origin only
  */
 export function securityHeaders(config = {}) {
 	const sec = config.security || {};
-	return {
+	const headers = {
 		'X-Frame-Options': sec.xFrameOptions || 'DENY',
 		'X-Content-Type-Options': 'nosniff',
 		'Referrer-Policy': sec.referrerPolicy || 'strict-origin-when-cross-origin',
 		...(sec.hsts !== false ? { 'Strict-Transport-Security': sec.hsts || 'max-age=31536000; includeSubDomains' } : {}),
 		'X-XSS-Protection': '0',
 	};
+	if (sec.contentSecurityPolicy !== false) {
+		headers['Content-Security-Policy'] = sec.contentSecurityPolicy ||
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+	}
+	return headers;
 }
 
 /**
@@ -294,7 +434,154 @@ export function securityComment(config = {}) {
 	if (sec.csrf !== false) features.push('csrf');
 	if (sec.xFrameOptions !== false) features.push('x-frame-options');
 	if (sec.hsts !== false) features.push('hsts');
+	if (sec.contentSecurityPolicy !== false) features.push('csp');
+	if (sec.trustProxy) features.push('trust-proxy');
 	return `<!-- vesk-sec: ${features.join(', ')} -->`;
+}
+
+// ── Rate Limiting (in-memory sliding window) ─────────────────────
+
+/**
+ * Simple in-memory sliding-window rate limiter.
+ *
+ * Tracks request timestamps per key (typically IP address).
+ * If the number of requests within the window exceeds the limit,
+ * further requests are denied until old timestamps expire.
+ *
+ * Usage:
+ *   const limiter = createRateLimiter({ windowMs: 60000, max: 100 });
+ *   if (limiter.check(clientIp)) { allow } else { deny }
+ *   limiter.reset(clientIp);
+ */
+
+/**
+ * @typedef {Object} RateLimitOptions
+ * @property {number} [windowMs] - Time window in milliseconds (default: 60000 = 1 min)
+ * @property {number} [max] - Max requests per window (default: 100)
+ * @property {number} [cleanupIntervalMs] - How often to purge stale entries (default: 60000)
+ */
+
+/**
+ * Create a rate limiter instance.
+ * @param {RateLimitOptions} [options]
+ * @returns {{ check: (key: string) => boolean, remaining: (key: string) => number, reset: (key: string) => void, getConfig: () => { windowMs: number, max: number }, middleware: (request: { headers?: object, url?: string }, response?: { headers?: object }) => boolean }}
+ */
+export function createRateLimiter(options = {}) {
+	const windowMs = options.windowMs || 60000;
+	const max = options.max || 100;
+	const timestamps = new Map();
+
+	const cleanupInterval = setInterval(() => {
+		const now = Date.now();
+		for (const [key, times] of timestamps) {
+			const valid = times.filter(t => now - t < windowMs);
+			if (valid.length === 0) timestamps.delete(key);
+			else timestamps.set(key, valid);
+		}
+	}, options.cleanupIntervalMs || 60000);
+	if (cleanupInterval.unref) cleanupInterval.unref();
+
+	function getClientIp(request) {
+		const forwarded = request?.headers?.['x-forwarded-for'];
+		if (forwarded) {
+			const ip = (typeof forwarded === 'string' ? forwarded.split(',')[0] : forwarded[0]).trim();
+			return ip;
+		}
+		return request?.headers?.['x-real-ip'] || request?.headers?.['cf-connecting-ip'] || 'unknown';
+	}
+
+	function _check(key) {
+		if (!key) return true;
+		const now = Date.now();
+		const times = timestamps.get(key) || [];
+		const valid = times.filter(t => now - t < windowMs);
+		if (valid.length >= max) {
+			timestamps.set(key, valid);
+			return false;
+		}
+		valid.push(now);
+		timestamps.set(key, valid);
+		return true;
+	}
+
+	return {
+		check(key) {
+			return _check(key);
+		},
+		remaining(key) {
+			if (!key) return max;
+			const now = Date.now();
+			const times = timestamps.get(key) || [];
+			return Math.max(0, max - times.filter(t => now - t < windowMs).length);
+		},
+		reset(key) {
+			timestamps.delete(key);
+		},
+		getConfig() {
+			return { windowMs, max };
+		},
+		middleware(request, response) {
+			const ip = getClientIp(request);
+			if (!_check(ip)) {
+				if (response && typeof response.headers === 'object') {
+					response.headers['Retry-After'] = String(Math.ceil(windowMs / 1000));
+				}
+				return false; // rate limited
+			}
+			return true; // allowed
+		},
+	};
+}
+
+// ── trustProxy ────────────────────────────────────────────────────
+
+/**
+ * Get the true client IP from a request, respecting X-Forwarded-For
+ * when trustProxy is enabled.
+ * @param {object} request - Request-like object with headers
+ * @param {boolean|string} trustProxy - true to trust any proxy, or specific IP
+ * @returns {string} Client IP address
+ */
+export function getClientIp(request, trustProxy = false) {
+	const headers = request?.headers || {};
+	if (trustProxy) {
+		const forwarded = headers['x-forwarded-for'];
+		if (forwarded) {
+			const ips = (typeof forwarded === 'string' ? forwarded : String(forwarded)).split(',').map(s => s.trim());
+			return ips[0] || 'unknown';
+		}
+		const realIp = headers['x-real-ip'];
+		if (realIp) return typeof realIp === 'string' ? realIp : String(realIp);
+	}
+	return headers['x-forwarded-for']
+		? (typeof headers['x-forwarded-for'] === 'string' ? headers['x-forwarded-for'].split(',')[0].trim() : headers['x-forwarded-for'][0])
+		: headers['x-real-ip'] || 'unknown';
+}
+
+/**
+ * Get the true protocol from a request, respecting X-Forwarded-Proto
+ * when trustProxy is enabled.
+ * @param {object} request - Request-like object with headers
+ * @param {boolean|string} trustProxy - true to trust any proxy
+ * @returns {string} 'http' or 'https'
+ */
+export function getClientProtocol(request, trustProxy = false) {
+	if (trustProxy) {
+		const proto = request?.headers?.['x-forwarded-proto'];
+		if (proto) return (typeof proto === 'string' ? proto.split(',')[0] : String(proto)).trim();
+	}
+	return request?.headers?.['x-forwarded-proto'] ? 'https' : 'http';
+}
+
+/**
+ * Apply trustProxy logic to a request context object (mutates in place).
+ * Adds ip, protocol, host properties.
+ */
+export function applyTrustProxy(ctx, trustProxy) {
+	if (!ctx || !trustProxy) return;
+	ctx.ip = getClientIp(ctx, trustProxy);
+	ctx.protocol = getClientProtocol(ctx, trustProxy);
+	ctx.host = ctx.headers?.['x-forwarded-host'] || ctx.host;
 }
 
 /** Wrap a raw JS expression string in parentheses for safe interpolation. */

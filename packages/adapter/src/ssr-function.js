@@ -76,7 +76,7 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
   const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
   const altCssPath = resolve(appDir, '..', 'src', 'app.css');
   const hasGlobalCss = existsSync(globalCssPath) || existsSync(altCssPath);
-  const cssOption = hasGlobalCss ? ', cssUrl: "/_vesk/static/global.css"' : '';
+  const cssOption = hasGlobalCss ? ', cssUrls: ["/_vesk/static/_tailwind.css", "/_vesk/static/global.css"]' : '';
 
   const hasLayout = routeNode.layout;
   const pageSrc = readFileSync(pagePath, 'utf-8');

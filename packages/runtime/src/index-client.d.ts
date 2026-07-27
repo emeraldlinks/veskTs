@@ -176,3 +176,17 @@ export function minLength(len: number, msg?: string): (value: any) => string | n
 export function maxLength(len: number, msg?: string): (value: any) => string | null;
 export function pattern(regex: RegExp, msg?: string): (value: any) => string | null;
 export function custom(fn: (value: any) => string | null): (value: any) => string | null;
+
+// ── VeskRequest / VeskResponse — type-only — use @vesk/runtime/server for the full classes ──
+
+export type VeskRequest = Request & {
+  cookies: Record<string, string>;
+  locals: Record<string, any>;
+  params: Record<string, string>;
+  query: Record<string, string>;
+  ip: string;
+  protocol: string;
+  hostname: string;
+};
+export type VeskResponse = Response;
+

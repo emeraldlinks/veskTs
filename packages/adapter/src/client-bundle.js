@@ -27,38 +27,56 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
   const runtimeDir = findRuntimeSrc(appDir);
 
   const seen = new Set();
-  let bundle = 'const __components = {};\n';
-  const aliasLines = [];
+  let componentLines = [];
+  let hydratorLines = [];
+  let aliasLines = [];
+  let hydratorAliasLines = [];
+
+  function stripRuntimeImport(code) {
+    return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, '')
+               .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '')
+               .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '');
+  }
+
+  function compileFile(filePath, resolvedName) {
+    if (seen.has(filePath)) return;
+    seen.add(filePath);
+    const src = readFileSync(filePath, 'utf-8');
+
+    // SPA navigation version — creates new DOM
+    const compCode = compileClient(src, null, { forceClient: true });
+    if (compCode) {
+      const stripped = stripRuntimeImport(compCode)
+        .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+      componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
+    }
+
+    // Hydration version — maps SSR markers
+    const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
+    if (hydCode) {
+      const stripped = stripRuntimeImport(hydCode)
+        .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '')
+        .replace(/__components/g, '__hydrators');
+      hydratorLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
+    }
+
+    // Track aliases for both sets
+    const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
+    if (actualName && actualName !== resolvedName) {
+      aliasLines.push(`__components[${JSON.stringify(resolvedName)}] = __components[${JSON.stringify(actualName)}];`);
+      hydratorAliasLines.push(`__hydrators[${JSON.stringify(resolvedName)}] = __hydrators[${JSON.stringify(actualName)}];`);
+    }
+  }
 
   function walk(nodes) {
     for (const node of nodes) {
       const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
-      if (node.page && existsSync(pagePath) && !seen.has(pagePath)) {
-        seen.add(pagePath);
-        const src = readFileSync(pagePath, 'utf-8');
-        const code = compileClient(src, null, { hydrate: true, forceClient: true });
-        if (code) {
-          bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`)
-                        .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '') + '\n';
-          const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
-          if (actualName && actualName !== node.page) {
-            aliasLines.push(`__components[${JSON.stringify(node.page)}] = __components[${JSON.stringify(actualName)}];`);
-          }
-        }
+      if (node.page && existsSync(pagePath)) {
+        compileFile(pagePath, node.page);
       }
       const layoutPath = resolve(appDir, node.sourceDir, 'layout.vsk');
-      if (node.layout && existsSync(layoutPath) && !seen.has(layoutPath)) {
-        seen.add(layoutPath);
-        const src = readFileSync(layoutPath, 'utf-8');
-        const code = compileClient(src, null, { hydrate: true, forceClient: true });
-        if (code) {
-          bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`)
-                        .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '') + '\n';
-          const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
-          if (actualName && actualName !== node.layout) {
-            aliasLines.push(`__components[${JSON.stringify(node.layout)}] = __components[${JSON.stringify(actualName)}];`);
-          }
-        }
+      if (node.layout && existsSync(layoutPath)) {
+        compileFile(layoutPath, node.layout);
       }
       walk(node.children || []);
     }
@@ -67,26 +85,15 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
 
   // ── External component files (./components/) ──
   for (const [compName, compPath] of componentMap) {
-    if (seen.has(compPath)) continue;
-    seen.add(compPath);
-    const src = readFileSync(compPath, 'utf-8');
-    const code = compileClient(src, null, { hydrate: true, forceClient: true });
-    if (code) {
-      bundle += code.replace(/from\s+['"]@vesk\/runtime['"]/g, `from '/_vesk/static/client.js'`)
-                    .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '') + '\n';
-      const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
-      if (actualName && actualName !== compName) {
-        aliasLines.push(`__components[${JSON.stringify(compName)}] = __components[${JSON.stringify(actualName)}];`);
-      }
-    }
+    compileFile(compPath, compName);
   }
 
   // Bundle client runtime — ripple reactivity first, then utilities
   const runtimeFiles = [
     'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
     'context.js', 'hydrate.js', 'resource.js',
-    'reconcile.js', 'bindings.js', 'router.js',
-    'portal.js', 'hmr-client.js',
+    'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
+    'portal.js',
     'seo.js', 'image.js', 'experiment.js', 'form.js',
   ];
   let runtimeCode = '';
@@ -95,6 +102,7 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
     if (existsSync(p)) {
       let src = readFileSync(p, 'utf-8');
       src = src.replace(/^import\s+[\s\S]*?from\s+['"].\/.*?['"];?\n?/gm, '');
+      src = src.replace(/^export\s*\{\s*[\s\S]*?\};?\n?/gm, '');
       src = src.replace(/^export\s+/gm, '');
       runtimeCode += `// --- ${f} ---\n${src}\n`;
     }
@@ -109,8 +117,16 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
   }
 
   const aliasCode = aliasLines.length > 0 ? aliasLines.join('\n') + '\n' : '';
-  const fullBundle = runtimeCode + '\n' + bundle + '\n' +
+  const hydratorAliasCode = hydratorAliasLines.length > 0 ? hydratorAliasLines.join('\n') + '\n' : '';
+  const fullBundle = runtimeCode + '\n' +
+    `const __components = {};\n` +
+    `const __hydrators = {};\n` +
+    `const __runtime_comps = __components;\n\n` +
+    componentLines.join('\n\n') + '\n' +
     aliasCode +
+    hydratorLines.join('\n\n') + '\n' +
+    hydratorAliasCode +
+    `function __cleanup(start, end) {\n\tlet n = start.nextSibling;\n\twhile (n && n !== end) {\n\t\tconst next = n.nextSibling;\n\t\tn.remove();\n\t\tn = next;\n\t}\n}\n` +
     `globalThis.__components = __components;\n` +
     `function __resolveNames(nodes) {\n` +
     `  for (const n of nodes) {\n` +
@@ -135,6 +151,7 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
     `const __routeTree = ${JSON.stringify(routeTree)};\n` +
     `__resolveNames(__routeTree);\n` +
     `const __router = createFileRouter(__routeTree);\n` +
+    `__router.__hydrators = __hydrators;\n` +
     `__router.__updateComponents = __updateComponents;\n` +
     `if (typeof document !== 'undefined') __router.start();\n`;
 

@@ -82,7 +82,11 @@ export async function bundleRuntime(appDir, outDir) {
     `  return req.locals || {};`,
     `}`,
     ``,
-    `export { renderPage, renderFullPage, renderPageStream, parseCookies };`,
+    `export { renderPage, renderFullPage, renderPageStream, parseCookies };
+
+// Re-export runtime classes used by API routes
+export const VeskRequest = __veskRuntime.VeskRequest;
+export const VeskResponse = __veskRuntime.VeskResponse;`,
   ].join('\n');
   writeFileSync(entryFile, entryContent, 'utf-8');
 
@@ -94,7 +98,7 @@ export async function bundleRuntime(appDir, outDir) {
       format: 'esm',
       minify: true,
       outfile: resolve(outDir, 'server', 'runtime.js'),
-      external: ['module', 'node:module', 'fs', 'node:fs', 'path', 'node:path'],
+      external: ['module', 'node:module', 'fs', 'node:fs', 'path', 'node:path', 'crypto', 'node:crypto'],
       target: ['es2022'],
       treeShaking: true,
     });

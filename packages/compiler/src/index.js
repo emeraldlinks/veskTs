@@ -28,6 +28,9 @@ export {
 
 /** @typedef {import('./config.js').VeskPlugin} VeskPlugin */
 /** @typedef {import('./config.js').VeskConfig} VeskConfig */
+/** @typedef {import('./config.js').VeskSecurity} VeskSecurity */
+/** @typedef {import('./config.js').VeskCors} VeskCors */
+/** @typedef {import('./config.js').VeskRateLimit} VeskRateLimit */
 
-export { defineConfig, validateConfig } from './config.js';
+export { defineConfig, validateConfig, preset, definePlugin } from './config.js';
 export { scanRoutes, scanComponents, collectSources, matchUrl } from './router.js';

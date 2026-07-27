@@ -10,6 +10,7 @@ export {
 	prettifyHtml,
 	isStatic,
 	escapeHtml,
+	raw,
 	exprJS,
 	tryEvalExpr,
 	childrenToHTML,
@@ -28,6 +29,20 @@ export {
 	securityHeaders,
 	corsHeaders,
 	corsPreflight,
+	csrfToken,
+	verifyCsrfToken,
+	csrfGuard,
+	signCookie,
+	unsignCookie,
+	setSignedCookie,
+	readSignedCookie,
+	securityComment,
+	redactLog,
+	setRedactLogging,
+	createRateLimiter,
+	getClientIp,
+	getClientProtocol,
+	applyTrustProxy,
 } from './server-utils.js';
 
 export {

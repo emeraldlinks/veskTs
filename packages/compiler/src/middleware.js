@@ -109,7 +109,7 @@ export async function loadMiddleware(sourcePath) {
  * Execute a middleware chain with onion model.
  *
  * Each middleware receives: (ctx, next)
- *   ctx = { request, params, url, locals, cookies }
+ *   ctx = { request, params, url, locals, cookies, set, get }
  *   next = async (rewriteUrl?) => Response   // passes to next middleware or page
  *
  * Can:
@@ -118,22 +118,61 @@ export async function loadMiddleware(sourcePath) {
  *   - Call next('/rewrite')               → rewrite URL in place
  *   - throw redirect() / notFound()       → caught
  *
+ * Decorators (ctx.set/get):
+ *   ctx.set('user', val)  → ctx.locals.user = val
+ *   ctx.get('user')       → ctx.locals.user
+ *   ctx.user              → ctx.locals.user  (convenience getter)
+ *   ctx.db                → ctx.locals.db
+ *
  * The last middleware resolves to a sentinel — the caller replaces it with
  * the actual page render. Returns { response, redirected, locals, rewriteUrl }
  */
 export async function executeMiddlewareChain(chain, request, params, options = {}) {
-	const { onLast } = options;
+	const { onLast, plugins } = options;
 	const url = new URL(request.url, 'http://localhost');
 	const locals = {};
 	const cookies = parseCookies(request.headers?.cookie || '');
 
-	const ctx = {
+	const ctx = new Proxy({
 		request,
 		params,
 		url,
 		locals,
 		cookies,
-	};
+		set(key, value) {
+			locals[key] = value;
+		},
+		get(key) {
+			return locals[key];
+		},
+	}, {
+		get(target, prop) {
+			if (prop in target) return target[prop];
+			return locals[prop];
+		},
+	});
+
+	// Resolve plugin provides and run onRequest hooks
+	if (plugins && plugins.length > 0) {
+		for (const plugin of plugins) {
+			if (plugin.provides) {
+				for (const [key, factory] of Object.entries(plugin.provides)) {
+					if (typeof factory === 'function' && !(factory instanceof RegExp)) {
+						try {
+							ctx.set(key, await factory());
+						} catch {
+							// factory failed — skip this provide
+						}
+					} else {
+						ctx.set(key, factory);
+					}
+				}
+			}
+			if (typeof plugin.onRequest === 'function') {
+				await plugin.onRequest(ctx);
+			}
+		}
+	}
 
 	let rewriteUrl = null;
 

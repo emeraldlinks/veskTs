@@ -11,16 +11,62 @@ export function render(source: string, componentName: string, props?: Record<str
 export function compileClient(source: string, componentName?: string | null, options?: { forceClient?: boolean; hydrate?: boolean }): string;
 export const compile: typeof compileClient;
 
+// ── Middleware context ─────────────────────────────────────────
+
+export interface Context {
+  request: Request;
+  params: Record<string, string>;
+  url: URL;
+  locals: Record<string, unknown>;
+  cookies: Record<string, string>;
+  set(key: string, value: unknown): void;
+  get<T = unknown>(key: string): T;
+}
+
 // ── Config ─────────────────────────────────────────────────────
+
+export interface VeskPluginProvides {
+  [name: string]: (new (...args: any[]) => any) | (() => any) | any;
+}
 
 export interface VeskPlugin {
   name: string;
+  provides?: VeskPluginProvides;
+  onRequest?: (ctx: Context) => Promise<void> | void;
   onCSS?: (content: string, filePath: string) => Promise<string | null> | string | null;
   onFileWatch?: (filePath: string) => Promise<{ handled: boolean }> | { handled: boolean };
   onTransformJS?: (code: string, filePath: string) => Promise<string | null> | string | null;
   onBuildStart?: () => Promise<void> | void;
   onBuildEnd?: () => Promise<void> | void;
 }
+
+export interface VeskCors {
+  origin: string | string[];
+  methods?: string;
+  headers?: string;
+  credentials?: boolean;
+  maxAge?: number;
+}
+
+export interface VeskRateLimit {
+  windowMs?: number;
+  max?: number;
+}
+
+export interface VeskSecurity {
+  xFrameOptions?: string;
+  hsts?: string | boolean;
+  referrerPolicy?: string | boolean;
+  contentSecurityPolicy?: string | boolean;
+  autoEscape?: boolean;
+  csrf?: boolean;
+  cors?: VeskCors;
+  trustProxy?: boolean | string;
+  rateLimit?: VeskRateLimit;
+  redactLogs?: boolean;
+}
+
+export type VeskSecurityPreset = 'strict' | 'default' | 'minimal' | 'off';
 
 export interface VeskConfig {
   appDir?: string;
@@ -30,8 +76,11 @@ export interface VeskConfig {
     getStaticPaths?: () => Promise<{ paths: { params: Record<string, string> }[] }>;
   };
   plugins?: VeskPlugin[];
+  security?: VeskSecurity | VeskSecurityPreset | false | ((preset: typeof preset) => VeskSecurity);
 }
 
+export function definePlugin(plugin: VeskPlugin): VeskPlugin;
+export function preset(name: 'production' | 'development', overrides?: VeskSecurity): VeskSecurity;
 export function defineConfig(config: VeskConfig): VeskConfig;
 export function validateConfig(config: VeskConfig): VeskConfig;
 

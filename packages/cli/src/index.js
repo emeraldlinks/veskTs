@@ -39,8 +39,43 @@ if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
 	usage(args.length === 0 ? 1 : 0);
 }
 
+// ── Environment variable loader ─────────────────────────────────
+/**
+ * Load .env and .env.local files into process.env.
+ * Supports VAR=value format, # comments, quoted values.
+ * .env.local overrides .env for local development overrides.
+ */
+function loadEnvFiles(projectDir) {
+	const files = [
+		join(projectDir, '.env'),
+		join(projectDir, '.env.local'),
+	];
+	for (const filePath of files) {
+		if (!existsSync(filePath)) continue;
+		const content = readFileSync(filePath, 'utf-8');
+		for (const line of content.split('\n')) {
+			const trimmed = line.trim();
+			if (!trimmed || trimmed.startsWith('#')) continue;
+			const eq = trimmed.indexOf('=');
+			if (eq === -1) continue;
+			let key = trimmed.slice(0, eq).trim();
+			let val = trimmed.slice(eq + 1).trim();
+			// Strip surrounding quotes
+			if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+				val = val.slice(1, -1);
+			}
+			if (!process.env[key]) {
+				process.env[key] = val;
+			}
+		}
+	}
+}
+
 // ── Config loader ──────────────────────────────────────────────
 async function loadConfig(projectDir) {
+	// Load .env files before config so env vars are available
+	loadEnvFiles(projectDir);
+
 	const jsPath = join(projectDir, 'vesk.config.js');
 	const tsPath = join(projectDir, 'vesk.config.ts');
 	let configPath = null;
@@ -68,6 +103,15 @@ async function loadConfig(projectDir) {
 
 	const config = typeof defineConfig === 'function' ? defineConfig(raw) : raw;
 	if (typeof validateConfig === 'function') validateConfig(config);
+
+	// Enable log redaction if configured
+	if (config.security?.redactLogs !== false) {
+		try {
+			const { setRedactLogging } = await import(resolve(__dirname, '../../compiler/src/server-utils.js'));
+			setRedactLogging(true);
+		} catch {}
+	}
+
 	return config;
 }
 
@@ -118,21 +162,20 @@ if (cmd === 'init') {
 	}, null, 2) + '\n');
 
 	writeFileSync(join(targetDir, 'vesk.config.ts'), [
-		`import { defineConfig } from '@vesk/compiler'`,
+		`import { defineConfig, preset } from '@vesk/compiler'`,
 		`import tailwindcss from '@vesk/plugin-tailwind'`,
 		``,
 		`export default defineConfig({`,
 		`\tappDir: './app',`,
 		`\toutDir: './dist',`,
 		`\tpublicDir: './public',`,
-		`\tsecurity: {`,
-		`\t\tautoEscape: true,     // auto-escape {expr} in templates (raw() to bypass)`,
-		`\t\tcsrf: true,            // CSRF protection for forms & API routes`,
-		`\t\txFrameOptions: 'DENY', // clickjacking protection`,
-		`\t\thsts: 'max-age=31536000; includeSubDomains',`,
-		`\t\treferrerPolicy: 'strict-origin-when-cross-origin',`,
-		`\t\t// cors: { origin: ['https://app.example.com'] }, // enable CORS`,
-		`\t},`,
+		`\t// security: 'strict',                // preset string ("strict"|"minimal"|"off")`,
+		`\t// security: preset('production'),     // environment preset`,
+		`\tsecurity: preset('production', {       // preset + overrides`,
+		`\t\ttrustProxy: true,                   // set to true if behind nginx/Cloudflare`,
+		`\t\t// rateLimit: { windowMs: 60000, max: 100 },`,
+		`\t\t// cors: { origin: ['https://app.example.com'] },`,
+		`\t}),`,
 		`\tplugins: [`,
 		`\t\ttailwindcss({ entry: 'src/global.css' }),`,
 		`\t],`,
@@ -223,8 +266,10 @@ if (cmd === 'init') {
 	writeFileSync(join(appDir, 'middleware.ts'), [
 		`// Vesk Middleware — onion model (ctx, next)`,
 		`//`,
-		`// ctx = { request, params, url, locals, cookies }`,
-		`//   locals — mutable object shared with page/API`,
+		`// ctx = { request, params, url, locals, cookies, set, get }`,
+		`//   ctx.set('user', val) → ctx.locals.user`,
+		`//   ctx.user             → ctx.locals.user (convenience getter)`,
+		`// ctx.locals — mutable object shared with page/API`,
 		`// next() — passes to next middleware or page render`,
 		`// next('/rewrite') — rewrites URL in place`,
 		`//`,
@@ -232,6 +277,11 @@ if (cmd === 'init') {
 		`// Onion: do before work, await next(), do after work`,
 		``,
 		`export async function middleware(ctx, next) {`,
+		`\t// Example: decorate ctx with user info`,
+		`\t// const user = await authenticate(ctx.request);`,
+		`\t// ctx.set('user', user);`,
+		`\t// ctx.set('db', db);`,
+		``,
 		`\treturn next();`,
 		`}`,
 		'',
@@ -303,6 +353,17 @@ if (cmd === 'init') {
 		'',
 	].join('\n'));
 
+	writeFileSync(join(targetDir, '.env.example'), [
+		`# Vesk environment variables (copy to .env.local for local overrides)`,
+		`# These are loaded automatically in dev and build commands.`,
+		``,
+		`# Example:`,
+		`# DATABASE_URL=postgres://user:pass@localhost:5432/db`,
+		`# STRIPE_SECRET=sk_test_...`,
+		`# PUBLIC_API_URL=https://api.example.com`,
+		'',
+	].join('\n'));
+
 	writeFileSync(join(targetDir, '.gitignore'), [
 		`node_modules/`,
 		`dist/`,
@@ -310,6 +371,9 @@ if (cmd === 'init') {
 		`.vsk-cache/`,
 		`*.log`,
 		`.DS_Store`,
+		`.env`,
+		`.env.local`,
+		`.env.*.local`,
 		'',
 	].join('\n'));
 
@@ -318,10 +382,11 @@ if (cmd === 'init') {
 	writeFileSync(join(apiDir, 'route.ts'), [
 		`// Vesk API Route — app/api/hello/route.ts`,
 		``,
-		`import type { NextRequest } from '@vesk/runtime';`,
+		`import { VeskRequest } from '@vesk/runtime';`,
 		``,
-		`export async function GET(request: NextRequest) {`,
+		`export async function GET(request: VeskRequest) {`,
 		`	const token = request.cookies?.token || '(none)';`,
+		`	console.log('client IP:', request.ip, 'protocol:', request.protocol);`,
 		`	return Response.json({`,
 		`		message: 'Hello from Vesk API!',`,
 		`		timestamp: Date.now(),`,
@@ -330,8 +395,9 @@ if (cmd === 'init') {
 		`	});`,
 		`}`,
 		``,
-		`export async function POST(request: NextRequest) {`,
-		`	const body = await request.json();`,
+		`export async function POST(request: VeskRequest) {`,
+		`	const body = await request.body;`,
+		`	if (body instanceof Response) return body;`,
 		`	return Response.json({ received: body, ok: true }, { status: 201 });`,
 		`}`,
 		'',

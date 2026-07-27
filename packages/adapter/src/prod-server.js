@@ -1,6 +1,7 @@
 import { readFileSync, existsSync, statSync } from 'fs';
 import { resolve, extname } from 'path';
 import { createServer } from 'node:http';
+import { securityHeaders } from '../../compiler/src/server-utils.js';
 
 async function readBody(req) {
   const chunks = [];
@@ -33,7 +34,7 @@ const MIME = {
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.wasm': 'application/wasm',
 };
 
-export function startProdServer(outDir, options = {}) {
+export async function startProdServer(outDir, options = {}) {
   const port = options.port || 3000;
   const staticDir = resolve(outDir, 'static');
   const configPath = resolve(outDir, 'config.json');
@@ -44,8 +45,35 @@ export function startProdServer(outDir, options = {}) {
     process.exit(1);
   }
 
-  const config = JSON.parse(readFileSync(configPath, 'utf-8'));
+  const buildConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
   console.error(`vesk start: serving from ${outDir}`);
+
+  // ── Load security config from vesk.config (alongside build output) ──
+  const projectDir = resolve(outDir, '..');
+  let securityConfig = {};
+  try {
+    const veskConfigPath = resolve(projectDir, 'vesk.config.js');
+    const veskConfigTsPath = resolve(projectDir, 'vesk.config.ts');
+    let rawConfig = {};
+    if (existsSync(veskConfigPath)) {
+      rawConfig = require(veskConfigPath);
+    } else if (existsSync(veskConfigTsPath)) {
+      const { transpile } = require('typescript');
+      const src = readFileSync(veskConfigTsPath, 'utf-8');
+      const result = transpile(src, { module: 99, target: 99 });
+      rawConfig = eval(result);
+    }
+    if (typeof rawConfig === 'function') rawConfig = rawConfig();
+    securityConfig = rawConfig.security || {};
+  } catch {}
+
+  // ── Rate limiter ──
+  let rateLimiter = null;
+  if (securityConfig.rateLimit) {
+    const rlConfig = securityConfig.rateLimit;
+    const { createRateLimiter } = await import('../../compiler/src/server-codegen.js');
+    rateLimiter = createRateLimiter({ windowMs: rlConfig.windowMs || 60000, max: rlConfig.max || 100 });
+  }
 
   // Cache SSR and API function modules
   const functionCache = new Map();
@@ -83,8 +111,38 @@ export function startProdServer(outDir, options = {}) {
     return null;
   }
 
+  // ── trustProxy helper for production server ──
+  function getClientIpFromReq(req) {
+    if (!securityConfig.trustProxy) return req.socket?.remoteAddress || 'unknown';
+    const forwarded = req.headers['x-forwarded-for'];
+    if (forwarded) return (typeof forwarded === 'string' ? forwarded.split(',')[0] : forwarded[0]).trim();
+    return req.headers['x-real-ip'] || req.socket?.remoteAddress || 'unknown';
+  }
+
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
+
+    // ── Rate limiting ──
+    if (rateLimiter) {
+      const clientIp = getClientIpFromReq(req);
+      if (!rateLimiter.check(clientIp)) {
+        res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(Math.ceil((securityConfig.rateLimit?.windowMs || 60000) / 1000)) });
+        res.end(JSON.stringify({ error: 'Too Many Requests' }));
+        return;
+      }
+    }
+
+    // ── Security headers on every response ──
+    const origWriteHead = res.writeHead.bind(res);
+    let secHeadersApplied = false;
+    res.writeHead = (statusCode, headers) => {
+      if (!secHeadersApplied) {
+        secHeadersApplied = true;
+        const sh = securityHeaders({ security: securityConfig });
+        headers = { ...sh, ...headers };
+      }
+      return origWriteHead(statusCode, headers);
+    };
 
     // ── Root-level public files (served at /) ──
     const publicDir = resolve(staticDir, 'public');
@@ -95,6 +153,16 @@ export function startProdServer(outDir, options = {}) {
       res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
       res.end(readFileSync(rootFile));
       return;
+    }
+
+    // ── Runtime module (aliased to client bundle for dynamic import support) ──
+    if (url.pathname === '/_vesk/runtime.js') {
+      const clientPath = resolve(staticDir, 'client.js');
+      if (existsSync(clientPath)) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(readFileSync(clientPath));
+        return;
+      }
     }
 
     // ── Static files (under /_vesk/static/) ──
@@ -113,8 +181,8 @@ export function startProdServer(outDir, options = {}) {
     }
 
     // ── Prerendered HTML ──
-    if (config.prerendered) {
-      const prerendered = config.prerendered.find(r => r.path === url.pathname);
+    if (buildConfig.prerendered) {
+      const prerendered = buildConfig.prerendered.find(r => r.path === url.pathname);
       if (prerendered) {
         const htmlPath = resolve(outDir, prerendered.file);
         if (existsSync(htmlPath)) {
@@ -127,7 +195,7 @@ export function startProdServer(outDir, options = {}) {
 
     // ── API Routes ──
     if (url.pathname.startsWith('/api')) {
-      for (const route of config.routes) {
+      for (const route of buildConfig.routes) {
         if (route.type === 'api') {
           const params = matchPath(route.path, url.pathname);
           if (params) {
@@ -152,7 +220,7 @@ export function startProdServer(outDir, options = {}) {
     }
 
     // ── SSR Routes ──
-    for (const route of config.routes) {
+    for (const route of buildConfig.routes) {
       if (route.type === 'ssr') {
         const params = matchPath(route.path, url.pathname);
         if (params) {
@@ -212,8 +280,8 @@ export function startProdServer(outDir, options = {}) {
     }
 
     // ── SPA Fallback — serve root route for unmatched routes ──
-    if (config) {
-      const rootRoute = config.routes.find(r => r.type === 'ssr' && r.path === '/');
+    if (buildConfig) {
+      const rootRoute = buildConfig.routes.find(r => r.type === 'ssr' && r.path === '/');
       if (rootRoute) {
         const mod = await loadFunction(rootRoute.function);
         if (mod) {

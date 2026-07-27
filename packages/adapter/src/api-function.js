@@ -7,6 +7,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
+import { transformSync } from 'esbuild';
 
 function apiRouteName(fullPath) {
   const parts = fullPath.split('/').filter(Boolean);
@@ -27,6 +28,16 @@ export function generateApiFunction(apiNode, apiDir, outDir) {
       if (p1 === 'server') return `from '../runtime.js';`;
       return `from '../runtime.js';`;
     });
+
+  // Strip TypeScript type annotations for production runtime
+  if (routeFilePath.endsWith('.ts')) {
+    try {
+      const result = transformSync(routeSrc, { loader: 'ts' });
+      routeSrc = result.code;
+    } catch {
+      // fall back to original source if stripping fails
+    }
+  }
 
   // Extract param names
   const paramNames = apiNode.fullPath
@@ -91,7 +102,10 @@ export function generateApiFunction(apiNode, apiDir, outDir) {
     `      });`,
     `    }`,
     `    const response = await handler(request, { params: Promise.resolve(params) });`,
-    `    if (response instanceof Response) return response;`,
+    `    if (response instanceof Response) {`,
+    `      if (typeof response.build === 'function') response.build();`,
+    `      return response;`,
+    `    }`,
     `    return new Response(JSON.stringify(response), {`,
     `      status: 200,`,
     `      headers: { 'Content-Type': 'application/json' },`,

@@ -111,7 +111,7 @@ export function renderPage(source, componentName, props = {}, registry = new Map
 
 /**
  * Static Site Generation — pre-render a component to a complete HTML page
- * with hydration support, following the Next.js SSG pattern.
+ * with hydration support, following the SSG pattern.
  *
  * 1. Parses the source to find an exported `getStaticProps` function
  * 2. Calls it at build time to obtain props
@@ -261,6 +261,7 @@ export async function renderFullPage(source, componentName, props = {}, registry
 			const sec = options.security;
 			if (sec.xFrameOptions !== false) headLines.push(`\t<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || 'DENY'}" />`);
 			if (sec.referrerPolicy !== false) headLines.push(`\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />`);
+			if (sec.contentSecurityPolicy !== false) headLines.push(`\t<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />`);
 			if (sec.autoEscape !== false) headLines.push(`\t<!-- vesk: auto-escape enabled -->`);
 		}
 
@@ -339,6 +340,7 @@ export async function* renderPageStream(source, componentName, props = {}, regis
 		const sec = options.security;
 		if (sec.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || 'DENY'}" />\n`;
 		if (sec.referrerPolicy !== false) yield `\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
+		if (sec.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
 		if (sec.autoEscape !== false) yield `\t<!-- vesk: auto-escape enabled -->\n`;
 	}
 	if (targetComp) {

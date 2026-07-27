@@ -1,5 +1,16 @@
 /** @vesk/runtime — Server-side entry point types */
 
+// ── Middleware Context ─────────────────────────────────────────
+export interface Context {
+  request: Request;
+  params: Record<string, string>;
+  url: URL;
+  locals: Record<string, unknown>;
+  cookies: Record<string, string>;
+  set(key: string, value: unknown): void;
+  get<T = unknown>(key: string): T;
+}
+
 // ── Component type ───────────────────────────────────────────
 export type Component<T = Record<string, unknown>> = (props: T) => string;
 
@@ -90,6 +101,32 @@ export function useSearchParams(): [URLSearchParams, (params: Record<string, str
 export function useRouter(): Router;
 export function buildRouteTree(routes: any[]): any[];
 export function defineRoute(pattern: string, config: any): any;
+
+// ── VeskRequest / VeskResponse — enhanced request/response for API routes ──
+
+export class VeskRequest extends ServerRequest {
+  query: Record<string, string>;
+  ip: string;
+  protocol: string;
+  hostname: string;
+  body: Promise<Record<string, any> | string>;
+}
+
+export class VeskResponse extends ServerResponse {
+  setCookie(name: string, value: string, opts?: {
+    maxAge?: number; httpOnly?: boolean; secure?: boolean;
+    sameSite?: 'Lax' | 'Strict' | 'None'; path?: string; domain?: string;
+  }): VeskResponse;
+  clearCookie(name: string, opts?: { path?: string; domain?: string }): VeskResponse;
+  setCsp(policy: string | false): VeskResponse;
+  setSecurityHeader(name: string, value: string | false): VeskResponse;
+  cache(ttlSeconds: number): VeskResponse;
+  noCache(): VeskResponse;
+  cors(opts?: { origin?: string; methods?: string; headers?: string; credentials?: boolean }): VeskResponse;
+  static html(html: string, init?: ResponseInit): VeskResponse;
+}
+
+export function applyRequestSecurity(request: VeskRequest, response: VeskResponse): void;
 
 // ── Navigation errors ──────────────────────────────────────────
 

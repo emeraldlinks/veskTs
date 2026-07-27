@@ -450,17 +450,6 @@ export function createFileRouter(routeTree, options = {}) {
 				window.addEventListener('scroll', _onScroll, { passive: true });
 			}
 
-			document.addEventListener('click', (e) => {
-				if (e.defaultPrevented) return;
-				const link = e.target?.nodeType === 1 ? e.target.closest('a[href]') : null;
-				if (!link) return;
-				if (link.hostname && link.hostname !== window.location.hostname) return;
-				const href = link.getAttribute('href');
-				if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
-				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-				e.preventDefault();
-				router.navigate(href);
-			});
 			window.addEventListener('popstate', () => {
 				setIsPopStateNavigation(true);
 				router.navigate(window.location.pathname + window.location.search, { replace: true });

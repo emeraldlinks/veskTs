@@ -1,23 +1,14 @@
-// Vesk API Route — app/api/hello/route.ts
-// Signature (Next.js App Router):
-//   export async function GET(request, { params }) {
-//     const { id } = await params;
-//     return Response.json({ id });
-//   }
+import { VeskRequest, VeskResponse } from '@vesk/runtime/server';
 
-import type { NextRequest } from '@vesk/runtime';
-
-export async function GET(request: NextRequest) {
-	const token = request.cookies?.token || '(none)';
-	return Response.json({
-		message: 'Hello from Vesk API!',
-		timestamp: Date.now(),
-		url: request.url,
-		token,
-	});
+export async function GET(req: VeskRequest) {
+  return VeskResponse.json({ message: 'Hello from Vesk!' })
+    .setCookie('session', 'abc123', { httpOnly: true, secure: true, path: '/', maxAge: 3600 })
+    .setStatus(201)
+    .cors({ origin: 'http://localhost:3002', methods: 'GET,POST' });
 }
 
-export async function POST(request: NextRequest) {
-	const body = await request.json();
-	return Response.json({ received: body, ok: true }, { status: 201 });
+export async function POST(req: VeskRequest) {
+  const body = await req.json();
+  return VeskResponse.json({ received: body, ok: true }, { status: 201 })
+    .setCookie('posted', 'true');
 }
