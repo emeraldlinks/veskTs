@@ -25,6 +25,9 @@ export {
 	__vskImportedNames,
 	resetVskState,
 	setVskImportedNames,
+	securityHeaders,
+	corsHeaders,
+	corsPreflight,
 } from './server-utils.js';
 
 export {

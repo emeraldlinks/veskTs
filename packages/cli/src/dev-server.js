@@ -19,7 +19,7 @@ import { WebSocketServer } from 'ws';
  * @param {object} config - loaded vesk config object
  */
 export async function startDevServer(port, projectDir, config) {
-	const { renderPage, renderFullPage, renderPageStream } = await import('../../compiler/src/server-codegen.js');
+	const { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight } = await import('../../compiler/src/server-codegen.js');
 	const { compileClient } = await import('../../compiler/src/client-codegen.js');
 	const { scanRoutes, matchUrl, collectSources } = await import('../../compiler/src/router.js');
 	const { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } = await import('../../compiler/src/api-routes.js');
@@ -387,6 +387,21 @@ export async function startDevServer(port, projectDir, config) {
 	const server = createServer(async (req, res) => {
 		const url = new URL(req.url, `http://localhost:${port}`);
 
+		// ── CORS ──────────────────────────────────────────────────
+		const reqOrigin = req.headers['origin'] || '';
+		const reqHost = req.headers['host'] || `localhost:${port}`;
+		const corsAllowed = corsHeaders(config.security, reqOrigin, reqHost);
+		if (corsAllowed['Access-Control-Allow-Origin'] && req.method === 'OPTIONS') {
+			res.writeHead(204, { ...corsAllowed, 'Content-Length': '0' });
+			res.end();
+			return;
+		}
+		// Monkey-patch writeHead to inject CORS headers on every response
+		const origWriteHead = res.writeHead.bind(res);
+		res.writeHead = (statusCode, headers) => {
+			return origWriteHead(statusCode, { ...headers, ...corsAllowed });
+		};
+
 		// Static bundle endpoints
 		if (url.pathname === '/_vesk/runtime.js') {
 			res.writeHead(200, { 'Content-Type': 'application/javascript' });
@@ -453,7 +468,7 @@ export async function startDevServer(port, projectDir, config) {
 						const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen.js');
 						const nfSrc = readFileSync(nfPath, 'utf-8');
 						const nfCompName = extractCompName(nfSrc) || rootNode.notFound;
-						notFoundHtml = await rfp(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
+						notFoundHtml = await rfp(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: config.security });
 					} catch {}
 				}
 			}
@@ -513,13 +528,14 @@ export async function startDevServer(port, projectDir, config) {
 			let html;
 			if (hasLayout) {
 				const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
-				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+				const secOpts = config.security ? `\t<!-- vesk: auto-escape enabled -->\n` : '';
+				html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${secOpts}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
 			} else {
 				const leaf = chain.find(n => n.page);
 				if (leaf) {
 					const src = readFileSync(resolve(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
 					const compName = extractCompName(src) || leaf.page;
-					html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
+					html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: config.security });
 					html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
 				} else {
 					throw new Error('No page or layout matched');
@@ -543,7 +559,7 @@ export async function startDevServer(port, projectDir, config) {
 				if (leaf) {
 					const src = readFileSync(resolve(appDirPath, leaf.sourceDir, 'page.vsk'), 'utf-8');
 					const compName = extractCompName(src) || leaf.page;
-					yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
+					yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: config.security });
 				} else {
 					throw new Error('No page or layout matched');
 				}
@@ -578,6 +594,7 @@ export async function startDevServer(port, projectDir, config) {
 			// Yield shell before body
 			const { prettifyHtml } = await import('../../compiler/src/server-codegen.js');
 			yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n';
+			if (config.security) yield '\t<!-- vesk: auto-escape enabled -->\n';
 			if (head) yield '\t' + head.split('\n').join('\n\t') + '\n';
 			yield '</head>\n<body>\n<div id="root">\n';
 			yield prettifyHtml(body);
@@ -600,7 +617,8 @@ export async function startDevServer(port, projectDir, config) {
 						globalThis.__vesk_request = ctx;
 						try {
 							const html = await renderSSR();
-							return new Response(html, { headers: { 'Content-Type': 'text/html' } });
+							const secHeaders = config.security ? securityHeaders(config.security) : {};
+							return new Response(html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
 						} finally {
 							globalThis.__vesk_request = prev;
 						}
@@ -618,7 +636,8 @@ export async function startDevServer(port, projectDir, config) {
 				globalThis.__vesk_request = ctx;
 				try {
 					const stream = renderSSRStream();
-					res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked' });
+					const secHeaders = config.security ? securityHeaders(config.security) : {};
+					res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', ...secHeaders });
 					for await (const chunk of stream) {
 						if (chunk.includes('</body>')) {
 							res.write(chunk.replace('</body>', '\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'));
@@ -648,7 +667,7 @@ export async function startDevServer(port, projectDir, config) {
 									const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen.js');
 									const nfSrc = readFileSync(nfPath, 'utf-8');
 									const nfCompName = extractCompName(nfSrc) || node.notFound;
-									const html = await rfp(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'] });
+									const html = await rfp(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: config.security });
 									notFoundHtml = html.replace('</body>',
 										`\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
 								} catch {}

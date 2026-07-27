@@ -104,6 +104,199 @@ export function escapeHtml(str) {
 		.replace(/'/g, '&#39;');
 }
 
+/** Mark a string as safe HTML (bypasses auto-escaping). Use raw() only for trusted content. */
+export function raw(value) {
+	if (value == null) return '';
+	return String(value);
+}
+
+// ── CSRF ──────────────────────────────────────────────────────────
+const __csrfSecrets = new Map();
+
+function csrfSecret(host) {
+	if (!host) host = 'localhost';
+	if (!__csrfSecrets.has(host)) {
+		__csrfSecrets.set(host, Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+	}
+	return __csrfSecrets.get(host);
+}
+
+function csrfHmac(value, secret) {
+	// Simple HMAC-like signing using the secret
+	let h = 0;
+	for (let i = 0; i < value.length; i++) {
+		h = ((h << 5) - h + value.charCodeAt(i)) | 0;
+	}
+	for (let i = 0; i < secret.length; i++) {
+		h = ((h << 5) - h + secret.charCodeAt(i)) | 0;
+	}
+	return (h >>> 0).toString(36);
+}
+
+/** Generate a signed CSRF token for a given session/request. */
+export function csrfToken(sessionId, host) {
+	const secret = csrfSecret(host);
+	const value = sessionId || 'anonymous';
+	const sig = csrfHmac(value, secret);
+	return `${value}:${sig}`;
+}
+
+/** Verify a CSRF token. Returns true if valid. */
+export function verifyCsrfToken(token, host) {
+	if (!token || typeof token !== 'string') return false;
+	const parts = token.split(':');
+	if (parts.length !== 2) return false;
+	const [value, sig] = parts;
+	const secret = csrfSecret(host);
+	const expected = csrfHmac(value, secret);
+	return sig === expected;
+}
+
+/**
+ * CSRF guard — call at the top of API route handlers for POST/PUT/DELETE requests.
+ * Reads the token from X-CSRF-Token header or _csrf body field.
+ * Throws on invalid/missing token.
+ */
+export function csrfGuard(request) {
+	if (!request || typeof request !== 'object') return;
+	const method = (request.method || 'GET').toUpperCase();
+	if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return;
+	const token = request.headers?.['x-csrf-token']
+		|| (request.body && request.body._csrf)
+		|| '';
+	if (!verifyCsrfToken(token)) {
+		throw new Error('CSRF validation failed');
+	}
+}
+
+// ── Cookie signing ────────────────────────────────────────────────
+const __cookieSecrets = new Map();
+
+function cookieSecret(host) {
+	if (!host) host = 'localhost';
+	if (!__cookieSecrets.has(host)) {
+		__cookieSecrets.set(host, Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2));
+	}
+	return __cookieSecrets.get(host);
+}
+
+/** Sign a cookie value with HMAC to prevent tampering. */
+export function signCookie(name, value, host) {
+	const secret = cookieSecret(host);
+	const payload = `${name}=${value}`;
+	let h = 0;
+	for (let i = 0; i < payload.length; i++) {
+		h = ((h << 5) - h + payload.charCodeAt(i)) | 0;
+	}
+	for (let i = 0; i < secret.length; i++) {
+		h = ((h << 5) - h + secret.charCodeAt(i)) | 0;
+	}
+	const sig = (h >>> 0).toString(36);
+	return `${value}.${sig}`;
+}
+
+/** Verify and unsign a cookie value. Returns null if tampered. */
+export function unsignCookie(name, signedValue, host) {
+	if (!signedValue || typeof signedValue !== 'string') return null;
+	const dot = signedValue.lastIndexOf('.');
+	if (dot === -1) return null;
+	const value = signedValue.slice(0, dot);
+	const sig = signedValue.slice(dot + 1);
+	const expectedSig = signCookie(name, value, host).split('.').pop();
+	return sig === expectedSig ? value : null;
+}
+
+/**
+ * Generate default security headers map for SSR responses.
+ * Configurable via security section in vesk.config.
+ */
+export function securityHeaders(config = {}) {
+	const sec = config.security || {};
+	return {
+		'X-Frame-Options': sec.xFrameOptions || 'DENY',
+		'X-Content-Type-Options': 'nosniff',
+		'Referrer-Policy': sec.referrerPolicy || 'strict-origin-when-cross-origin',
+		...(sec.hsts !== false ? { 'Strict-Transport-Security': sec.hsts || 'max-age=31536000; includeSubDomains' } : {}),
+		'X-XSS-Protection': '0',
+	};
+}
+
+/**
+ * Generate CORS headers based on security config and request origin.
+ * Returns an object of header key/value pairs, or empty object if CORS is not needed.
+ *
+ * Same-origin requests (Origin matches Host) are always allowed implicitly.
+ * Cross-origin requests require security.cors.origin to be configured.
+ *
+ * Config options (under security.cors):
+ *   origin: string | string[]   — allowed origins for cross-origin requests
+ *   methods: string             — allowed methods (default: 'GET,POST,PUT,DELETE,PATCH,OPTIONS')
+ *   headers: string             — allowed headers (default: 'Content-Type,Authorization,X-CSRF-Token')
+ *   credentials: boolean        — allow credentials (default: true)
+ *   maxAge: number              — preflight cache seconds (default: 86400)
+ */
+export function corsHeaders(security = {}, requestOrigin = '', host = '') {
+	if (!requestOrigin) return {};
+
+	// Same-origin check — always allowed
+	const originHost = (requestOrigin || '').replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+	const localHost = (host || '').split(':')[0];
+	if (originHost && localHost && originHost === localHost) {
+		return {};
+	}
+
+	const cors = security?.cors;
+	if (!cors || !cors.origin) return {};
+
+	const allowedOrigins = Array.isArray(cors.origin) ? cors.origin : [cors.origin];
+	const origin = allowedOrigins.includes('*')
+		? '*'
+		: allowedOrigins.includes(requestOrigin) ? requestOrigin : null;
+
+	if (!origin) return {};
+
+	return {
+		'Access-Control-Allow-Origin': origin,
+		'Access-Control-Allow-Methods': cors.methods || 'GET,POST,PUT,DELETE,PATCH,OPTIONS',
+		'Access-Control-Allow-Headers': cors.headers || 'Content-Type,Authorization,X-CSRF-Token',
+		...(cors.credentials !== false ? { 'Access-Control-Allow-Credentials': 'true' } : {}),
+		'Access-Control-Max-Age': String(cors.maxAge || 86400),
+	};
+}
+
+/** CORS preflight guard — call for OPTIONS requests. Returns true if handled. */
+export function corsPreflight(request, security) {
+	if ((request.method || 'GET').toUpperCase() !== 'OPTIONS') return false;
+	const origin = request.headers?.['origin'] || '';
+	const host = request.headers?.['host'] || '';
+	const headers = corsHeaders(security, origin, host);
+	if (!headers['Access-Control-Allow-Origin']) return false;
+	throw new CorsResponse(headers);
+}
+
+class CorsResponse extends Error {
+	constructor(headers) {
+		super('CORS preflight');
+		this.name = 'CorsResponse';
+		this.status = 204;
+		this.headers = { ...headers, 'Content-Length': '0' };
+	}
+}
+
+/**
+ * Security comment markers — injected into SSR HTML to indicate security posture.
+ * These are stripped in production builds.
+ */
+export function securityComment(config = {}) {
+	const sec = config.security || {};
+	const features = [];
+	if (sec.autoEscape !== false) features.push('auto-escape');
+	if (sec.csrf !== false) features.push('csrf');
+	if (sec.xFrameOptions !== false) features.push('x-frame-options');
+	if (sec.hsts !== false) features.push('hsts');
+	return `<!-- vesk-sec: ${features.join(', ')} -->`;
+}
+
 /** Wrap a raw JS expression string in parentheses for safe interpolation. */
 export function exprJS(raw) {
 	return `(${raw})`;

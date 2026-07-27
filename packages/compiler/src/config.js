@@ -9,15 +9,40 @@
  */
 
 /**
+ * @typedef {Object} VeskCors
+ * @property {string|string[]} origin - Allowed origins (required to enable CORS)
+ * @property {string} [methods] - Allowed methods (default: 'GET,POST,PUT,DELETE,PATCH,OPTIONS')
+ * @property {string} [headers] - Allowed headers (default: 'Content-Type,Authorization,X-CSRF-Token')
+ * @property {boolean} [credentials] - Allow credentials (default: true)
+ * @property {number} [maxAge] - Preflight cache seconds (default: 86400)
+ */
+
+/**
+ * @typedef {Object} VeskSecurity
+ * @property {string} [xFrameOptions] - X-Frame-Options header value (default: 'DENY')
+ * @property {string|boolean} [hsts] - Strict-Transport-Security value or false to disable (default: 'max-age=31536000; includeSubDomains')
+ * @property {string} [referrerPolicy] - Referrer-Policy (default: 'strict-origin-when-cross-origin')
+ * @property {boolean} [autoEscape] - Auto-escape all template expressions (default: true)
+ * @property {boolean} [csrf] - Enable CSRF protection for forms and API routes (default: true)
+ * @property {VeskCors} [cors] - CORS configuration (unset = CORS disabled)
+ */
+
+/**
  * @typedef {Object} VeskConfig
  * @property {string} [appDir]
  * @property {string} [outDir]
  * @property {string} [publicDir]
  * @property {{ getStaticPaths?: () => Promise<{ paths: Array<{ params: object }> }> }} [ssg]
  * @property {VeskPlugin[]} [plugins]
+ * @property {VeskSecurity} [security] - Security configuration
  */
 
 export function defineConfig(config) {
+	// Apply security defaults
+	if (!config.security) config.security = {};
+	if (config.security.autoEscape !== false) config.security.autoEscape = true;
+	if (config.security.csrf !== false) config.security.csrf = true;
+	if (config.security.xFrameOptions === undefined) config.security.xFrameOptions = 'DENY';
 	return config;
 }
 

@@ -137,6 +137,12 @@ function staticNodeToJS(node) {
 function dynamicBindingToJS(node) {
 	if (node.kind === 'attribute') return '';
 	const raw = node.expression.raw;
+	// Detect raw() calls — bypass HTML escaping for trusted content
+	const isRaw = /^\s*raw\s*\(/.test(raw);
+	if (isRaw) {
+		const inner = raw.replace(/^\s*raw\s*\(/, '').replace(/\)\s*$/, '');
+		return `{ const __v = ${exprJS(inner)}; if (__v != null) __out.push(typeof __v === 'boolean' ? 'true' : String(__v)); }`;
+	}
 	return `{ const __v = ${exprJS(raw)}; if (__v != null) __out.push(typeof __v === 'boolean' ? (__v ? 'true' : '') : __escape(String(__v))); }`;
 }
 
@@ -295,6 +301,7 @@ export function generateFunctionBody(comp, importedNames) {
 	lines.push(`try {`);
 	lines.push(`const __out = [];`);
 	lines.push(`const __escape = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\x22/g,'&quot;');`);
+	lines.push(`const raw = (s) => s == null ? '' : String(s);`);
 
 	if (comp.style) {
 		lines.push(`__out.push('<style>');`);

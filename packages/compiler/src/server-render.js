@@ -12,6 +12,7 @@ import {
 	isStatic, prettifyHtml, resetVskState,
 	loadRuntimeImports, evalTopLevelCode,
 	callStaticProps, callLoadFunction,
+	securityHeaders, securityComment,
 } from './server-utils.js';
 import { renderHeadHtml, mergeHeadHtml } from './server-head.js';
 import { buildComponentMap } from './server-jsgen.js';
@@ -199,7 +200,8 @@ ${bodyHtml}${scriptBlock}</body>
  * @param {string} [options.cssUrl] - URL for a global CSS file
  * @param {string} [options.clientScriptUrl] - URL for the client hydration script
  * @param {string} [options.pageHead] - head HTML from the page component (for layout merging)
- * @returns {Promise<string>} complete HTML document
+ * @param {object} [options.security] - security config (autoEscape, csrf, xFrameOptions, hsts)
+ * @returns {Promise<{html: string, headers: object}>} complete HTML document with security headers
  */
 export async function renderFullPage(source, componentName, props = {}, registry = new Map(), options = {}) {
 	globalThis.__vsk_ssr = true;
@@ -251,12 +253,21 @@ export async function renderFullPage(source, componentName, props = {}, registry
 		if (ssrDataKeys.length > 0) dataScripts.push(`<script>const __vesk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
 		const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
 
+		const headLines = ['\t<meta charset="utf-8" />', '\t<meta name="viewport" content="width=device-width, initial-scale=1" />'];
+		if (cssLink) headLines.push(cssLink.trimEnd());
+		if (headHtml) headLines.push('\t' + headHtml.split('\n').join('\n\t'));
+
+		if (options.security) {
+			const sec = options.security;
+			if (sec.xFrameOptions !== false) headLines.push(`\t<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || 'DENY'}" />`);
+			if (sec.referrerPolicy !== false) headLines.push(`\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />`);
+			if (sec.autoEscape !== false) headLines.push(`\t<!-- vesk: auto-escape enabled -->`);
+		}
+
 		return `<!DOCTYPE html>
 <html>
 <head>
-	<meta charset="utf-8" />
-	<meta name="viewport" content="width=device-width, initial-scale=1" />
-${cssLink}${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
+${headLines.join('\n')}</head>
 <body>
 <div id="root">
 ${bodyHtml}
@@ -279,6 +290,7 @@ ${dataScriptBlock}${clientScript}</body>
  *   - createResource SSR data collection
  *   - client script injection
  *   - CSS link injection
+ *   - security headers / meta tags
  *
  * @param {string} source - raw .vsk source
  * @param {string} componentName
@@ -289,6 +301,7 @@ ${dataScriptBlock}${clientScript}</body>
  * @param {string} [options.cssUrl] - URL for global CSS
  * @param {string} [options.clientScriptUrl] - URL for client hydration bundle
  * @param {string} [options.pageHead] - head HTML from page (for layout merging)
+ * @param {object} [options.security] - security config
  * @yields {string} HTML chunks
  */
 export async function* renderPageStream(source, componentName, props = {}, registry = new Map(), options = {}) {
@@ -322,6 +335,12 @@ export async function* renderPageStream(source, componentName, props = {}, regis
 
 	yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n';
 	if (cssLink) yield cssLink;
+	if (options.security) {
+		const sec = options.security;
+		if (sec.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || 'DENY'}" />\n`;
+		if (sec.referrerPolicy !== false) yield `\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
+		if (sec.autoEscape !== false) yield `\t<!-- vesk: auto-escape enabled -->\n`;
+	}
 	if (targetComp) {
 		let headHtml = renderHeadHtml(targetComp, ssrProps);
 		if (options.pageHead) {
