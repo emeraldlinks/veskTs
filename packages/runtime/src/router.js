@@ -71,12 +71,26 @@ function renderMatch(router, match, container) {
 			_state.path.value = match.pathname || window.location.pathname;
 			_state.search.value = window.location.search || '';
 			const pageProps = { params: paramValues, ...pageNode.props };
-			return pageNode.page(pageProps, new Map(), clientWalker);
+			const result = pageNode.page(pageProps, new Map(), clientWalker);
+			if (router && pageNode._pageName && result && result.nodeType === 1) {
+				if (!router.__componentInstances) router.__componentInstances = new Map();
+				const name = pageNode._pageName;
+				if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
+				router.__componentInstances.get(name).push({ root: result, props: pageProps, node: pageNode, type: 'page' });
+			}
+			return result;
 		}
 		const node = layoutNodes[index];
 		const childDom = renderLayoutChain(index + 1);
 		const layoutProps = { children: childDom, params: paramValues };
-		return node.layout(layoutProps, new Map(), clientWalker);
+		const result = node.layout(layoutProps, new Map(), clientWalker);
+		if (router && node._layoutName && result && result.nodeType === 1) {
+			if (!router.__componentInstances) router.__componentInstances = new Map();
+			const name = node._layoutName;
+			if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
+			router.__componentInstances.get(name).push({ root: result, props: layoutProps, node, type: 'layout' });
+		}
+		return result;
 	}
 
 	let rootDom;
@@ -359,8 +373,40 @@ export function createRouter(
 			if (typeof this.__updateComponents === 'function') {
 				this.__updateComponents(this.routeTree);
 			}
-			const path = window.location.pathname + window.location.search;
-			this.navigate(path, { replace: true });
+			const instances = this.__componentInstances;
+			if (instances && instances.size > 0) {
+				let didUpdate = false;
+				for (const [name, nameInstances] of instances) {
+					if (updated.has(name)) {
+						for (const inst of nameInstances) {
+							try {
+								const isPage = inst.type === 'page';
+								const newFn = isPage ? inst.node.page : inst.node.layout;
+								if (!newFn) continue;
+								const walker = createHydrateWalker(document.createDocumentFragment(), []);
+								let newDom;
+								root(() => {
+									newDom = newFn(inst.props, new Map(), walker);
+								});
+								if (newDom && newDom.nodeType === 1 && inst.root && inst.root.parentNode) {
+									inst.root.parentNode.replaceChild(newDom, inst.root);
+									inst.root = newDom;
+									didUpdate = true;
+								}
+							} catch (e) {
+								console.error('HMR update error:', e);
+							}
+						}
+					}
+				}
+				if (!didUpdate) {
+					const path = window.location.pathname + window.location.search;
+					this.navigate(path, { replace: true });
+				}
+			} else {
+				const path = window.location.pathname + window.location.search;
+				this.navigate(path, { replace: true });
+			}
 		},
 	};
 
@@ -556,8 +602,40 @@ export function createFileRouter(routeTree, options = {}) {
 			if (typeof this.__updateComponents === 'function') {
 				this.__updateComponents(this.routeTree);
 			}
-			const path = window.location.pathname + window.location.search;
-			this.navigate(path, { replace: true });
+			const instances = this.__componentInstances;
+			if (instances && instances.size > 0) {
+				let didUpdate = false;
+				for (const [name, nameInstances] of instances) {
+					if (updated.has(name)) {
+						for (const inst of nameInstances) {
+							try {
+								const isPage = inst.type === 'page';
+								const newFn = isPage ? inst.node.page : inst.node.layout;
+								if (!newFn) continue;
+								const walker = createHydrateWalker(document.createDocumentFragment(), []);
+								let newDom;
+								root(() => {
+									newDom = newFn(inst.props, new Map(), walker);
+								});
+								if (newDom && newDom.nodeType === 1 && inst.root && inst.root.parentNode) {
+									inst.root.parentNode.replaceChild(newDom, inst.root);
+									inst.root = newDom;
+									didUpdate = true;
+								}
+							} catch (e) {
+								console.error('HMR update error:', e);
+							}
+						}
+					}
+				}
+				if (!didUpdate) {
+					const path = window.location.pathname + window.location.search;
+					this.navigate(path, { replace: true });
+				}
+			} else {
+				const path = window.location.pathname + window.location.search;
+				this.navigate(path, { replace: true });
+			}
 		},
 	};
 

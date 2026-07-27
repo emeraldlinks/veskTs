@@ -43,7 +43,14 @@
               break;
             case 'css-update':
               document.querySelectorAll('link[rel="stylesheet"]').forEach(function(el) {
-                el.href = el.href.split('?')[0] + '?t=' + Date.now();
+                var parent = el.parentNode;
+                if (!parent) return;
+                var fresh = document.createElement('link');
+                fresh.rel = 'stylesheet';
+                fresh.href = el.href.split('?')[0] + '?t=' + Date.now();
+                fresh.onload = function() { el.remove(); };
+                fresh.onerror = function() { fresh.remove(); };
+                parent.insertBefore(fresh, el.nextSibling);
               });
               status = 'connected';
               updateUI();

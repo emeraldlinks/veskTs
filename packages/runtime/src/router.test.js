@@ -1,4 +1,4 @@
-import { buildRouteTree, defineRoute, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from './router.js';
+import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from './router.js';
 
 let passed = 0;
 let failed = 0;
@@ -88,7 +88,8 @@ function makeEl(tag) {
 		removeEventListener() {},
 		appendChild(c) { children.push(c); if (c && typeof c === 'object') c.parentNode = this; },
 		replaceChildren(...args) { children.length = 0; for (const a of args) { children.push(a); if (a && typeof a === 'object') a.parentNode = this; } },
-		insertBefore(c, ref) { const idx = ref ? children.indexOf(ref) : children.length; children.splice(idx, 0, c); },
+		insertBefore(c, ref) { const idx = ref ? children.indexOf(ref) : children.length; children.splice(idx, 0, c); if (c && typeof c === 'object') c.parentNode = this; },
+		replaceChild(newChild, oldChild) { const idx = children.indexOf(oldChild); if (idx === -1) throw new Error('replaceChild: oldChild not found'); children.splice(idx, 1, newChild); if (newChild && typeof newChild === 'object') newChild.parentNode = this; if (oldChild && typeof oldChild === 'object') oldChild.parentNode = null; },
 		remove() { if (this.parentNode) { const idx = this.parentNode.children.indexOf(this); if (idx > -1) this.parentNode.children.splice(idx, 1); } },
 		querySelector() { return null; },
 		querySelectorAll() { return []; },
@@ -352,6 +353,241 @@ test('Error component receives params', () => {
 	const router = createFileRouter(tree, { container });
 	router.navigate('/', { replace: true });
 	expect(capturedParams).toBeTruthy();
+});
+
+// ── HMR Granular Update Tests ─────────────────────────────────
+
+test('renderMatch stores page component instance after navigate', () => {
+	const container = document.createElement('div');
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Hello';
+		return el;
+	};
+	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
+	tree[0]._pageName = 'Home';
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+	expect(router.__componentInstances).toBeTruthy();
+	expect(router.__componentInstances.has('Home')).toBe(true);
+	const insts = router.__componentInstances.get('Home');
+	expect(insts.length).toBe(1);
+	expect(insts[0].type).toBe('page');
+	expect(insts[0].root).toBeTruthy();
+	expect(insts[0].root.textContent).toBe('Hello');
+});
+
+test('renderMatch stores layout component instance after navigate', () => {
+	const container = document.createElement('div');
+	const layoutFn = (props) => {
+		const div = document.createElement('div');
+		div.className = 'layout-root';
+		if (props.children && props.children.nodeType) div.appendChild(props.children);
+		return div;
+	};
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Page';
+		return el;
+	};
+	const tree = buildRouteTree([{ path: '/', page: pageFn, layout: layoutFn }]);
+	tree[0]._pageName = 'Home';
+	tree[0]._layoutName = 'MainLayout';
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+	expect(router.__componentInstances.has('Home')).toBe(true);
+	expect(router.__componentInstances.has('MainLayout')).toBe(true);
+	const layoutInst = router.__componentInstances.get('MainLayout')[0];
+	expect(layoutInst.type).toBe('layout');
+	expect(layoutInst.root.className).toBe('layout-root');
+});
+
+test('hmrUpdate swaps page component DOM in-place without navigate', () => {
+	const container = document.createElement('div');
+
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Old Page';
+		el.className = 'page-root';
+		return el;
+	};
+
+	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
+	tree[0]._pageName = 'Home';
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+
+	const oldRoot = router.__componentInstances.get('Home')[0].root;
+	expect(oldRoot.parentNode).toBe(container);
+
+	const newPageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'New Page';
+		el.className = 'page-root';
+		return el;
+	};
+	globalThis.__components = { Home: newPageFn };
+	router.__updateComponents = (nodes) => {
+		for (const n of nodes) {
+			if (n._pageName && globalThis.__components[n._pageName]) n.page = globalThis.__components[n._pageName];
+			if (n.children) router.__updateComponents(n.children);
+		}
+	};
+	globalThis.__updatedComponents = new Set(['Home']);
+
+	router.hmrUpdate();
+
+	expect(oldRoot.parentNode).toBeNull();
+	expect(container.children.length).toBe(1);
+	expect(container.textContent).toBe('New Page');
+});
+
+test('hmrUpdate updates component instance root reference', () => {
+	const container = document.createElement('div');
+
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'V1';
+		return el;
+	};
+
+	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
+	tree[0]._pageName = 'Home';
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+
+	const newPageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'V2';
+		return el;
+	};
+	globalThis.__components = { Home: newPageFn };
+	router.__updateComponents = (nodes) => {
+		for (const n of nodes) {
+			if (n._pageName && globalThis.__components[n._pageName]) n.page = globalThis.__components[n._pageName];
+			if (n.children) router.__updateComponents(n.children);
+		}
+	};
+	globalThis.__updatedComponents = new Set(['Home']);
+	router.hmrUpdate();
+
+	const updatedRoot = router.__componentInstances.get('Home')[0].root;
+	expect(updatedRoot.textContent).toBe('V2');
+});
+
+test('hmrUpdate preserves non-updated layout when updating page only', () => {
+	const container = document.createElement('div');
+
+	const layoutFn = (props) => {
+		const div = document.createElement('div');
+		div.className = 'layout-root';
+		if (props.children && props.children.nodeType) div.appendChild(props.children);
+		return div;
+	};
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Old Page';
+		return el;
+	};
+
+	const tree = buildRouteTree([{ path: '/', page: pageFn, layout: layoutFn }]);
+	tree[0]._pageName = 'Home';
+	tree[0]._layoutName = 'MainLayout';
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+
+	const layoutRoot = router.__componentInstances.get('MainLayout')[0].root;
+	expect(container.children[0]).toBe(layoutRoot);
+
+	const newPageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'New Page';
+		return el;
+	};
+	globalThis.__components = { Home: newPageFn };
+	router.__updateComponents = (nodes) => {
+		for (const n of nodes) {
+			if (n._pageName && globalThis.__components[n._pageName]) n.page = globalThis.__components[n._pageName];
+			if (n._layoutName && globalThis.__components[n._layoutName]) n.layout = globalThis.__components[n._layoutName];
+			if (n.children) router.__updateComponents(n.children);
+		}
+	};
+	globalThis.__updatedComponents = new Set(['Home']);
+	router.hmrUpdate();
+
+	expect(container.children[0]).toBe(layoutRoot);
+	expect(layoutRoot.textContent).toBe('New Page');
+});
+
+test('hmrUpdate falls back to navigate when no instances tracked', () => {
+	const container = document.createElement('div');
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Fallback';
+		return el;
+	};
+	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
+	tree[0]._pageName = 'Home';
+	const router = createFileRouter(tree, { container });
+	router.navigate('/', { replace: true });
+
+	router.__componentInstances = new Map();
+	const newPageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'After Navigate';
+		return el;
+	};
+	globalThis.__components = { Home: newPageFn };
+	router.__updateComponents = (nodes) => {
+		for (const n of nodes) {
+			if (n._pageName && globalThis.__components[n._pageName]) n.page = globalThis.__components[n._pageName];
+			if (n.children) router.__updateComponents(n.children);
+		}
+	};
+	globalThis.__updatedComponents = new Set(['Home']);
+	router.hmrUpdate();
+
+	expect(container.textContent).toBe('After Navigate');
+});
+
+test('hmrUpdate on createRouter stores and swaps instances', () => {
+	const container = document.getElementById('root') || document.createElement('div');
+	const pageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Manual Old';
+		return el;
+	};
+	const routes = { '/': pageFn };
+	const router = createRouter(routes, { container });
+	router.navigate('/', { replace: true });
+
+	// Simulate HMR: set up component name on the route tree node (as __resolveNames does)
+	const routeNode = router.routeTree[0];
+	routeNode._pageName = 'Test';
+	// Navigate again so renderMatch picks up _pageName
+	router.navigate('/', { replace: true });
+
+	const inst = router.__componentInstances.get('Test')[0];
+	const oldRoot = inst.root;
+
+	const newPageFn = () => {
+		const el = document.createElement('p');
+		el.textContent = 'Manual New';
+		return el;
+	};
+	globalThis.__components = { Test: newPageFn };
+	router.__updateComponents = (nodes) => {
+		for (const n of nodes) {
+			if (n._pageName && globalThis.__components[n._pageName]) n.page = globalThis.__components[n._pageName];
+			if (n.children) router.__updateComponents(n.children);
+		}
+	};
+	globalThis.__updatedComponents = new Set(['Test']);
+	router.hmrUpdate();
+
+	expect(oldRoot.parentNode).toBeNull();
+	expect(container.textContent).toBe('Manual New');
+	expect(router.__componentInstances.get('Test')[0].root.textContent).toBe('Manual New');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
