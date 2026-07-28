@@ -55,6 +55,7 @@ export async function startDevServer(port, projectDir, config) {
 	const { scanRoutes, matchUrl, collectSources } = await import('../../compiler/src/router.js');
 	const { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } = await import('../../compiler/src/api-routes.js');
 	const { collectMiddlewareChain, executeMiddlewareChain } = await import('../../compiler/src/middleware.js');
+	const { generateClientBundle } = await import('../../adapter/src/client-bundle.js');
 
 	const appDirPath = join(projectDir, 'app');
 	const publicDir = join(projectDir, 'public');
@@ -153,105 +154,15 @@ export async function startDevServer(port, projectDir, config) {
 
 	// ── Client bundling ─────────────────────────────────────────
 	/**
-	 * Compile all .vsk components into a client-side JS bundle with hydration support.
-	 * Produces both non-hydrate (SPA navigation) and hydrate (initial render) versions.
+	 * Generate client bundle using the shared bundle generator.
 	 */
 	async function buildClientBundle() {
 		try {
-			const seen = new Set();
-			const sources = collectSources(routeTree);
-			const componentLines = [];
-			const hydratorLines = [];
-			const aliasLines = [];
-			const hydratorAliasLines = [];
-			const runtimeImportNames = new Set();
-			runtimeImportNames.add('track');
-			runtimeImportNames.add('get');
-			runtimeImportNames.add('set');
-			runtimeImportNames.add('destroy_block');
-			runtimeImportNames.add('getActiveComponent');
-			runtimeImportNames.add('setActiveComponent');
-			runtimeImportNames.add('effect');
-			runtimeImportNames.add('createFileRouter');
-			runtimeImportNames.add('NavLink');
-			runtimeImportNames.add('Link');
-
-			for (const [compName, sourcePath] of sources) {
-				if (seen.has(sourcePath)) continue;
-				if (sourcePath.endsWith('middleware.ts')) continue;
-				seen.add(sourcePath);
-				const src = readFileSync(sourcePath, 'utf-8');
-
-				// Non-hydrate version — for SPA navigation
-				const compCode = compileClient(src, null, { forceClient: true });
-				if (compCode) {
-					const stripped = compCode
-						.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, (match) => {
-							const names = match.match(/\{([^}]*)\}/)?.[1] || '';
-							names.split(',').map(s => s.trim()).filter(Boolean).forEach(n => runtimeImportNames.add(n));
-							return '';
-						})
-						.replace(/^const __components = \{\};\s*\n?/gm, '')
-						.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '');
-					const withoutLeadingBlank = stripped.replace(/^\n+/, '').replace(/\n+$/, '');
-					componentLines.push(withoutLeadingBlank);
-					const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
-					if (actualName && actualName !== compName) {
-						aliasLines.push(`__components[${JSON.stringify(compName)}] = __components[${JSON.stringify(actualName)}];`);
-					}
-				}
-
-				// Hydrate version — for initial hydration
-				const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
-				if (hydCode) {
-					const stripped = hydCode
-						.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, (match) => {
-							const names = match.match(/\{([^}]*)\}/)?.[1] || '';
-							names.split(',').map(s => s.trim()).filter(Boolean).forEach(n => runtimeImportNames.add(n));
-							return '';
-						})
-						.replace(/^const __components = \{\};\s*\n?/gm, '')
-						.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '')
-						.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '')
-						.replace(/__components/g, '__hydrators');
-					const withoutLeadingBlank = stripped.replace(/^\n+/, '').replace(/\n+$/, '');
-					hydratorLines.push(withoutLeadingBlank);
-					const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
-					if (actualName && actualName !== compName) {
-						hydratorAliasLines.push(`__hydrators[${JSON.stringify(compName)}] = __hydrators[${JSON.stringify(actualName)}];`);
-					}
-				}
-			}
-
-			const importStr = [...runtimeImportNames].join(', ');
-			clientBundle = '';
-			clientBundle += `import { ${importStr} } from '/_vesk/runtime.js';\n\n`;
-			clientBundle += `const __components = {};\n\n`;
-			clientBundle += `const __hydrators = {};\n\n`;
-			clientBundle += `const __runtime_comps = __components;\n\n`;
-			clientBundle += componentLines.join('\n\n');
-			if (aliasLines.length > 0) {
-				clientBundle += '\n' + aliasLines.join('\n') + '\n';
-			}
-			if (hydratorLines.length > 0) {
-				clientBundle += '\n' + hydratorLines.join('\n') + '\n';
-			}
-			if (hydratorAliasLines.length > 0) {
-				clientBundle += '\n' + hydratorAliasLines.join('\n') + '\n';
-			}
-			clientBundle += `\nfunction __cleanup(start, end) {\n\tlet n = start.nextSibling;\n\twhile (n && n !== end) {\n\t\tconst next = n.nextSibling;\n\t\tn.remove();\n\t\tn = next;\n\t}\n}\n`;
-			const treeJson = JSON.stringify(routeTree);
-			clientBundle += `\nconst __routeTree = ${treeJson};\n`;
-			clientBundle += `function __resolveNames(nodes) { for (const n of nodes) { if (typeof n.page === 'string') { n._pageName = n.page; n.page = __components[n.page]; } if (typeof n.layout === 'string') { n._layoutName = n.layout; n.layout = __components[n.layout]; } if (n.children) __resolveNames(n.children); } }\n`;
-			clientBundle += `function __updateComponents(nodes) { for (const n of nodes) { if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName]; if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName]; if (n.children) __updateComponents(n.children); } }\n`;
-			clientBundle += `__resolveNames(__routeTree);\n`;
-			clientBundle += `const __router = createFileRouter(__routeTree);\n`;
-			clientBundle += `__router.__hydrators = __hydrators;\n`;
-			clientBundle += `__router.__updateComponents = __updateComponents;\n`;
-			clientBundle += `globalThis.__vesk_router = __router;\n`;
-			clientBundle += `globalThis.__components = __components;\n`;
-			clientBundle += `globalThis.__vesk_hmr_eval = (code) => eval(code);\n`;
-			clientBundle += `if (typeof document !== 'undefined') __router.start();\n`;
+			const { main } = await generateClientBundle(routeTree, appDirPath, new Map(), {
+				importRuntime: true,
+				hmr: true,
+			});
+			clientBundle = main;
 			LOG.info(`client bundle: ${clientBundle.length} bytes`);
 		} catch (e) {
 			LOG.err(`client build error:`, e.message);
@@ -374,13 +285,24 @@ export async function startDevServer(port, projectDir, config) {
 									});
 								} else if (errorMessage) {
 									const err = bundleError || e;
-									const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
-									const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
-									const fileMatch = errorMessage.match(/(?:in|at)\s+['"]?([^'":\s]+(?:\.[a-z]+))['"]?/i);
-									const line = lineMatch ? parseInt(lineMatch[1]) : 0;
-									const col = colMatch ? parseInt(colMatch[1]) : 0;
-									let file = fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
-									if (fileMatch) file = fileMatch[1];
+									let line = 0, col = 0, file = '';
+									let suggestions = [], nextSteps = [], tip = '';
+									if (err && err.name === 'VeskError') {
+										line = err.line || 0;
+										col = err.column || 0;
+										file = err.file || fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
+										suggestions = err.suggestions || [];
+										nextSteps = err.nextSteps || [];
+										tip = err.tip || '';
+									} else {
+										const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
+										const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
+										const fileMatch = errorMessage.match(/(?:in|at)\s+['"]?([^'":\s]+(?:\.[a-z]+))['"]?/i);
+										line = lineMatch ? parseInt(lineMatch[1]) : 0;
+										col = colMatch ? parseInt(colMatch[1]) : 0;
+										file = fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
+										if (fileMatch) file = fileMatch[1];
+									}
 									let code = '';
 									if (line > 0 && fileExists) {
 										try {
@@ -392,12 +314,14 @@ export async function startDevServer(port, projectDir, config) {
 										} catch {}
 									}
 									const tips = [];
-									if (errorMessage.toLowerCase().includes('unexpected token')) { tips.push('Check for missing or extra brackets, parentheses, or quotes.'); }
-									if (errorMessage.toLowerCase().includes('unexpected identifier')) { tips.push('A keyword or identifier is in an unexpected position. Check for typos.'); }
-									if (errorMessage.toLowerCase().includes('expected')) { tips.push('Check the syntax around the reported line for missing punctuation.'); }
-									if (errorMessage.toLowerCase().includes('not defined') || errorMessage.toLowerCase().includes('is not defined')) { tips.push('The variable or component may not be imported or declared.'); }
-									if (errorMessage.toLowerCase().includes('invalid')) { tips.push('Check the expression syntax around the reported location.'); }
-									if (errorMessage.toLowerCase().includes('component') && errorMessage.toLowerCase().includes('not')) { tips.push('Ensure the component is properly defined with the "component" keyword.'); }
+									if (tip) tips.push(tip);
+									if (errorMessage.toLowerCase().includes('unexpected token')) tips.push('Check for missing or extra brackets, parentheses, or quotes.');
+									if (errorMessage.toLowerCase().includes('unexpected identifier')) tips.push('A keyword or identifier is in an unexpected position. Check for typos.');
+									if (errorMessage.toLowerCase().includes('expected')) tips.push('Check the syntax around the reported line for missing punctuation.');
+									if (errorMessage.toLowerCase().includes('not defined') || errorMessage.toLowerCase().includes('is not defined')) tips.push('The variable or component may not be imported or declared.');
+									if (errorMessage.toLowerCase().includes('invalid')) tips.push('Check the expression syntax around the reported location.');
+									if (errorMessage.toLowerCase().includes('component') && errorMessage.toLowerCase().includes('not')) tips.push('Ensure the component is properly defined with the "component" keyword.');
+									if (nextSteps.length) tips.push(...nextSteps);
 									if (tips.length === 0) tips.push('Review the code around the reported line for syntax or type errors.');
 									globalThis.__vesk_broadcastHmr({
 										type: 'error',
@@ -408,6 +332,8 @@ export async function startDevServer(port, projectDir, config) {
 										code,
 										stack: err?.stack || '',
 										tips,
+										suggestions,
+										nextSteps,
 									});
 								} else {
 									globalThis.__vesk_broadcastHmr({ type: 'reload' });

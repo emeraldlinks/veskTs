@@ -30,7 +30,9 @@ function extractCompName(src) {
 
 function buildParamExtraction(node, urlParts) {
   const parts = [];
-  let partIdx = 0;
+  // Start at the depth of this node within the full path.
+  // urlParts includes all ancestor segments; the node's own path is the last segment.
+  let partIdx = Math.max(0, urlParts.length - 1);
   function walk(n) {
     if (n.fullPath === '/') {
       for (const child of (n.children || [])) walk(child);

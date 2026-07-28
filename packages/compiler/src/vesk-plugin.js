@@ -67,7 +67,7 @@ export function VeskPlugin(config = {}) {
 			parseExpression(noIn, refDestructuringErrors) {
 				const expr = super.parseExpression(noIn, refDestructuringErrors);
 				if (tstt && this.type === tstt.jsxTagStart) {
-					this.raise(this.start, "Adjacent JSX elements must be wrapped in an enclosing tag");
+					this.raise(this.start, "Adjacent JSX elements must be wrapped in an enclosing tag. Wrap them in a fragment: <><Comp1 /><Comp2 /></> or a single parent element.");
 				}
 				return expr;
 			}

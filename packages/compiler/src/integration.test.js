@@ -219,6 +219,55 @@ it('ssg with event handler generates client JS', async () => {
 });
 
 // =============================================================
+// SSG — Statement Mode
+// =============================================================
+console.log('\n=== SSG — Statement Mode ===');
+
+it('[stmt] ssg generates complete HTML page', async () => {
+  const result = show('ssg', await ssg('component App { <h1>SSG</h1> }', 'App'));
+  show('  .html', result.html);
+  assert(result.html.includes('<!DOCTYPE html>'), 'missing doctype');
+  assert(result.html.includes('<h1>SSG</h1>'), `missing content: ${JSON.stringify(result.html.slice(0, 200))}`);
+});
+
+it('[stmt] ssg embeds __vesk_props variable', async () => {
+  const result = show('ssg', await ssg('component App(props) { <h1>{props.msg}</h1> }', 'App', { msg: 'PropTest' }));
+  show('  .html', result.html.slice(0, 400));
+  show('  .props', result.props);
+  assert(result.props.includes('PropTest'), `props missing value: ${JSON.stringify(result.props)}`);
+  assert(result.html.includes('PropTest'), `html missing prop output: ${JSON.stringify(result.html)}`);
+});
+
+it('[stmt] ssg with <Head> includes head content', async () => {
+  const result = show('ssg', await ssg(`component App {
+    <Head><title>SSG Title</title></Head>
+    <p>body</p>
+  }`, 'App'));
+  show('  .html', result.html.slice(0, 400));
+  assert(result.html.includes('SSG Title'), `head missing: ${JSON.stringify(result.html.slice(0, 300))}`);
+  assert(result.html.includes('<title>'), `title tag missing`);
+});
+
+it('[stmt] ssg renders static body without hydration JS (zero-JS)', async () => {
+  const result = show('ssg', await ssg('component App { <p>Static</p> }', 'App'));
+  show('  .static', result.static);
+  show('  .clientCode', result.clientCode);
+  assert(result.static === true, `expected static, got static=${result.static}`);
+  assert(result.clientCode === '', `expected empty clientCode, got ${JSON.stringify(result.clientCode.slice(0, 100))}`);
+});
+
+it('[stmt] ssg with event handler generates client JS', async () => {
+  const result = show('ssg', await ssg(`component App {
+    let &[c] = track(0);
+    <button onClick={() => c.set(1)}>Click</button>
+  }`, 'App'));
+  show('  .static', result.static);
+  show('  .clientCode', result.clientCode.slice(0, 400));
+  assert(result.static === false, `expected non-static`);
+  assert(result.clientCode.length > 0, `expected non-empty clientCode`);
+});
+
+// =============================================================
 // Client codegen — expression mode
 // =============================================================
 console.log('\n=== Client Codegen — Expression Mode ===');
@@ -638,6 +687,110 @@ it('auto-imports Experiment when used as JSX tag', () => {
 });
 
 // =============================================================
+// Compiler — Auto-Import — Statement Mode
+// =============================================================
+console.log('\n=== Compiler — Auto-Import — Statement Mode ===');
+
+it('[stmt] auto-imports useFetch when used in script', () => {
+  const source = `component App {
+    const data = useFetch('/api/posts');
+    <div>{data.loading ? "..." : "ok"}</div>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const hasImport = ir.imports.some(i => i.includes('useFetch'));
+  assert(hasImport, `useFetch import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] auto-imports useRouter when used in script', () => {
+  const source = `component App {
+    const router = useRouter();
+    <div>{router.pathname}</div>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const hasImport = ir.imports.some(i => i.includes('useRouter'));
+  assert(hasImport, `useRouter import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] auto-import does not inject if already imported', () => {
+  const source = `import { useFetch } from '@vesk/runtime';
+  component App {
+    const data = useFetch('/api/posts');
+    <div>ok</div>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const count = ir.imports.filter(i => i.includes('useFetch')).length;
+  assert(count === 1, `expected exactly 1 useFetch import, got ${count}: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] no auto-import when builtins are not used', () => {
+  const source = `component App {
+    const x = 42;
+    <div>{x}</div>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const autoImports = ir.imports.filter(i => i.includes('@vesk/runtime'));
+  assert(autoImports.length === 0, `unexpected auto-imports: ${JSON.stringify(autoImports)}`);
+});
+
+it('[stmt] auto-imports Form and Field when used as JSX tags', () => {
+  const source = `component App {
+    <Form action="/api/submit"><Field name="x" rules={[]}><input /></Field></Form>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const hasForm = ir.imports.some(i => i.includes('Form'));
+  const hasField = ir.imports.some(i => i.includes('Field'));
+  assert(hasForm, `Form import missing: ${JSON.stringify(ir.imports)}`);
+  assert(hasField, `Field import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] auto-imports Link and NavLink when used as JSX tags', () => {
+  const source = `component App {
+    <nav><Link href="/">Home</Link><NavLink href="/about">About</NavLink></nav>
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('Link')), `Link import missing: ${JSON.stringify(ir.imports)}`);
+  assert(ir.imports.some(i => i.includes('NavLink')), `NavLink import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] auto-imports validation helpers when used in prop expressions', () => {
+  const source = `component App {
+    <Field name="email" rules={[required(), email()]}><input /></Field>
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('required')), `required import missing: ${JSON.stringify(ir.imports)}`);
+  assert(ir.imports.some(i => i.includes('email')), `email import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] auto-imports minLength, maxLength, pattern, custom', () => {
+  const source = `component App {
+    <Field name="pw" rules={[minLength(8), maxLength(64), pattern(/^\\w+$/), custom(v => v !== 'admin')]}><input /></Field>
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('minLength')), `minLength missing`);
+  assert(ir.imports.some(i => i.includes('maxLength')), `maxLength missing`);
+  assert(ir.imports.some(i => i.includes('pattern')), `pattern missing`);
+  assert(ir.imports.some(i => i.includes('custom')), `custom missing`);
+});
+
+it('[stmt] does not double-import when user already imported', () => {
+  const source = `import { Form, required } from '@vesk/runtime';
+  component App {
+    <Form action="/api"><Field name="x" rules={[required()]}><input /></Field></Form>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const count = ir.imports.filter(i => i.includes('Form')).length;
+  assert(count === 1, `expected exactly 1 Form import, got ${count}: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] auto-imports Experiment when used as JSX tag', () => {
+  const source = `component App {
+    <Experiment name="test" variants={[{content: "A"}]} />
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('Experiment')), `Experiment import missing: ${JSON.stringify(ir.imports)}`);
+});
+
+// =============================================================
 // Runtime — useFetch
 // =============================================================
 console.log('\n=== Runtime — useFetch ===');
@@ -648,6 +801,19 @@ it('useFetch in SSR renders loading state and serializes data', async () => {
     return <p>{data.loading ? "waiting" : "done"}</p>;
   }`;
   // Simulate SSR — set up tracking then render
+  globalThis.__vsk_ssr = true;
+  const html = await renderFullPage(source, 'App', {});
+  delete globalThis.__vsk_ssr;
+  show('  html', html.slice(0, 600));
+  assert(typeof html === 'string', `html should be string, got ${typeof html}`);
+  assert(html.length > 0, `html should not be empty`);
+});
+
+it('[stmt] useFetch in SSR renders loading state', async () => {
+  const source = `component App {
+    const data = useFetch('/api/test');
+    <p>{data.loading ? "waiting" : "done"}</p>
+  }`;
   globalThis.__vsk_ssr = true;
   const html = await renderFullPage(source, 'App', {});
   delete globalThis.__vsk_ssr;

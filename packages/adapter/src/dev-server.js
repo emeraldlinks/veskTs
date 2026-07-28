@@ -64,7 +64,7 @@ export async function startDevServer(appDir, options = {}) {
   async function doBuild() {
     const start = Date.now();
     try {
-      const result = await build(appDir, { outDir: devDir, publicDir });
+      const result = await build(appDir, { outDir: devDir, publicDir, hmr: true });
       const configPath = resolve(devDir, 'config.json');
       if (existsSync(configPath)) {
         config = JSON.parse(readFileSync(configPath, 'utf-8'));

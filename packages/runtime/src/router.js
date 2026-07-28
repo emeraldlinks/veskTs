@@ -28,6 +28,36 @@ export {
 	Redirect, redirect, permanentRedirect, NotFoundError, notFound,
 };
 
+const loadedChunks = new Set();
+
+function ensureChunk(chunkUrl) {
+	if (!chunkUrl || loadedChunks.has(chunkUrl)) return Promise.resolve();
+	loadedChunks.add(chunkUrl);
+	if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
+		return Promise.resolve();
+	}
+	return new Promise((resolve, reject) => {
+		const s = document.createElement('script');
+		s.src = chunkUrl;
+		s.onload = resolve;
+		s.onerror = () => {
+			loadedChunks.delete(chunkUrl);
+			reject(new Error(`Failed to load chunk: ${chunkUrl}`));
+		};
+		document.head.appendChild(s);
+	});
+}
+
+function hasPendingChunks(nodes) {
+	const urls = [];
+	function walk(n) {
+		if (n._chunk && !loadedChunks.has(n._chunk)) urls.push(n._chunk);
+		if (n.children) n.children.forEach(walk);
+	}
+	nodes.forEach(walk);
+	return urls;
+}
+
 function renderMatch(router, match, container) {
 	const chain = match.matchChain;
 	const paramValues = match.params;
@@ -525,9 +555,20 @@ export function createFileRouter(routeTree, options = {}) {
 				handleScroll(url.pathname, opts.replace);
 			};
 
+			const pendingChunks = hasPendingChunks(match.matchChain);
+
+			const doRenderWithChunks = pendingChunks.length > 0
+				? () => Promise.all(pendingChunks.map(ensureChunk)).then(() => {
+					if (typeof this.__updateComponents === 'function') {
+						this.__updateComponents(match.matchChain);
+					}
+					doRender();
+				})
+				: () => { doRender(); };
+
 			async function runMwChain(index) {
 				if (index >= middlewareFns.length) {
-					doRender();
+					await doRenderWithChunks();
 					return;
 				}
 
@@ -564,11 +605,11 @@ export function createFileRouter(routeTree, options = {}) {
 					if (middlewareFns.length > 0) {
 						runMwChain(0);
 					} else {
-						doRender();
+						doRenderWithChunks();
 					}
 				});
 			} else {
-				doRender();
+				doRenderWithChunks();
 			}
 		},
 
@@ -578,6 +619,9 @@ export function createFileRouter(routeTree, options = {}) {
 			if (!match) return;
 			router._prefetched = router._prefetched || new Map();
 			router._prefetched.set(url.pathname, match);
+			// Preload code-split chunk for this route
+			const preloadUrls = hasPendingChunks(match.matchChain);
+			preloadUrls.forEach(ensureChunk);
 		},
 
 		get currentPath() {

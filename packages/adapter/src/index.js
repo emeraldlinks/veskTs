@@ -135,9 +135,17 @@ export async function build(appDir, options = {}) {
 
   // ── Generate client bundle ──
   console.error('vesk build: bundling client runtime...');
-  const clientCode = await generateClientBundle(routeTree, appDir, componentMap);
-  writeFileSync(resolve(outDir, 'static', 'client.js'), clientCode, 'utf-8');
-  console.error(`vesk build: client → static/client.js  (${clientCode.length} bytes)`);
+  const bundleOpts = { ...(options.codeSplit ? { codeSplit: true } : {}), ...(options.hmr ? { hmr: true } : {}) };
+  const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);
+  writeFileSync(resolve(outDir, 'static', 'client.js'), main, 'utf-8');
+  console.error(`vesk build: client → static/client.js  (${main.length} bytes)`);
+  if (chunks.length > 0) {
+    const staticDir = resolve(outDir, 'static');
+    for (const chunk of chunks) {
+      writeFileSync(resolve(staticDir, chunk.name), chunk.code, 'utf-8');
+      console.error(`vesk build: chunk → static/${chunk.name}  (${chunk.code.length} bytes)`);
+    }
+  }
 
   // ── Copy public/ assets ──
   copyStaticAssets(publicDir, outDir);

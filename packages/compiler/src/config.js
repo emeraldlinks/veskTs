@@ -18,6 +18,7 @@
  * @property {boolean} [credentials] - Allow credentials (default: true)
  * @property {number} [maxAge] - Preflight cache seconds (default: 86400)
  */
+import { VeskError } from './errors.js';
 
 /**
  * @typedef {Object} VeskRateLimit
@@ -91,7 +92,7 @@ export function preset(name, overrides = {}) {
 		},
 	};
 	if (!presets[name]) {
-		throw new Error(`[vesk] Unknown security preset: "${name}". Available: ${Object.keys(presets).join(', ')}`);
+		throw VeskError.configError(`Unknown security preset: "${name}".`, Object.keys(presets));
 	}
 	return { ...presets[name], ...overrides };
 }
@@ -117,7 +118,7 @@ export function defineConfig(config) {
 		config.security = {};
 	} else if (typeof config.security === 'string') {
 		const p = SECURITY_PRESETS[config.security];
-		if (!p) throw new Error(`[vesk] Unknown security preset string: "${config.security}". Available: ${Object.keys(SECURITY_PRESETS).join(', ')}`);
+		if (!p) throw VeskError.configError(`Unknown security preset string: "${config.security}".`, Object.keys(SECURITY_PRESETS));
 		config.security = { ...p };
 	} else if (typeof config.security === 'function') {
 		config.security = config.security(preset);

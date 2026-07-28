@@ -84,7 +84,7 @@ function routeName(segments) {
 
 function buildParamExtraction(node, urlParts) {
   const parts = [];
-  let partIdx = 0;
+  let partIdx = Math.max(0, urlParts.length - 1);
   function walk(n) {
     if (n.fullPath === '/') { for (const child of (n.children || [])) walk(child); return; }
     if (n.isGroup) { for (const child of (n.children || [])) walk(child); return; }

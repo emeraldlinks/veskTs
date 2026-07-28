@@ -27,7 +27,7 @@ function usage(code = 0) {
 	console.error(``);
 	console.error(`Usage:`);
 	console.error(`  vesk init [project-name]     Create a new Vesk project`);
-	console.error(`  vesk build [--seo] [--strict] Build app/ for production`);
+	console.error(`  vesk build [--seo] [--strict] [--skip-split] Build app/ for production`);
 	console.error(`  vesk seo [--strict]           Run SEO analysis on app/`);
 	console.error(`  vesk start [port]             Start production server`);
 	console.error(`  vesk dev                      Start dev server with HMR`);
@@ -440,7 +440,7 @@ if (cmd === 'build') {
 
 	const config = await loadConfig(projectDir);
 	const plugins = config.plugins || [];
-	const opts = { publicDir, plugins, seo, strictSeo: strict };
+	const opts = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split') };
 
 	const { build } = await import(resolve(__dirname, '../../adapter/src/index.js'));
 	try {

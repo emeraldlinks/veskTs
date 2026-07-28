@@ -26,6 +26,7 @@ import {
 	Expression,
 	SlotNode,
 } from './ir.js';
+import { VeskError } from './errors.js';
 
 function getSource(source, node) {
 	return source.slice(node.start, node.end);
@@ -489,10 +490,7 @@ function processStatementModeBody(source, bodyStmts) {
 		} else if (stmt.type === 'ForStatement') {
 			nodes.push(...processForStatement(source, stmt));
 		} else if (stmt.type === 'ClassDeclaration') {
-			throw new Error(
-				`[vesk] class declarations are not supported inside Vesk components. ` +
-				`Use plain objects, factory functions, or import the class from an external module instead.`
-			);
+			throw VeskError.classDecl();
 		} else {
 			// Non-JSX statements preserved as runtime statements
 			const raw = getSource(source, stmt);
@@ -523,31 +521,11 @@ function validateBlocks(compName, isClient, body) {
 	for (const node of body) {
 		if (isClient) {
 			if (node instanceof ServerBlock) {
-				throw new Error(
-					`[vesk] {#server} block found in client island "${compName}". ` +
-					'Client islands render on both server and client, so {#server} blocks ' +
-					'have no effect — the content would never reach the client.\n\n' +
-					'  Remove the {#server} block:\n' +
-					`    component ${compName} client {\n` +
-					'      // content here is always rendered\n' +
-					'    }\n\n' +
-					'Or convert to a server-only component by removing the `client` keyword:\n' +
-					`    component ${compName} { ... }\n` +
-					'  and use {#client} blocks for interactive parts.\n'
-				);
+				throw VeskError.serverBlockInClient(compName);
 			}
 		} else {
 			if (node instanceof ClientBlock) {
-				throw new Error(
-					`[vesk] {#client} block found in component "${compName}", but this component is ` +
-					'not a client island. Client blocks are only allowed inside components ' +
-					'declared with the `client` keyword.\n\n' +
-					'  Add `client` to the component declaration:\n' +
-					`    component ${compName} client { ... }\n\n` +
-					'Or remove the {#client} block if the content can be server-rendered.\n\n' +
-					'  Server-only components cannot contain {#client} blocks because they\n' +
-					'  are stripped during SSR and never rendered to the client.\n'
-				);
+				throw VeskError.clientBlockInServer(compName);
 			}
 		}
 		if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock) {
@@ -648,10 +626,7 @@ export function generateIR(ast, source) {
 		if (inner.type === 'ComponentDeclaration') {
 			// handled below
 		} else if (inner.type === 'ClassDeclaration') {
-			throw new Error(
-				`[vesk] class declarations are not supported in .vsk files. ` +
-				`Import classes from external modules or use factory functions instead.`
-			);
+			throw VeskError.classDecl();
 		} else if (inner.type === 'TSEnumDeclaration') {
 			const code = processEnum(inner, source, exported);
 			topLevelCode.push(code);
@@ -701,10 +676,7 @@ export function generateIR(ast, source) {
 				} else if (stmt.type === 'IfStatement' && !mainReturn && stmt.consequent.type !== 'ThrowStatement') {
 					guardClauses.push(stmt);
 				} else if (stmt.type === 'ClassDeclaration') {
-					throw new Error(
-						`[vesk] class declarations are not supported inside Vesk components. ` +
-						`Use plain objects, factory functions, or import the class from an external module instead.`
-					);
+					throw VeskError.classDecl();
 				} else {
 					const raw = getSource(source, stmt);
 					if (raw) preamble.push(new RuntimeStatement(raw, stmt, source));
@@ -725,6 +697,8 @@ export function generateIR(ast, source) {
 		'useFetch', 'useRouter', 'useParams', 'usePathname', 'useSearchParams', 'useNavigate',
 		'useHead', 'useTitle',
 		'Form', 'Field', 'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom',
+		'Link', 'NavLink', 'Outlet',
+		'Image', 'Portal',
 		'Experiment',
 	];
 	const usedFunctions = new Set();

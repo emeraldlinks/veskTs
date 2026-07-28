@@ -171,9 +171,22 @@
 
     var tipsHtml = '';
     if (msg.tips && msg.tips.length > 0) {
-      tipsHtml = '<div class="__vo_tips_title">Debug Tips</div>';
+      var shownHeader = false;
       for (var t = 0; t < msg.tips.length; t++) {
+        if (!shownHeader) { tipsHtml += '<div class="__vo_tips_title">Debug Tips</div>'; shownHeader = true; }
         tipsHtml += '<div class="__vo_tip">' + msg.tips[t] + '</div>';
+      }
+    }
+    if (msg.suggestions && msg.suggestions.length > 0) {
+      tipsHtml += '<div class="__vo_tips_title" style="margin-top:8px">Suggestions</div>';
+      for (var s = 0; s < Math.min(msg.suggestions.length, 4); s++) {
+        tipsHtml += '<div class="__vo_tip">-- ' + escapeHtml(msg.suggestions[s]) + '</div>';
+      }
+    }
+    if (msg.nextSteps && msg.nextSteps.length > 0) {
+      tipsHtml += '<div class="__vo_tips_title" style="margin-top:8px">Next Steps</div>';
+      for (var n = 0; n < Math.min(msg.nextSteps.length, 4); n++) {
+        tipsHtml += '<div class="__vo_tip">' + escapeHtml(msg.nextSteps[n]) + '</div>';
       }
     }
     document.getElementById('__vo_tips').innerHTML = tipsHtml;
