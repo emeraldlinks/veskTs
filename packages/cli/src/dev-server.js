@@ -255,6 +255,7 @@ export async function startDevServer(port, projectDir, config) {
 			LOG.info(`client bundle: ${clientBundle.length} bytes`);
 		} catch (e) {
 			LOG.err(`client build error:`, e.message);
+			throw e;
 		}
 	}
 
@@ -330,13 +331,19 @@ export async function startDevServer(port, projectDir, config) {
 						const changedComponents = sourceToComponents.get(fullPath) || [];
 
 						clientBundle = '';
-						await buildClientBundle();
+						let bundleError = null;
+						try {
+							await buildClientBundle();
+						} catch (e) {
+							bundleError = e;
+							LOG.err(`client build error:`, e.message);
+						}
 
 						if (typeof globalThis.__vesk_broadcastHmr === 'function') {
 							if (changedComponents.length > 0) {
 								let fnSources;
-								let errorMessage = '';
-								if (fileExists) {
+								let errorMessage = bundleError ? bundleError.message : '';
+								if (fileExists && !bundleError) {
 									try {
 										const src = readFileSync(fullPath, 'utf-8');
 										let compCode = compileClient(src, null, { forceClient: true });
@@ -366,6 +373,7 @@ export async function startDevServer(port, projectDir, config) {
 										fnSources
 									});
 								} else if (errorMessage) {
+									const err = bundleError || e;
 									const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
 									const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
 									const fileMatch = errorMessage.match(/(?:in|at)\s+['"]?([^'":\s]+(?:\.[a-z]+))['"]?/i);
@@ -398,7 +406,7 @@ export async function startDevServer(port, projectDir, config) {
 										line,
 										column: col,
 										code,
-										stack: e.stack || '',
+										stack: err?.stack || '',
 										tips,
 									});
 								} else {
