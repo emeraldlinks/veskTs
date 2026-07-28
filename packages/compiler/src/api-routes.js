@@ -377,7 +377,7 @@ export async function executeApiRoute(filePath, method, request, params = {}, lo
 		if (globalAfterResult instanceof Response) response = globalAfterResult;
 
 		// Auto-build VeskResponse to flush cookies + security headers
-		if (response?.constructor?.name === 'VeskResponse' && typeof response.build === 'function') {
+		if (typeof response?.build === 'function') {
 			response.build();
 		}
 

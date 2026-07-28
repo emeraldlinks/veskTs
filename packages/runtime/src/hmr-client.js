@@ -222,6 +222,9 @@
       '  <span class="__v_label">Vesk</span>' +
       '  <span class="__v_version">dev</span>' +
       '</div>';
+    dot.querySelector('.__v_bar').addEventListener('click', function() {
+      if (lastError) showOverlay(lastError);
+    });
     document.body.appendChild(dot);
   }
 

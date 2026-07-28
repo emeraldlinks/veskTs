@@ -112,7 +112,7 @@ export class VeskRequest extends ServerRequest {
   body: Promise<Record<string, any> | string>;
 }
 
-export class VeskResponse extends ServerResponse {
+export interface VeskResponse {
   setCookie(name: string, value: string, opts?: {
     maxAge?: number; httpOnly?: boolean; secure?: boolean;
     sameSite?: 'Lax' | 'Strict' | 'None'; path?: string; domain?: string;
@@ -123,8 +123,21 @@ export class VeskResponse extends ServerResponse {
   cache(ttlSeconds: number): VeskResponse;
   noCache(): VeskResponse;
   cors(opts?: { origin?: string; methods?: string; headers?: string; credentials?: boolean }): VeskResponse;
-  static html(html: string, init?: ResponseInit): VeskResponse;
+  setStatus(code: number): VeskResponse;
+  build(): VeskResponse;
+  readonly status: number;
+  readonly headers: Headers;
+  text(): Promise<string>;
+  json(): Promise<any>;
 }
+export declare const VeskResponse: {
+  (body?: unknown, init?: ResponseInit): VeskResponse;
+  json(body: unknown, init?: ResponseInit): VeskResponse;
+  html(html: string, init?: ResponseInit): VeskResponse;
+  redirect(url: string, status?: number): VeskResponse;
+  rewrite(url: string): VeskResponse;
+  next(): VeskResponse;
+};
 
 export function applyRequestSecurity(request: VeskRequest, response: VeskResponse): void;
 

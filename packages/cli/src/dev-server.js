@@ -438,7 +438,6 @@ export async function startDevServer(port, projectDir, config) {
 				const isInApi = fullPath.includes('/api/');
 				if (isInApi && fileExists) {
 					apiWatchCache.set(fullPath, Date.now());
-					LOG.info(`api route updated: ${filename}`);
 				}
 			}
 		});

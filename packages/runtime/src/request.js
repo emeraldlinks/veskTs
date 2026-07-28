@@ -710,7 +710,7 @@ export class VeskRequest extends ServerRequest {
  *   .cache(ttl)                    — set Cache-Control
  *   .noCache()                     — disable caching
  */
-export class VeskResponse extends ServerResponse {
+class _VeskResponse extends ServerResponse {
 	constructor(body, init) {
 		super(body, init);
 		this._cookieHeaders = [];
@@ -718,64 +718,30 @@ export class VeskResponse extends ServerResponse {
 		this._finalStatus = null;
 	}
 
-	/**
-	 * Set the response status code (for chaining).
-	 * @param {number} code - HTTP status code
-	 * @returns {VeskResponse}
-	 */
 	setStatus(code) {
 		this._finalStatus = code;
 		return this;
 	}
 
-	/**
-	 * Override the status getter to respect _finalStatus from setStatus().
-	 */
 	get status() {
 		return this._finalStatus !== null ? this._finalStatus : super.status;
 	}
 
-	/**
-	 * Finalize the response: flush accumulated security headers.
-	 * Call this before returning the response from a route handler,
-	 * or let the framework call it automatically.
-	 * @returns {VeskResponse}
-	 */
 	build() {
 		this._flushSecurityHeaders();
 		return this;
 	}
 
-	/**
-	 * Override text() to auto-flush before serializing.
-	 */
 	async text() {
 		this._flushSecurityHeaders();
 		return super.text();
 	}
 
-	/**
-	 * Override json() instance method to auto-flush.
-	 */
 	async json() {
 		this._flushSecurityHeaders();
 		return super.json();
 	}
 
-	/**
-	 * Set a cookie on this response.
-	 * @param {string} name
-	 * @param {string} value
-	 * @param {object} [opts]
-	 * @param {number} [opts.maxAge]
-	 * @param {boolean} [opts.httpOnly=true]
-	 * @param {boolean} [opts.secure=true]
-	 * @param {'Lax'|'Strict'|'None'} [opts.sameSite='Lax']
-	 * @param {string} [opts.path='/']
-	 * @param {string} [opts.domain]
-	 * @param {boolean} [opts.signed] - sign the cookie value
-	 * @returns {VeskResponse}
-	 */
 	setCookie(name, value, opts = {}) {
 		const parts = [`${name}=${encodeURIComponent(value)}`];
 		if (opts.httpOnly !== false) parts.push('HttpOnly');
@@ -788,53 +754,25 @@ export class VeskResponse extends ServerResponse {
 		return this;
 	}
 
-	/**
-	 * Clear a cookie by name.
-	 * @param {string} name
-	 * @param {object} [opts]
-	 * @param {string} [opts.path='/']
-	 * @param {string} [opts.domain]
-	 * @returns {VeskResponse}
-	 */
 	clearCookie(name, opts = {}) {
 		return this.setCookie(name, '', { ...opts, maxAge: 0 });
 	}
 
-	/**
-	 * Override Content-Security-Policy for this response.
-	 * @param {string|false} policy - CSP string, or false to disable
-	 * @returns {VeskResponse}
-	 */
 	setCsp(policy) {
 		this._secHeaders['Content-Security-Policy'] = policy === false ? null : policy;
 		return this;
 	}
 
-	/**
-	 * Set a custom security header on this response.
-	 * @param {string} name - header name (e.g. 'X-Frame-Options')
-	 * @param {string|false} value - header value, or false to omit
-	 * @returns {VeskResponse}
-	 */
 	setSecurityHeader(name, value) {
 		this._secHeaders[name] = value === false ? null : value;
 		return this;
 	}
 
-	/**
-	 * Set Cache-Control header (public).
-	 * @param {number} ttlSeconds - cache TTL in seconds
-	 * @returns {VeskResponse}
-	 */
 	cache(ttlSeconds) {
 		this.headers?.set('Cache-Control', `public, max-age=${ttlSeconds}, s-maxage=${ttlSeconds}`);
 		return this;
 	}
 
-	/**
-	 * Disable caching for this response.
-	 * @returns {VeskResponse}
-	 */
 	noCache() {
 		this.headers?.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
 		this.headers?.set('Pragma', 'no-cache');
@@ -842,15 +780,6 @@ export class VeskResponse extends ServerResponse {
 		return this;
 	}
 
-	/**
-	 * Set CORS headers on this response.
-	 * @param {object} opts
-	 * @param {string} opts.origin - allowed origin
-	 * @param {string} [opts.methods] - allowed methods
-	 * @param {string} [opts.headers] - allowed headers
-	 * @param {boolean} [opts.credentials] - allow credentials
-	 * @returns {VeskResponse}
-	 */
 	cors(opts = {}) {
 		this.headers?.set('Access-Control-Allow-Origin', opts.origin || '*');
 		if (opts.methods) this.headers?.set('Access-Control-Allow-Methods', opts.methods);
@@ -880,52 +809,37 @@ export class VeskResponse extends ServerResponse {
 	 * @returns {VeskResponse}
 	 */
 	static json(body, init) {
-		return new VeskResponse(JSON.stringify(body), {
+		return new _VeskResponse(JSON.stringify(body), {
 			...init,
 			headers: { 'Content-Type': 'application/json', ...init?.headers },
 		});
 	}
 
-	/**
-	 * Create a redirect response.
-	 * @param {string} url
-	 * @param {number} [status]
-	 * @returns {VeskResponse}
-	 */
 	static redirect(url, status = 307) {
-		return new VeskResponse(null, { status, headers: { Location: url } });
+		return new _VeskResponse(null, { status, headers: { Location: url } });
 	}
 
-	/**
-	 * Internal rewrite.
-	 * @param {string} url
-	 * @returns {VeskResponse}
-	 */
 	static rewrite(url) {
-		return new VeskResponse(null, { status: 200, headers: { 'x-vesk-rewrite': url } });
+		return new _VeskResponse(null, { status: 200, headers: { 'x-vesk-rewrite': url } });
 	}
 
-	/**
-	 * Pass through.
-	 * @returns {VeskResponse}
-	 */
 	static next() {
-		return new VeskResponse(null, { status: 200, headers: { 'x-vesk-next': '1' } });
+		return new _VeskResponse(null, { status: 200, headers: { 'x-vesk-next': '1' } });
 	}
 
-	/**
-	 * Create an HTML response.
-	 * @param {string} html
-	 * @param {ResponseInit} [init]
-	 * @returns {VeskResponse}
-	 */
 	static html(html, init) {
-		return new VeskResponse(html, {
+		return new _VeskResponse(html, {
 			...init,
 			headers: { 'Content-Type': 'text/html; charset=utf-8', ...init?.headers },
 		});
 	}
 }
+
+export const VeskResponse = new Proxy(_VeskResponse, {
+	apply(target, thisArg, args) {
+		return new target(...args);
+	}
+});
 
 // ── Helper: apply a VeskRequest's security overrides to a VeskResponse ──
 

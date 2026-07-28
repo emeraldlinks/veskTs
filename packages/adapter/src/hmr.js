@@ -248,7 +248,7 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
       try {
         await doFullBuild();
         broadcast('reload', { reason: `API: ${filename}`, time: Date.now() - start });
-        console.error(`vesk hmr: api ${filename} rebuilt (${Date.now() - start}ms)`);
+
       } catch (e) {
         broadcast('error', { message: e.message, file: filename });
       }
