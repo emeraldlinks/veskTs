@@ -448,8 +448,19 @@ export class ServerRequest extends Request {
 		this._locals = {};
 	}
 
-	/** Parsed cookies, keyed by name. */
-	get cookies() { return this._cookies; }
+	/** Parsed cookies with .get(), .getAll(), .toString() support. */
+	get cookies() {
+		const target = this._cookies;
+		return new Proxy(target, {
+			get(t, prop) {
+				if (prop === 'get') return (name) => t[name] || undefined;
+				if (prop === 'getAll') return () => Object.entries(t).map(([name, value]) => ({ name, value }));
+				if (prop === 'toString') return () => Object.entries(t).map(([k, v]) => `${k}=${v}`).join('; ');
+				if (prop in t) return t[prop];
+				return undefined;
+			},
+		});
+	}
 	set cookies(v) { this._cookies = v; }
 
 	/** Route parameters (e.g., { id: '42' }). */

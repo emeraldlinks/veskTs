@@ -608,7 +608,7 @@ export async function startDevServer(port, projectDir, config) {
 					headers: rawHeaders,
 					body: bodyBuffer.length ? bodyBuffer : null,
 				});
-				Object.defineProperty(webRequest, 'cookies', { get: () => rawCookies, enumerable: true });
+				webRequest._cookies = rawCookies;
 				webRequest.locals = apiLocals;
 				const response = await executeApiRoute(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
 				logRequest(response.status);

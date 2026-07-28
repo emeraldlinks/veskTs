@@ -250,10 +250,18 @@ export function buildWebRequest(nodeReq, url) {
 	};
 	webRequest.clone = () => webRequest;
 
-	// Add cookies getter (VeskRequest-compatible)
+	// Add cookies getter with .get() / .getAll() / .toString() support
 	const rawCookies = parseCookies(nodeReq.headers.cookie || '');
 	Object.defineProperty(webRequest, 'cookies', {
-		get: () => rawCookies,
+		get: () => new Proxy(rawCookies, {
+			get(t, prop) {
+				if (prop === 'get') return (name) => t[name] || undefined;
+				if (prop === 'getAll') return () => Object.entries(t).map(([name, value]) => ({ name, value }));
+				if (prop === 'toString') return () => Object.entries(t).map(([k, v]) => `${k}=${v}`).join('; ');
+				if (prop in t) return t[prop];
+				return undefined;
+			},
+		}),
 		enumerable: true,
 	});
 
