@@ -57,8 +57,8 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
 
     const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
     if (actualName && actualName !== resolvedName) {
-      output.push(`__components[${JSON.stringify(resolvedName)}] = __components[${JSON.stringify(actualName)}];`);
-      output.push(`__hydrators[${JSON.stringify(resolvedName)}] = __hydrators[${JSON.stringify(actualName)}];`);
+      output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
+      output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
     }
   }
 
@@ -160,8 +160,8 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
 
       const actualName = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m)?.[1];
       if (actualName && actualName !== resolvedName) {
-        aliasLines.push(`__components[${JSON.stringify(resolvedName)}] = __components[${JSON.stringify(actualName)}];`);
-        hydratorAliasLines.push(`__hydrators[${JSON.stringify(resolvedName)}] = __hydrators[${JSON.stringify(actualName)}];`);
+        aliasLines.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
+        hydratorAliasLines.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
       }
     }
 

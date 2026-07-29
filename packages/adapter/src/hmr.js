@@ -25,6 +25,20 @@ function findRouteForSource(routeTree, sourceDir) {
   return null;
 }
 
+function collectAncestorLayouts(routeTree, sourceDir, chain = []) {
+  for (const node of routeTree) {
+    if (node.sourceDir === sourceDir) return chain;
+    if (node.children) {
+      const nextChain = node.layout
+        ? [...chain, { sourceDir: node.sourceDir, layoutCompName: node.layout }]
+        : chain;
+      const found = collectAncestorLayouts(node.children, sourceDir, nextChain);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 function extractComponentAssignments(code) {
   const assignments = [];
   const startRegex = /__components\["(\w+)"\]\s*=\s*/;
@@ -106,29 +120,49 @@ function buildParamExtraction(node, urlParts) {
   return parts;
 }
 
-function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map()) {
+function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map(), options = {}) {
+  const ancestorLayouts = options.ancestorLayouts || [];
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
+  const tailwindPath = resolve(outDir, 'static', '_tailwind.css');
   const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
   const altCssPath = resolve(appDir, '..', 'src', 'app.css');
   const hasGlobalCss = existsSync(globalCssPath) || existsSync(altCssPath);
-  const cssOption = hasGlobalCss ? ', cssUrl: "/_vesk/static/global.css"' : '';
+  const hasTailwind = existsSync(tailwindPath) && readFileSync(tailwindPath, 'utf-8').trim().length > 0;
+  const cssUrls = [];
+  if (hasTailwind) cssUrls.push('/_vesk/static/_tailwind.css');
+  if (hasGlobalCss) cssUrls.push('/_vesk/static/global.css');
+  const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
   const parts = routeNode.fullPath.split('/').filter(Boolean);
   const name = routeName(parts);
   const funcDir = resolve(outDir, 'server', 'functions');
   const funcPath = resolve(funcDir, `${name}.js`);
   const hasLayout = routeNode.layout;
+  const hasAncestorLayout = ancestorLayouts.length > 0;
   const pageSrc = readFileSync(pagePath, 'utf-8');
   const pageComp = extractCompName(pageSrc) || 'Page';
+
+  const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
+
   let src = '';
   if (hasLayout) {
     const layoutSrc = readFileSync(layoutPath, 'utf-8');
     const layoutComp = extractCompName(layoutSrc) || 'Layout';
     src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
+  } else if (hasAncestorLayout) {
+    const outerLayout = ancestorLayouts[0];
+    const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
+    const outerLayoutSrc = readFileSync(outerLayoutPath, 'utf-8');
+    const outerLayoutComp = extractCompName(outerLayoutSrc) || 'Layout';
+    src = `const _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
+    src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
+    src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
   }
+
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
   const paramExprs = buildParamExtraction(routeNode, urlParts);
   const paramsCode = paramExprs.length > 0 ? `const params = { ${paramExprs.join(', ')} };\n` : 'const params = {};\n';
@@ -147,19 +181,22 @@ function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map
     registryCode = 'const __componentRegistry = new Map();\n';
   }
 
-  const funcCode = [
-    `import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';`,
-    ``, registryCode, src, ``,
-    `export async function handle(request) {`,
-    `  const url = new URL(request.url);`,
-    `  const urlParts = url.pathname.split('/').filter(Boolean);`,
-    `  ${paramsCode}`,
-    hasLayout ? [
+  let renderCode;
+  if (hasLayout) {
+    renderCode = [
       `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
-      `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}, pageHead: page.head });`,
+      `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption}, pageHead: page.head });`,
       `  return new Response(html, { headers: { 'Content-Type': 'text/html' } });`,
-    ].join('\n') : [
-      `  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption} });`,
+    ].join('\n');
+  } else if (hasAncestorLayout) {
+    renderCode = [
+      `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
+      `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption}, pageHead: page.head });`,
+      `  return new Response(html, { headers: { 'Content-Type': 'text/html' } });`,
+    ].join('\n');
+  } else {
+    renderCode = [
+      `  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption} });`,
       `  return new Response(new ReadableStream({`,
       `    async start(controller) {`,
       `      const enc = new TextEncoder();`,
@@ -169,7 +206,17 @@ function regenerateSsrFunction(routeNode, appDir, outDir, componentMap = new Map
       `      controller.close();`,
       `    },`,
       `  }), { headers: { 'Content-Type': 'text/html' } });`,
-    ].join('\n'),
+    ].join('\n');
+  }
+
+  const funcCode = [
+    `import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';`,
+    ``, registryCode, src, ``,
+    `export async function handle(request) {`,
+    `  const url = new URL(request.url);`,
+    `  const urlParts = url.pathname.split('/').filter(Boolean);`,
+    `  ${paramsCode}`,
+    renderCode,
     `}`,
   ].join('\n');
   writeFileSync(funcPath, funcCode, 'utf-8');
@@ -230,7 +277,8 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
         if (sourceDir !== null) {
           const routeNode = findRouteForSource(routeTree, sourceDir);
           if (routeNode) {
-            regenerateSsrFunction(routeNode, appDir, devDir, componentMap);
+            const ancestorLayouts = collectAncestorLayouts(routeTree, sourceDir);
+            regenerateSsrFunction(routeNode, appDir, devDir, componentMap, { ancestorLayouts: ancestorLayouts || [] });
           }
         }
 

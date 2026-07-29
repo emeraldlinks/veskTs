@@ -46,8 +46,8 @@ async function main() {
 
   browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox'],
-    executablePath: '/data/data/com.termux/files/usr/lib/chromium/chrome',
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
+    executablePath: '/data/data/com.termux/files/usr/bin/chromium-browser',
   });
 
   // ── Test 1: Main bundle loads ──

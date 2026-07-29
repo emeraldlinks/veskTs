@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, watch, statSync } from 'fs';
-import { resolve, extname, dirname } from 'path';
+import { resolve, extname, dirname, join } from 'path';
 import { createServer } from 'node:http';
 import { fileURLToPath } from 'url';
 import { build } from './index.js';
@@ -82,6 +82,21 @@ export async function startDevServer(appDir, options = {}) {
   const server = createServer(async (req, res) => {
     const url = new URL(req.url, `http://localhost:${port}`);
 
+    // ── HMR client script ──
+    if (url.pathname === '/_vesk/hmr.js') {
+      const monorepoRoot = resolve(__dirname, '..', '..', '..');
+      const runtimeSrc = resolve(monorepoRoot, 'packages', 'runtime', 'src');
+      const hmrPath = existsSync(runtimeSrc)
+        ? resolve(runtimeSrc, 'hmr-client.js')
+        : resolve(appDir, '..', 'node_modules', '@vesk/runtime', 'src', 'hmr-client.js');
+      if (existsSync(hmrPath)) {
+        const hmrContent = readFileSync(hmrPath, 'utf-8');
+        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.end(hmrContent);
+        return;
+      }
+    }
+
     // ── Static files ──
     if (url.pathname.startsWith('/_vesk/static/')) {
       const relPath = url.pathname.replace('/_vesk/static/', '').replace(/\.\./g, '');
@@ -157,8 +172,16 @@ export async function startDevServer(appDir, options = {}) {
             const body = await response.text();
 
             const headers = Object.fromEntries(response.headers);
+            const contentType = headers['content-type'] || '';
+            let finalBody = body;
+            if (contentType.includes('text/html')) {
+              finalBody = body.replace(
+                '</body>',
+                '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'
+              );
+            }
             res.writeHead(response.status, headers);
-            res.end(body);
+            res.end(finalBody);
           } catch (e) {
             res.writeHead(500, { 'Content-Type': 'text/html' });
             res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>`);
@@ -180,8 +203,16 @@ export async function startDevServer(appDir, options = {}) {
             const response = await mod.handle(webRequest);
             const body = await response.text();
             const headers = Object.fromEntries(response.headers);
+            const contentType = headers['content-type'] || '';
+            let finalBody = body;
+            if (contentType.includes('text/html')) {
+              finalBody = body.replace(
+                '</body>',
+                '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'
+              );
+            }
             res.writeHead(200, headers);
-            res.end(body);
+            res.end(finalBody);
           } catch (e) {
             res.writeHead(500, { 'Content-Type': 'text/html' });
             res.end(`<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>`);

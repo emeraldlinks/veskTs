@@ -82,10 +82,14 @@ export async function build(appDir, options = {}) {
 
   // ── Generate SSR functions ──
   const ssrRoutes = [];
-  function walk(nodes) {
+  function walk(nodes, ancestorLayouts = []) {
     for (const node of nodes) {
+      const childAncestorLayouts = node.layout
+        ? [...ancestorLayouts, { sourceDir: node.sourceDir, layoutCompName: node.layout }]
+        : ancestorLayouts;
+
       if (node.page) {
-        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap);
+        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts });
         writeFileSync(funcPath, funcCode, 'utf-8');
         // Detect ISR config from page source
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
@@ -101,7 +105,7 @@ export async function build(appDir, options = {}) {
         ssrRoutes.push(node);
         console.error(`vesk build: ssr  → server/functions/${name}.js  (${node.fullPath})`);
       }
-      walk(node.children || []);
+      walk(node.children || [], childAncestorLayouts);
     }
   }
   walk(routeTree);
@@ -138,7 +142,8 @@ export async function build(appDir, options = {}) {
   const bundleOpts = { ...(options.codeSplit ? { codeSplit: true } : {}), ...(options.hmr ? { hmr: true } : {}) };
   const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);
   writeFileSync(resolve(outDir, 'static', 'client.js'), main, 'utf-8');
-  console.error(`vesk build: client → static/client.js  (${main.length} bytes)`);
+  const mode = chunks.length > 0 ? 'code-split' : 'monolithic';
+  console.error(`vesk build: client → static/client.js  (${main.length} bytes, ${mode})`);
   if (chunks.length > 0) {
     const staticDir = resolve(outDir, 'static');
     for (const chunk of chunks) {
@@ -209,8 +214,24 @@ export async function build(appDir, options = {}) {
       }
     }
     const twCssTarget = resolve(outDir, 'static', '_tailwind.css');
-    writeFileSync(twCssTarget, twCss, 'utf-8');
-    console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
+    // Strip unresolved tailwind imports — if no plugin processed them, the
+    // browser would 404 trying to resolve @import "tailwindcss" as a URL.
+    const hasUnresolvedTailwindImport = /@import\s+['"]tailwindcss['"]/.test(twCss);
+    if (hasUnresolvedTailwindImport) {
+      const lines = twCss.split('\n').filter(l => !/^\s*@import\s+['"]tailwindcss['"]/.test(l));
+      twCss = lines.join('\n').trim();
+      if (twCss.length === 0) {
+        // Nothing left — no tailwind output to serve
+        writeFileSync(twCssTarget, '', 'utf-8');
+        console.error(`vesk build: css  → static/_tailwind.css  (empty, tailwind unresolved)`);
+      } else {
+        writeFileSync(twCssTarget, twCss, 'utf-8');
+        console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes, tailwind partially unresolved)`);
+      }
+    } else {
+      writeFileSync(twCssTarget, twCss, 'utf-8');
+      console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
+    }
   }
 
   // ── SSG pre-rendering ──

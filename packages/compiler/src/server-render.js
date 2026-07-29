@@ -311,10 +311,9 @@ export async function* renderPageStream(source, componentName, props = {}, regis
 
 	let ssrProps = { ...props };
 	let serializedProps = null;
-	let __vesk;
+	let __vesk = loadRuntimeImports(ir.imports);
 
 	if (ir.loadFn) {
-		__vesk = loadRuntimeImports(ir.imports);
 		const loadResult = await callLoadFunction(ir.loadFn, props, __vesk);
 		if (loadResult && typeof loadResult === 'object') {
 			if (loadResult.props) ssrProps = { ...ssrProps, ...loadResult.props };

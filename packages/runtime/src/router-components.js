@@ -162,6 +162,7 @@ export function Link(props, registry, hydrate) {
 			if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 			if (props.target === '_blank') return;
 			e.preventDefault();
+			e.stopPropagation();
 			const nav = useNavigate();
 			nav(href);
 		});
@@ -205,6 +206,7 @@ export function Link(props, registry, hydrate) {
 		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 		if (props.target === '_blank') return;
 		e.preventDefault();
+		e.stopPropagation();
 		const nav = useNavigate();
 		nav(href);
 	});
@@ -231,6 +233,7 @@ export function NavLink(props, registry, hydrate) {
 				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 				if (props.target === '_blank') return;
 				e.preventDefault();
+				e.stopPropagation();
 				const nav = useNavigate();
 				nav(props.href);
 			});

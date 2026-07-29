@@ -65,7 +65,8 @@ function buildParamExtraction(node, urlParts) {
   return parts;
 }
 
-export function generateSsrFunction(routeNode, appDir, outDir, componentMap = new Map()) {
+export function generateSsrFunction(routeNode, appDir, outDir, componentMap = new Map(), options = {}) {
+  const ancestorLayouts = options.ancestorLayouts || [];
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
 
@@ -74,13 +75,19 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
   const funcDir = resolve(outDir, 'server', 'functions');
   const funcPath = resolve(funcDir, `${name}.js`);
 
-  // Check for global CSS file
+  // Build CSS URLs — only include _tailwind.css if it has actual content
+  const tailwindPath = resolve(outDir, 'static', '_tailwind.css');
   const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
   const altCssPath = resolve(appDir, '..', 'src', 'app.css');
   const hasGlobalCss = existsSync(globalCssPath) || existsSync(altCssPath);
-  const cssOption = hasGlobalCss ? ', cssUrls: ["/_vesk/static/_tailwind.css", "/_vesk/static/global.css"]' : '';
+  const hasTailwind = existsSync(tailwindPath) && readFileSync(tailwindPath, 'utf-8').trim().length > 0;
+  const cssUrls = [];
+  if (hasTailwind) cssUrls.push('/_vesk/static/_tailwind.css');
+  if (hasGlobalCss) cssUrls.push('/_vesk/static/global.css');
+  const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
 
   const hasLayout = routeNode.layout;
+  const hasAncestorLayout = ancestorLayouts.length > 0;
   const pageSrc = readFileSync(pagePath, 'utf-8');
   const pageComp = extractCompName(pageSrc) || 'Page';
 
@@ -90,6 +97,16 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
     const layoutComp = extractCompName(layoutSrc) || 'Layout';
     src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
+  } else if (hasAncestorLayout) {
+    // Use the outermost ancestor layout for the HTML shell
+    const outerLayout = ancestorLayouts[0];
+    const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
+    const outerLayoutSrc = readFileSync(outerLayoutPath, 'utf-8');
+    const outerLayoutComp = extractCompName(outerLayoutSrc) || 'Layout';
+    src = `const _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
+    src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
+    src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
   }
@@ -120,6 +137,41 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
     registryCode = 'const __componentRegistry = new Map();\n';
   }
 
+  let renderCode;
+  if (hasLayout) {
+    renderCode = [
+      `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
+      `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption}, pageHead: page.head });`,
+      `  return new Response(html, {`,
+      `    headers: { 'Content-Type': 'text/html' },`,
+      `  });`,
+    ].join('\n');
+  } else if (hasAncestorLayout) {
+    const outerLayout = ancestorLayouts[0];
+    renderCode = [
+      `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
+      `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption}, pageHead: page.head });`,
+      `  return new Response(html, {`,
+      `    headers: { 'Content-Type': 'text/html' },`,
+      `  });`,
+    ].join('\n');
+  } else {
+    renderCode = [
+      `  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption} });`,
+      `  return new Response(new ReadableStream({`,
+      `    async start(controller) {`,
+      `      const enc = new TextEncoder();`,
+      `      for await (const chunk of stream) {`,
+      `        controller.enqueue(enc.encode(chunk));`,
+      `      }`,
+      `      controller.close();`,
+      `    },`,
+      `  }), {`,
+      `    headers: { 'Content-Type': 'text/html' },`,
+      `  });`,
+    ].join('\n');
+  }
+
   const funcCode = [
     `import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';`,
     ``,
@@ -130,28 +182,7 @@ export function generateSsrFunction(routeNode, appDir, outDir, componentMap = ne
     `  const url = new URL(request.url);`,
     `  const urlParts = url.pathname.split('/').filter(Boolean);`,
     `  ${paramsCode}`,
-    hasLayout
-      ? [
-          `  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });`,
-          `  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption}, pageHead: page.head });`,
-          `  return new Response(html, {`,
-          `    headers: { 'Content-Type': 'text/html' },`,
-          `  });`,
-        ].join('\n')
-      : [
-          `  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true${cssOption}${clientScriptOption} });`,
-          `  return new Response(new ReadableStream({`,
-          `    async start(controller) {`,
-          `      const enc = new TextEncoder();`,
-          `      for await (const chunk of stream) {`,
-          `        controller.enqueue(enc.encode(chunk));`,
-          `      }`,
-          `      controller.close();`,
-          `    },`,
-          `  }), {`,
-          `    headers: { 'Content-Type': 'text/html' },`,
-          `  });`,
-        ].join('\n'),
+    renderCode,
     `}`,
     ``,
   ].join('\n');
