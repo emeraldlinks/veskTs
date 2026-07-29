@@ -618,15 +618,15 @@ test('NavLink does not have active class when path does not match', () => {
 	expect(a.classList.contains('active')).toBe(false);
 });
 
-test('createFileRouter intercepts document clicks for SPA navigation', () => {
+test('createFileRouter does not intercept document clicks', () => {
 	const container = document.createElement('div');
 	const pageFn = () => document.createTextNode('Home');
 	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
 	const router = createFileRouter(tree, { container });
 	router.start();
-	// Document should have a delegated click listener for SPA navigation
+	// Document should NOT have a global click listener — plain <a> does full navigation
 	const doc = globalThis.document || global.document;
-	expect(doc._listeners.click).toBeTruthy();
+	expect(doc._listeners.click).toBeFalsy();
 });
 
 test('plain anchor created via createElement has no Vesk listeners', () => {

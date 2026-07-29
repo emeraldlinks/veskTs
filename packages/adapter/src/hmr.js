@@ -209,7 +209,7 @@ export function createHmrServer(httpServer, appDir, devDir, componentMap = new M
       try {
         const start = Date.now();
         const src = readFileSync(fullPath, 'utf-8');
-        const code = compileClient(src, null, { hydrate: true, forceClient: true });
+        const code = compileClient(src, null, { forceClient: true });
         const assignments = extractComponentAssignments(code);
 
         if (assignments.length > 0) {

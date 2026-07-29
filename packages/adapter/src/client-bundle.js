@@ -66,7 +66,7 @@ export async function generateClientBundle(routeTree, appDir, componentMap = new
     const dir = relative(appDir, node.sourceDir || '');
     const parts = dir.split(sep).filter(Boolean);
     const slug = parts.length > 0 ? parts.join('-') : 'index';
-    return slug;
+    return slug.replace(/[\[\]]/g, '_');
   }
 
   function routeKey(node) {
@@ -219,7 +219,6 @@ function buildRuntimeCode(runtimeDir) {
 
 function appendHmrGlobals(code) {
   return code +
-    `globalThis.__vesk_router = __router;\n` +
     `globalThis.__vesk_hmr_eval = (code) => eval(code);\n`;
 }
 
@@ -270,6 +269,7 @@ function buildMainBundle(routeTree, runtimeDir, codeSplit, mono = {}, hmr = fals
       `  const __router = createFileRouter(__routeTree);\n` +
       `  __router.__hydrators = __hydrators;\n` +
       `  __router.__updateComponents = __updateComponents;\n` +
+      `  globalThis.__vesk_router = __router;\n` +
       `  if (typeof document !== 'undefined') __router.start();\n` +
       `};\n` +
       `if (__pendChunks.length > 0 && typeof ensureChunk === 'function') {\n` +
@@ -344,6 +344,7 @@ function buildMainBundle(routeTree, runtimeDir, codeSplit, mono = {}, hmr = fals
     `const __routeTree = ${routeTreeJson};\n` +
     `__resolveNames(__routeTree);\n` +
     `const __router = createFileRouter(__routeTree);\n` +
+    `globalThis.__vesk_router = __router;\n` +
     `__router.__hydrators = __hydrators;\n` +
     `__router.__updateComponents = __updateComponents;\n` +
     `if (typeof document !== 'undefined') __router.start();\n`;

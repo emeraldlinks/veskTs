@@ -145,8 +145,12 @@ export function Outlet(props) {
 
 export function Link(props, registry, hydrate) {
 	const href = props.href || '#';
-	if (hydrate && hydrate.nextElement && !hydrate.done) {
-		const a = hydrate.nextElement('a');
+	if (hydrate && hydrate.nextElement) {
+		let a = hydrate.nextElement('a');
+		if (a && !a.parentNode && hydrate.root) {
+			const existing = hydrate.root.querySelector('a');
+			if (existing) a = existing;
+		}
 		if (props.children != null) {
 			if (typeof props.children === 'string' || typeof props.children === 'number') {
 				a.textContent = String(props.children);
