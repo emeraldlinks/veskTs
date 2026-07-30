@@ -17,9 +17,11 @@
     "packages/lsp"
   ],
   "scripts": {
-    "test": "node scripts/test.js",
-    "test:hydration": "node hydration-test.mjs",
-    "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json"
+    "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/adapter/tsconfig.json",
+    "test:dev": "npx tsx tests/dev-test.mjs",
+    "test:prod": "npx tsx tests/prod-test.mjs",
+    "test:unit": "node scripts/test.js",
+    "test": "npm run test:unit && npm run test:dev"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.3",
@@ -30,6 +32,7 @@
     "linkedom": "^0.18.13",
     "puppeteer-core": "^25.3.0",
     "tslib": "^2.8.1",
+    "tsx": "^4.23.1",
     "typescript": "^5.8.0"
   }
 }

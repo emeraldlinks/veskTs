@@ -4,12 +4,16 @@
   "type": "module",
   "description": "Vesk CLI — vesk dev, vesk build",
   "bin": {
-    "vesk": "./src/index.js"
+    "vesk": "./src/bin.js"
   },
-  "main": "./src/index.js",
+  "main": "./src/bin.js",
   "dependencies": {
     "@vesk/compiler": "*",
     "@vesk/runtime": "*"
+  },
+  "scripts": {
+    "build": "node build.js",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "typescript": "^5.8.0"

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname);
 const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
-const PORT = 3099;
+const PORT = parseInt(process.env.VESK_E2E_PROD_PORT || '3099');
 const BASE = `http://localhost:${PORT}`;
 
 let passed = 0;
@@ -18,17 +18,20 @@ function assert(cond, msg) {
 }
 
 async function main() {
-  const outDir = resolve(root, 'test-app', '.vesk', 'prod-test');
+  let httpServer;
+  if (!process.env.VESK_E2E) {
+    const outDir = resolve(root, 'test-app', '.vesk', 'prod-test');
 
-  const { build } = await import(resolve(root, 'packages/adapter/src/index.js'));
-  const { startProdServer } = await import(resolve(root, 'packages/adapter/src/prod-server.js'));
-  const appDir = resolve(root, 'test-app', 'app');
-  const publicDir = resolve(root, 'test-app', 'public');
+    const { build } = await import(resolve(root, 'packages/adapter/src/index.js'));
+    const { startProdServer } = await import(resolve(root, 'packages/adapter/src/prod-server.js'));
+    const appDir = resolve(root, 'test-app', 'app');
+    const publicDir = resolve(root, 'test-app', 'public');
 
-  console.error('Building...');
-  await build(appDir, { outDir, publicDir, codeSplit: true });
-  const httpServer = await startProdServer(outDir, { port: PORT });
-  await new Promise(r => setTimeout(r, 1000));
+    console.error('Building...');
+    await build(appDir, { outDir, publicDir, codeSplit: true });
+    httpServer = await startProdServer(outDir, { port: PORT });
+    await new Promise(r => setTimeout(r, 1000));
+  }
 
   browser = await puppeteer.launch({
     executablePath: CHROMIUM_PATH,
@@ -208,7 +211,7 @@ async function main() {
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);
 
   await browser.close();
-  httpServer.close();
+  if (httpServer) httpServer.close();
   process.exit(failed > 0 ? 1 : 0);
 }
 

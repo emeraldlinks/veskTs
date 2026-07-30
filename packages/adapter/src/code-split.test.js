@@ -15,9 +15,8 @@ const root = resolve(__dirname, '..', '..', '..');
 const appDir = resolve(root, 'test-app', 'app');
 const outDir = resolve(root, 'test-app', '.vesk', 'code-split-test');
 const publicDir = resolve(root, 'test-app', 'public');
-const staticDir = resolve(outDir, 'static');
 
-const PORT = 3099;
+const PORT = parseInt(process.env.VESK_E2E_PROD_PORT || '3099');
 const BASE = `http://localhost:${PORT}`;
 
 let passed = 0;
@@ -31,18 +30,20 @@ async function assert(condition, msg) {
 }
 
 async function main() {
-  try { rmSync(outDir, { recursive: true }); } catch {}
-  mkdirSync(staticDir, { recursive: true });
+  if (!process.env.VESK_E2E) {
+    try { rmSync(outDir, { recursive: true }); } catch {}
+    mkdirSync(resolve(outDir, 'static'), { recursive: true });
 
-  console.log('\n=== Build with code splitting ===');
-  await build(appDir, { outDir, publicDir, codeSplit: true });
+    console.log('\n=== Build with code splitting ===');
+    await build(appDir, { outDir, publicDir, codeSplit: true });
 
-  const files = readdirSync(staticDir);
-  const chunks = files.filter(f => f.startsWith('page-') && f.endsWith('.js'));
-  console.error(`  ${chunks.length} chunk files: ${chunks.join(', ')}`);
+    const files = readdirSync(resolve(outDir, 'static'));
+    const chunks = files.filter(f => f.startsWith('page-') && f.endsWith('.js'));
+    console.error(`  ${chunks.length} chunk files: ${chunks.join(', ')}`);
 
-  httpServer = await startProdServer(outDir, { port: PORT });
-  await new Promise(r => setTimeout(r, 500));
+    httpServer = await startProdServer(outDir, { port: PORT });
+    await new Promise(r => setTimeout(r, 500));
+  }
 
   browser = await puppeteer.launch({
     headless: true,

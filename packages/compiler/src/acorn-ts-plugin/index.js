@@ -1,4 +1,4 @@
-// src/index.ts
+// @ts-nocheck — forked acorn TypeScript parser plugin, not core Vesk code
 import * as acornNamespace from "acorn";
 
 // src/tokenType.ts

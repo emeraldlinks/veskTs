@@ -1,34 +1,16 @@
-/**
- * Vesk Parser
- *
- * Acorn + TypeScript + Vesk plugin. Parses .vsk files with Vesk-specific
- * grammar extensions: component declarations, reactive bindings, etc.
- */
 import * as acorn from 'acorn';
 import { tsPlugin } from './acorn-ts-plugin/index.js';
-import { VeskPlugin } from './vesk-plugin.js';
-
-/**
- * Create the Vesk parser (Acorn + TypeScript + Vesk plugin).
- */
+import { VeskParserPlugin } from './vesk-plugin.js';
 export function createBaseParser() {
-  return acorn.Parser.extend(tsPlugin(), VeskPlugin());
+    return acorn.Parser.extend(tsPlugin(), VeskParserPlugin());
 }
-
-/**
- * Parse a Vesk source string into an AST.
- * @param {string} source
- * @param {object} [options]
- * @param {string} [options.filename]
- * @returns {import('estree').Program}
- */
 export function parse(source, options = {}) {
-  const parser = createBaseParser();
-  return parser.parse(source, {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    locations: true,
-    ranges: true,
-    ...(options.filename ? { sourceFilename: options.filename } : {}),
-  });
+    const parser = createBaseParser();
+    return parser.parse(source, {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        locations: true,
+        ranges: true,
+        ...(options.filename ? { sourceFilename: options.filename } : {}),
+    });
 }

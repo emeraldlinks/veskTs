@@ -13,11 +13,13 @@ const pagePath = resolve(appDir, 'page.vsk');
 const layoutPath = resolve(appDir, 'layout.vsk');
 const compPath = resolve(appDir, 'counter.vsk');
 
+const PORT = parseInt(process.env.VESK_E2E_DEV_PORT || '3002');
+
 const devDir = resolve(root, 'test-app', '.vesk', 'dev');
 mkdirSync(resolve(devDir, 'static'), { recursive: true });
 const clientBundlePath = resolve(devDir, 'static', 'client.js');
 const runtimeDir = resolve(root, 'node_modules', '@vesk', 'runtime', 'src');
-const hmrClientPath = resolve(runtimeDir, 'hmr-client.js');
+const hmrClientPath = resolve(runtimeDir, 'hmr-client.ts');
 
 let passed = 0;
 let failed = 0;
@@ -32,8 +34,10 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR End-to-End Tests \u2550\u2550\u2550\n
 const originalPageSrc = readFileSync(pagePath, 'utf-8');
 const originalLayoutSrc = readFileSync(layoutPath, 'utf-8');
 
-startDevServer(appDir, { port: 3002, publicDir });
-await new Promise(r => setTimeout(r, 4000));
+if (!process.env.VESK_E2E) {
+  startDevServer(appDir, { port: PORT, publicDir });
+  await new Promise(r => setTimeout(r, 4000));
+}
 
 try {
   const clientCode = existsSync(clientBundlePath) ? readFileSync(clientBundlePath, 'utf-8') : '';
@@ -48,7 +52,7 @@ try {
   assert(hmrCode.includes("'update'") || hmrCode.includes('"update"'), 'HMR client handles update messages');
   assert(hmrCode.includes("'reload'") || hmrCode.includes('"reload"'), 'HMR client handles reload messages');
 
-  const ws = new WebSocket('ws://localhost:3002/_vesk/hmr');
+  const ws = new WebSocket(`ws://localhost:${PORT}/_vesk/hmr`);
   await new Promise((resolve, reject) => {
     ws.onopen = resolve;
     ws.onerror = reject;
