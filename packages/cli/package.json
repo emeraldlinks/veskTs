@@ -4,9 +4,9 @@
   "type": "module",
   "description": "Vesk CLI — vesk dev, vesk build",
   "bin": {
-    "vesk": "./dist/cli.js"
+    "vesk": "./src/bin.js"
   },
-  "main": "./dist/cli.js",
+  "main": "./src/bin.js",
   "dependencies": {
     "@vesk/compiler": "*",
     "@vesk/runtime": "*"
