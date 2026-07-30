@@ -13,7 +13,7 @@ import {
 	HEAD_BLOCK,
 	DIRECT_CHILD_BLOCK,
 	UNINITIALIZED,
-} from './ripple-constants.js';
+} from './ripple-constants';
 import {
 	active_block,
 	active_component,
@@ -24,9 +24,9 @@ import {
 	run_teardown,
 	schedule_update,
 	untrack,
-} from './ripple-runtime.js';
-import type { Block, Component, Derived } from './ripple-runtime.js';
-import { is_ripple_object } from './ripple-utils.js';
+} from './ripple-runtime';
+import type { Block, Component, Derived } from './ripple-runtime';
+import { is_ripple_object } from './ripple-utils';
 
 export function user_effect(fn: () => void): Block | void {
 	if (active_block === null) {

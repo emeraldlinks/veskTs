@@ -4,10 +4,11 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve, join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig, definePlugin, preset, validateConfig } from '../../compiler/src/config';
-import { setRedactLogging } from '../../compiler/src/server-utils';
+import { setRedactLogging, setRuntimeModule } from '../../compiler/src/server-utils.js';
 import { build, startProdServer } from '../../adapter/src/index';
 import { runSeoAudit } from '../../adapter/src/seo-audit';
 import { startDevServer } from './dev-server';
+import * as __veskRuntime from '../../runtime/src/index-server';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
@@ -464,6 +465,7 @@ if (cmd === 'dev') {
   }
 
   const config = await loadConfig(projectDir);
+  setRuntimeModule(__veskRuntime);
   await startDevServer(port, projectDir, config);
 }
 

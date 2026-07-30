@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { transformSync } from 'esbuild';
-import type { ApiRouteNode, ApiFunctionOptions } from './types.js';
+import type { ApiRouteNode, ApiFunctionOptions } from './types';
 
 function apiRouteName(fullPath: string): string {
   const parts = fullPath.split('/').filter(Boolean);

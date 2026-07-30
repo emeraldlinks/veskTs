@@ -3,7 +3,7 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import type { SecurityConfig } from './types.js';
+import type { SecurityConfig } from './types';
 
 const _require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));

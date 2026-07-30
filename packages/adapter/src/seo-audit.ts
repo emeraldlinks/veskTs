@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { SeoCheckIssue, SeoAuditResult, CombinedPageInfo } from './types.js';
+import type { SeoCheckIssue, SeoAuditResult, CombinedPageInfo } from './types';
 
 const SEVERITY = { WARN: 'warn' as const, ERROR: 'error' as const };
 

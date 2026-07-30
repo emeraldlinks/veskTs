@@ -1,4 +1,4 @@
-import { Image } from './image.js';
+import { Image } from './image';
 
 let passed = 0;
 let failed = 0;

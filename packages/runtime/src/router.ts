@@ -1,9 +1,9 @@
-import { track, get, set } from './ripple-runtime.js';
-import { root } from './ripple-blocks.js';
-import { createHydrateWalker, hydrateViewport, hydrateIdle, hydrateOnInteraction } from './hydrate.js';
-import type { HydrateWalker } from './hydrate.js';
-import { matchRoute, flattenLayoutChain, buildTreeFromMap } from './router-match.js';
-import type { RouteNode, RouteMatch } from './router-match.js';
+import { track, get, set } from './ripple-runtime';
+import { root } from './ripple-blocks';
+import { createHydrateWalker, hydrateViewport, hydrateIdle, hydrateOnInteraction } from './hydrate';
+import type { HydrateWalker } from './hydrate';
+import { matchRoute, flattenLayoutChain, buildTreeFromMap } from './router-match';
+import type { RouteNode, RouteMatch } from './router-match';
 import {
 	__isHydrating, setIsHydrating, _state, _scrollPositions,
 	_isPopStateNavigation, setIsPopStateNavigation, setCurrentRouter,
@@ -12,7 +12,7 @@ import {
 	Outlet, Link, NavLink, useNavigate, useParams, usePathname,
 	useSearchParams, useRouter, Redirect, redirect, permanentRedirect,
 	NotFoundError, notFound,
-} from './router-components.js';
+} from './router-components';
 
 export {
 	Outlet, Link, NavLink,

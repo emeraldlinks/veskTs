@@ -1,4 +1,4 @@
-import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, SsgRouteResult } from './types.js';
+import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, SsgRouteResult } from './types';
 
 export function generateManifest(
   routes: RouteNode[],

@@ -5,6 +5,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { transformSync } from 'esbuild';
+import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml } from '../../compiler/src/server-codegen';
+import { compileClient } from '../../compiler/src/client-codegen';
+import { scanRoutes, matchUrl, collectSources } from '../../compiler/src/router';
+import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '../../compiler/src/api-routes';
+import { collectMiddlewareChain, executeMiddlewareChain } from '../../compiler/src/middleware';
+import { generateClientBundle } from '../../adapter/src/client-bundle';
+import { VeskRequest } from '../../runtime/src/index-server';
 
 const LOG = {
   reset: '\x1b[0m',
@@ -38,33 +45,6 @@ const LOG = {
 };
 
 export async function startDevServer(port: number, projectDir: string, config: Record<string, unknown>): Promise<void> {
-  const { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy } = await import('../../compiler/src/server-codegen') as {
-    renderPage: (src: string, compName: string, props: Record<string, unknown>, map: Map<string, unknown>, opts: Record<string, unknown>) => { body: string; head?: string };
-    renderFullPage: (src: string, compName: string, props: Record<string, unknown>, map: Map<string, unknown>, opts: Record<string, unknown>) => string;
-    renderPageStream: (src: string, compName: string, props: Record<string, unknown>, map: Map<string, unknown>, opts: Record<string, unknown>) => AsyncGenerator<string>;
-    securityHeaders: (config: Record<string, unknown>) => Record<string, string>;
-    corsHeaders: (config: Record<string, unknown>, origin: string, host: string) => Record<string, string>;
-    corsPreflight: () => boolean;
-    createRateLimiter: (opts: { windowMs: number; max: number }) => { check: (ip: string) => boolean };
-    applyTrustProxy: (ctx: Record<string, unknown>, opts: unknown) => void;
-  };
-  const { compileClient } = await import('../../compiler/src/client-codegen') as { compileClient: (src: string, componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean }) => string };
-  const { scanRoutes, matchUrl, collectSources } = await import('../../compiler/src/router') as {
-    scanRoutes: (appDir: string) => unknown[];
-    matchUrl: (routes: unknown[], pathname: string) => { nodes: Record<string, unknown>[]; params: Record<string, string> } | null;
-    collectSources: (routes: unknown[]) => [string, string][];
-  };
-  const { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } = await import('../../compiler/src/api-routes') as {
-    scanApiRoutes: (dir: string) => Promise<unknown[]>;
-    matchApiUrl: (routes: unknown[], url: string) => { node: { filePath: string }; params: Record<string, string> } | null;
-    buildWebRequest: (req: IncomingMessage, body: Buffer) => unknown;
-    executeApiRoute: (filePath: string, method: string, request: unknown, params: Record<string, string>, locals: Record<string, unknown>, cache: Map<string, unknown>) => Promise<Response>;
-  };
-  const { collectMiddlewareChain, executeMiddlewareChain } = await import('../../compiler/src/middleware') as {
-    collectMiddlewareChain: (routes: unknown[], pathname: string, appDir: string) => unknown[];
-    executeMiddlewareChain: (chain: unknown[], req: Request, params: Record<string, string>, opts: Record<string, unknown>) => Promise<{ locals: Record<string, unknown>; response?: Response }>;
-  };
-  const { generateClientBundle } = await import('../../adapter/src/client-bundle') as { generateClientBundle: (routeTree: unknown[], appDir: string, componentMap: Map<string, string>, opts?: { forceClient?: boolean; hmr?: boolean; hydrate?: boolean; importRuntime?: boolean }) => Promise<{ main: string; chunks?: string[] }> };
 
   const appDirPath = join(projectDir, 'app');
   const publicDir = join(projectDir, 'public');
@@ -382,8 +362,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
   const security = config.security as Record<string, unknown> | undefined;
   if (security?.rateLimit) {
     const rlConfig = security.rateLimit as Record<string, unknown>;
-    const { createRateLimiter: crl } = await import('../../compiler/src/server-codegen') as { createRateLimiter: (opts: { windowMs: number; max: number }) => { check: (ip: string) => boolean } };
-    rateLimiter = crl({ windowMs: (rlConfig.windowMs as number) || 60000, max: (rlConfig.max as number) || 100 });
+    rateLimiter = createRateLimiter({ windowMs: (rlConfig.windowMs as number) || 60000, max: (rlConfig.max as number) || 100 });
   }
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -397,8 +376,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
     const rawCtx = buildRequestContext(req);
     if (security?.trustProxy) {
-      const { applyTrustProxy: atp } = await import('../../compiler/src/server-codegen') as { applyTrustProxy: (ctx: Record<string, unknown>, opts: unknown) => void };
-      atp(rawCtx, security.trustProxy);
+      applyTrustProxy(rawCtx, security.trustProxy);
     }
 
     if (rateLimiter) {
@@ -415,8 +393,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
     const reqOrigin = req.headers['origin'] || '';
     const reqHost = req.headers['host'] || `localhost:${port}`;
-    const { corsHeaders: ch } = await import('../../compiler/src/server-codegen') as { corsHeaders: (config: Record<string, unknown>, origin: string, host: string) => Record<string, string> };
-    const corsAllowed = ch(security || {}, reqOrigin, reqHost);
+    const corsAllowed = corsHeaders(security || {}, reqOrigin, reqHost);
     if (corsAllowed['Access-Control-Allow-Origin'] && req.method === 'OPTIONS') {
       res.writeHead(204, { ...corsAllowed, 'Content-Length': '0' });
       res.end();
@@ -427,12 +404,12 @@ export async function startDevServer(port: number, projectDir: string, config: R
       return origWriteHead(statusCode, { ...headers, ...corsAllowed } as Record<string, string | number | string[]>);
     }) as typeof res.writeHead;
 
-    if (url.pathname === '/_vesk/runtime') {
+    if (url.pathname === '/_vesk/runtime' || url.pathname === '/_vesk/runtime.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' });
       res.end(runtimeBundle);
       return;
     }
-    if (url.pathname === '/_vesk/client') {
+    if (url.pathname === '/_vesk/client' || url.pathname === '/_vesk/client.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' });
       res.end(clientBundle);
       return;
@@ -447,7 +424,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       res.end(devTailwindCssContent);
       return;
     }
-    if (url.pathname === '/_vesk/hmr') {
+    if (url.pathname === '/_vesk/hmr' || url.pathname === '/_vesk/hmr.js') {
       if (hmrClientPath) {
         let hmrContent = readFileSync(hmrClientPath, 'utf-8');
         if (hmrClientPath.endsWith('.ts')) {
@@ -469,23 +446,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
 
-    const { collectMiddlewareChain: cmc, executeMiddlewareChain: emc } = await import('../../compiler/src/middleware') as {
-      collectMiddlewareChain: (routes: unknown[], pathname: string, appDir: string) => unknown[];
-      executeMiddlewareChain: (chain: unknown[], req: Request, params: Record<string, string>, opts: Record<string, unknown>) => Promise<{ locals: Record<string, unknown>; response?: Response }>;
-    };
-    const mwChain = cmc(routeTree, url.pathname, appDirPath);
+    const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
 
     const apiDirPath = join(appDirPath, 'api');
     if (url.pathname.startsWith('/api') && existsSync(apiDirPath)) {
-      const { scanApiRoutes: sar, matchApiUrl: mau, executeApiRoute: ear } = await import('../../compiler/src/api-routes') as {
-        scanApiRoutes: (dir: string) => Promise<unknown[]>;
-        matchApiUrl: (routes: unknown[], url: string) => { node: { filePath: string }; params: Record<string, string> } | null;
-        executeApiRoute: (filePath: string, method: string, request: unknown, params: Record<string, string>, locals: Record<string, unknown>, cache: Map<string, unknown>) => Promise<Response>;
-      };
-      const apiRoutes = await sar(apiDirPath);
-      const apiMatch = mau(apiRoutes, req.url || url.pathname);
+      const apiRoutes = await scanApiRoutes(apiDirPath);
+      const apiMatch = matchApiUrl(apiRoutes, req.url || url.pathname);
       if (apiMatch) {
-        const { VeskRequest } = await import('@vesk/runtime/server') as { VeskRequest: new (url: string, opts: Record<string, unknown>) => Record<string, unknown> };
         const bodyChunks: Buffer[] = [];
         for await (const chunk of req) bodyChunks.push(chunk as Buffer);
         const bodyBuffer = Buffer.concat(bodyChunks);
@@ -507,7 +474,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         let apiLocals: Record<string, unknown> = {};
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
-          const mwResult = await emc(mwChain, mwReq, apiMatch.params, {
+          const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
             plugins: config.plugins,
             onLast: async () => new Response(null),
           });
@@ -521,7 +488,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         }) as Record<string, unknown>;
         webRequest._cookies = rawCookies;
         webRequest.locals = apiLocals;
-        const response = await ear(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
+        const response = await executeApiRoute(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
         logRequest(response.status);
         res.writeHead(response.status, Object.fromEntries(response.headers));
         const body = await response.text();
@@ -532,8 +499,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
     const ctx = rawCtx;
 
-    const { matchUrl: mu } = await import('../../compiler/src/router') as { matchUrl: (routes: unknown[], pathname: string) => { nodes: Record<string, unknown>[]; params: Record<string, string> } | null };
-    const match = mu(routeTree, url.pathname);
+    const match = matchUrl(routeTree, url.pathname);
 
     if (!match) {
       const rootNode = routeTree.find(n => (n.fullPath as string) === '/');
@@ -542,10 +508,9 @@ export async function startDevServer(port: number, projectDir: string, config: R
         const nfPath = resolve(appDirPath, rootNode.sourceDir as string, 'not-found.vsk');
         if (existsSync(nfPath)) {
           try {
-            const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen') as { renderFullPage: (src: string, compName: string, props: Record<string, unknown>, map: Map<string, unknown>, opts: Record<string, unknown>) => string };
             const nfSrc = readFileSync(nfPath, 'utf-8');
             const nfCompName = extractCompName(nfSrc) || (rootNode.notFound as string);
-            notFoundHtml = await rfp(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
           } catch {}
         }
       }
@@ -601,7 +566,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir as string, 'layout.vsk')));
       let html: string;
       if (hasLayout) {
-        const { prettifyHtml } = await import('../../compiler/src/server-codegen') as { prettifyHtml: (html: string) => string };
         let secMeta = '';
         if (security) {
           if (security.xFrameOptions !== false) secMeta += `\t<meta http-equiv="X-Frame-Options" content="${(security.xFrameOptions as string) || 'DENY'}" />\n`;
@@ -615,7 +579,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+          html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
           html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
         } else {
           throw new Error('No page or layout matched');
@@ -633,7 +597,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+          yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
         } else {
           throw new Error('No page or layout matched');
         }
@@ -665,7 +629,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
         }
       }
 
-      const { prettifyHtml } = await import('../../compiler/src/server-codegen') as { prettifyHtml: (html: string) => string };
       yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n';
       if (security) {
         if (security.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${(security.xFrameOptions as string) || 'DENY'}" />\n`;
@@ -686,7 +649,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           headers: req.headers as Record<string, string>,
           method: req.method || 'GET',
         });
-        const mwResult = await emc(mwChain, mwReq, match.params, {
+        const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
           plugins: config.plugins,
           onLast: async (rewrite?: string) => {
             if (rewrite) url.pathname = rewrite;
@@ -694,8 +657,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
             (globalThis as Record<string, unknown>).__vesk_request = ctx;
             try {
               const html = await renderSSR();
-              const { securityHeaders: sh } = await import('../../compiler/src/server-codegen') as { securityHeaders: (config: Record<string, unknown>) => Record<string, string> };
-              const secHeaders = security ? sh(security) : {};
+              const secHeaders = security ? securityHeaders(security) : {};
               return new Response(html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
             } finally {
               (globalThis as Record<string, unknown>).__vesk_request = prev;
@@ -715,13 +677,12 @@ export async function startDevServer(port: number, projectDir: string, config: R
         (globalThis as Record<string, unknown>).__vesk_request = ctx;
         try {
           const stream = renderSSRStream();
-          const { securityHeaders: sh } = await import('../../compiler/src/server-codegen') as { securityHeaders: (config: Record<string, unknown>) => Record<string, string> };
-          const secHeaders = security ? sh(security) : {};
+          const secHeaders = security ? securityHeaders(security) : {};
           logRequest(200);
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', ...secHeaders });
           for await (const chunk of stream) {
             if (chunk.includes('</body>')) {
-              res.write(chunk.replace('</body>', '\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'));
+              res.write(chunk.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'));
             } else {
               res.write(chunk);
             }
@@ -748,10 +709,9 @@ export async function startDevServer(port: number, projectDir: string, config: R
               const nfPath = resolve(appDirPath, node.sourceDir as string, 'not-found.vsk');
               if (existsSync(nfPath)) {
                 try {
-                  const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen') as { renderFullPage: (src: string, compName: string, props: Record<string, unknown>, map: Map<string, unknown>, opts: Record<string, unknown>) => string };
                   const nfSrc = readFileSync(nfPath, 'utf-8');
                   const nfCompName = extractCompName(nfSrc) || (node.notFound as string);
-                  const html = await rfp(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
                   notFoundHtml = html.replace('</body>',
                     `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch {}
@@ -772,11 +732,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
               const errPath = resolve(appDirPath, node.sourceDir as string, 'error.vsk');
               if (existsSync(errPath)) {
                 try {
-                  const { renderFullPage: rfp } = await import('../../compiler/src/server-codegen') as { renderFullPage: (src: string, compName: string, props: Record<string, unknown>, map: Map<string, unknown>, opts: Record<string, unknown>) => string };
                   const errSrc = readFileSync(errPath, 'utf-8');
                   const errCompName = extractCompName(errSrc) || (node.error as string);
                   const errProps = { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname };
-                  const html = await rfp(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
                   errorHtml = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch (e2) {
                   LOG.err(`error page render failed:`, (e2 as Error).message);

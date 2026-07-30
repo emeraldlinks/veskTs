@@ -2,7 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
-import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from './types.js';
+import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from './types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

@@ -1,12 +1,12 @@
 import puppeteer from 'puppeteer-core';
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname);
 const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
-const BASE = 'http://localhost:3002';
+const BASE = 'http://localhost:3000';
 
 const pagePath = resolve(root, 'test-app', 'app', 'page.vsk');
 const layoutPath = resolve(root, 'test-app', 'app', 'layout.vsk');
@@ -14,7 +14,6 @@ const layoutPath = resolve(root, 'test-app', 'app', 'layout.vsk');
 let passed = 0;
 let failed = 0;
 let browser;
-let serverProcess;
 
 function assert(cond, msg) {
   if (cond) { passed++; console.log(`  \u2713 ${msg}`); }
@@ -27,14 +26,6 @@ async function main() {
   const originalLayout = readFileSync(layoutPath, 'utf-8');
 
   try {
-    // Start dev server
-    const { startDevServer } = await import(resolve(root, 'packages/adapter/src/dev-server.js'));
-    const appDir = resolve(root, 'test-app', 'app');
-    const publicDir = resolve(root, 'test-app', 'public');
-    
-    startDevServer(appDir, { port: 3002, publicDir });
-    await new Promise(r => setTimeout(r, 6000));
-
     browser = await puppeteer.launch({
       executablePath: CHROMIUM_PATH,
       headless: true,
@@ -172,9 +163,6 @@ async function main() {
     writeFileSync(pagePath, originalPage, 'utf-8');
     writeFileSync(layoutPath, originalLayout, 'utf-8');
     if (browser) await browser.close();
-    // Kill dev server
-    const { execSync } = await import('child_process');
-    try { execSync('kill $(lsof -ti:3002) 2>/dev/null'); } catch {}
   }
 
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);

@@ -4,7 +4,7 @@ import {
 	effect as _effect,
 	pause_block,
 	pre_effect,
-} from './ripple-blocks.js';
+} from './ripple-blocks';
 
 export { destroy_non_branch_children };
 import {
@@ -32,8 +32,8 @@ import {
 	DIRECT_CHILD_BLOCK,
 	UPDATE_SOURCE,
 	NAMESPACE_URI,
-} from './ripple-constants.js';
-import { is_ripple_object, define_property, get_descriptor, is_array, object_keys, get_own_property_symbols } from './ripple-utils.js';
+} from './ripple-constants';
+import { is_ripple_object, define_property, get_descriptor, is_array, object_keys, get_own_property_symbols } from './ripple-utils';
 
 export interface Block {
 	co: Component | null;

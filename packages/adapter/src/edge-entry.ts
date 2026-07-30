@@ -2,7 +2,7 @@ import { writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
-import type { RouteNode, ApiRouteNode } from './types.js';
+import type { RouteNode, ApiRouteNode } from './types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

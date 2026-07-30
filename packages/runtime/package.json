@@ -16,7 +16,7 @@
     },
     "./server": {
       "types": "./src/index-server.d.ts",
-      "default": "./src/index-server.js"
+      "default": "./src/index-server"
     }
   },
   "scripts": {

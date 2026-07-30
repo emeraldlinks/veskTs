@@ -3,8 +3,8 @@
  *
  * Run with: node --experimental-vm-modules packages/runtime/src/track.test.js
  */
-import { track, get, set, untrack, derived, flush_sync, tick } from './ripple-runtime.js';
-import { effect, destroy_block, root } from './ripple-blocks.js';
+import { track, get, set, untrack, derived, flush_sync, tick } from './ripple-runtime';
+import { effect, destroy_block, root } from './ripple-blocks';
 
 let passed = 0;
 let failed = 0;

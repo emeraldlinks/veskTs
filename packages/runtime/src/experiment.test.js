@@ -1,4 +1,4 @@
-import { Experiment } from './experiment.js';
+import { Experiment } from './experiment';
 
 let passed = 0;
 let failed = 0;

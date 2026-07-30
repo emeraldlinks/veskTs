@@ -1,6 +1,6 @@
-import { track, get } from './ripple-runtime.js';
-import { createContext } from './context.js';
-import { createHydrateWalker } from './hydrate.js';
+import { track, get } from './ripple-runtime';
+import { createContext } from './context';
+import { createHydrateWalker } from './hydrate';
 
 interface Router {
 	start(): Router;

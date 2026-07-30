@@ -1,4 +1,4 @@
-import { Form, Field, required, email, minLength, maxLength, pattern, custom } from './form.js';
+import { Form, Field, required, email, minLength, maxLength, pattern, custom } from './form';
 
 let passed = 0;
 let failed = 0;

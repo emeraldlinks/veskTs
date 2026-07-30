@@ -3,10 +3,10 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
-import { build } from './index.js';
-import { createHmrServer } from './hmr.js';
-import { buildRuntimeCode } from './client-bundle.js';
-import type { RouteNode, DevServerOptions, Manifest } from './types.js';
+import { build } from './index';
+import { createHmrServer } from './hmr';
+import { buildRuntimeCode } from './client-bundle';
+import type { RouteNode, DevServerOptions, Manifest } from './types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

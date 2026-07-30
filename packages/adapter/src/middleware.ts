@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { MiddlewareChainItem, MiddlewareExtractResult } from './types.js';
+import type { MiddlewareChainItem, MiddlewareExtractResult } from './types';
 
 function extractMiddlewareBody(src: string): MiddlewareExtractResult | null {
   const m = src.match(/export\s+(?:async\s+)?function\s+middleware\s*\(([\s\S]*?)\)\s*\{/);

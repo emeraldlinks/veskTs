@@ -1,4 +1,4 @@
-import { ServerResponse, ServerRequest, VeskRequest, VeskResponse, applyRequestSecurity, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook } from './request.js';
+import { ServerResponse, ServerRequest, VeskRequest, VeskResponse, applyRequestSecurity, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook } from './request';
 
 let passed = 0;
 let failed = 0;

@@ -1,5 +1,5 @@
-import { build } from './index.js';
-import { startProdServer } from './prod-server.js';
+import { build } from './index';
+import { startProdServer } from './prod-server';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync, rmSync } from 'fs';

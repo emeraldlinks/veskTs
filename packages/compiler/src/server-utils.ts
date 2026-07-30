@@ -555,19 +555,11 @@ export function buildParamInit(paramNames: string[]): string {
   return `const { ${paramNames.join(', ')} } = props;`;
 }
 
-let __cachedRuntimeModule: Record<string, unknown> | null = null;
+let __cachedRuntimeModule: Record<string, unknown> = {};
 
 export function setRuntimeModule(mod: Record<string, unknown>): void {
   __cachedRuntimeModule = mod;
 }
-
-try {
-  const runtimeDir = new URL('../../runtime/src/index-server.js', import.meta.url).href;
-  __cachedRuntimeModule = await import(runtimeDir) as Record<string, unknown>;
-} catch {
-  // runtime module not available
-}
-if (!__cachedRuntimeModule) __cachedRuntimeModule = {};
 
 export function loadRuntimeImports(importStrs: string[]): Record<string, unknown> {
   const names = extractRuntimeNames(importStrs);

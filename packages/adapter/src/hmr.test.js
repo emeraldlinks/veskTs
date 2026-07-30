@@ -1,4 +1,4 @@
-import { startDevServer } from './dev-server.js';
+import { startDevServer } from './dev-server';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { WebSocket } from 'ws';

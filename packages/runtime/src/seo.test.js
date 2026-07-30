@@ -1,4 +1,4 @@
-import { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSchema, OrganizationSchema, LocalBusinessSchema, VideoSchema } from './seo.js';
+import { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSchema, OrganizationSchema, LocalBusinessSchema, VideoSchema } from './seo';
 
 let passed = 0;
 let failed = 0;

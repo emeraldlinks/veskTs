@@ -1,5 +1,5 @@
-import { destroy_block } from './ripple-blocks.js';
-import type { Block } from './ripple-runtime.js';
+import { destroy_block } from './ripple-blocks';
+import type { Block } from './ripple-runtime';
 
 interface MapEntry {
 	marker: Comment;

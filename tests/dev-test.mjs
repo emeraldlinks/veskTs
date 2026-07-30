@@ -73,7 +73,7 @@ async function runUnitTests() {
       const filePath = resolve(dir, file);
       process.stdout.write(`${file} ... `);
       try {
-        const output = execSync(`node --experimental-vm-modules "${filePath}"`, {
+        const output = execSync(`npx tsx "${filePath}"`, {
           encoding: 'utf-8', timeout: 120000,
         });
         const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/);

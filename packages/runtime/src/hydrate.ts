@@ -1,4 +1,4 @@
-import { get } from './ripple-runtime.js';
+import { get } from './ripple-runtime';
 
 export interface HydrateWalker {
 	root: HTMLElement | null;

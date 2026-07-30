@@ -1,7 +1,7 @@
-import { effect, render } from './ripple-blocks.js';
-import { get, set } from './ripple-runtime.js';
-import type { Tracked, Derived } from './ripple-runtime.js';
-import { is_ripple_object } from './ripple-utils.js';
+import { effect, render } from './ripple-blocks';
+import { get, set } from './ripple-runtime';
+import type { Tracked, Derived } from './ripple-runtime';
+import { is_ripple_object } from './ripple-utils';
 
 interface GetSetPair {
 	getter: () => unknown;

@@ -1,17 +1,17 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bundleRuntime } from './runtime-bundle.js';
-import { generateSsrFunction } from './ssr-function.js';
-import { generateApiFunction } from './api-function.js';
-import { compileMiddleware, compileMiddlewareCode } from './middleware.js';
-import { generateClientBundle } from './client-bundle.js';
-import { generateManifest } from './manifest.js';
-import { copyStaticAssets } from './static.js';
+import { bundleRuntime } from './runtime-bundle';
+import { generateSsrFunction } from './ssr-function';
+import { generateApiFunction } from './api-function';
+import { compileMiddleware, compileMiddlewareCode } from './middleware';
+import { generateClientBundle } from './client-bundle';
+import { generateManifest } from './manifest';
+import { copyStaticAssets } from './static';
 import type {
   RouteNode, ApiRouteNode, BuildOptions, BuildResult, AncestorLayout,
   MiddlewareChainItem, VeskPlugin, Manifest,
-} from './types.js';
+} from './types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -303,4 +303,4 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   return { routeTree, apiTree, ssrRoutes, apiRoutes, manifest };
 }
 
-export { startProdServer } from './prod-server.js';
+export { startProdServer } from './prod-server';

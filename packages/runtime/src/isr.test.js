@@ -1,4 +1,4 @@
-import { isr, revalidatePath, revalidateTag, clearIsrCache, pageIsr, componentIsr, revalidateComponent } from './isr.js';
+import { isr, revalidatePath, revalidateTag, clearIsrCache, pageIsr, componentIsr, revalidateComponent } from './isr';
 
 let passed = 0;
 let failed = 0;

@@ -3,7 +3,7 @@ import type { Server } from 'node:http';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { RouteNode, AncestorLayout } from './types.js';
+import type { RouteNode, AncestorLayout } from './types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

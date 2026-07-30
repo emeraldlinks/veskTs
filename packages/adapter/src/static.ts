@@ -1,6 +1,6 @@
 import { mkdirSync, copyFileSync, readdirSync, statSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
-import type { RouteNode, SsgRouteResult } from './types.js';
+import type { RouteNode, SsgRouteResult } from './types';
 
 export function copyStaticAssets(publicDir: string, outDir: string): void {
   const targetDir = resolve(outDir, 'static', 'public');

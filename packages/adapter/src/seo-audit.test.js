@@ -1,4 +1,4 @@
-import { runSeoAudit } from './seo-audit.js';
+import { runSeoAudit } from './seo-audit';
 import { mkdirSync, writeFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { tmpdir } from 'os';

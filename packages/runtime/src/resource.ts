@@ -1,5 +1,5 @@
-import { tracked, get, set } from './ripple-runtime.js';
-import type { Tracked } from './ripple-runtime.js';
+import { tracked, get, set } from './ripple-runtime';
+import type { Tracked } from './ripple-runtime';
 
 interface ResourceState<T> {
 	loading: boolean;

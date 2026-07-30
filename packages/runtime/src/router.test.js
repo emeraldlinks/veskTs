@@ -1,4 +1,4 @@
-import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from './router.js';
+import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from './router';
 
 let passed = 0;
 let failed = 0;
