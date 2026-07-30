@@ -7,10 +7,11 @@ const args = process.argv.slice(2);
 
 const distPath = resolve(__dirname, '../dist/cli.js');
 const srcPath = resolve(__dirname, 'index.ts');
-const entry = existsSync(distPath) ? distPath : srcPath;
+const hasDist = existsSync(distPath);
 
 const { spawnSync } = await import('child_process');
-const result = spawnSync('node', ['--import', 'tsx', entry, ...args], {
+const nodeArgs = hasDist ? [distPath, ...args] : ['--import', 'tsx', srcPath, ...args];
+const result = spawnSync('node', nodeArgs, {
   stdio: 'inherit',
   env: process.env,
   cwd: process.cwd(),
