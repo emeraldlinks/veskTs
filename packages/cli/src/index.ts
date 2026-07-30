@@ -406,9 +406,12 @@ if (cmd === 'build') {
   const seo = restArgs.includes('--seo');
   const strict = restArgs.includes('--strict');
 
+  const targetIdx = restArgs.indexOf('--target');
+  const target = targetIdx !== -1 && restArgs[targetIdx + 1] === 'edge' ? 'edge' : 'node';
+
   const config = await loadConfig(projectDir);
   const plugins = (config as Record<string, unknown>)?.plugins || [];
-  const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split') };
+  const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
 
   const { build: buildFn } = await import(resolve(__dirname, '../../adapter/src/index')) as { build: (appDir: string, opts: Record<string, unknown>) => Promise<void> };
   try {

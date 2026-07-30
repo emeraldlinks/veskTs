@@ -282,6 +282,17 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
 
+  if (options?.target === 'edge') {
+    const { generateEdgeEntry, bundleEdgeEntry } = await import('./edge-entry.js') as {
+      generateEdgeEntry: typeof import('./edge-entry.js').generateEdgeEntry;
+      bundleEdgeEntry: typeof import('./edge-entry.js').bundleEdgeEntry;
+    };
+    const prerenderedPaths = prerenderedRoutes.map(r => r.path);
+    const entryFile = await generateEdgeEntry(outDir, ssrRoutes, apiRoutes, prerenderedPaths, middlewareEnabled);
+    const edgeFile = await bundleEdgeEntry(entryFile, outDir);
+    console.error(`vesk build: edge → edge.js  (${edgeFile})`);
+  }
+
   for (const plugin of plugins) {
     if (typeof plugin.onBuildEnd === 'function') {
       await plugin.onBuildEnd();

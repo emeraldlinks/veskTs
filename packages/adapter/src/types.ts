@@ -70,6 +70,7 @@ export interface BuildOptions {
   ssg?: boolean;
   codeSplit?: boolean;
   hmr?: boolean;
+  target?: 'node' | 'edge';
 }
 
 export interface DevServerOptions {
