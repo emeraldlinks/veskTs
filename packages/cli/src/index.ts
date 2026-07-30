@@ -3,6 +3,11 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve, join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { defineConfig, definePlugin, preset, validateConfig } from '../../compiler/src/config';
+import { setRedactLogging } from '../../compiler/src/server-utils';
+import { build, startProdServer } from '../../adapter/src/index';
+import { runSeoAudit } from '../../adapter/src/seo-audit';
+import { startDevServer } from './dev-server';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
@@ -63,19 +68,20 @@ async function loadConfig(projectDir: string) {
 
   if (!configPath) return {};
 
-  const { defineConfig, validateConfig } = await import(
-    resolve(__dirname, '../../compiler/src/config')
-  ) as { defineConfig: (raw: unknown) => unknown; validateConfig: (config: unknown) => void };
-
   let raw: unknown;
   if (configPath.endsWith('.ts')) {
     const { transpile } = await import('typescript');
     const src = readFileSync(configPath, 'utf-8');
-    const result = transpile(src, { module: 99, target: 99 });
+    let js = transpile(src, { module: 99, target: 99 });
+    js = js.replace(/import\s+\{[^}]*\}\s*from\s+['"]@vesk\/compiler['"]\s*;?\s*/g, '');
+    js = `const { defineConfig, definePlugin, preset } = globalThis.__vesk_inject;\n` + js;
     const tmpFile = join(projectDir, '.vesk', 'config.tmp.js');
     mkdirSync(dirname(tmpFile), { recursive: true });
-    writeFileSync(tmpFile, result, 'utf-8');
+    writeFileSync(tmpFile, js, 'utf-8');
+    globalThis.__vesk_inject = { defineConfig, definePlugin, preset };
+
     raw = (await import(tmpFile)).default;
+    delete globalThis.__vesk_inject;
   } else {
     raw = (await import(configPath)).default;
   }
@@ -84,10 +90,7 @@ async function loadConfig(projectDir: string) {
   if (typeof validateConfig === 'function') validateConfig(config);
 
   if ((config as Record<string, unknown>)?.security?.redactLogs !== false) {
-    try {
-      const { setRedactLogging } = await import(resolve(__dirname, '../../compiler/src/server-utils')) as { setRedactLogging: (v: boolean) => void };
-      setRedactLogging(true);
-    } catch {}
+    try { setRedactLogging(true); } catch {}
   }
 
   return config;
@@ -413,9 +416,8 @@ if (cmd === 'build') {
   const plugins = (config as Record<string, unknown>)?.plugins || [];
   const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
 
-  const { build: buildFn } = await import(resolve(__dirname, '../../adapter/src/index')) as { build: (appDir: string, opts: Record<string, unknown>) => Promise<void> };
   try {
-    await buildFn(appDirPath, opts);
+    await build(appDirPath, opts);
     console.error('vesk build: done');
   } catch (e) {
     console.error(`vesk build: error — ${(e as Error).message}`);
@@ -433,7 +435,6 @@ if (cmd === 'seo') {
   }
 
   const strict = args.includes('--strict');
-  const { runSeoAudit } = await import(resolve(__dirname, '../../adapter/src/seo-audit')) as { runSeoAudit: (dir: string) => { errors: number; warnings: number } };
   const audit = runSeoAudit(appDirPath);
   if (strict && audit.errors > 0) {
     console.error(`vesk seo: failed with ${audit.errors} error(s)`);
@@ -447,7 +448,6 @@ if (cmd === 'start') {
   const outDir = join(projectDir, '.vesk');
   const port = parseInt(args[1], 10) || 3000;
 
-  const { startProdServer } = await import(resolve(__dirname, '../../adapter/src/index')) as { startProdServer: (outDir: string, opts: { port: number }) => Promise<unknown> };
   startProdServer(outDir, { port });
   await new Promise(() => {});
 }
@@ -464,7 +464,6 @@ if (cmd === 'dev') {
   }
 
   const config = await loadConfig(projectDir);
-  const { startDevServer } = await import('./dev-server') as { startDevServer: (port: number, projectDir: string, config: unknown) => Promise<unknown> };
   await startDevServer(port, projectDir, config);
 }
 
