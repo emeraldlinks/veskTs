@@ -181,7 +181,6 @@ async function renderFullPage(source, componentName, props = {}, registry = /* @
     if (headHtml) headLines.push("	" + headHtml.split("\n").join("\n	"));
     if (options.security) {
       const sec = options.security;
-      if (sec.xFrameOptions !== false) headLines.push(`	<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || "DENY"}" />`);
       if (sec.referrerPolicy !== false) headLines.push(`	<meta name="referrer" content="${sec.referrerPolicy || "strict-origin-when-cross-origin"}" />`);
       if (sec.contentSecurityPolicy !== false) headLines.push(`	<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, "&quot;")}" />`);
       if (sec.autoEscape !== false) headLines.push(`	<!-- vesk: auto-escape enabled -->`);
@@ -228,8 +227,6 @@ async function* renderPageStream(source, componentName, props = {}, registry = /
   if (cssLink) yield cssLink;
   if (options.security) {
     const sec = options.security;
-    if (sec.xFrameOptions !== false) yield `	<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || "DENY"}" />
-`;
     if (sec.referrerPolicy !== false) yield `	<meta name="referrer" content="${sec.referrerPolicy || "strict-origin-when-cross-origin"}" />
 `;
     if (sec.contentSecurityPolicy !== false) yield `	<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, "&quot;")}" />

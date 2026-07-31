@@ -85,7 +85,7 @@ async function loadConfig(projectDir) {
 	if (!configPath) return {};
 
 	const { defineConfig, validateConfig } = await import(
-		resolve(__dirname, '../../compiler/src/config.js')
+		resolve(__dirname, '../../compiler/src/config')
 	);
 
 	let raw;

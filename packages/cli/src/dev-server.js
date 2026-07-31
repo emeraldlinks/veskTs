@@ -623,7 +623,6 @@ export async function startDevServer(port, projectDir, config) {
 				let secMeta = '';
 				if (config.security) {
 					const s = config.security;
-					if (s.xFrameOptions !== false) secMeta += `\t<meta http-equiv="X-Frame-Options" content="${s.xFrameOptions || 'DENY'}" />\n`;
 					if (s.referrerPolicy !== false) secMeta += `\t<meta name="referrer" content="${s.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
 					if (s.contentSecurityPolicy !== false) secMeta += `\t<meta http-equiv="Content-Security-Policy" content="${(s.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
 					if (s.autoEscape !== false) secMeta += `\t<!-- vesk: auto-escape enabled -->\n`;
@@ -695,7 +694,6 @@ export async function startDevServer(port, projectDir, config) {
 			yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n';
 			if (config.security) {
 				const s = config.security;
-				if (s.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${s.xFrameOptions || 'DENY'}" />\n`;
 				if (s.referrerPolicy !== false) yield `\t<meta name="referrer" content="${s.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
 				if (s.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${(s.contentSecurityPolicy || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
 				if (s.autoEscape !== false) yield '\t<!-- vesk: auto-escape enabled -->\n';

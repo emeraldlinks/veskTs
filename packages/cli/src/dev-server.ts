@@ -227,7 +227,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                       const actualName = extractCompName(src);
                       for (const cname of changedComponents) {
                         if (actualName && actualName !== cname) {
-                          compCode += `\n__components[${JSON.stringify(cname)}] = __components[${JSON.stringify(actualName)}];\n`;
+                          compCode += `\nObject.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });\n`;
                         }
                       }
                       if (compCode.trim()) fnSources = { _raw: compCode };
@@ -358,8 +358,20 @@ export async function startDevServer(port: number, projectDir: string, config: R
     return m ? m[1] : null;
   }
 
+  function relaxCspForDev(sec: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+    if (!sec || sec.contentSecurityPolicy === false || sec.contentSecurityPolicy === 'off') return sec;
+    let csp = sec.contentSecurityPolicy;
+    if (csp === true) {
+      csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
+    }
+    if (typeof csp === 'string' && csp.includes("script-src 'self'")) {
+      csp = csp.replace("script-src 'self'", "script-src 'self' 'unsafe-eval'");
+    }
+    return { ...sec, contentSecurityPolicy: csp };
+  }
+
   let rateLimiter: { check: (ip: string) => boolean } | null = null;
-  const security = config.security as Record<string, unknown> | undefined;
+  const security = relaxCspForDev(config.security as Record<string, unknown> | undefined);
   if (security?.rateLimit) {
     const rlConfig = security.rateLimit as Record<string, unknown>;
     rateLimiter = createRateLimiter({ windowMs: (rlConfig.windowMs as number) || 60000, max: (rlConfig.max as number) || 100 });
@@ -568,7 +580,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
       if (hasLayout) {
         let secMeta = '';
         if (security) {
-          if (security.xFrameOptions !== false) secMeta += `\t<meta http-equiv="X-Frame-Options" content="${(security.xFrameOptions as string) || 'DENY'}" />\n`;
           if (security.referrerPolicy !== false) secMeta += `\t<meta name="referrer" content="${(security.referrerPolicy as string) || 'strict-origin-when-cross-origin'}" />\n`;
           if (security.contentSecurityPolicy !== false) secMeta += `\t<meta http-equiv="Content-Security-Policy" content="${((security.contentSecurityPolicy as string) || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
           if (security.autoEscape !== false) secMeta += '\t<!-- vesk: auto-escape enabled -->\n';
@@ -631,7 +642,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
       yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n';
       if (security) {
-        if (security.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${(security.xFrameOptions as string) || 'DENY'}" />\n`;
         if (security.referrerPolicy !== false) yield `\t<meta name="referrer" content="${(security.referrerPolicy as string) || 'strict-origin-when-cross-origin'}" />\n`;
         if (security.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${((security.contentSecurityPolicy as string) || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
         if (security.autoEscape !== false) yield '\t<!-- vesk: auto-escape enabled -->\n';
@@ -657,7 +667,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
             (globalThis as Record<string, unknown>).__vesk_request = ctx;
             try {
               const html = await renderSSR();
-              const secHeaders = security ? securityHeaders(security) : {};
+              const secHeaders = security ? securityHeaders({ security }) : {};
               return new Response(html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
             } finally {
               (globalThis as Record<string, unknown>).__vesk_request = prev;
@@ -677,7 +687,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         (globalThis as Record<string, unknown>).__vesk_request = ctx;
         try {
           const stream = renderSSRStream();
-          const secHeaders = security ? securityHeaders(security) : {};
+          const secHeaders = security ? securityHeaders({ security }) : {};
           logRequest(200);
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', ...secHeaders });
           for await (const chunk of stream) {

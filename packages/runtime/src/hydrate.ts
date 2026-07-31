@@ -132,6 +132,15 @@ export function hydrateViewport(
 	props?: Record<string, unknown>,
 	rootMargin = 500,
 ): Promise<void> {
+	if (document.readyState !== 'complete') {
+		return new Promise<void>((resolve) => {
+			const onLoad = () => {
+				window.removeEventListener('load', onLoad);
+				resolve(hydrateViewport(container, componentFn, props, rootMargin));
+			};
+			window.addEventListener('load', onLoad);
+		});
+	}
 	const allMarkers = collectVskMarkers(container);
 
 	const viewportMarkers: Comment[] = [];

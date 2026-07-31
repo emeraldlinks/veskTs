@@ -13,7 +13,7 @@ component Home (){
 	if (2 > 3){
 		<p> 2 is higher</p>
 	} else{
-		<p> Hurray 3 xwon</p>
+		<p> Hurray 3 people won</p>
 	}
 	<button onClick={()=> count++}> + </button>
 	<div class="bg-white gg rounded-xl p-6 shadow-sm border border-gray-100">

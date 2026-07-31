@@ -261,6 +261,8 @@ function emitStatic(ctx, node, tracked, effectsVar) {
         }
     }
     for (const attr of node.attributes) {
+        if (attr.name.startsWith('on') && attr.name.length > 2)
+            continue;
         if (attr.value === '') {
             ctx.push(`${el}.setAttribute(${JSON.stringify(attr.name)}, '');`);
         }

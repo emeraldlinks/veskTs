@@ -7,6 +7,8 @@ function basename(p: string): string {
   return idx === -1 ? p : p.slice(idx + 1);
 }
 
+
+
 export function scanApiRoutes(apiDir: string): ApiRouteNode[] {
   if (!existsSync(apiDir)) return [];
   return scanApiDir(apiDir, apiDir, '/');

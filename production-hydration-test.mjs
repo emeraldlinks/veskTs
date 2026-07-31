@@ -158,10 +158,13 @@ async function main() {
 
     await page.goto(BASE + '/blog/hello-world', { waitUntil: 'networkidle0' });
 
+    // navigate to /blog via SPA click so both history entries are same-document
     await page.evaluate(() => { window.__spaFlag = true; });
-    await page.goto(BASE + '/blog', { waitUntil: 'networkidle0' });
+    await page.click('a[href="/blog"]');
+    await new Promise(r => setTimeout(r, 800));
     let h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
-    assert(h1 === 'Blog', 'Direct /blog → h1: Blog');
+    assert(h1 === 'Blog', 'SPA /blog → h1: Blog');
+    assert(await page.evaluate(() => window.__spaFlag === true), '/blog reached without reload');
 
     // back (SPA)
     await page.evaluate(() => { window.__spaFlag = true; });

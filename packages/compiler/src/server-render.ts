@@ -222,7 +222,6 @@ export async function renderFullPage(
 
     if (options.security) {
       const sec = options.security;
-      if (sec.xFrameOptions !== false) headLines.push(`\t<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || 'DENY'}" />`);
       if (sec.referrerPolicy !== false) headLines.push(`\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />`);
       if (sec.contentSecurityPolicy !== false) headLines.push(`\t<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />`);
       if (sec.autoEscape !== false) headLines.push(`\t<!-- vesk: auto-escape enabled -->`);
@@ -282,7 +281,6 @@ export async function* renderPageStream(
   if (cssLink) yield cssLink;
   if (options.security) {
     const sec = options.security;
-    if (sec.xFrameOptions !== false) yield `\t<meta http-equiv="X-Frame-Options" content="${sec.xFrameOptions || 'DENY'}" />\n`;
     if (sec.referrerPolicy !== false) yield `\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
     if (sec.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
     if (sec.autoEscape !== false) yield `\t<!-- vesk: auto-escape enabled -->\n`;
