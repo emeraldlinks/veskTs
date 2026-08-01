@@ -1,6 +1,6 @@
 import { mkdirSync, copyFileSync, readdirSync, statSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
-import type { RouteNode, SsgRouteResult } from './types';
+import type { RouteNode, SsgRouteResult } from '@vesk/adapter/src/types';
 
 export function copyStaticAssets(publicDir: string, outDir: string): void {
   const targetDir = resolve(outDir, 'static', 'public');
@@ -27,7 +27,7 @@ export function copyStaticAssets(publicDir: string, outDir: string): void {
 }
 
 export async function generateSsgRoutes(routeTree: RouteNode[], appDir: string, outDir: string): Promise<SsgRouteResult[]> {
-  const { ssg } = await import('../../compiler/src/server-render.js') as { ssg: (source: string, componentName: string | null, customProps: Record<string, unknown> | undefined, options: Record<string, unknown>) => Promise<{ html: string; body: string; head: string; props: string; clientCode: string; static: boolean; staticLists: boolean }> };
+  const { ssg } = await import('@vesk/compiler/src/server-render') as { ssg: (source: string, componentName: string | null, customProps: Record<string, unknown> | undefined, options: Record<string, unknown>) => Promise<{ html: string; body: string; head: string; props: string; clientCode: string; static: boolean; staticLists: boolean }> };
   const prerenderDir = resolve(outDir, 'prerendered');
   mkdirSync(prerenderDir, { recursive: true });
 

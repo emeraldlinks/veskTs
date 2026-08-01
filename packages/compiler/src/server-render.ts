@@ -1,17 +1,17 @@
-import type { IRRoot, ComponentIR, IRNode } from './ir.js';
-import { MapRegion } from './ir.js';
-import { parse } from './parser.js';
-import { generateIR } from './ir-generator.js';
-import { compileClient, isStaticIR } from './client-codegen.js';
-import type { CompileFileResult, RenderPageResult, SSGResult, FullPageOptions } from './types.js';
+import type { IRRoot, ComponentIR, IRNode } from '@vesk/compiler/src/ir';
+import { MapRegion } from '@vesk/compiler/src/ir';
+import { parse } from '@vesk/compiler/src/parser';
+import { generateIR } from '@vesk/compiler/src/ir-generator';
+import { compileClient, isStaticIR } from '@vesk/compiler/src/client-codegen';
+import type { CompileFileResult, RenderPageResult, SSGResult, FullPageOptions } from '@vesk/compiler/src/types';
 import {
   isStatic, prettifyHtml, resetVskState,
   loadRuntimeImports, evalTopLevelCode,
   callStaticProps, callLoadFunction,
   securityHeaders, securityComment,
-} from './server-utils.js';
-import { renderHeadHtml, mergeHeadHtml } from './server-head.js';
-import { buildComponentMap } from './server-jsgen.js';
+} from '@vesk/compiler/src/server-utils';
+import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
+import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 
 export function compileFile(source: string): CompileFileResult {
   const ast = parse(source);
@@ -68,26 +68,48 @@ export function renderPage(
   }
 
   (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
+  const renderToken = (globalThis as any).__vsk_ssr_token;
   const renderFn = componentMap.get(componentName);
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
   const fullRegistry = new Map([...registry, ...componentMap]);
+  const targetComp = ir.components.find((c) => c.name === componentName);
+  if (targetComp && (targetComp.isAsync || targetComp.ssrAwait)) {
+    return (async () => {
+      let bodyHtml: string;
+      try {
+        bodyHtml = await renderFn(props, fullRegistry, __vesk);
+      } finally {
+        delete (globalThis as any).__vsk_ssr;
+        clearSsrCells(renderToken);
+      }
+      return {
+        body: bodyHtml,
+        head: renderHeadHtml(targetComp, props),
+        props
+      };
+    })();
+  }
   let bodyHtml: unknown;
   try {
     bodyHtml = renderFn(props, fullRegistry, __vesk);
   } finally {
     delete (globalThis as any).__vsk_ssr;
+    clearSsrCells(renderToken);
   }
 
-  const targetComp = ir.components.find((c) => c.name === componentName);
-  if (targetComp?.isAsync) {
-    return (async () => ({
-      body: await (bodyHtml as Promise<string>),
-      head: renderHeadHtml(targetComp, props),
-      props
-    }))();
-  }
   const headHtml = targetComp ? renderHeadHtml(targetComp, props) : '';
   return { body: bodyHtml as string, head: headHtml, props };
+}
+
+function clearSsrCells(token: string | undefined): void {
+  if (!token) return;
+  delete (globalThis as any)[`__vsk_ssr_promises_${token}`];
+  const cells = (globalThis as any).__vsk_ssr_cells;
+  if (!cells || !(cells instanceof Map)) return;
+  for (const k of cells.keys()) {
+    if (typeof k === 'string' && k.startsWith(token)) cells.delete(k);
+  }
 }
 
 export async function ssg(
@@ -213,7 +235,7 @@ export async function renderFullPage(
     const dataScripts: string[] = [];
     if (serializedProps) dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
     const ssrDataKeys = Object.keys(ssrData);
-    if (ssrDataKeys.length > 0) dataScripts.push(`<script>const __vesk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+    if (ssrDataKeys.length > 0) dataScripts.push(`<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
     const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
 
     const headLines = ['\t<meta charset="utf-8" />', '\t<meta name="viewport" content="width=device-width, initial-scale=1" />'];
@@ -301,11 +323,14 @@ export async function* renderPageStream(
   yield '</head>\n<body>\n<div id="root">\n';
 
   (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
+  const renderToken = (globalThis as any).__vsk_ssr_token;
   let bodyHtml: string;
   try {
     bodyHtml = await Promise.resolve(renderFn(ssrProps, fullRegistry, __vesk));
   } finally {
     delete (globalThis as any).__vsk_ssr;
+    clearSsrCells(renderToken);
   }
 
   yield bodyHtml;
@@ -321,11 +346,7 @@ export async function* renderPageStream(
   const dataScripts: string[] = [];
   if (serializedProps) dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
   const ssrDataKeys = Object.keys(ssrData);
-  if (ssrDataKeys.length > 0) dataScripts.push(`<script>const __vesk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+  if (ssrDataKeys.length > 0) dataScripts.push(`<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
   const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') : '';
-
-  const clientScript = options.clientScriptUrl
-    ? `\n<script type="module" src="${options.clientScriptUrl}"></script>\n`
-    : '';
-  yield `\n</div>${dataScriptBlock}${clientScript}</body>\n</html>\n`;
+  yield `\n</div>${dataScriptBlock}</body>\n</html>\n`;
 }

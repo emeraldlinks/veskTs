@@ -1,4 +1,4 @@
-import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, SsgRouteResult } from './types';
+import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, SsgRouteResult } from '@vesk/adapter/src/types';
 
 export function generateManifest(
   routes: RouteNode[],

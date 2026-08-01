@@ -3,3 +3,5 @@ dist/
 *.tsbuildinfo
 .DS_Store
 ripple-fork-source/
+test-app/node_modules
+chrome-headless-shell/

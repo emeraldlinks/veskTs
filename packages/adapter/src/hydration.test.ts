@@ -247,7 +247,7 @@ async function main() {
         const root = document.getElementById('root');
         if (!root) return { error: 'no root' };
         const walker = document.createTreeWalker(root, 128, {
-          acceptNode: (n) => n.textContent === 'vsk' ? 1 : 2,
+          acceptNode(n) { return n.textContent === 'vsk' ? 1 : 2; },
         });
         let count = 0;
         while (walker.nextNode()) count++;

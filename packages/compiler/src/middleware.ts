@@ -1,9 +1,9 @@
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
-import { extractMiddleware } from './router.js';
-import { parseCookies } from './api-routes.js';
-import type { RouteNode } from './types.js';
-import type { VeskPlugin, MiddlewareChainOptions } from './types.js';
+import { extractMiddleware } from '@vesk/compiler/src/router';
+import { parseCookies } from '@vesk/compiler/src/api-routes';
+import type { RouteNode } from '@vesk/compiler/src/types';
+import type { VeskPlugin, MiddlewareChainOptions } from '@vesk/compiler/src/types';
 
 export interface MiddlewareEntry {
   sourcePath: string;

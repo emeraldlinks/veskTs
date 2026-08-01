@@ -22,8 +22,8 @@ async function main() {
   if (!process.env.VESK_E2E) {
     const outDir = resolve(root, 'test-app', '.vesk', 'prod-test');
 
-    const { build } = await import(resolve(root, 'packages/adapter/src/index.js'));
-    const { startProdServer } = await import(resolve(root, 'packages/adapter/src/prod-server.js'));
+    const { build } = await import(resolve(root, 'packages/adapter/src/index.ts'));
+    const { startProdServer } = await import(resolve(root, 'packages/adapter/src/prod-server.ts'));
     const appDir = resolve(root, 'test-app', 'app');
     const publicDir = resolve(root, 'test-app', 'public');
 

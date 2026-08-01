@@ -1,6 +1,6 @@
-import { track, get } from './ripple-runtime';
-import { createContext } from './context';
-import { createHydrateWalker } from './hydrate';
+import { track, get } from '@vesk/runtime/src/ripple-runtime';
+import { createContext } from '@vesk/runtime/src/context';
+import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
 
 interface Router {
 	start(): Router;

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve, extname, dirname } from 'node:path';
-import type { ImageRef, ImageResult } from './types';
+import type { ImageRef, ImageResult } from '@vesk/adapter/src/types';
 
 const SUPPORTED = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tiff']);
 const OUTPUT_WIDTHS = [640, 768, 1024, 1280, 1536];

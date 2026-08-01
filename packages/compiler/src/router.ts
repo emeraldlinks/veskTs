@@ -1,6 +1,6 @@
 import { readdirSync, statSync, existsSync, readFileSync } from 'fs';
 import { join, relative, basename, dirname, resolve as resolvePath } from 'path';
-import type { RouteNode } from './types.js';
+import type { RouteNode } from '@vesk/compiler/src/types';
 
 export interface ScanOptions {
   layoutCompName?: string;

@@ -3,8 +3,7 @@
  *
  * Run with: node --experimental-vm-modules packages/runtime/src/track.test.js
  */
-import { track, derived } from '@vesk/runtime/src/track';
-import { get, set, untrack, flush_sync, tick } from '@vesk/runtime/src/ripple-runtime';
+import { track, get, set, untrack, derived, flush_sync, tick } from '@vesk/runtime/src/ripple-runtime';
 import { effect, destroy_block, root } from '@vesk/runtime/src/ripple-blocks';
 
 let passed = 0;

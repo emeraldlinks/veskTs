@@ -68,7 +68,7 @@ describe('CSRF', () => {
 
 	it('verifyCsrfToken rejects tampered token', () => {
 		const token = csrfToken('session123', 'test.com');
-		const tampered = token.slice(0, -1) + 'x';
+		const tampered = token.slice(0, -1) + (token.endsWith('x') ? 'y' : 'x');
 		expect(verifyCsrfToken(tampered, 'test.com')).toBe(false);
 	});
 

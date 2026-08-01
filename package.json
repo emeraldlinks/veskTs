@@ -17,7 +17,7 @@
     "packages/lsp"
   ],
   "scripts": {
-    "build": "node packages/cli/build.js",
+    "build": "npx tsx packages/cli/build.ts",
     "typecheck": "tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/adapter/tsconfig.json",
     "test:dev": "npx tsx tests/dev-test.mjs",
     "test:prod": "npx tsx tests/prod-test.mjs",

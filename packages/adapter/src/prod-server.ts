@@ -3,7 +3,9 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import type { SecurityConfig } from './types';
+import { createRateLimiter } from '@vesk/compiler/src/server-codegen';
+import { securityHeaders } from '@vesk/compiler/src/server-utils';
+import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const _require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -72,8 +74,6 @@ export async function startProdServer(outDir: string, options?: { port?: number 
   const port = options?.port || 3000;
   const staticDir = resolve(outDir, 'static');
   const configPath = resolve(outDir, 'config.json');
-  const compilerSrc = resolve(__dirname, '..', '..', 'compiler', 'src');
-  const runtimeSrc = resolve(__dirname, '..', '..', 'runtime', 'src');
 
   if (!existsSync(configPath)) {
     console.error(`vesk start: no build found at ${outDir}`);
@@ -108,14 +108,12 @@ export async function startProdServer(outDir: string, options?: { port?: number 
   let rateLimiter: { check: (ip: string) => boolean } | null = null;
   if (securityConfig?.rateLimit) {
     const rlConfig = securityConfig.rateLimit;
-    const { createRateLimiter } = await import(resolve(compilerSrc, 'server-codegen.ts')) as { createRateLimiter: (opts: { windowMs: number; max: number }) => { check: (ip: string) => boolean } };
     rateLimiter = createRateLimiter({ windowMs: rlConfig.windowMs || 60000, max: rlConfig.max || 100 });
   }
 
   let securityHeadersFn: ((config: Record<string, unknown>) => Record<string, string>) | null = null;
   try {
-    const securityMod = await import(resolve(compilerSrc, 'server-utils.ts')) as { securityHeaders: (config: Record<string, unknown>) => Record<string, string> };
-    securityHeadersFn = securityMod.securityHeaders;
+    securityHeadersFn = securityHeaders;
   } catch {
     // security headers not available
   }
@@ -300,7 +298,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
 
               let cachedResult: { html: string; headers: Record<string, string> } | null = null;
               if (route.revalidate && route.revalidate > 0) {
-                const { pageIsr } = await import('../../runtime/src/index-server.ts') as unknown as { pageIsr: (path: string, fn: () => Promise<{ html: string; headers: Record<string, string> }>, opts: { revalidate: number; tags: string[] }) => Promise<{ html: string; headers: Record<string, string> } | null> };
+                const { pageIsr } = await import('@vesk/runtime/src/index-server') as unknown as { pageIsr: (path: string, fn: () => Promise<{ html: string; headers: Record<string, string> }>, opts: { revalidate: number; tags: string[] }) => Promise<{ html: string; headers: Record<string, string> } | null> };
                 cachedResult = await pageIsr(url.pathname, async () => {
                   const response = await mod.handle(webRequest);
                   return { html: await response.text(), headers: Object.fromEntries(response.headers) };

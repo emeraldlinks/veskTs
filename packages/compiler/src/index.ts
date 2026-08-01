@@ -1,8 +1,8 @@
-export { parse, createBaseParser } from './parser.js';
-export { VeskParserPlugin } from './vesk-plugin.js';
-export { generateIR } from './ir-generator.js';
-export { render } from './server-codegen.js';
-export { compileClient, compile } from './client-codegen.js';
+export { parse, createBaseParser } from '@vesk/compiler/src/parser';
+export { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
+export { generateIR } from '@vesk/compiler/src/ir-generator';
+export { render } from '@vesk/compiler/src/server-codegen';
+export { compileClient, compile } from '@vesk/compiler/src/client-codegen';
 export {
   IRRoot,
   ComponentIR,
@@ -13,14 +13,14 @@ export {
   MapRegion,
   ComponentCall,
   Expression,
-} from './ir.js';
-export type { IRNode } from './ir.js';
+} from '@vesk/compiler/src/ir';
+export type { IRNode } from '@vesk/compiler/src/ir';
 
-export type { VeskPlugin } from './types.js';
-export type { VeskConfig } from './types.js';
-export type { VeskSecurity } from './types.js';
-export type { VeskCors } from './types.js';
-export type { VeskRateLimit } from './types.js';
+export type { VeskPlugin } from '@vesk/compiler/src/types';
+export type { VeskConfig } from '@vesk/compiler/src/types';
+export type { VeskSecurity } from '@vesk/compiler/src/types';
+export type { VeskCors } from '@vesk/compiler/src/types';
+export type { VeskRateLimit } from '@vesk/compiler/src/types';
 
-export { defineConfig, validateConfig, preset, definePlugin } from './config.js';
-export { scanRoutes, scanComponents, collectSources, matchUrl } from './router.js';
+export { defineConfig, validateConfig, preset, definePlugin } from '@vesk/compiler/src/config';
+export { scanRoutes, scanComponents, collectSources, matchUrl } from '@vesk/compiler/src/router';

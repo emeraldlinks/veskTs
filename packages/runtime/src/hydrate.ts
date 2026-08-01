@@ -1,4 +1,4 @@
-import { get } from './ripple-runtime';
+import { get } from '@vesk/runtime/src/ripple-runtime';
 
 export interface HydrateWalker {
 	root: HTMLElement | null;

@@ -686,7 +686,7 @@ let _signImpl: Record<string, Function | null> | null = null;
 async function _getImpl(): Promise<Record<string, Function | null>> {
 	if (_signImpl) return _signImpl;
 	try {
-		_signImpl = await import('../../compiler/src/server-utils.js') as unknown as Record<string, Function | null>;
+		_signImpl = await import('@vesk/compiler/src/server-utils') as unknown as Record<string, Function | null>;
 	} catch {
 		try {
 			const mod = await import('@vesk/compiler') as Record<string, Function | null>;

@@ -2,7 +2,7 @@ import * as acorn from 'acorn';
 import type { Options } from 'acorn';
 import type { Program } from 'estree';
 import { tsPlugin } from './acorn-ts-plugin/index.js';
-import { VeskParserPlugin } from './vesk-plugin.js';
+import { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
 
 export interface ParseOptions {
   filename?: string;
@@ -10,7 +10,7 @@ export interface ParseOptions {
 }
 
 export function createBaseParser(): typeof acorn.Parser {
-  return acorn.Parser.extend(tsPlugin() as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser, VeskParserPlugin() as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser);
+  return acorn.Parser.extend(tsPlugin({}) as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser, VeskParserPlugin() as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser);
 }
 
 export function parse(source: string, options: ParseOptions = {}): Program {

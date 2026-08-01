@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { RouteNode, AncestorLayout, SsrFunctionOptions } from './types';
+import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
 function escapeSource(src: string): string {
   return src

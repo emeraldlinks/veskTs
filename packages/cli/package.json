@@ -12,7 +12,7 @@
     "@vesk/runtime": "*"
   },
   "scripts": {
-    "build": "node build.js",
+    "build": "npx tsx build.ts",
     "prepublishOnly": "npm run build"
   },
   "devDependencies": {

@@ -1,5 +1,6 @@
-import type { IRNode } from './ir.js';
-import { StaticNode, TextNode, DynamicBinding } from './ir.js';
+import type { IRNode } from '@vesk/compiler/src/ir';
+import { StaticNode, TextNode, DynamicBinding } from '@vesk/compiler/src/ir';
+import * as __defaultRuntimeModule from '@vesk/runtime/src/index-server';
 
 const VOID_ELEMENTS = new Set([
   'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
@@ -555,7 +556,7 @@ export function buildParamInit(paramNames: string[]): string {
   return `const { ${paramNames.join(', ')} } = props;`;
 }
 
-let __cachedRuntimeModule: Record<string, unknown> = {};
+let __cachedRuntimeModule: Record<string, unknown> | null = null;
 
 export function setRuntimeModule(mod: Record<string, unknown>): void {
   __cachedRuntimeModule = mod;
@@ -563,11 +564,14 @@ export function setRuntimeModule(mod: Record<string, unknown>): void {
 
 export function loadRuntimeImports(importStrs: string[]): Record<string, unknown> {
   const names = extractRuntimeNames(importStrs);
-  const mod = __cachedRuntimeModule;
+  const mod: Record<string, unknown> = __cachedRuntimeModule || __defaultRuntimeModule as unknown as Record<string, unknown>;
   if (mod) {
     const result: Record<string, unknown> = {};
     if (mod.getActiveComponent) result.getActiveComponent = mod.getActiveComponent;
     if (mod.setActiveComponent) result.setActiveComponent = mod.setActiveComponent;
+    for (const name of ['get', 'set', 'track']) {
+      if (name in mod) result[name] = mod[name];
+    }
     for (const name of names) {
       if (name in mod) result[name] = mod[name];
     }

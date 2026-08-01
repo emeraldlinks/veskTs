@@ -44,6 +44,7 @@ export class ComponentIR {
   paramNames: string[];
   isClient: boolean;
   isAsync: boolean;
+  ssrAwait: boolean;
   mode: 'expression' | 'statement';
   body: IRNode[];
   style: string | null;
@@ -57,6 +58,7 @@ export class ComponentIR {
     opts: {
       isClient?: boolean;
       isAsync?: boolean;
+      ssrAwait?: boolean;
       mode?: 'expression' | 'statement';
       exported?: boolean;
       defaultExport?: boolean;
@@ -67,6 +69,7 @@ export class ComponentIR {
     this.body = body;
     this.isClient = opts.isClient ?? false;
     this.isAsync = opts.isAsync ?? false;
+    this.ssrAwait = opts.ssrAwait ?? false;
     this.mode = opts.mode ?? 'expression';
     this.style = null;
     this.exported = opts.exported ?? false;

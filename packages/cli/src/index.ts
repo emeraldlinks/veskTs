@@ -3,12 +3,12 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve, join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { defineConfig, definePlugin, preset, validateConfig } from '../../compiler/src/config';
-import { setRedactLogging, setRuntimeModule } from '../../compiler/src/server-utils.js';
-import { build, startProdServer } from '../../adapter/src/index';
-import { runSeoAudit } from '../../adapter/src/seo-audit';
-import { startDevServer } from './dev-server';
-import * as __veskRuntime from '../../runtime/src/index-server';
+import { defineConfig, definePlugin, preset, validateConfig } from '@vesk/compiler/src/config';
+import { setRedactLogging, setRuntimeModule } from '@vesk/compiler/src/server-utils';
+import { build, startProdServer } from '@vesk/adapter/src/index';
+import { runSeoAudit } from '@vesk/adapter/src/seo-audit';
+import { startDevServer } from '@vesk/cli/src/dev-server';
+import * as __veskRuntime from '@vesk/runtime/src/index-server';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
@@ -467,22 +467,4 @@ if (cmd === 'dev') {
   const config = await loadConfig(projectDir);
   setRuntimeModule(__veskRuntime);
   await startDevServer(port, projectDir, config);
-}
-
-const compilerBin = resolve(__dirname, '../../compiler/bin/vesk');
-
-if (!existsSync(compilerBin)) {
-  console.error(`vesk: compiler bin not found at ${compilerBin}`);
-  process.exit(1);
-}
-
-try {
-  const { execSync } = await import('child_process');
-  execSync(`node ${compilerBin} ${args.map(a => `"${a.replace(/"/g, '\\"')}"`).join(' ')}`, {
-    stdio: 'inherit',
-    encoding: 'utf-8',
-  });
-  process.exit(0);
-} catch (e) {
-  process.exit((e as { status?: number }).status || 1);
 }

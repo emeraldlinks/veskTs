@@ -3,10 +3,10 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
-import { build } from './index';
-import { createHmrServer } from './hmr';
-import { buildRuntimeCode } from './client-bundle';
-import type { RouteNode, DevServerOptions, Manifest } from './types';
+import { build } from '@vesk/adapter/src/index';
+import { createHmrServer } from '@vesk/adapter/src/hmr';
+import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
+import type { RouteNode, DevServerOptions, Manifest } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 

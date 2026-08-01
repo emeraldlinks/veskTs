@@ -1,5 +1,5 @@
-import type { VeskConfig, VeskSecurity, VeskSecurityPreset } from './types.js';
-import { VeskError } from './errors.js';
+import type { VeskConfig, VeskSecurity, VeskSecurityPreset } from '@vesk/compiler/src/types';
+import { VeskError } from '@vesk/compiler/src/errors';
 
 const SECURITY_PRESETS: Record<string, VeskSecurity> = {
   strict: {

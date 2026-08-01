@@ -12,8 +12,24 @@ import { generateIR } from '@vesk/compiler/src/ir-generator';
 let passed = 0;
 let failed = 0;
 const errors = [];
+let asyncChain: Promise<void> = Promise.resolve();
 
 function it(name, fn) {
+  if (fn.constructor.name === 'AsyncFunction') {
+    asyncChain = asyncChain.then(async () => {
+      try {
+        await fn();
+        passed++;
+        console.log(`  \u2713 ${name}`);
+      } catch (e) {
+        failed++;
+        console.log(`  \u2717 ${name}`);
+        console.log(`    ${e.message}`);
+        errors.push({ name, message: e.message });
+      }
+    });
+    return;
+  }
   try {
     fn();
     passed++;
@@ -589,6 +605,77 @@ it('load function merged with existing props', async () => {
   assert(html.includes('From load'), `load prop: ${html.slice(300, 600)}`);
 });
 
+it('useFetch with into renders fetched data in SSR body', async () => {
+  const source = `import { track } from '@vesk/runtime'
+  component App {
+    let &[posts] = track<{ title: string }[]>([])
+    const postsResource = useFetch('/api/posts', { into: posts })
+    <h1>{postsResource.loading ? 'Loading...' : 'Loaded'}</h1>
+    for (const post in posts) {
+      <div>{post.title}</div>
+    }
+  }`;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve([{ title: 'Post A' }, { title: 'Post B' }]),
+  }) as any;
+  const html = await renderFullPage(source, 'App', {});
+  (globalThis as any).fetch = savedFetch;
+  show('  html', html.slice(0, 900));
+  assert(!html.includes('Loading...'), `body should not render loading state: ${html.slice(0, 900)}`);
+  assert(html.includes('Post A'), `fetched title in SSR body: ${html.slice(0, 900)}`);
+  assert(html.includes('Post B'), `fetched title in SSR body: ${html.slice(0, 900)}`);
+  assert(html.includes('__vsk_ssr_data'), `ssr data script missing: ${html.slice(0, 900)}`);
+});
+
+it('useFetch into tracked cell hydrates from serialized data without re-fetch', async () => {
+  const source = `import { track } from '@vesk/runtime'
+  component App {
+    let &[posts] = track<{ title: string }[]>([])
+    const postsResource = useFetch('/api/posts', { into: posts })
+    for (const post in posts) {
+      <div>{post.title}</div>
+    }
+  }`;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve([{ title: 'Post A' }, { title: 'Post B' }]),
+  }) as any;
+  const html = await renderFullPage(source, 'App', {});
+  const match = html.match(/globalThis\.__vsk_ssr_data = (.*?);<\/script>/s);
+  assert(match, `ssr data script missing: ${html.slice(0, 900)}`);
+  const ssrData = JSON.parse(match![1]);
+  (globalThis as any).fetch = savedFetch;
+
+  const clientCode = compileClient(source, null, { hydrate: true });
+  assert(clientCode.includes('useFetch'), `client code should keep useFetch call`);
+  assert(clientCode.includes('into: posts'), `client should pass tracked cell into useFetch: ${clientCode.slice(0, 500)}`);
+
+  const serializedIntoKey = Object.keys(ssrData).find((k) => k.includes('/api/posts'));
+  assert(serializedIntoKey, `serialized data should contain fetch key: ${JSON.stringify(ssrData)}`);
+  assert((ssrData as Record<string, unknown>)[serializedIntoKey!] as unknown as { length: number }, `fetched array serialized`);
+});
+
+it('useFetch without into also renders fetched data after awaiting', async () => {
+  const source = `component App {
+    const posts = useFetch('/api/posts');
+    <h1>{posts.loading ? 'Loading...' : 'Loaded'}</h1>
+  }`;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => Promise.resolve({
+    ok: true,
+    json: () => Promise.resolve([{ title: 'Post A' }]),
+  }) as any;
+  const html = await renderFullPage(source, 'App', {});
+  (globalThis as any).fetch = savedFetch;
+  show('  html', html.slice(0, 900));
+  assert(!html.includes('Loading...'), `loading state should not remain in SSR body: ${html.slice(0, 900)}`);
+  assert(html.includes('Loaded'), `fetched data should render in SSR body: ${html.slice(0, 900)}`);
+  assert(html.includes('__vsk_ssr_data'), `ssr data script missing: ${html.slice(0, 900)}`);
+});
+
 // =============================================================
 // Compiler — Auto-Import Detection
 // =============================================================
@@ -823,6 +910,7 @@ it('[stmt] useFetch in SSR renders loading state', async () => {
 });
 
 // Summary
+await asyncChain;
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) {

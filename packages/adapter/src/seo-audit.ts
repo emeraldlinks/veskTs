@@ -1,6 +1,6 @@
 import { readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import type { SeoCheckIssue, SeoAuditResult, CombinedPageInfo } from './types';
+import type { SeoCheckIssue, SeoAuditResult, CombinedPageInfo } from '@vesk/adapter/src/types';
 
 const SEVERITY = { WARN: 'warn' as const, ERROR: 'error' as const };
 

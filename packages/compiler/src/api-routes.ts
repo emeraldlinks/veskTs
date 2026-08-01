@@ -1,6 +1,6 @@
 import { readdirSync, statSync, existsSync } from 'fs';
 import { join, extname } from 'path';
-import type { ApiRouteNode } from './types.js';
+import type { ApiRouteNode } from '@vesk/compiler/src/types';
 
 function basename(p: string): string {
   const idx = p.lastIndexOf('/');

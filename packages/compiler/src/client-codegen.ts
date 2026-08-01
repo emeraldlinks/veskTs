@@ -1,7 +1,7 @@
 import { walk } from 'zimmerframe';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
-import type { IRNode, IRRoot, ComponentIR } from './ir.js';
+import type { IRNode, IRRoot, ComponentIR } from '@vesk/compiler/src/ir';
 import {
   StaticNode,
   TextNode,
@@ -20,9 +20,9 @@ import {
   ClientBlock,
   HeadBlock,
   SlotNode,
-} from './ir.js';
-import { parse } from './parser.js';
-import { generateIR } from './ir-generator.js';
+} from '@vesk/compiler/src/ir';
+import { parse } from '@vesk/compiler/src/parser';
+import { generateIR } from '@vesk/compiler/src/ir-generator';
 
 function memberExpr(object: string, property: string): Record<string, unknown> {
   return {
@@ -38,12 +38,12 @@ function callExpr(callee: Record<string, unknown>, args: Record<string, unknown>
   return { type: 'CallExpression', callee, arguments: args, optional: false };
 }
 
-interface TrackedInfo {
+export interface TrackedInfo {
   cellName: string;
   kind: 'virtual' | 'cell';
 }
 
-function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
+export function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
   if (tracked.size === 0) return (irNode as any).raw;
   const ast = (irNode as any).ast;
   if (!ast) return (irNode as any).raw;
@@ -119,6 +119,14 @@ function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding
           !parent.computed
         )
           return context.next();
+        if (
+          parent.type === 'Property' &&
+          parent.value === node &&
+          parent.key &&
+          parent.key.type === 'Identifier' &&
+          parent.key.name === 'into'
+        )
+          return context.next();
       }
       const info = context.state.get(node.name);
       if (info && info.kind === 'virtual') {
@@ -135,9 +143,9 @@ function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding
 }
 
 import type { Node as ESTreeNode } from 'estree';
-import type { Expression } from './ir.js';
+import type { Expression } from '@vesk/compiler/src/ir';
 
-function collectTrackedNames(body: IRNode[]): Map<string, TrackedInfo> {
+export function collectTrackedNames(body: IRNode[]): Map<string, TrackedInfo> {
   const names = new Map<string, TrackedInfo>();
   for (const node of body) {
     if (node instanceof TrackDecl) {

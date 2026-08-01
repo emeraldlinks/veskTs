@@ -3,21 +3,26 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Vesk runtime — reactivity, blocks, DOM operations, hydration",
-  "main": "./src/index-client.js",
-  "types": "./src/index-client.d.ts",
+  "main": "./src/index-client.ts",
+  "types": "./src/index-client.ts",
   "exports": {
     ".": {
-      "types": "./src/index-client.d.ts",
-      "default": "./src/index-client.js"
+      "types": "./src/index-client.ts",
+      "default": "./src/index-client.ts"
     },
     "./client": {
-      "types": "./src/index-client.d.ts",
-      "default": "./src/index-client.js"
+      "types": "./src/index-client.ts",
+      "default": "./src/index-client.ts"
     },
     "./server": {
-      "types": "./src/index-server.d.ts",
-      "default": "./src/index-server"
-    }
+      "types": "./src/index-server.ts",
+      "default": "./src/index-server.ts"
+    },
+    "./src/*": "./src/*.ts",
+    "./src/*.js": "./src/*.ts"
+  },
+  "dependencies": {
+    "@vesk/compiler": "*"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

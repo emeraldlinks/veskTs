@@ -13,9 +13,9 @@ const testDirs = [
 ]
 
 const e2eFiles = new Set([
-  'code-split.test.js',
-  'hmr.test.js',
-  'hydration.test.js',
+  'code-split.test.ts',
+  'hmr.test.ts',
+  'hydration.test.ts',
 ])
 
 function runTestFile(filePath, env) {
@@ -34,7 +34,7 @@ let totalFiles = 0
 // Phase 1: Unit tests (non-E2E)
 for (const dir of testDirs) {
   if (!existsSync(dir)) continue
-  const files = readdirSync(dir).filter(f => f.endsWith('.test.js'))
+  const files = readdirSync(dir).filter(f => f.endsWith('.test.ts'))
   for (const file of files.sort()) {
     if (e2eFiles.has(file)) continue
     const filePath = resolve(dir, file)
@@ -105,7 +105,7 @@ const e2eEnv = { VESK_E2E: '1', VESK_E2E_PROD_PORT: '3099', VESK_E2E_DEV_PORT: '
 // Run adapter E2E tests
 for (const dir of testDirs) {
   if (!existsSync(dir)) continue
-  const files = readdirSync(dir).filter(f => f.endsWith('.test.js'))
+  const files = readdirSync(dir).filter(f => f.endsWith('.test.ts'))
   for (const file of files.sort()) {
     if (!e2eFiles.has(file)) continue
     const filePath = resolve(dir, file)
@@ -144,6 +144,36 @@ if (existsSync(prodHydrationPath)) {
   process.stdout.write('production-hydration-test.mjs ... ')
   try {
     const output = runTestFile(prodHydrationPath, e2eEnv)
+    const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
+    if (match) {
+      const passed = parseInt(match[1])
+      const failed = parseInt(match[2])
+      totalPassed += passed
+      totalFailed += failed
+      if (failed > 0) {
+        console.log(`FAIL (${failed} failure${failed > 1 ? 's' : ''})`)
+        console.log(output)
+      } else {
+        console.log(`OK (${passed} tests)`)
+      }
+    } else {
+      console.log('OK')
+    }
+  } catch (e) {
+    totalFailed++
+    console.log('ERROR')
+    console.error(e.message.slice(0, 300))
+    if (e.stdout) console.log(e.stdout.slice(-500))
+  }
+}
+
+// Run standalone edge-test.mjs (after prod hydration — edge build overwrites .vesk)
+const edgeTestPath = resolve(root, 'edge-test.mjs')
+if (existsSync(edgeTestPath)) {
+  totalFiles++
+  process.stdout.write('edge-test.mjs ... ')
+  try {
+    const output = runTestFile(edgeTestPath)
     const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
     if (match) {
       const passed = parseInt(match[1])

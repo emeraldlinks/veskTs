@@ -1,17 +1,17 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bundleRuntime } from './runtime-bundle';
-import { generateSsrFunction } from './ssr-function';
-import { generateApiFunction } from './api-function';
-import { compileMiddleware, compileMiddlewareCode } from './middleware';
-import { generateClientBundle } from './client-bundle';
-import { generateManifest } from './manifest';
-import { copyStaticAssets } from './static';
+import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
+import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
+import { generateApiFunction } from '@vesk/adapter/src/api-function';
+import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/middleware';
+import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
+import { generateManifest } from '@vesk/adapter/src/manifest';
+import { copyStaticAssets } from '@vesk/adapter/src/static';
 import type {
   RouteNode, ApiRouteNode, BuildOptions, BuildResult, AncestorLayout,
   MiddlewareChainItem, VeskPlugin, Manifest,
-} from './types';
+} from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -283,9 +283,9 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   console.error('vesk build: config → config.json');
 
   if (options?.target === 'edge') {
-    const { generateEdgeEntry, bundleEdgeEntry } = await import('./edge-entry.js') as {
-      generateEdgeEntry: typeof import('./edge-entry.js').generateEdgeEntry;
-      bundleEdgeEntry: typeof import('./edge-entry.js').bundleEdgeEntry;
+    const { generateEdgeEntry, bundleEdgeEntry } = await import('@vesk/adapter/src/edge-entry') as {
+      generateEdgeEntry: typeof import('@vesk/adapter/src/edge-entry').generateEdgeEntry;
+      bundleEdgeEntry: typeof import('@vesk/adapter/src/edge-entry').bundleEdgeEntry;
     };
     const prerenderedPaths = prerenderedRoutes.map(r => r.path);
     const entryFile = await generateEdgeEntry(outDir, ssrRoutes, apiRoutes, prerenderedPaths, middlewareEnabled);
@@ -303,4 +303,4 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   return { routeTree, apiTree, ssrRoutes, apiRoutes, manifest };
 }
 
-export { startProdServer } from './prod-server';
+export { startProdServer } from '@vesk/adapter/src/prod-server';

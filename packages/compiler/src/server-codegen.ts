@@ -36,18 +36,18 @@ export {
   getClientIp,
   getClientProtocol,
   applyTrustProxy,
-} from './server-utils.js';
+} from '@vesk/compiler/src/server-utils';
 
 export {
   renderHeadHtml,
   mergeHeadHtml,
-} from './server-head.js';
+} from '@vesk/compiler/src/server-head';
 
 export {
   irNodeToJS,
   generateFunctionBody,
   buildComponentMap,
-} from './server-jsgen.js';
+} from '@vesk/compiler/src/server-jsgen';
 
 export {
   compileFile,
@@ -56,4 +56,4 @@ export {
   ssg,
   renderFullPage,
   renderPageStream,
-} from './server-render.js';
+} from '@vesk/compiler/src/server-render';

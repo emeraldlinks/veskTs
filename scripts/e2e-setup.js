@@ -1,6 +1,6 @@
-import { build } from '../packages/adapter/src/index.js';
-import { startProdServer } from '../packages/adapter/src/prod-server.js';
-import { startDevServer } from '../packages/adapter/src/dev-server.js';
+import { build } from '../packages/adapter/src/index.ts';
+import { startProdServer } from '../packages/adapter/src/prod-server.ts';
+import { startDevServer } from '../packages/adapter/src/dev-server.ts';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { mkdirSync, rmSync } from 'fs';

@@ -1,5 +1,5 @@
-import { destroy_block } from './ripple-blocks';
-import type { Block } from './ripple-runtime';
+import { destroy_block } from '@vesk/runtime/src/ripple-blocks';
+import type { Block } from '@vesk/runtime/src/ripple-runtime';
 
 interface MapEntry {
 	marker: Comment;

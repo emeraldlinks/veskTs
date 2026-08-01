@@ -1,9 +1,9 @@
-import { track, get, set } from './ripple-runtime';
-import { root } from './ripple-blocks';
-import { createHydrateWalker, hydrateViewport, hydrateIdle, hydrateOnInteraction } from './hydrate';
-import type { HydrateWalker } from './hydrate';
-import { matchRoute, flattenLayoutChain, buildTreeFromMap } from './router-match';
-import type { RouteNode, RouteMatch } from './router-match';
+import { track, get, set } from '@vesk/runtime/src/ripple-runtime';
+import { root } from '@vesk/runtime/src/ripple-blocks';
+import { createHydrateWalker, hydrateViewport, hydrateIdle, hydrateOnInteraction } from '@vesk/runtime/src/hydrate';
+import type { HydrateWalker } from '@vesk/runtime/src/hydrate';
+import { matchRoute, flattenLayoutChain, buildTreeFromMap } from '@vesk/runtime/src/router-match';
+import type { RouteNode, RouteMatch } from '@vesk/runtime/src/router-match';
 import {
 	__isHydrating, setIsHydrating, _state, _scrollPositions,
 	_isPopStateNavigation, setIsPopStateNavigation, setCurrentRouter,
@@ -12,7 +12,7 @@ import {
 	Outlet, Link, NavLink, useNavigate, useParams, usePathname,
 	useSearchParams, useRouter, Redirect, redirect, permanentRedirect,
 	NotFoundError, notFound,
-} from './router-components';
+} from '@vesk/runtime/src/router-components';
 
 export {
 	Outlet, Link, NavLink,

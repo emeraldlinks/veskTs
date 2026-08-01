@@ -2,7 +2,8 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
-import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from './types';
+import { compileClient } from '@vesk/compiler/src/client-codegen';
+import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,11 +27,6 @@ export async function generateClientBundle(
   componentMap?: Map<string, string>,
   options?: ClientBundleOptions,
 ): Promise<ClientBundleResult> {
-  const _dirname = dirname(fileURLToPath(import.meta.url));
-  const monorepoClient = resolve(_dirname, '..', '..', 'compiler', 'src', 'client-codegen.js');
-  const { compileClient } = existsSync(monorepoClient)
-    ? await import(monorepoClient) as { compileClient: (source: string, _componentName: string | null, options?: { forceClient?: boolean; hydrate?: boolean }) => string }
-    : await import('@vesk/compiler') as { compileClient: (source: string, _componentName: string | null, options?: { forceClient?: boolean; hydrate?: boolean }) => string };
   const runtimeDir = findRuntimeSrc(appDir);
 
   const seen = new Set<string>();
@@ -207,7 +203,8 @@ export function buildRuntimeCode(runtimeDir: string): string {
     if (existsSync(p)) {
       let src = readFileSync(p, 'utf-8');
       src = stripTypes(src);
-      src = src.replace(/^import\s+[\s\S]*?from\s+['"].\/.*?['"];?\n?/gm, '');
+      src = src.replace(/^import\s+[\s\S]*?from\s+['"](?:\.\/.*?|@vesk\/runtime\/src\/.*?)['"];?\n?/gm, '');
+      src = src.replace(/^import\s+['"](?:\.\/.*?|@vesk\/runtime\/src\/.*?)['"];?\n?/gm, '');
       src = src.replace(/^export\s*\{\s*[\s\S]*?\};?\n?/gm, '');
       src = src.replace(/^export\s+/gm, '');
       code += `// --- ${f} ---\n${src}\n`;

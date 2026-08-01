@@ -1,7 +1,7 @@
-import { effect, render } from './ripple-blocks';
-import { get, set } from './ripple-runtime';
-import type { Tracked, Derived } from './ripple-runtime';
-import { is_ripple_object } from './ripple-utils';
+import { effect, render } from '@vesk/runtime/src/ripple-blocks';
+import { get, set } from '@vesk/runtime/src/ripple-runtime';
+import type { Tracked, Derived } from '@vesk/runtime/src/ripple-runtime';
+import { is_ripple_object } from '@vesk/runtime/src/ripple-utils';
 
 interface GetSetPair {
 	getter: () => unknown;

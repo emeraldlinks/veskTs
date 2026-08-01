@@ -20,12 +20,39 @@ import {
   HeadBlock,
   Expression,
   SlotNode,
-} from './ir.js';
-import type { IRNode } from './ir.js';
-import { VeskError } from './errors.js';
+} from '@vesk/compiler/src/ir';
+import type { IRNode } from '@vesk/compiler/src/ir';
+import { VeskError } from '@vesk/compiler/src/errors';
 
 function getSource(source: string, node: { start: number; end: number }): string {
   return source.slice(node.start, node.end);
+}
+
+function componentUsesFetch(nodes: IRNode[]): boolean {
+  for (const node of nodes) {
+    if (node instanceof ServerBlock || node instanceof ClientBlock) {
+      if (componentUsesFetch(node.children)) return true;
+    } else if (node instanceof RuntimeStatement) {
+      if (node.raw.includes('useFetch(')) return true;
+    } else if (node instanceof DynamicBinding) {
+      if (node.expression.raw.includes('useFetch(')) return true;
+    } else if (node instanceof MapRegion) {
+      if (componentUsesFetch(node.bodyTemplate)) return true;
+    } else if (node instanceof OpaqueDynamicRegion) {
+      if (componentUsesFetch(node.consequentNodes) || componentUsesFetch(node.alternateNodes)) return true;
+    } else if (node instanceof WhileLoop) {
+      if (componentUsesFetch(node.bodyTemplate)) return true;
+    } else if (node instanceof ForLoop) {
+      if (componentUsesFetch(node.bodyTemplate)) return true;
+    } else if (node instanceof TryCatch) {
+      if (componentUsesFetch(node.bodyTemplate) || componentUsesFetch(node.catchBody)) return true;
+    } else if (node instanceof SwitchBlock) {
+      for (const c of node.cases) {
+        if (componentUsesFetch(c.body)) return true;
+      }
+    }
+  }
+  return false;
 }
 
 function extractKeyExpr(nodes: IRNode[]): Expression | null {
@@ -608,7 +635,7 @@ export function generateIR(ast: any, source: string): IRRoot {
       const raw = processStatementModeBody(source, bodyStmts);
       const { body, css } = extractStyle(raw);
       validateBlocks(name, isClientComp, body);
-      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async });
+      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body) });
       comp.style = css;
       components.push(comp);
     } else {
@@ -647,7 +674,7 @@ export function generateIR(ast: any, source: string): IRRoot {
       const guardBody = buildGuardChain(source, guardClauses, mainReturn);
       const { body, css } = extractStyle([...preamble, ...guardBody]);
       validateBlocks(name, isClientComp, body);
-      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async });
+      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body) });
       comp.style = css;
       components.push(comp);
     }

@@ -1,4 +1,4 @@
-import type { IRRoot, ComponentIR, IRNode } from './ir.js';
+import type { IRRoot, ComponentIR, IRNode } from '@vesk/compiler/src/ir';
 
 export interface RouteNode {
   path: string;

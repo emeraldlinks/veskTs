@@ -3,18 +3,10 @@ import type { Server } from 'node:http';
 import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { RouteNode, AncestorLayout } from './types';
+import { compileClient } from '@vesk/compiler/src/client-codegen';
+import type { RouteNode, AncestorLayout } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-function findCompilerApi(appDir: string): string {
-  const monorepoRoot = resolve(__dirname, '..', '..', '..');
-  const monorepoCompiler = resolve(monorepoRoot, 'packages', 'compiler', 'src');
-  if (existsSync(monorepoCompiler)) return monorepoCompiler;
-  const projectCompiler = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'src');
-  if (existsSync(projectCompiler)) return projectCompiler;
-  return resolve(appDir, 'node_modules', '@vesk/compiler', 'src');
-}
 
 function findRouteForSource(routeTree: RouteNode[], sourceDir: string): RouteNode | null {
   for (const node of routeTree) {
@@ -264,9 +256,6 @@ export function createHmrServer(
 
     if (filename.endsWith('.vsk')) {
       const sourceDir = extractSourceDir(filename);
-      const compilerRoot = findCompilerApi(appDir);
-      const { compileClient } = await import(resolve(compilerRoot, 'client-codegen.js')) as { compileClient: (src: string, componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean }) => string };
-
       const fullPath = resolve(appDir, filename);
       if (!existsSync(fullPath)) return;
 

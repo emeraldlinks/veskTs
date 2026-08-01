@@ -4,7 +4,7 @@
   "type": "module",
   "description": "Tailwind CSS v4 plugin for Vesk",
   "main": "./src/index.js",
-  "types": "./src/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": "./src/index.js"
   },

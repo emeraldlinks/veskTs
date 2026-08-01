@@ -1,7 +1,7 @@
-import type { IRNode } from './ir.js';
-import { StaticNode, TextNode, DynamicBinding, HeadBlock, RuntimeStatement } from './ir.js';
-import type { ComponentIR } from './ir.js';
-import { tryEvalExpr, escapeHtml } from './server-utils.js';
+import type { IRNode } from '@vesk/compiler/src/ir';
+import { StaticNode, TextNode, DynamicBinding, HeadBlock, RuntimeStatement } from '@vesk/compiler/src/ir';
+import type { ComponentIR } from '@vesk/compiler/src/ir';
+import { tryEvalExpr, escapeHtml } from '@vesk/compiler/src/server-utils';
 
 function evaluateLocals(comp: ComponentIR, props: Record<string, unknown>): Record<string, unknown> {
   const locals: Record<string, unknown> = {};

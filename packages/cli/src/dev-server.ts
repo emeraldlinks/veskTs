@@ -5,13 +5,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { transformSync } from 'esbuild';
-import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml } from '../../compiler/src/server-codegen';
-import { compileClient } from '../../compiler/src/client-codegen';
-import { scanRoutes, matchUrl, collectSources } from '../../compiler/src/router';
-import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '../../compiler/src/api-routes';
-import { collectMiddlewareChain, executeMiddlewareChain } from '../../compiler/src/middleware';
-import { generateClientBundle } from '../../adapter/src/client-bundle';
-import { VeskRequest } from '../../runtime/src/index-server';
+import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml } from '@vesk/compiler/src/server-codegen';
+import { compileClient } from '@vesk/compiler/src/client-codegen';
+import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
+import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
+import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
+import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
+import { VeskRequest } from '@vesk/runtime/src/index-server';
 
 const LOG = {
   reset: '\x1b[0m',

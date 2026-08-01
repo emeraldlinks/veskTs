@@ -1,5 +1,5 @@
 {
   "extends": "../../tsconfig.base.json",
   "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist", "src/**.test.js", "src/**.test.ts"]
+  "exclude": ["node_modules", "dist", "src/**/*.test.js", "src/**/*.test.ts", "src/acorn-ts-plugin"]
 }
