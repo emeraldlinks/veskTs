@@ -4,7 +4,7 @@ import {
 	effect as _effect,
 	pause_block,
 	pre_effect,
-} from './ripple-blocks';
+} from '@vesk/runtime/src/ripple-blocks';
 
 export { destroy_non_branch_children };
 import {
@@ -32,8 +32,8 @@ import {
 	DIRECT_CHILD_BLOCK,
 	UPDATE_SOURCE,
 	NAMESPACE_URI,
-} from './ripple-constants';
-import { is_ripple_object, define_property, get_descriptor, is_array, object_keys, get_own_property_symbols } from './ripple-utils';
+} from '@vesk/runtime/src/ripple-constants';
+import { is_ripple_object, define_property, get_descriptor, is_array, object_keys, get_own_property_symbols } from '@vesk/runtime/src/ripple-utils';
 
 export interface Block {
 	co: Component | null;
@@ -47,6 +47,7 @@ export interface Block {
 	prev: Block | null;
 	s: unknown;
 	t: (() => void) | null;
+	tc: (() => void)[] | null;
 }
 
 export interface Tracked {
@@ -148,7 +149,8 @@ export function set_tracking(value: boolean): void {
 
 export function run_teardown(block: Block): void {
 	const fn = block.t;
-	if (fn !== null) {
+	const callbacks = block.tc;
+	if (fn !== null || callbacks !== null) {
 		const previous_block = active_block;
 		const previous_reaction = active_reaction;
 		const previous_tracking = tracking;
@@ -159,7 +161,12 @@ export function run_teardown(block: Block): void {
 			active_reaction = null;
 			tracking = false;
 			teardown = true;
-			fn.call(null);
+			if (fn !== null) fn.call(null);
+			if (callbacks !== null) {
+				for (let i = 0; i < callbacks.length; i++) {
+					callbacks[i]();
+				}
+			}
 		} finally {
 			active_block = previous_block;
 			active_reaction = previous_reaction;
@@ -167,6 +174,13 @@ export function run_teardown(block: Block): void {
 			teardown = previous_teardown;
 		}
 	}
+}
+
+export function on_destroy(fn: () => void): void {
+	const block = scope();
+	if (block === null) return;
+	if (block.tc === null) block.tc = [];
+	block.tc.push(fn);
 }
 
 export function with_block<T>(block: Block, fn: () => T): T {
