@@ -1,5 +1,5 @@
 import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as esbuild from 'esbuild';
 
@@ -9,30 +9,30 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function findCompilerSrc(appDir: string): string {
   const monorepoRoot = resolve(__dirname, '..', '..', '..');
-  const monorepoCompiler = resolve(monorepoRoot, 'packages', 'compiler', 'src');
-  if (existsSync(monorepoCompiler)) return monorepoCompiler;
+  const monorepoCompiler = resolve(monorepoRoot, 'packages', 'compiler', 'dist');
+  if (existsSync(join(monorepoCompiler, 'server-codegen.js'))) return monorepoCompiler;
 
-  const projectCompiler = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'src');
-  if (existsSync(projectCompiler)) return projectCompiler;
+  const projectCompiler = resolve(appDir, '..', 'node_modules', '@vesk/compiler');
+  if (existsSync(join(projectCompiler, 'server-codegen.js'))) return projectCompiler;
 
-  const appCompiler = resolve(appDir, 'node_modules', '@vesk/compiler', 'src');
-  if (existsSync(appCompiler)) return appCompiler;
+  const appCompiler = resolve(appDir, 'node_modules', '@vesk/compiler');
+  if (existsSync(join(appCompiler, 'server-codegen.js'))) return appCompiler;
 
-  throw new Error('@vesk/compiler/src not found — tried monorepo layout and node_modules');
+  throw new Error('@vesk/compiler/dist not found — run "npm run build" first');
 }
 
 function findRuntimeSrc(appDir: string): string {
   const monorepoRoot = resolve(__dirname, '..', '..', '..');
-  const monorepoRuntime = resolve(monorepoRoot, 'packages', 'runtime', 'src');
-  if (existsSync(monorepoRuntime)) return monorepoRuntime;
+  const monorepoRuntime = resolve(monorepoRoot, 'packages', 'runtime', 'dist');
+  if (existsSync(join(monorepoRuntime, 'index-server.js'))) return monorepoRuntime;
 
-  const projectRuntime = resolve(appDir, '..', 'node_modules', '@vesk/runtime', 'src');
-  if (existsSync(projectRuntime)) return projectRuntime;
+  const projectRuntime = resolve(appDir, '..', 'node_modules', '@vesk/runtime');
+  if (existsSync(join(projectRuntime, 'index-server.js'))) return projectRuntime;
 
-  const appRuntime = resolve(appDir, 'node_modules', '@vesk/runtime', 'src');
-  if (existsSync(appRuntime)) return appRuntime;
+  const appRuntime = resolve(appDir, 'node_modules', '@vesk/runtime');
+  if (existsSync(join(appRuntime, 'index-server.js'))) return appRuntime;
 
-  throw new Error('@vesk/runtime/src not found');
+  throw new Error('@vesk/runtime/dist not found — run "npm run build" first');
 }
 
 export async function bundleRuntime(appDir: string, outDir: string): Promise<string> {
@@ -41,9 +41,9 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
 
   const entryFile = resolve(outDir, 'server', `.runtime-entry-${buildId++}.mjs`);
   const entryContent = [
-    `import { renderPage, renderFullPage, renderPageStream, setRuntimeModule } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.ts'))};`,
-    `import { parseCookies } from ${JSON.stringify(resolve(compilerRoot, 'server-cookies.ts'))};`,
-    `import * as __veskRuntime from ${JSON.stringify(resolve(runtimeRoot, 'index-server.ts'))};`,
+    `import { renderPage, renderFullPage, renderPageStream, setRuntimeModule } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
+    `import { parseCookies } from ${JSON.stringify(resolve(compilerRoot, 'server-cookies.js'))};`,
+    `import * as __veskRuntime from ${JSON.stringify(resolve(runtimeRoot, 'index-server.js'))};`,
     '',
     '// Inject runtime module so server-codegen can find components like NavLink, Link, etc.',
     'setRuntimeModule(__veskRuntime);',

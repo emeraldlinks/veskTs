@@ -11,6 +11,8 @@ import { existsSync } from 'fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
+execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inherit' });
+
 const PORT = 3099;
 const BASE = `http://localhost:${PORT}`;
 const outDir = resolve(root, 'test-app', '.vesk', 'prod-test');

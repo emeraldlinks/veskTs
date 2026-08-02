@@ -2,6 +2,7 @@
 
 export interface TailwindOptions {
   entry?: string;
+  appDir?: string;
 }
 
 declare function tailwindcss(options?: TailwindOptions): {

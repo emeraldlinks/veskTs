@@ -11,6 +11,8 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 
+execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inherit' });
+
 const PORT = 3000;
 let serverProcess = null;
 let passed = 0;

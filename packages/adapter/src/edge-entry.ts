@@ -24,9 +24,9 @@ function toId(s: string): string {
 }
 
 function findCompilerSrc(): string {
-  const monorepo = resolve(__dirname, '..', '..', '..', 'packages', 'compiler', 'src');
+  const monorepo = resolve(__dirname, '..', '..', '..', 'packages', 'compiler', 'dist');
   if (existsSync(monorepo)) return monorepo;
-  throw new Error('@vesk/compiler/src not found');
+  throw new Error('@vesk/compiler/dist not found — run "npm run build" first');
 }
 
 function findRuntimeSrc(): string {
@@ -80,7 +80,7 @@ export async function generateEdgeEntry(
   // SSR/API functions import the runtime themselves from ../runtime.js.
   const compilerSrc = findCompilerSrc();
   const parseCookiesImport = hasMiddleware
-    ? `import { parseCookies } from ${JSON.stringify(resolve(compilerSrc, 'server-cookies.ts'))};`
+    ? `import { parseCookies } from ${JSON.stringify(resolve(compilerSrc, 'server-cookies.js'))};`
     : '';
 
   const code = `

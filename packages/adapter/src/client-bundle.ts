@@ -10,16 +10,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function findRuntimeSrc(appDir: string): string {
   const monorepoRoot = resolve(__dirname, '..', '..', '..');
-  const monorepoRuntime = resolve(monorepoRoot, 'packages', 'runtime', 'src');
-  if (existsSync(monorepoRuntime)) return monorepoRuntime;
+  const monorepoRuntime = resolve(monorepoRoot, 'packages', 'runtime', 'dist');
+  if (existsSync(join(monorepoRuntime, 'index-client.js'))) return monorepoRuntime;
 
-  const projectRuntime = resolve(appDir, '..', 'node_modules', '@vesk/runtime', 'src');
-  if (existsSync(projectRuntime)) return projectRuntime;
+  const projectRuntime = resolve(appDir, '..', 'node_modules', '@vesk/runtime');
+  if (existsSync(join(projectRuntime, 'index-client.js'))) return projectRuntime;
 
-  const appRuntime = resolve(appDir, 'node_modules', '@vesk/runtime', 'src');
-  if (existsSync(appRuntime)) return appRuntime;
+  const appRuntime = resolve(appDir, 'node_modules', '@vesk/runtime');
+  if (existsSync(join(appRuntime, 'index-client.js'))) return appRuntime;
 
-  throw new Error('@vesk/runtime/src not found');
+  throw new Error('@vesk/runtime/dist not found — run "npm run build" first');
 }
 
 export async function generateClientBundle(
@@ -192,11 +192,11 @@ function stripTypes(code: string): string {
 
 export function buildRuntimeCode(runtimeDir: string): string {
   const runtimeFiles = [
-    'ripple-constants.ts', 'ripple-utils.ts', 'ripple-runtime.ts', 'ripple-blocks.ts',
-    'context.ts', 'hydrate.ts', 'resource.ts',
-    'reconcile.ts', 'bindings.ts', 'router-match.ts', 'router-components.ts', 'router.ts',
-    'portal.ts',
-    'seo.ts', 'image.ts', 'experiment.ts', 'form.ts',
+    'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
+    'context.js', 'hydrate.js', 'resource.js',
+    'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
+    'portal.js',
+    'seo.js', 'image.js', 'experiment.js', 'form.js',
   ];
   let code = '';
   for (const f of runtimeFiles) {
@@ -211,7 +211,7 @@ export function buildRuntimeCode(runtimeDir: string): string {
       code += `// --- ${f} ---\n${src}\n`;
     }
   }
-  const indexSrc = readFileSync(join(runtimeDir, 'index-client.ts'), 'utf-8');
+  const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
   const exportNames: string[] = stripTypes(indexSrc).match(/export\s*\{\s*([^}]+)\s*\}\s*from/g)
     ?.flatMap(m => m.replace(/export\s*\{\s*|\s*\}\s*from/g, '').split(',').map(s => s.trim())) || [];
 

@@ -53,8 +53,8 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
 
   let componentMap = new Map<string, string>();
-  const monorepoRouter = resolve(__dirname, '..', '..', 'compiler', 'src', 'router.ts');
-  const pkgRouter = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'src', 'router.ts');
+  const monorepoRouter = resolve(__dirname, '..', '..', 'compiler', 'dist', 'router.js');
+  const pkgRouter = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'router.js');
   const routerPath = existsSync(monorepoRouter) ? monorepoRouter : (existsSync(pkgRouter) ? pkgRouter : null);
   if (routerPath) {
     const { scanComponents } = await import(routerPath) as { scanComponents: (componentsDir: string) => Map<string, string> };
@@ -80,7 +80,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       }
       if (result) routeTree = result.routeTree;
       const monorepoRoot = resolve(__dirname, '..', '..', '..');
-      const runtimeDir = resolve(monorepoRoot, 'packages', 'runtime', 'src');
+      const runtimeDir = resolve(monorepoRoot, 'packages', 'runtime', 'dist');
       runtimeBundle = buildRuntimeCode(runtimeDir);
       lastBuild = Date.now();
       console.error(`vesk dev: rebuilt in ${Date.now() - start}ms`);
@@ -97,7 +97,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
 
     if (url.pathname === '/_vesk/hmr.js') {
       const monorepoRoot = resolve(__dirname, '..', '..', '..');
-      const runtimeSrc = resolve(monorepoRoot, 'packages', 'runtime', 'src');
+      const runtimeSrc = resolve(monorepoRoot, 'packages', 'runtime', 'dist');
       const hmrJsPath = resolve(runtimeSrc, 'hmr-client.js');
       const hmrTsPath = resolve(runtimeSrc, 'hmr-client.ts');
       const hmrPath = existsSync(hmrJsPath) ? hmrJsPath : (existsSync(hmrTsPath) ? hmrTsPath : null);

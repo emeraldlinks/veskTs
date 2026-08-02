@@ -1,5 +1,12 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@vesk/runtime/src/*": ["./src/*"],
+      "@vesk/compiler": ["../compiler/src/index.ts"],
+      "@vesk/compiler/src/*": ["../compiler/src/*"]
+    }
+  },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
 }

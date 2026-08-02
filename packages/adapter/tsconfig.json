@@ -1,5 +1,15 @@
 {
   "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@vesk/adapter/src/*": ["./src/*"],
+      "@vesk/compiler": ["../compiler/src/index.ts"],
+      "@vesk/compiler/src/*": ["../compiler/src/*"],
+      "@vesk/runtime": ["../runtime/src/index-client.ts"],
+      "@vesk/runtime/server": ["../runtime/src/index-server.ts"],
+      "@vesk/runtime/src/*": ["../runtime/src/*"]
+    }
+  },
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist", "src/**/*.test.js", "src/**/*.test.ts", "src/acorn-ts-plugin"]
 }

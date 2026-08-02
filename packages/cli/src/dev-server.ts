@@ -48,9 +48,9 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
   const appDirPath = join(projectDir, 'app');
   const publicDir = join(projectDir, 'public');
-  const runtimeDir = resolve(projectDir, 'node_modules', '@vesk/runtime', 'src');
-  if (!existsSync(runtimeDir)) {
-    LOG.err('@vesk/runtime not found. Run npm install first.');
+  const runtimeDir = resolve(projectDir, 'node_modules', '@vesk/runtime');
+  if (!existsSync(join(runtimeDir, 'ripple-runtime.js'))) {
+    LOG.err('@vesk/runtime not built. Run "npm run build" (or packages/cli/build-packages.ts) first.');
     process.exit(1);
   }
   const devPlugins = (config.plugins || []) as { onBuildStart?: () => Promise<void>; onCSS?: (css: string, path: string) => Promise<string | null> }[];
@@ -94,10 +94,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
   function bundleRuntime() {
     try {
       const files = [
-        'ripple-constants.ts', 'ripple-utils.ts', 'ripple-runtime.ts', 'ripple-blocks.ts',
-        'context.ts', 'hydrate.ts', 'resource.ts', 'portal.ts',
-        'reconcile.ts', 'bindings.ts', 'router-match.ts', 'router-components.ts', 'router.ts',
-        'seo.ts', 'image.ts', 'experiment.ts', 'form.ts',
+        'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
+        'context.js', 'hydrate.js', 'resource.js', 'portal.js',
+        'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
+        'seo.js', 'image.js', 'experiment.js', 'form.js',
       ];
       let code = '';
       for (const f of files) {
@@ -111,7 +111,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           code += `// --- ${f} ---\n${src}\n`;
         }
       }
-      const indexSrc = readFileSync(join(runtimeDir, 'index-client.ts'), 'utf-8');
+      const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
       const indexCompiled = transformSync(indexSrc, { loader: 'ts' }).code;
       const exportNames = indexCompiled.match(/export\s*\{\s*([^}]+)\s*\}\s*from/g)
         ?.flatMap(m => m.replace(/export\s*\{\s*|\s*\}\s*from/g, '').split(',').map(s => s.trim())) || [];
@@ -351,7 +351,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     '.html': 'text/html', '.json': 'application/json',
   };
 
-  const hmrJsPath = join(runtimeDir, 'hmr-client');
+  const hmrJsPath = join(runtimeDir, 'hmr-client.js');
   const hmrTsPath = join(runtimeDir, 'hmr-client.ts');
   const hmrClientPath = existsSync(hmrJsPath) ? hmrJsPath : (existsSync(hmrTsPath) ? hmrTsPath : null);
 

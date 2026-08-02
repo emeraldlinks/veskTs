@@ -8,13 +8,24 @@
 import { readFileSync, existsSync, globSync } from 'fs'
 import { resolve } from 'path'
 
+interface GlobScanOptions {
+  cwd?: string
+  nodir?: boolean
+}
+
 const CLASS_RE = /class(?:\w+)?=["']([^"']*)["']/g
 
-function scanCandidates(dir) {
-  const candidates = new Set()
+export interface TailwindOptions {
+  entry?: string
+  appDir?: string
+}
+
+function scanCandidates(dir: string): string[] {
+  const candidates = new Set<string>()
   const base = resolve(dir)
   if (!existsSync(base)) return []
-  const files = globSync('**/*.{vsk,js,ts,jsx,tsx}', { cwd: base, nodir: true })
+  const globOpts: GlobScanOptions = { cwd: base, nodir: true }
+  const files = globSync('**/*.{vsk,js,ts,jsx,tsx}', globOpts)
   for (const file of files) {
     try {
       const content = readFileSync(resolve(base, file), 'utf-8')
@@ -32,7 +43,7 @@ function scanCandidates(dir) {
   return [...candidates]
 }
 
-async function loadFallbackStylesheet(id, base) {
+async function loadFallbackStylesheet(id: string, base: string): Promise<{ content: string; base: string }> {
   const { readFile } = await import('fs/promises')
   const path = await import('path')
   const { createRequire } = await import('module')
@@ -45,20 +56,19 @@ async function loadFallbackStylesheet(id, base) {
   const pkgJson = req.resolve(id + '/package.json')
   const pkgDir = path.dirname(pkgJson)
   const pkg = JSON.parse(await readFile(pkgJson, 'utf-8'))
-  let cssPath = null
+  let cssPath: string | null = null
   if (pkg.style) {
     cssPath = path.resolve(pkgDir, pkg.style)
   } else if (pkg.exports?.['.']?.style) {
     cssPath = path.resolve(pkgDir, pkg.exports['.'].style)
-  } else {
-    cssPath = path.resolve(pkgDir, 'index.css')
   }
+  if (cssPath === null) cssPath = path.resolve(pkgDir, 'index.css')
   if (!existsSync(cssPath)) throw new Error(`Cannot resolve stylesheet for package '${id}'`)
   const content = await readFile(cssPath, 'utf-8')
   return { content, base: path.dirname(cssPath) }
 }
 
-async function loadFallbackModule(id, base) {
+async function loadFallbackModule(id: string, base: string): Promise<{ module: unknown; base: string }> {
   const path = await import('path')
   const { createRequire } = await import('module')
   if (id.startsWith('.')) {
@@ -74,9 +84,9 @@ async function loadFallbackModule(id, base) {
 
 const TAILWIND_BLOCK = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/m
 
-function extractTailwindDirectives(css) {
-  let tailwindLines = []
-  let userLines = []
+function extractTailwindDirectives(css: string): { directives: string; userCSS: string } {
+  let tailwindLines: string[] = []
+  let userLines: string[] = []
   let i = 0
   const lines = css.split('\n')
 
@@ -117,32 +127,56 @@ function extractTailwindDirectives(css) {
 
 export { extractTailwindDirectives }
 
-export default function tailwindcss(options = {}) {
+interface CompileOptions {
+  base: string
+  from: string
+  onDependency: (path: string) => void
+  loadStylesheet?: (id: string, base: string) => Promise<{ content: string; base: string }>
+  loadModule?: (id: string, base: string) => Promise<{ module: unknown; base: string }>
+}
+
+interface CompileResult {
+  build(candidates: string[]): string
+}
+
+interface TailwindCompile {
+  (css: string, options: CompileOptions): Promise<CompileResult>
+}
+
+interface TailwindPlugin {
+  name: string
+  dependencies: Set<string>
+  onBuildStart: () => Promise<void>
+  onCSS: (content: string, filePath: string) => Promise<string | null>
+  onFileWatch: (filePath: string) => Promise<{ handled: boolean }>
+}
+
+export default function tailwindcss(options: TailwindOptions = {}): TailwindPlugin {
   const entry = options.entry || 'src/global.css'
   const appDir = options.appDir || 'app'
-  let compileReady = null
+  let compileReady: { compile: TailwindCompile; node: boolean } | null = null
 
-  async function getCompile() {
+  async function getCompile(): Promise<{ compile: TailwindCompile; node: boolean }> {
     if (compileReady) return compileReady
     try {
       const tw = await import('@tailwindcss/node')
       compileReady = { compile: tw.compile, node: true }
     } catch {
       const tw = await import('tailwindcss')
-      compileReady = { compile: tw.compile, node: false }
+      compileReady = { compile: tw.compile as TailwindCompile, node: false }
     }
     return compileReady
   }
 
   return {
     name: '@vesk/plugin-tailwind',
-    dependencies: new Set(),
+    dependencies: new Set<string>(),
 
-    async onBuildStart() {
-      this.dependencies = new Set()
+    async onBuildStart(): Promise<void> {
+      this.dependencies = new Set<string>()
     },
 
-    async onCSS(content, filePath) {
+    async onCSS(content: string, filePath: string): Promise<string | null> {
       const baseDir = process.cwd()
       const entryPath = resolve(baseDir, entry)
       const resolvedFilePath = filePath ? resolve(baseDir, filePath) : ''
@@ -155,10 +189,10 @@ export default function tailwindcss(options = {}) {
 
       try {
         const { compile, node } = await getCompile()
-        const compileOpts = {
+        const compileOpts: CompileOptions = {
           base: baseDir,
           from: entryPath,
-          onDependency: (path) => {
+          onDependency: (path: string) => {
             if (path) this.dependencies.add(path)
           },
         }
@@ -172,12 +206,12 @@ export default function tailwindcss(options = {}) {
         const finalCss = result.build(candidates)
         return finalCss
       } catch (err) {
-        console.error(`[vesk/plugin-tailwind] Compile error:`, err.message)
+        console.error(`[vesk/plugin-tailwind] Compile error:`, err instanceof Error ? err.message : String(err))
         return content
       }
     },
 
-    async onFileWatch(filePath) {
+    async onFileWatch(filePath: string): Promise<{ handled: boolean }> {
       if (this.dependencies.has(filePath)) {
         return { handled: true }
       }

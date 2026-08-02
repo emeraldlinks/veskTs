@@ -6,6 +6,9 @@ import { execSync, spawn } from 'child_process'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = resolve(__dirname, '..')
 
+// Build packages (incremental — no-op when dist is fresh) before running tests.
+execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inherit' })
+
 const testDirs = [
   resolve(root, 'packages/compiler/src'),
   resolve(root, 'packages/runtime/src'),

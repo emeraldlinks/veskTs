@@ -26,10 +26,21 @@ export interface ApiRouteNode {
   children: ApiRouteNode[];
 }
 
+export interface MiddlewareContext {
+  request: Request;
+  params: Record<string, string>;
+  url: URL;
+  locals: Record<string, unknown>;
+  cookies: Record<string, string>;
+  set(key: string, value: unknown): void;
+  get(key: string): unknown;
+  [key: string]: unknown;
+}
+
 export interface VeskPlugin {
   name: string;
   provides?: Record<string, (() => unknown | Promise<unknown>) | unknown>;
-  onRequest?: (ctx: Record<string, unknown>) => void | Promise<void>;
+  onRequest?: (ctx: MiddlewareContext) => void | Promise<void>;
   onCSS?: (content: string, filePath: string) => string | null | Promise<string | null>;
   onFileWatch?: (filePath: string) => { handled: boolean } | Promise<{ handled: boolean }>;
   onTransformJS?: (code: string, filePath: string) => string | null | Promise<string | null>;

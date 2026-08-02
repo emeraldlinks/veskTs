@@ -17,6 +17,7 @@ export {
 export type { IRNode } from '@vesk/compiler/src/ir';
 
 export type { VeskPlugin } from '@vesk/compiler/src/types';
+export type { MiddlewareContext } from '@vesk/compiler/src/types';
 export type { VeskConfig } from '@vesk/compiler/src/types';
 export type { VeskSecurity } from '@vesk/compiler/src/types';
 export type { VeskCors } from '@vesk/compiler/src/types';

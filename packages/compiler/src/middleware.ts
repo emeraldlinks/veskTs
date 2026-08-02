@@ -3,7 +3,7 @@ import { resolve } from 'path';
 import { extractMiddleware } from '@vesk/compiler/src/router';
 import { parseCookies } from '@vesk/compiler/src/api-routes';
 import type { RouteNode } from '@vesk/compiler/src/types';
-import type { VeskPlugin, MiddlewareChainOptions } from '@vesk/compiler/src/types';
+import type { VeskPlugin, MiddlewareContext, MiddlewareChainOptions } from '@vesk/compiler/src/types';
 
 export interface MiddlewareEntry {
   sourcePath: string;
@@ -145,7 +145,7 @@ export async function executeMiddlewareChain(
         }
       }
       if (typeof plugin.onRequest === 'function') {
-        await plugin.onRequest(ctx as Record<string, unknown>);
+        await plugin.onRequest(ctx as MiddlewareContext);
       }
     }
   }

@@ -18,8 +18,8 @@ const PORT = parseInt(process.env.VESK_E2E_DEV_PORT || '3002');
 const devDir = resolve(root, 'test-app', '.vesk', 'dev');
 mkdirSync(resolve(devDir, 'static'), { recursive: true });
 const clientBundlePath = resolve(devDir, 'static', 'client.js');
-const runtimeDir = resolve(root, 'node_modules', '@vesk', 'runtime', 'src');
-const hmrClientPath = resolve(runtimeDir, 'hmr-client.ts');
+const runtimeDir = resolve(root, 'node_modules', '@vesk', 'runtime');
+const hmrClientPath = resolve(runtimeDir, 'hmr-client.js');
 
 let passed = 0;
 let failed = 0;

@@ -1,4 +1,4 @@
-import type { VeskConfig, VeskSecurity, VeskSecurityPreset } from '@vesk/compiler/src/types';
+import type { VeskConfig, VeskPlugin, VeskSecurity, VeskSecurityPreset } from '@vesk/compiler/src/types';
 import { VeskError } from '@vesk/compiler/src/errors';
 
 const SECURITY_PRESETS: Record<string, VeskSecurity> = {
@@ -38,7 +38,7 @@ export function preset(name: string, overrides: VeskSecurity = {}): VeskSecurity
   return { ...presets[name], ...overrides };
 }
 
-export function definePlugin(plugin: VeskConfig['plugins'] extends Array<infer P> ? P : never): VeskConfig['plugins'] extends Array<infer P> ? P : never {
+export function definePlugin<P extends VeskPlugin>(plugin: P): P {
   if (!plugin || typeof plugin !== 'object') {
     throw new Error('[vesk] definePlugin() requires a plugin object.');
   }

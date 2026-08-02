@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "sourceMap": false,
+    "paths": {}
+  },
+  "include": ["src/**/*", "tsconfig.stubs/**/*.d.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.js", "src/**/*.test.ts", "src/acorn-ts-plugin"]
+}

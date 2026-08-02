@@ -2,7 +2,9 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as esbuild from 'esbuild';
+import { buildPackages } from './src/build-packages';
 const __dirname = dirname(fileURLToPath(import.meta.url));
+buildPackages();
 await esbuild.build({
   entryPoints: [resolve(__dirname, 'src/index.ts')],
   bundle: true,
