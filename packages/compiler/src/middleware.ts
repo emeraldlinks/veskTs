@@ -198,12 +198,6 @@ export async function executeMiddlewareChain(
           headers: { Location: err.url || '' },
         });
       }
-      if (err.name === 'NotFoundError') {
-        return new Response(JSON.stringify({ error: 'Not Found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
       throw e;
     }
   }

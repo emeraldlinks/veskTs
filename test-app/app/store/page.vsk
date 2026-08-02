@@ -1,0 +1,11 @@
+import { Link } from '@vesk/runtime';
+
+component Store(props) {
+	<h1 class="text-3xl font-bold mb-4">Store</h1>
+	<p class="text-gray-600 mb-6">Route-level error and not-found boundaries live under /store.</p>
+	<ul class="space-y-3">
+		<li><Link href="/store/widget" class="text-blue-600 no-underline hover:underline">/store/widget — renders normally</Link></li>
+		<li><Link href="/store/missing" class="text-blue-600 no-underline hover:underline">/store/missing — throws NotFoundError → store not-found</Link></li>
+		<li><Link href="/store/boom" class="text-blue-600 no-underline hover:underline">/store/boom — throws Error → store error boundary</Link></li>
+	</ul>
+}

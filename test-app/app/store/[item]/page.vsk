@@ -1,0 +1,12 @@
+import { NotFoundError } from '@vesk/runtime';
+
+component StoreItem(props: { params: { item: string } }) {
+	if (props.params.item === 'missing') {
+		throw new NotFoundError()
+	}
+	if (props.params.item === 'boom') {
+		throw new Error('Store exploded: stock API unavailable')
+	}
+	<h1 class="text-3xl font-bold mb-2">Item: {props.params.item}</h1>
+	<p class="text-gray-600">Rendered normally at the store item route.</p>
+}

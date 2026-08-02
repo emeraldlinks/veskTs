@@ -479,11 +479,21 @@ export async function startDevServer(port: number, projectDir: string, config: R
         let apiLocals: Record<string, unknown> = {};
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
-          const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
-            plugins: (config.plugins || []) as VeskPlugin[],
-            onLast: async () => new Response(null),
-          });
-          apiLocals = mwResult.locals || {};
+          try {
+            const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
+              plugins: (config.plugins || []) as VeskPlugin[],
+              onLast: async () => new Response(null),
+            });
+            apiLocals = mwResult.locals || {};
+          } catch (e) {
+            const err = e as Error & { name: string };
+            if (err.name === 'NotFoundError') {
+              res.writeHead(404, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Not Found' }));
+              return;
+            }
+            throw e;
+          }
         }
 
         const webRequest = buildWebRequest(req, req.url || url.pathname, bodyBuffer.length ? bodyBuffer : null);

@@ -1,0 +1,9 @@
+import { Link } from '@vesk/runtime';
+
+component StoreNotFound(props) {
+	<div class="max-w-2xl mx-auto my-12 p-8 bg-rose-50 border-l-4 border-rose-500 rounded-r-lg text-center">
+		<h1 class="text-3xl font-bold text-rose-700 mb-2">Store Not Found</h1>
+		<p class="text-rose-600 mb-6">That store item doesn't exist: <code class="bg-rose-100 px-1.5 py-0.5 rounded text-sm font-mono">{props.url}</code></p>
+		<Link href="/store" class="text-rose-700 no-underline hover:underline font-medium">← Back to store</Link>
+	</div>
+}
