@@ -114,8 +114,9 @@ function __matchPath(pattern, pathname) {
 export async function handleRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
+  const isDataRequest = request.headers.get('x-vesk-data') === '1';
 
-  if (__prerendered.has(pathname)) {
+  if (__prerendered.has(pathname) && !isDataRequest) {
     return new Response(null, { status: 308, headers: { Location: '/_vesk/static/public' + (pathname.endsWith('/') ? pathname + 'index.html' : pathname + '.html') } });
   }
 
@@ -142,7 +143,7 @@ export async function handleRequest(request) {
       return await route.handler(request);
     }
 
-    if (route.revalidate && route.revalidate > 0) {
+    if (route.revalidate && route.revalidate > 0 && !isDataRequest) {
       const cached = __isrCache.get(url.pathname);
       if (cached && Date.now() - cached.ts < route.revalidate * 1000) {
         return new Response(cached.html, {
@@ -154,7 +155,7 @@ export async function handleRequest(request) {
 
     const response = await route.handler(request);
 
-    if (route.revalidate && route.revalidate > 0) {
+    if (route.revalidate && route.revalidate > 0 && !isDataRequest) {
       const html = await response.clone().text();
       __isrCache.set(url.pathname, { html, headers: Object.fromEntries(response.headers), ts: Date.now() });
     }

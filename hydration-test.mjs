@@ -408,6 +408,97 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 12: Fresh server data on SPA navigation ──
+  console.log('\n=== TEST 12: Fresh server data on SPA navigation ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    const dataRequests = [];
+    page.on('pageerror', err => errors.push(err.message));
+    page.on('request', req => {
+      if (req.headers()['x-vesk-data'] === '1') dataRequests.push(req.url());
+    });
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    const titleBefore = await page.evaluate(() => document.title);
+    assert(titleBefore !== 'Async — load() + async components', 'title is not the async one yet: "' + titleBefore + '"');
+
+    // No data request should fire for the initial SSR'd page (container already hydrated)
+    assert(dataRequests.length === 0, `no X-Vesk-Data request on initial load (got ${dataRequests.length})`);
+
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await page.click('a[href="/async"]');
+
+    // optimistic render should happen first, then fresh head + props land
+    await page.waitForFunction(() => document.title.includes('Async'), { timeout: 8000 });
+    await new Promise(r => setTimeout(r, 200));
+
+    const url = page.url();
+    assert(url.includes('/async'), 'URL changed to /async');
+    assert(await page.evaluate(() => window.__spaFlag === true), '/async reached via SPA (no reload)');
+
+    const finalTitle = await page.evaluate(() => document.title);
+    assert(finalTitle === 'Async — load() + async components', 'title swapped to fresh head: "' + finalTitle + '"');
+
+    const bodyText = await page.evaluate(() => document.body.textContent);
+    assert(bodyText.includes('Posts from load()'), 'async page content rendered');
+    assert(bodyText.includes('Hello Vesk'), 'posts from load() props rendered: ' + (bodyText.match(/Hello Vesk/) ? 'yes' : 'no'));
+
+    const dataForAsync = dataRequests.filter(u => u.includes('/async'));
+    assert(dataForAsync.length === 1, `exactly one X-Vesk-Data request for /async (got ${dataForAsync.length})`);
+    assert(errors.length === 0, 'zero JS errors during data-fetch nav (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    // SPA back to root still works after data fetch
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await page.evaluate(() => window.history.back());
+    await new Promise(r => setTimeout(r, 400));
+    const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
+    assert(h1 === 'Welcome to Vesk', 'back to / after async data nav (h1: ' + h1 + ')');
+    assert(await page.evaluate(() => window.__spaFlag === true), 'back is SPA (no reload)');
+
+    await page.close();
+  }
+
+  // ── Test 13: Fresh data on repeated SPA navigation (prefetch reuse) ──
+  console.log('\n=== TEST 13: Fresh data on repeated SPA navigation ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    let asyncDataRequests = 0;
+    page.on('pageerror', err => errors.push(err.message));
+    page.on('request', req => {
+      if (req.headers()['x-vesk-data'] === '1' && req.url().includes('/async')) asyncDataRequests++;
+    });
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    // navigate away and back to /async twice
+    for (let i = 0; i < 2; i++) {
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/async"]');
+      await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+      assert(true, `async fresh props render on visit ${i + 1}`);
+
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/about"]');
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
+    }
+
+    // Third SPA nav to /async: data already fresh for this page session, no refetch
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await page.click('a[href="/async"]');
+    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+    const bodyText = await page.evaluate(() => document.body.textContent);
+    assert(bodyText.includes('Hello Vesk'), 'async renders from cached fresh props without refetch');
+
+    // First /async visit fetched fresh data; revisits (and the reuse nav) hit the
+    // session cache — exactly one X-Vesk-Data request for /async total.
+    assert(asyncDataRequests === 1, `async fresh data fetched once, reused on revisits (got ${asyncDataRequests})`);
+    assert(errors.length === 0, 'zero JS errors during repeated data navs (got ' + errors.length + ')');
+
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

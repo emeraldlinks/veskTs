@@ -13,6 +13,8 @@ export interface RouteNode {
 	segmentCount?: number;
 	_matchChain?: RouteNode[];
 	loader?: Function;
+	props?: Record<string, unknown>;
+	_head?: string;
 	[k: string]: unknown;
 }
 

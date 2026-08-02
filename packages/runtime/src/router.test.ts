@@ -8,6 +8,18 @@ function test(name, fn) {
 	catch (e) { failed++; console.log(`  ✗ ${name} — ${e.message}`); }
 }
 
+let asyncQueue: Promise<void> = Promise.resolve();
+function testAsync(name, fn) {
+	asyncQueue = asyncQueue.then(async () => {
+		try { await fn(); passed++; console.log(`  ✓ ${name}`); }
+		catch (e) { failed++; console.log(`  ✗ ${name} — ${e.message}`); }
+	});
+}
+
+function tick(ms = 0) {
+	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 function expect(actual) {
 	return {
 		toBe(expected) {
@@ -147,6 +159,13 @@ function setupMockDom() {
 }
 
 setupMockDom();
+
+const defaultFetch = async () => ({
+	ok: true, status: 200, redirected: false, url: '',
+	headers: { get: () => 'application/json' },
+	json: async () => ({}),
+});
+globalThis.fetch = defaultFetch;
 
 console.log('Runtime Router\n');
 
@@ -635,6 +654,118 @@ test('plain anchor created via createElement has no Vesk listeners', () => {
 	// No listeners should be attached (it's just a plain element)
 	expect(a._listeners.click).toBeFalsy();
 });
+
+// ── Route data fetch (fresh server data on SPA navigation) ──
+
+function mockFetchResponse(body, extra = {}) {
+	return {
+		ok: true, status: 200, redirected: false, url: '',
+		headers: { get: () => 'application/json' },
+		json: async () => body,
+		...extra,
+	};
+}
+
+testAsync('navigate sends X-Vesk-Data and patches DOM with fresh props', async () => {
+	const container = document.createElement('div');
+	let capturedHeader = null;
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path, init) => {
+		capturedHeader = init && init.headers ? init.headers['X-Vesk-Data'] : null;
+		return mockFetchResponse({ props: { msg: 'fresh-data' }, head: '<title>Fresh</title>' });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/data', page: (props) => {
+				const d = document.createElement('p');
+				d.textContent = (props && props.msg) || 'optimistic';
+				return d;
+			} },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/data', { replace: true });
+		expect(container.textContent).toBe('optimistic');
+		expect(capturedHeader).toBe('1');
+		await tick(10);
+		expect(container.textContent).toBe('fresh-data');
+		expect(document.head.textContent.includes('Fresh')).toBe(true);
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('prefetch caches route data; navigate reuses it without refetch', async () => {
+	const container = document.createElement('div');
+	let fetchCount = 0;
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path) => {
+		fetchCount++;
+		return mockFetchResponse({ props: { msg: 'prefetched' }, head: '' });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/fresh', page: (props) => {
+				const d = document.createElement('p');
+				d.textContent = (props && props.msg) || 'about';
+				return d;
+			} },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.prefetch('/fresh');
+		await tick(5);
+		expect(fetchCount).toBe(1);
+		router.navigate('/fresh', { replace: true });
+		await tick(10);
+		expect(container.textContent).toBe('prefetched');
+		expect(fetchCount).toBe(1);
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('stale route data response is dropped after rapid navigation', async () => {
+	const container = document.createElement('div');
+	let releaseA;
+	const gateA = new Promise(resolve => { releaseA = resolve; });
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path) => {
+		if (path === '/a') {
+			await gateA;
+			return mockFetchResponse({ props: { msg: 'stale-A' }, head: '' });
+		}
+		return mockFetchResponse({ props: { msg: 'fresh-B' }, head: '' });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/a', page: (props) => {
+				const d = document.createElement('p');
+				d.textContent = (props && props.msg) || 'a';
+				return d;
+			} },
+			{ path: '/b', page: (props) => {
+				const d = document.createElement('p');
+				d.textContent = (props && props.msg) || 'b';
+				return d;
+			} },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/a', { replace: true });
+		router.navigate('/b', { replace: true });
+		releaseA();
+		await tick(15);
+		expect(container.textContent).toBe('fresh-B');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+await asyncQueue;
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

@@ -93,6 +93,18 @@ export async function generateClientBundle(
         if (node.layout && existsSync(layoutPath)) {
           compileFile(layoutPath, node.layout, chunkCode);
         }
+        const errorPath = resolve(appDir, node.sourceDir, 'error.vsk');
+        if (node.error && existsSync(errorPath)) {
+          compileFile(errorPath, node.error, chunkCode);
+        }
+        const notFoundPath = resolve(appDir, node.sourceDir, 'not-found.vsk');
+        if (node.notFound && existsSync(notFoundPath)) {
+          compileFile(notFoundPath, node.notFound, chunkCode);
+        }
+        const loadingPath = resolve(appDir, node.sourceDir, 'loading.vsk');
+        if (node.loading && existsSync(loadingPath)) {
+          compileFile(loadingPath, node.loading, chunkCode);
+        }
         if (chunkCode.length > 0) {
           const chunkName = `page-${buildChunkName(node)}.js`;
           chunkEntries.push({ name: chunkName, code: chunkCode.join('\n\n'), node });
@@ -169,6 +181,12 @@ export async function generateClientBundle(
         if (node.page && existsSync(pagePath)) compileFileMono(pagePath, node.page);
         const layoutPath = resolve(appDir, node.sourceDir, 'layout.vsk');
         if (node.layout && existsSync(layoutPath)) compileFileMono(layoutPath, node.layout);
+        const errorPath = resolve(appDir, node.sourceDir, 'error.vsk');
+        if (node.error && existsSync(errorPath)) compileFileMono(errorPath, node.error);
+        const notFoundPath = resolve(appDir, node.sourceDir, 'not-found.vsk');
+        if (node.notFound && existsSync(notFoundPath)) compileFileMono(notFoundPath, node.notFound);
+        const loadingPath = resolve(appDir, node.sourceDir, 'loading.vsk');
+        if (node.loading && existsSync(loadingPath)) compileFileMono(loadingPath, node.loading);
         walkMono(node.children || []);
       }
     }
@@ -247,6 +265,8 @@ function buildMainBundle(
     '  for (const n of nodes) {\n' +
     "    if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName];\n" +
     "    if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName];\n" +
+    "    if (n._errorName && __components[n._errorName]) n.error = __components[n._errorName];\n" +
+    "    if (n._notFoundName && __components[n._notFoundName]) n.notFound = __components[n._notFoundName];\n" +
     '    if (n.children) __updateComponents(n.children);\n' +
     '  }\n' +
     '}\n';
@@ -259,6 +279,8 @@ function buildMainBundle(
       "    if (n.chunk) n._chunk = n.chunk;\n" +
       "    if (typeof n.page === 'string') n._pageName = n.page;\n" +
       "    if (typeof n.layout === 'string') n._layoutName = n.layout;\n" +
+      "    if (typeof n.error === 'string') n._errorName = n.error;\n" +
+      "    if (typeof n.notFound === 'string') n._notFoundName = n.notFound;\n" +
       '    if (n.children) __resolveNames(n.children);\n' +
       '  }\n' +
       '}\n';
@@ -349,6 +371,8 @@ function buildMainBundle(
     '      n._layoutName = n.layout;\n' +
     '      n.layout = __components[n.layout];\n' +
     '    }\n' +
+    "    if (typeof n.error === 'string') n.error = __components[n.error];\n" +
+    "    if (typeof n.notFound === 'string') n.notFound = __components[n.notFound];\n" +
     '    if (n.children) __resolveNames(n.children);\n' +
     '  }\n' +
     '}\n' +

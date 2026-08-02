@@ -7,7 +7,7 @@ import type { RouteNode, RouteMatch } from '@vesk/runtime/src/router-match';
 import {
 	__isHydrating, setIsHydrating, _state, _scrollPositions,
 	_isPopStateNavigation, setIsPopStateNavigation, setCurrentRouter,
-	showLoadingInContainer, handleScroll, findLoadingComponent,
+	showLoadingInContainer, handleScroll, applyHead, findLoadingComponent,
 	findErrorComponent, findNotFoundComponent, RouterCtx, getCurrentRouter,
 	Outlet, Link, NavLink, useNavigate, useParams, usePathname,
 	useSearchParams, useRouter, Redirect, redirect, permanentRedirect,
@@ -36,6 +36,7 @@ interface RouterInstance {
 	__componentInstances?: Map<string, { root: Element; props: Record<string, unknown>; node: RouteNode; type: string }[]>;
 	__updateComponents?: (tree: RouteNode[] | RouteMatch['matchChain']) => void;
 	_prefetched?: Map<string, RouteMatch>;
+	_navToken?: number;
 	[k: string]: unknown;
 }
 
@@ -74,6 +75,122 @@ function hasPendingChunks(nodes: RouteNode[]): string[] {
 	}
 	nodes.forEach(walk);
 	return urls;
+}
+
+interface RouteDataResult {
+	props?: Record<string, unknown>;
+	head?: string;
+	notFound?: boolean;
+	redirect?: string;
+}
+
+const _dataPromises = new Map<string, Promise<RouteDataResult | null>>();
+
+async function fetchRouteData(path: string): Promise<RouteDataResult | null> {
+	try {
+		const res = await fetch(path, { headers: { 'X-Vesk-Data': '1' }, credentials: 'same-origin' });
+		if (res.redirected && res.url) {
+			const finalUrl = new URL(res.url);
+			const requested = new URL(path, window.location.origin);
+			if (finalUrl.pathname !== requested.pathname || finalUrl.search !== requested.search) {
+				return { redirect: finalUrl.pathname + finalUrl.search };
+			}
+		}
+		if (res.status === 404) return { notFound: true };
+		if (!res.ok) return null;
+		const ct = res.headers.get('content-type') || '';
+		if (!ct.includes('application/json')) return null;
+		return (await res.json()) as RouteDataResult;
+	} catch {
+		return null;
+	}
+}
+
+function getRouteData(path: string): Promise<RouteDataResult | null> {
+	const key = path;
+	const existing = _dataPromises.get(key);
+	if (existing) return existing;
+	const p = fetchRouteData(key).finally(() => { _dataPromises.delete(key); });
+	_dataPromises.set(key, p);
+	return p;
+}
+
+function findPageNode(match: RouteMatch): RouteNode | null {
+	const chain = match.matchChain;
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].page) return chain[i];
+	}
+	return null;
+}
+
+function renderNotFound(
+	router: RouterInstance,
+	match: RouteMatch,
+	container: HTMLElement,
+): void {
+	const chain = match.matchChain;
+	const paramValues = match.params;
+	const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
+	if (notFoundFn) {
+		const tempRoot = document.createDocumentFragment();
+		const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
+		const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
+		const nfDom = notFoundFn(nfProps, new Map(), walker);
+		if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
+			if (container.replaceChildren) container.replaceChildren(nfDom as Node);
+			else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
+		} else if (typeof nfDom === 'string') {
+			container.innerHTML = nfDom;
+		}
+		return;
+	}
+	if (container.replaceChildren) container.replaceChildren();
+	else container.innerHTML = '';
+	container.innerHTML = '<h1>404 — Not Found</h1>';
+	router._currentMatch = match;
+}
+
+function applyRouteData(
+	router: RouterInstance,
+	match: RouteMatch,
+	data: RouteDataResult,
+	container: HTMLElement,
+	render: (router: RouterInstance, match: RouteMatch, container: HTMLElement) => void = renderMatch,
+): void {
+	if (data.notFound) {
+		renderNotFound(router, match, container);
+		return;
+	}
+	const pathname = match.pathname || window.location.pathname;
+	const pageNode = findPageNode(match);
+	if (pageNode && data.props) {
+		pageNode.props = data.props;
+		pageNode._dataPath = pathname;
+	}
+	if (data.head) {
+		applyHead(data.head);
+		if (pageNode) pageNode._head = data.head;
+	}
+	render(router, match, container);
+	router._currentMatch = match;
+}
+
+function shouldFetchData(router: RouterInstance, match: RouteMatch): boolean {
+	const pageNode = findPageNode(match);
+	if (!pageNode) return false;
+	const pathname = match.pathname || window.location.pathname;
+	return (pageNode._dataPath as string | undefined) !== pathname;
+}
+
+function storePrefetchedData(match: RouteMatch, data: RouteDataResult): void {
+	if (!data || data.notFound || data.redirect) return;
+	const pathname = match.pathname || window.location.pathname;
+	const pageNode = findPageNode(match);
+	if (pageNode && data.props) {
+		pageNode.props = data.props;
+		pageNode._dataPath = pathname;
+	}
+	if (data.head && pageNode) pageNode._head = data.head;
 }
 
 function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement): void {
@@ -383,6 +500,10 @@ export function createRouter(
 			}
 
 			const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
+			this._navToken = (this._navToken || 0) + 1;
+			const navToken = this._navToken;
+
+			let firstRenderFailed = false;
 
 			const doRender = () => {
 				if (!opts.replace) {
@@ -392,16 +513,35 @@ export function createRouter(
 				}
 				set(_state.path, url.pathname);
 				set(_state.search, url.search);
-				renderMatch(this, match!, this.container);
+				try {
+					renderMatch(this, match!, this.container);
+				} catch (e) {
+					firstRenderFailed = true;
+					throw e;
+				}
 				this._currentMatch = match!;
 				handleScroll(url.pathname, opts.replace);
 			};
 
+			const fetchData = () => {
+				if (firstRenderFailed) return;
+				if (!shouldFetchData(this, match!)) return;
+				getRouteData(url.pathname + url.search).then((data) => {
+					if (navToken !== this._navToken) return;
+					if (!data) return;
+					if (data.redirect) {
+						this.navigate(data.redirect, { replace: true });
+						return;
+					}
+					applyRouteData(this, match!, data, this.container);
+				});
+			};
+
 			if (loadingFn) {
 				showLoadingInContainer(this.container, loadingFn, match.params);
-				Promise.resolve().then(() => doRender());
+				Promise.resolve().then(() => { try { doRender(); } finally { fetchData(); } });
 			} else {
-				doRender();
+				try { doRender(); } finally { fetchData(); }
 			}
 		},
 
@@ -409,8 +549,13 @@ export function createRouter(
 			const url = new URL(path, window.location.origin);
 			const match = matchRoute(this.routeTree, url.pathname);
 			if (!match) return;
+			match.pathname = url.pathname;
 			this._prefetched = this._prefetched || new Map();
 			this._prefetched.set(url.pathname, match);
+			if (typeof document === 'undefined') return;
+			getRouteData(url.pathname + url.search).then((data) => {
+				if (data) storePrefetchedData(match!, data);
+			});
 		},
 
 		get currentPath() {
@@ -567,8 +712,12 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			}
 
 			const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
+			router._navToken = (router._navToken || 0) + 1;
+			const navToken = router._navToken;
 
 			const middlewareFns: Function[] = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
+
+			let firstRenderFailed = false;
 
 			const doRender = () => {
 				const fullUrl = url.pathname + url.search;
@@ -579,9 +728,36 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				}
 				set(_state.path, url.pathname);
 				set(_state.search, url.search);
-				renderFn(router, match!, container);
+				try {
+					renderFn(router, match!, container);
+				} catch (e) {
+					firstRenderFailed = true;
+					throw e;
+				}
 				router._currentMatch = match!;
 				handleScroll(url.pathname, opts.replace);
+			};
+
+			const fetchData = () => {
+				if (firstRenderFailed) return;
+				if (!shouldFetchData(router, match!)) return;
+				getRouteData(url.pathname + url.search).then(async (data) => {
+					if (navToken !== router._navToken) return;
+					if (!data) return;
+					if (data.redirect) {
+						router.navigate(data.redirect, { replace: true });
+						return;
+					}
+					const pending = hasPendingChunks(match!.matchChain);
+					if (pending.length > 0) {
+						await Promise.all(pending.map(ensureChunk));
+						if (navToken !== router._navToken) return;
+						if (typeof router.__updateComponents === 'function') {
+							router.__updateComponents(match!.matchChain);
+						}
+					}
+					applyRouteData(router, match!, data, container, renderFn);
+				});
 			};
 
 			const pendingChunks = hasPendingChunks(match.matchChain);
@@ -631,14 +807,18 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					showLoadingInContainer(container, loadingFn, match.params);
 				}
 				Promise.resolve().then(() => {
-					if (middlewareFns.length > 0) {
-						runMwChain(0);
-					} else {
-						(doRenderWithChunks as () => void)();
+					try {
+						if (middlewareFns.length > 0) {
+							runMwChain(0);
+						} else {
+							(doRenderWithChunks as () => void)();
+						}
+					} finally {
+						fetchData();
 					}
 				});
 			} else {
-				(doRenderWithChunks as () => void)();
+				try { (doRenderWithChunks as () => void)(); } finally { fetchData(); }
 			}
 		},
 
@@ -646,10 +826,15 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			const url = new URL(path, window.location.origin);
 			const match = matchRoute(routeTree, url.pathname);
 			if (!match) return;
+			match.pathname = url.pathname;
 			router._prefetched = router._prefetched || new Map();
 			router._prefetched.set(url.pathname, match);
 			const preloadUrls = hasPendingChunks(match.matchChain);
 			preloadUrls.forEach(ensureChunk);
+			if (typeof document === 'undefined') return;
+			getRouteData(url.pathname + url.search).then((data) => {
+				if (data) storePrefetchedData(match!, data);
+			});
 		},
 
 		get currentPath() {

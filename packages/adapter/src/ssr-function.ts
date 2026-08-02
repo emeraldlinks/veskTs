@@ -136,6 +136,13 @@ export function generateSsrFunction(
   let renderCode: string;
   if (hasLayout) {
     renderCode = [
+      "  if (request.headers.get('x-vesk-data') === '1') {",
+      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
+      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true });",
+      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
+      "      headers: { 'Content-Type': 'application/json' },",
+      '    });',
+      '  }',
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
       '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
       '  return new Response(html, {',
@@ -144,6 +151,13 @@ export function generateSsrFunction(
     ].join('\n');
   } else if (hasAncestorLayout) {
     renderCode = [
+      "  if (request.headers.get('x-vesk-data') === '1') {",
+      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
+      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true });",
+      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
+      "      headers: { 'Content-Type': 'application/json' },",
+      '    });',
+      '  }',
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
       '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
       '  return new Response(html, {',
@@ -152,6 +166,12 @@ export function generateSsrFunction(
     ].join('\n');
   } else {
     renderCode = [
+      "  if (request.headers.get('x-vesk-data') === '1') {",
+      '    const dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true });',
+      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: dataPage.head || '' }), {",
+      "      headers: { 'Content-Type': 'application/json' },",
+      '    });',
+      '  }',
       "  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + " });",
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',

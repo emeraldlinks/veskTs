@@ -125,6 +125,43 @@ export function handleScroll(pathname: string, isReplace?: boolean): void {
 	}
 }
 
+const HEAD_MARKER = 'data-vesk-head';
+
+export function applyHead(headHtml: string): void {
+	if (typeof document === 'undefined' || !headHtml) return;
+	const head = document.head;
+	if (!head) return;
+
+	for (const el of Array.from(head.querySelectorAll('[' + HEAD_MARKER + ']'))) {
+		el.remove();
+	}
+
+	const titleMatch = headHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
+	if (titleMatch) {
+		const existing = head.querySelector('title');
+		if (existing) existing.textContent = titleMatch[1];
+		else {
+			const t = document.createElement('title');
+			t.textContent = titleMatch[1];
+			head.appendChild(t);
+		}
+	}
+
+	for (const m of headHtml.matchAll(/<meta\b([^>]*)>/gi)) {
+		const meta = document.createElement('meta');
+		const raw = m[1] || '';
+		for (const attrMatch of raw.matchAll(/([a-zA-Z0-9\-:]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) {
+			const name = attrMatch[1];
+			const value = attrMatch[3] ?? attrMatch[4] ?? '';
+			if (name.toLowerCase() === 'charset') continue;
+			meta.setAttribute(name, value);
+		}
+		if (!meta.hasAttributes()) continue;
+		meta.setAttribute(HEAD_MARKER, '');
+		head.appendChild(meta);
+	}
+}
+
 interface OutletProps {
 	children?: unknown;
 }

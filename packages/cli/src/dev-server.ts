@@ -540,11 +540,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
     const matched = match;
+    const forData = req.headers['x-vesk-data'] === '1';
 
     async function renderSSR() {
       const chain = cleanChain;
       let body = '';
       let head = '';
+      let props: Record<string, unknown> | undefined;
 
       for (let i = chain.length - 1; i >= 0; i--) {
         const node = chain[i];
@@ -557,6 +559,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true });
           body = result.body;
           head = result.head || '';
+          props = result.props;
         }
 
         if (node.layout && existsSync(layoutFilePath)) {
@@ -566,6 +569,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
           body = result.body;
           head = (result.head || '') + head;
         }
+      }
+
+      if (forData) {
+        return { html: '', props: props || { params: matched.params }, head };
       }
 
       const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir as string, 'layout.vsk')));
@@ -589,7 +596,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           throw new Error('No page or layout matched');
         }
       }
-      return html;
+      return { html, props: props || { params: matched.params }, head };
     }
 
     async function* renderSSRStream() {
@@ -659,9 +666,12 @@ export async function startDevServer(port: number, projectDir: string, config: R
             const prev = (globalThis as Record<string, unknown>).__vesk_request;
             (globalThis as Record<string, unknown>).__vesk_request = ctx;
             try {
-              const html = await renderSSR();
+              const rendered = await renderSSR();
               const secHeaders = security ? securityHeaders({ security }) : {};
-              return new Response(html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
+              if (forData) {
+                return new Response(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }), { headers: { 'Content-Type': 'application/json', ...secHeaders } });
+              }
+              return new Response(rendered.html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
             } finally {
               (globalThis as Record<string, unknown>).__vesk_request = prev;
             }
@@ -680,8 +690,15 @@ export async function startDevServer(port: number, projectDir: string, config: R
         const prev = (globalThis as Record<string, unknown>).__vesk_request;
         (globalThis as Record<string, unknown>).__vesk_request = ctx;
         try {
-          const stream = renderSSRStream();
           const secHeaders = security ? securityHeaders({ security }) : {};
+          if (forData) {
+            const rendered = await renderSSR();
+            logRequest(200);
+            res.writeHead(200, { 'Content-Type': 'application/json', ...secHeaders });
+            res.end(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }));
+            return;
+          }
+          const stream = renderSSRStream();
           logRequest(200);
           res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Transfer-Encoding': 'chunked', ...secHeaders });
           for await (const chunk of stream) {

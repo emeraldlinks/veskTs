@@ -18,11 +18,15 @@ component AsyncPage(props) {
 	</p>
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">Posts from load()</h2>
-	for (const post of props.posts) {
-		<div class="bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-100">
-			<h3 class="font-semibold">{post.title}</h3>
-			<p class="text-gray-500 text-sm">{post.excerpt}</p>
-		</div>
+	if (props.posts && props.posts.length > 0) {
+		for (const post of props.posts) {
+			<div class="bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-100">
+				<h3 class="font-semibold">{post.title}</h3>
+				<p class="text-gray-500 text-sm">{post.excerpt}</p>
+			</div>
+		}
+	} else {
+		<p class="text-gray-400 text-sm">Loading posts…</p>
 	}
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">async component with await</h2>
