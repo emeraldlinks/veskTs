@@ -4,6 +4,7 @@ import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
+import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import type { RouteNode, AncestorLayout } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -83,8 +84,7 @@ function escapeSource(src: string): string {
 }
 
 function extractCompName(src: string): string | null {
-  const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-  return m ? m[1] : null;
+  return resolveComponentName(src);
 }
 
 function routeName(segments: string[]): string {

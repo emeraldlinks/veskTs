@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
 function escapeSource(src: string): string {
@@ -18,8 +19,7 @@ function routeName(segments: string[]): string {
 }
 
 function extractCompName(src: string): string | null {
-  const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-  return m ? m[1] : null;
+  return resolveComponentName(src);
 }
 
 function buildParamExtraction(node: RouteNode, urlParts: string[]): string[] {

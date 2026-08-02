@@ -11,17 +11,18 @@ export function reconcile<T>(
 	endAnchor: Node,
 	items: T[],
 	keyFn: (item: T) => string,
-	createItem: (item: T, effs: Block[]) => void,
+	createItem: (item: T, index: number, effs: Block[]) => void,
 ): (newItems: T[]) => void {
 	const parent = anchor.parentNode as HTMLElement;
 	const map = new Map<string, MapEntry>();
 
-	for (const item of items) {
+	for (let i = 0; i < items.length; i++) {
+		const item = items[i];
 		const key = keyFn(item);
 		const marker = document.createComment('k:' + key);
 		const effs: Block[] = [];
 		parent.insertBefore(marker, endAnchor);
-		createItem(item, effs);
+		createItem(item, i, effs);
 		map.set(key, { marker, effs });
 	}
 
@@ -51,7 +52,7 @@ export function reconcile<T>(
 				const marker = document.createComment('k:' + key);
 				const effs: Block[] = [];
 				parent.insertBefore(marker, ref);
-				createItem(newItems[i], effs);
+				createItem(newItems[i], i, effs);
 				map.set(key, { marker, effs });
 				ref = marker;
 			}

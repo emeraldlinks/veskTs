@@ -4,6 +4,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve, join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { defineConfig, definePlugin, preset, validateConfig } from '@vesk/compiler/src/config';
+import type { VeskConfig, VeskSecurity } from '@vesk/compiler/src/types';
 import { setRedactLogging, setRuntimeModule } from '@vesk/compiler/src/server-utils';
 import { build, startProdServer } from '@vesk/adapter/src/index';
 import { runSeoAudit } from '@vesk/adapter/src/seo-audit';
@@ -79,18 +80,19 @@ async function loadConfig(projectDir: string) {
     const tmpFile = join(projectDir, '.vesk', 'config.tmp.js');
     mkdirSync(dirname(tmpFile), { recursive: true });
     writeFileSync(tmpFile, js, 'utf-8');
-    globalThis.__vesk_inject = { defineConfig, definePlugin, preset };
+    (globalThis as Record<string, unknown>).__vesk_inject = { defineConfig, definePlugin, preset };
 
     raw = (await import(tmpFile)).default;
-    delete globalThis.__vesk_inject;
+    delete (globalThis as Record<string, unknown>).__vesk_inject;
   } else {
     raw = (await import(configPath)).default;
   }
 
-  const config = typeof defineConfig === 'function' ? defineConfig(raw) : raw;
+  const config = (typeof defineConfig === 'function' ? defineConfig(raw as VeskConfig) : raw) as VeskConfig;
   if (typeof validateConfig === 'function') validateConfig(config);
 
-  if ((config as Record<string, unknown>)?.security?.redactLogs !== false) {
+  const sec = config.security;
+  if (sec !== undefined && sec !== false && typeof sec === 'object' && (sec as VeskSecurity).redactLogs !== false) {
     try { setRedactLogging(true); } catch {}
   }
 
@@ -464,7 +466,7 @@ if (cmd === 'dev') {
     process.exit(1);
   }
 
-  const config = await loadConfig(projectDir);
+  const config = (await loadConfig(projectDir)) as Record<string, unknown>;
   setRuntimeModule(__veskRuntime);
   await startDevServer(port, projectDir, config);
 }

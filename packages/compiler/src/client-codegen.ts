@@ -114,17 +114,20 @@ export function transformTracked(irNode: Expression | RuntimeStatement | Dynamic
         )
           return context.next();
         if (
-          parent.type === 'MemberExpression' &&
-          parent.object === node &&
-          !parent.computed
-        )
-          return context.next();
-        if (
           parent.type === 'Property' &&
           parent.value === node &&
           parent.key &&
           parent.key.type === 'Identifier' &&
           parent.key.name === 'into'
+        )
+          return context.next();
+        if (
+          parent.type === 'MemberExpression' &&
+          !parent.computed &&
+          parent.object === node &&
+          parent.property &&
+          parent.property.type === 'Identifier' &&
+          parent.property.name === 'set'
         )
           return context.next();
       }
@@ -647,8 +650,10 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   ctx.push(`const ${endAnchor} = document.createComment('map-end');`);
 
   const renderItem = ctx.n();
-  ctx.push(`const ${renderItem} = (${itemVar}, __e, __r) => {`);
+  const indexParam = node.indexVariable ? ', __i' : '';
+  ctx.push(`const ${renderItem} = (${itemVar}${indexParam}, __e, __r) => {`);
   ctx.push(indent(`__r = __r || ${endAnchor};`));
+  if (node.indexVariable) ctx.push(indent(`const ${node.indexVariable} = __i;`));
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   for (const n of node.bodyTemplate) {
     const v = emitNode(ctx, n, tracked, '__e');
@@ -661,7 +666,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   if (node.keyExpr) {
     const keyExpr = transformTracked(node.keyExpr as any, tracked);
     const reconciler = ctx.n();
-    ctx.push(`const ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}, __e, __r) => ${renderItem}(${itemVar}, __e, __r));`);
+    ctx.push(`const ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}${indexParam}, __e, __r) => ${renderItem}(${itemVar}${indexParam ? ', __i' : ''}, __e, __r));`);
 
     ctx.effects.push(`{
   let __first = true;
@@ -671,11 +676,31 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   });
 }`);
   } else {
-    ctx.push(`for (const ${itemVar} of ${arrExpr}) {`);
-    ctx.push(indent(`${renderItem}(${itemVar}, ${effectsVar});`));
-    ctx.push(`}`);
-
-    ctx.effects.push(`{
+    if (node.indexVariable) {
+      ctx.push(`let __i = 0;`);
+      ctx.push(`for (const ${itemVar} of ${arrExpr}) {`);
+      ctx.push(indent(`${renderItem}(${itemVar}, ${effectsVar}, void 0, __i);`));
+      ctx.push(indent(`__i++;`));
+      ctx.push(`}`);
+      ctx.effects.push(`{
+  let __first = true;
+  effect(() => {
+    if (__first) { __first = false; return; }
+    for (const e of ${effectsVar}) destroy_block(e);
+    ${effectsVar}.length = 0;
+    __cleanup(${anchor}, ${endAnchor});
+    let __i = 0;
+    for (const ${itemVar} of ${arrExpr}) {
+      ${renderItem}(${itemVar}, ${effectsVar}, void 0, __i);
+      __i++;
+    }
+  });
+}`);
+    } else {
+      ctx.push(`for (const ${itemVar} of ${arrExpr}) {`);
+      ctx.push(indent(`${renderItem}(${itemVar}, ${effectsVar});`));
+      ctx.push(`}`);
+      ctx.effects.push(`{
   let __first = true;
   effect(() => {
     if (__first) { __first = false; return; }
@@ -687,6 +712,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
     }
   });
 }`);
+    }
   }
 
   return null;

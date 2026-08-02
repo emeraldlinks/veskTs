@@ -3,6 +3,7 @@ import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
+import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +39,12 @@ export async function generateClientBundle(
                .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '');
   }
 
+  function stripExports(code: string): string {
+    return code
+      .replace(/^export\s+default\s+__components\[.*?\];?\s*\n?/gm, '')
+      .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+  }
+
   function compileFile(filePath: string, resolvedName: string, output: string[]): void {
     if (seen.has(filePath)) return;
     seen.add(filePath);
@@ -45,21 +52,18 @@ export async function generateClientBundle(
 
     const compCode = compileClient(src, null, { forceClient: true });
     if (compCode) {
-      const stripped = stripRuntimeImport(compCode)
-        .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+      const stripped = stripExports(stripRuntimeImport(compCode));
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
     }
 
     const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
     if (hydCode) {
-      const stripped = stripRuntimeImport(hydCode)
-        .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '')
+      const stripped = stripExports(stripRuntimeImport(hydCode))
         .replace(/__components/g, '__hydrators');
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
     }
 
-    const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-    const actualName = m?.[1];
+    const actualName = resolveComponentName(src);
     if (actualName && actualName !== resolvedName) {
       output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
       output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
@@ -141,21 +145,18 @@ export async function generateClientBundle(
 
       const compCode = compileClient(src, null, { forceClient: true });
       if (compCode) {
-        const stripped = stripRuntimeImport(compCode)
-          .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+        const stripped = stripExports(stripRuntimeImport(compCode));
         componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
 
       const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
       if (hydCode) {
-        const stripped = stripRuntimeImport(hydCode)
-          .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '')
+        const stripped = stripExports(stripRuntimeImport(hydCode))
           .replace(/__components/g, '__hydrators');
         hydratorLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
 
-      const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-      const actualName = m?.[1];
+      const actualName = resolveComponentName(src);
       if (actualName && actualName !== resolvedName) {
         aliasLines.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
         hydratorAliasLines.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);

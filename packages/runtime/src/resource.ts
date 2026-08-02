@@ -166,10 +166,20 @@ function buildRequestInit<T>(options: UseFetchOptions<T>): RequestInit {
 	return init;
 }
 
+function resolveFetchUrl(url: string): string {
+  if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return url;
+  const reqUrl = (g().__vesk_request as Record<string, unknown> | undefined)?.url;
+  const base = typeof reqUrl === 'string' && /^https?:\/\//i.test(reqUrl)
+    ? reqUrl
+    : (g().__vesk_ssr_base_url as string) || '';
+  if (base) return new URL(url, base).href;
+  return url;
+}
+
 function createFetcher<T>(url: string, options: UseFetchOptions<T>): (signal?: AbortSignal) => Promise<T> {
 	const init = buildRequestInit(options);
 	return async (signal?: AbortSignal) => {
-		const res = await fetch(url, signal ? { ...init, signal } : init);
+		const res = await fetch(resolveFetchUrl(url), signal ? { ...init, signal } : init);
 		if (!res.ok) throw new HttpError(res.status, res.statusText);
 		return res.json() as Promise<T>;
 	};

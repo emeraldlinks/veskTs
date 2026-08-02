@@ -3,7 +3,7 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { createRateLimiter } from '@vesk/compiler/src/server-codegen';
+import { createRateLimiter, resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
@@ -344,8 +344,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
                   const runtimePath = resolve(outDir, 'server', 'runtime.js');
                   const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
                   const src = readFileSync(errPath, 'utf-8');
-                  const compNameMatch = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-                  const compName = compNameMatch ? compNameMatch[1] : 'Error';
+                  const compName = resolveComponentName(src) || 'Error';
                   errorHtml = await renderFullPage(src, compName, { error: (e instanceof Error ? e.message : String(e)), stack: (e instanceof Error ? e.stack : ''), statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {} });
                 } catch {}
               }
@@ -366,8 +365,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
         const runtimePath = resolve(outDir, 'server', 'runtime.js');
         const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
         const src = readFileSync(nfPath, 'utf-8');
-        const compNameMatch = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-        const compName = compNameMatch ? compNameMatch[1] : 'NotFound';
+        const compName = resolveComponentName(src) || 'NotFound';
         notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {} });
       } catch {}
     }

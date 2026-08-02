@@ -75,18 +75,6 @@ function exprJSX(node: { raw: string; ast: ESTreeNode | null }, tracked?: Map<st
   return exprJS(code);
 }
 
-function trackedExprRefs(node: { raw: string; ast: ESTreeNode | null }, tracked?: Map<string, TrackedInfo>): boolean {
-  if (!tracked || tracked.size === 0 || !node.ast) return false;
-  let found = false;
-  walk(node.ast, null, {
-    Identifier(n: any) {
-      const info = tracked.get(n.name);
-      if (info && info.kind === 'virtual') found = true;
-    },
-  });
-  return found;
-}
-
 function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
 
@@ -191,6 +179,18 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
   const lines: string[] = [];
   const arr = exprJSX(node.expression, tracked);
   const item = node.itemVariable;
+  if (node.indexVariable) {
+    lines.push('let __i = 0;');
+    lines.push(`for (const ${item} of ${arr}) {`);
+    lines.push(indent(`const ${node.indexVariable} = __i;`));
+    for (const n of node.bodyTemplate) {
+      const code = irNodeToJS(n, null, false, tracked);
+      if (code) lines.push(indent(code));
+    }
+    lines.push(indent('__i++;'));
+    lines.push(`}`);
+    return lines.join('\n');
+  }
   lines.push(`for (const ${item} of ${arr}) {`);
   for (const n of node.bodyTemplate) {
     const code = irNodeToJS(n, null, false, tracked);
@@ -260,13 +260,8 @@ function tryCatchToJS(node: TryCatch, tracked?: Map<string, TrackedInfo>): strin
 function forLoopToJS(node: ForLoop, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   if (node.kind === 'for-in') {
-    const isTrackedLoop = trackedExprRefs(node.condition, tracked);
     const arr = exprJSX(node.condition, tracked);
-    if (isTrackedLoop) {
-      lines.push(`for (${node.init} of ${arr}) {`);
-    } else {
-      lines.push(`for (${node.init} in ${arr}) {`);
-    }
+    lines.push(`for (${node.init} of (Array.isArray(${arr}) ? ${arr} : (${arr} == null ? [] : Object.keys(${arr})))) {`);
     for (const n of node.bodyTemplate) {
       const code = irNodeToJS(n, null, false, tracked);
       if (code) lines.push(indent(code));
@@ -326,6 +321,7 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
     lines.push(`const __pk = __tk ? '__vsk_ssr_promises_' + __tk : '__vsk_ssr_promises';`);
     lines.push(`for (let __pass = 0; __pass < 3; __pass++) {`);
     lines.push(`const __out = [];`);
+    lines.push(`const __start = (globalThis[__pk] || []).length;`);
   } else {
     lines.push(`const __out = [];`);
   }
@@ -342,9 +338,10 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
   }
 
   if (asyncMode) {
-    lines.push(`if (!(globalThis[__pk] && globalThis[__pk].length > 0)) return __out.join('');`);
-    lines.push(`const __ps = globalThis[__pk].slice();`);
-    lines.push(`globalThis[__pk] = [];`);
+    lines.push(`const __all = globalThis[__pk] || [];`);
+    lines.push(`if (__all.length <= __start) return __out.join('');`);
+    lines.push(`const __ps = __all.slice(__start);`);
+    lines.push(`globalThis[__pk] = __all.slice(0, __start);`);
     lines.push(`await Promise.allSettled(__ps);`);
     lines.push(`}`);
     lines.push(`return '';`);

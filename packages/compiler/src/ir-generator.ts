@@ -154,7 +154,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
             const ofParts = decl.split(' of ');
             if (ofParts.length === 2) {
               const itemVar = ofParts[0].trim();
-              const arrExpr = toExpression(source, ofParts[1]);
+              const arrExpr = new Expression(ofParts[1].trim());
               result.push(new MapRegion(arrExpr, itemVar, bodyNodes, null));
               i += 2;
               continue;
@@ -163,7 +163,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
             const inParts = decl.split(' in ');
             if (inParts.length === 2) {
               const itemVar = inParts[0].trim().replace(/^(const|let|var)\s+/, '');
-              const arrExpr = toExpression(source, inParts[1]);
+              const arrExpr = new Expression(inParts[1].trim());
               result.push(new ForLoop(itemVar, arrExpr, '', bodyNodes, 'for-in'));
               i += 2;
               continue;
@@ -181,10 +181,11 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
       if (isMapCall(expr)) {
         const arrowFn = expr.arguments[0];
         const itemVar = arrowFn.params[0]?.name ?? 'item';
+        const indexVar = arrowFn.params[1]?.name ?? null;
         const bodyNodes = processJSXCallbackBody(source, arrowFn.body);
         const arrayExpr = toExpression(source, expr.callee.object);
         const keyExpr = extractKeyExpr(bodyNodes);
-        result.push(new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr));
+        result.push(new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr, indexVar));
         i++;
         continue;
       }
@@ -242,10 +243,11 @@ function exprToIR(source: string, expr: any): IRNode[] {
   if (isMapCall(expr)) {
     const arrowFn = expr.arguments[0];
     const itemVar = arrowFn.params[0]?.name ?? 'item';
+    const indexVar = arrowFn.params[1]?.name ?? null;
     const bodyNodes = processJSXCallbackBody(source, arrowFn.body);
     const arrayExpr = toExpression(source, expr.callee.object);
     const keyExpr = extractKeyExpr(bodyNodes);
-    return [new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr)];
+    return [new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr, indexVar)];
   }
   return [new DynamicBinding(toExpression(source, expr))];
 }

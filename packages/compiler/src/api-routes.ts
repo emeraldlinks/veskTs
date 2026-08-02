@@ -160,6 +160,63 @@ export function parseCookies(str: string): Record<string, string> {
 
 export interface DevCache extends Map<string, number> {}
 
+export type BuildWebRequestInput = {
+  method?: string;
+  headers?: Record<string, string | string[] | number | undefined>;
+  socket?: { remoteAddress?: string };
+  [Symbol.asyncIterator](): AsyncIterableIterator<Buffer | Uint8Array | string>;
+};
+
+/**
+ * Build a standard Web API Request from a Node.js IncomingMessage.
+ *
+ * When `body` is omitted, the body is read lazily from the Node stream and
+ * `json()`/`text()` are patched accordingly. A `cookies` getter is attached
+ * (NextRequest-compatible).
+ */
+export function buildWebRequest(
+  nodeReq: BuildWebRequestInput,
+  url: string,
+  body?: BodyInit | null
+): Request & { cookies: Record<string, string>; query: Record<string, string> } {
+  const parsedUrl = new URL(url, `http://${nodeReq.headers?.host || 'localhost'}`);
+  const method = nodeReq.method || 'GET';
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(nodeReq.headers || {})) {
+    headers[k] = Array.isArray(v) ? v.join(', ') : v === undefined ? '' : String(v);
+  }
+
+  const webRequest = new Request(parsedUrl, { method, headers, body: body ?? null });
+
+  if (body === undefined) {
+    let _bodyBuffer: Buffer | null = null;
+    const getBody = async (): Promise<Buffer> => {
+      if (_bodyBuffer) return _bodyBuffer;
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of nodeReq) chunks.push(chunk as Uint8Array);
+      _bodyBuffer = Buffer.concat(chunks as Buffer[]);
+      return _bodyBuffer;
+    };
+    Object.defineProperty(webRequest, 'json', {
+      value: async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } },
+      configurable: true,
+    });
+    Object.defineProperty(webRequest, 'text', {
+      value: async () => (await getBody()).toString('utf-8'),
+      configurable: true,
+    });
+  }
+
+  const rawCookies = parseCookies(String(nodeReq.headers?.cookie || ''));
+  Object.defineProperty(webRequest, 'cookies', { get: () => rawCookies, enumerable: true });
+
+  const query: Record<string, string> = {};
+  for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
+  Object.defineProperty(webRequest, 'query', { get: () => query, enumerable: true });
+
+  return webRequest as Request & { cookies: Record<string, string>; query: Record<string, string> };
+}
+
 export async function executeApiRoute(
   filePath: string,
   method: string,

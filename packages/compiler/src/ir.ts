@@ -133,12 +133,14 @@ export class OpaqueDynamicRegion {
 export class MapRegion {
   expression: Expression;
   itemVariable: string;
+  indexVariable: string | null;
   bodyTemplate: IRNode[];
   keyExpr: Expression | null;
 
-  constructor(expression: Expression, itemVariable: string, bodyTemplate: IRNode[], keyExpr: Expression | null = null) {
+  constructor(expression: Expression, itemVariable: string, bodyTemplate: IRNode[], keyExpr: Expression | null = null, indexVariable: string | null = null) {
     this.expression = expression;
     this.itemVariable = itemVariable;
+    this.indexVariable = indexVariable;
     this.bodyTemplate = bodyTemplate;
     this.keyExpr = keyExpr;
   }

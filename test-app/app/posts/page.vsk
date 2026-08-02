@@ -25,7 +25,7 @@ component PostsSummary {
 	</p>
 }
 
-component Posts {
+export default component Posts {
 	<Head>
 		<title>Posts — useFetch demo</title>
 	</Head>

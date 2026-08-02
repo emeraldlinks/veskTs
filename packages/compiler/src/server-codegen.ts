@@ -10,6 +10,7 @@ export {
   extractTopLevelNames,
   extractRuntimeNames,
   buildParamInit,
+  resolveComponentName,
   loadRuntimeImports,
   evalTopLevelCode,
   callStaticProps,

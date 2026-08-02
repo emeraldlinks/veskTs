@@ -5,13 +5,13 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { transformSync } from 'esbuild';
-import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml } from '@vesk/compiler/src/server-codegen';
+import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
-import { VeskRequest } from '@vesk/runtime/src/index-server';
+import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 
 const LOG = {
   reset: '\x1b[0m',
@@ -87,7 +87,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   }
 
-  let routeTree = scanRoutes(appDirPath) as Record<string, unknown>[];
+  let routeTree: RouteNode[] = scanRoutes(appDirPath);
   let clientBundle = '';
   let runtimeBundle = '';
 
@@ -199,7 +199,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({ type: 'compiling' });
               }
 
-              routeTree = scanRoutes(appDirPath) as Record<string, unknown>[];
+              routeTree = scanRoutes(appDirPath);
               updateSourceMapping();
               const changedComponents = sourceToComponents.get(fullPath) || [];
 
@@ -223,6 +223,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                       compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
                       compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
                       compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');
+                      compCode = compCode.replace(/^export\s+default\s+__components\[.*?\];?\s*\n?/gm, '');
                       compCode = compCode.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
                       const actualName = extractCompName(src);
                       for (const cname of changedComponents) {
@@ -251,13 +252,14 @@ export async function startDevServer(port: number, projectDir: string, config: R
                     const suggestions: string[] = [];
                     const nextSteps: string[] = [];
                     let tip = '';
-                    if (err && (err as Record<string, unknown>).name === 'VeskError') {
-                      line = ((err as Record<string, unknown>).line as number) || 0;
-                      col = ((err as Record<string, unknown>).column as number) || 0;
-                      file = ((err as Record<string, unknown>).file as string) || fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
-                      if ((err as Record<string, unknown>).suggestions) suggestions.push(...(err as Record<string, unknown>).suggestions as string[]);
-                      if ((err as Record<string, unknown>).nextSteps) nextSteps.push(...(err as Record<string, unknown>).nextSteps as string[]);
-                      tip = (err as Record<string, unknown>).tip as string || '';
+                    const errDetails = err ? (err as unknown as Record<string, unknown>) : undefined;
+                    if (errDetails?.name === 'VeskError') {
+                      line = (errDetails.line as number) || 0;
+                      col = (errDetails.column as number) || 0;
+                      file = (errDetails.file as string) || fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
+                      if (errDetails.suggestions) suggestions.push(...(errDetails.suggestions as string[]));
+                      if (errDetails.nextSteps) nextSteps.push(...(errDetails.nextSteps as string[]));
+                      tip = (errDetails.tip as string) || '';
                     } else {
                       const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
                       const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
@@ -354,8 +356,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
   const hmrClientPath = existsSync(hmrJsPath) ? hmrJsPath : (existsSync(hmrTsPath) ? hmrTsPath : null);
 
   function extractCompName(src: string): string | null {
-    const m = src.match(/^(?:export\s+)?(?:default\s+)?component\s+(\w+)/m);
-    return m ? m[1] : null;
+    return resolveComponentName(src);
   }
 
   function relaxCspForDev(sec: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
@@ -380,6 +381,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
     const reqStart = Date.now();
+    const reqHost = req.headers.host || `localhost:${port}`;
+    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `http://${reqHost}`;
 
     const logRequest = (status: number) => {
       if (url.pathname.startsWith('/_vesk')) return;
@@ -388,7 +391,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
     const rawCtx = buildRequestContext(req);
     if (security?.trustProxy) {
-      applyTrustProxy(rawCtx, security.trustProxy);
+      applyTrustProxy(rawCtx, security.trustProxy as boolean | string);
     }
 
     if (rateLimiter) {
@@ -404,7 +407,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
 
     const reqOrigin = req.headers['origin'] || '';
-    const reqHost = req.headers['host'] || `localhost:${port}`;
     const corsAllowed = corsHeaders(security || {}, reqOrigin, reqHost);
     if (corsAllowed['Access-Control-Allow-Origin'] && req.method === 'OPTIONS') {
       res.writeHead(204, { ...corsAllowed, 'Content-Length': '0' });
@@ -473,34 +475,24 @@ export async function startDevServer(port: number, projectDir: string, config: R
         for (const [k, v] of Object.entries(req.headers)) {
           rawHeaders[k] = Array.isArray(v) ? v.join(', ') : (v || '');
         }
-        const rawCookies: Record<string, string> = {};
-        for (const pair of (req.headers.cookie || '').split(';')) {
-          const eq = pair.indexOf('=');
-          if (eq !== -1) {
-            const k = pair.slice(0, eq).trim();
-            const v = pair.slice(eq + 1).trim();
-            if (k) rawCookies[k] = v;
-          }
-        }
 
         let apiLocals: Record<string, unknown> = {};
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
           const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
-            plugins: config.plugins,
+            plugins: (config.plugins || []) as VeskPlugin[],
             onLast: async () => new Response(null),
           });
           apiLocals = mwResult.locals || {};
         }
 
-        const webRequest = new VeskRequest(requestUrl, {
-          method: req.method || 'GET',
-          headers: rawHeaders,
-          body: bodyBuffer.length ? bodyBuffer : null,
-        }) as Record<string, unknown>;
-        webRequest._cookies = rawCookies;
-        webRequest.locals = apiLocals;
-        const response = await executeApiRoute(apiMatch.node.filePath, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
+        const webRequest = buildWebRequest(req, req.url || url.pathname, bodyBuffer.length ? bodyBuffer : null);
+        const response = await executeApiRoute(apiMatch.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
+        if (!response) {
+          res.writeHead(500, { 'Content-Type': 'text/plain' });
+          res.end('API route returned no response');
+          return;
+        }
         logRequest(response.status);
         res.writeHead(response.status, Object.fromEntries(response.headers));
         const body = await response.text();
@@ -533,7 +525,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
 
     const urlParts = url.pathname.split('/').filter(Boolean);
-    const cleanChain: Record<string, unknown>[] = [];
+    const cleanChain: RouteNode[] = [];
     let segIdx = 0;
     for (const node of match.nodes) {
       if (node.fullPath === '/') {
@@ -547,6 +539,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         cleanChain.push(node);
       }
     }
+    const matched = match;
 
     async function renderSSR() {
       const chain = cleanChain;
@@ -561,7 +554,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (i === chain.length - 1 && node.page && existsSync(pageFilePath)) {
           const src = readFileSync(pageFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.page as string);
-          const result = renderPage(src, compName, { params: match.params }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true });
           body = result.body;
           head = result.head || '';
         }
@@ -569,7 +562,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (node.layout && existsSync(layoutFilePath)) {
           const src = readFileSync(layoutFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.layout as string);
-          const result = renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
           body = result.body;
           head = (result.head || '') + head;
         }
@@ -590,7 +583,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          html = renderFullPage(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
           html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
         } else {
           throw new Error('No page or layout matched');
@@ -608,7 +601,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          yield* renderPageStream(src, compName, { params: match.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
         } else {
           throw new Error('No page or layout matched');
         }
@@ -626,7 +619,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (i === chain.length - 1 && node.page && existsSync(pageFilePath)) {
           const src = readFileSync(pageFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.page as string);
-          const result = renderPage(src, compName, { params: match.params }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true });
           body = result.body;
           head = result.head || '';
         }
@@ -634,7 +627,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (node.layout && existsSync(layoutFilePath)) {
           const src = readFileSync(layoutFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.layout as string);
-          const result = renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
           body = result.body;
           head = (result.head || '') + head;
         }
@@ -660,8 +653,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
           method: req.method || 'GET',
         });
         const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
-          plugins: config.plugins,
-          onLast: async (rewrite?: string) => {
+          plugins: (config.plugins || []) as VeskPlugin[],
+          onLast: async (rewrite: string | null) => {
             if (rewrite) url.pathname = rewrite;
             const prev = (globalThis as Record<string, unknown>).__vesk_request;
             (globalThis as Record<string, unknown>).__vesk_request = ctx;
@@ -676,7 +669,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
         });
         mwLocals = mwResult.locals;
         if (mwResult.response) {
-          if (typeof (mwResult.response as Record<string, unknown>).build === 'function') (mwResult.response as Record<string, unknown>).build();
+          const respRecord = mwResult.response as unknown as Record<string, unknown>;
+          if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
           logRequest(mwResult.response.status);
           res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
           res.end(await mwResult.response.text());
@@ -818,7 +812,14 @@ function stripTailwindDirectives(css: string): string {
   return result.join('\n').trim();
 }
 
-function buildRequestContext(req: IncomingMessage) {
+function buildRequestContext(req: IncomingMessage): {
+  headers: Record<string, string>;
+  url: string | undefined;
+  method: string;
+  cookies: Record<string, string>;
+  locals: Record<string, unknown>;
+  ip?: string;
+} {
   const headers: Record<string, string> = {};
   for (const [k, v] of Object.entries(req.headers)) {
     headers[k] = Array.isArray(v) ? v.join(', ') : (v || '');
@@ -832,5 +833,5 @@ function buildRequestContext(req: IncomingMessage) {
     const v = pair.slice(eq + 1).trim();
     if (k) cookies[k] = v;
   }
-  return { headers, url: req.url, method: req.method || 'GET', cookies, locals: {} };
+  return { headers, url: req.url, method: req.method || 'GET', cookies, locals: {}, ip: undefined };
 }

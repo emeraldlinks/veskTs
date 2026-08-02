@@ -1,0 +1,33 @@
+component MapDemo {
+	<Head>
+		<title>Map — inline .map() in JSX</title>
+	</Head>
+	const users = [
+		{ id: 1, name: 'Ada', role: 'admin' },
+		{ id: 2, name: 'Grace', role: 'dev' },
+		{ id: 3, name: 'Alan', role: 'dev' },
+	]
+	const numbers = [1, 2, 3, 4, 5]
+
+	<h1 class="text-3xl font-bold mb-4">Inline .map() Demo</h1>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">map over objects</h2>
+	<ul class="space-y-2">
+		{users.map(u => <li class="bg-gray-50 rounded px-3 py-2"><b>{u.name}</b> — {u.role}</li>)}
+	</ul>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">map with index</h2>
+	<p>
+		{users.map((u, i) => <span class="mr-3">#{i + 1}: {u.name}</span>)}
+	</p>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">map with keys</h2>
+	<div class="flex gap-2">
+		{numbers.map(n => <span key={n} class="bg-blue-600 text-white text-sm px-3 py-1 rounded-full">{n}</span>)}
+	</div>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">chained map + filter</h2>
+	<p>
+		{numbers.filter(n => n % 2 === 1).map(n => <span class="mr-3">{n}²={n * n}</span>)}
+	</p>
+}

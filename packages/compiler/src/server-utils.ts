@@ -1,6 +1,8 @@
 import type { IRNode } from '@vesk/compiler/src/ir';
 import { StaticNode, TextNode, DynamicBinding } from '@vesk/compiler/src/ir';
 import * as __defaultRuntimeModule from '@vesk/runtime/src/index-server';
+import { parse } from '@vesk/compiler/src/parser';
+import { generateIR } from '@vesk/compiler/src/ir-generator';
 
 const VOID_ELEMENTS = new Set([
   'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
@@ -554,6 +556,20 @@ export function buildParamInit(paramNames: string[]): string {
   }
   if (paramNames.length === 0) return '';
   return `const { ${paramNames.join(', ')} } = props;`;
+}
+
+export function resolveComponentName(source: string): string | null {
+  try {
+    const ir = generateIR(parse(source), source);
+    const defaultComp = ir.components.find((c) => c.defaultExport);
+    if (defaultComp) return defaultComp.name;
+    if (ir.components.length > 0) return ir.components[0].name;
+    const exportedComp = ir.components.find((c) => c.exported);
+    if (exportedComp) return exportedComp.name;
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 let __cachedRuntimeModule: Record<string, unknown> | null = null;

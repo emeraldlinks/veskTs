@@ -1,264 +1,122 @@
-# VeskTS Development Summary - 2026-08-01
+# VeskTS Development Summary - 2026-08-02
 
 ## Overview
-Implemented a complete, production-ready `useFetch` system for Vesk with SWR-style caching, request deduplication, retries, timeouts, and tracked cell integration. Added demo API endpoint and page showcasing all features.
+This session added three demo pages exercising every supported JS statement in the compiler (if/else, ternary, switch, for, for-in, for-of, while, do-while, try/catch+throw, labeled blocks, runtime statements, async `load()`, inline `.map()`), curled each page one at a time, and fixed four real compiler/dev-server bugs uncovered along the way. Ended with `hydration-test.mjs` at 60/60 passing.
 
 ---
 
-## Core Runtime Changes
+## New Demo Pages (`test-app/app`)
 
-### 1. New Teardown Callback API (`packages/runtime/src/ripple-runtime.ts`)
-- Added `Block.tc: (() => void)[]` field for teardown callbacks
-- Modified `run_teardown()` to execute callbacks after main teardown function
-- Added `on_destroy(fn: () => void)` exported from both `index-client.ts` and `index-server.ts`
-- Enables registering cleanup logic (like aborting fetches) that runs on component unmount
+### `/statements` — `app/statements/page.vsk`
+Exercises statement-mode compilation of every supported construct with visible SSR output:
+- `if / else` blocks, ternary expressions
+- `switch` with JSX cases + `break`
+- `for` loop with counter, `for-of` over array values, `for-in` over object keys
+- `while` and `do-while` loops (shared counter carries across)
+- `try / catch / throw` (`throw new Error('Boom!')` caught and rendered)
+- labeled block (`summary: { ... }`)
+- runtime statements (`const total = items.length * 2`, counter mutation)
 
-### 2. Complete `resource.ts` Rewrite (`packages/runtime/src/resource.ts`)
+### `/async` — `app/async/page.vsk`
+- `export async function load()` — fetches `/api/posts` during SSR using `globalThis.__vesk_ssr_base_url` (set per-request by the dev server), returns `{ props: { posts } }`
+- `for-of` over `props.posts` renders post cards
 
-#### Type Definitions
-```typescript
-export interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> {
-  key?: string;
-  into?: Tracked;
-  body?: unknown;           // plain objects auto-JSON-stringified
-  staleTime?: number;       // cache freshness in ms
-  keepPreviousData?: boolean; // show stale data during revalidation
-  retry?: number;           // retries (GET only, default 0)
-  retryDelay?: number;      // base delay for exponential backoff (default 1000ms)
-  timeout?: number;         // request timeout in ms
-  enabled?: boolean;        // skip fetch when false
-  dedupe?: boolean;         // deduplicate in-flight requests (default true)
-}
-```
+### `/map` — `app/map/page.vsk`
+- Inline `.map()` in JSX: single-param, index-param `(u, i)`, keyed maps (`key={n}`), chained `filter().map()`
 
-#### Features Implemented
-
-**Fetch/Axios-like Options**
-- Full `RequestInit` compatibility: `method`, `headers`, `credentials`, `cache`, `mode`, `redirect`, `referrer`, `referrerPolicy`, `integrity`, `keepalive`, `signal`
-- Plain object `body` auto-stringified with `Content-Type: application/json`
-- FormData, URLSearchParams, Blob, ArrayBuffer pass through unchanged
-
-**Request Deduplication**
-- In-flight requests shared by `key` (defaults to URL)
-- Per-render token scoping on SSR (`__vsk_ssr_promises_${token}`)
-- Cross-component dedup within same render
-- `dedupe: false` opt-out per request
-
-**Caching (SWR-style)**
-- In-memory client cache: `__vsk_fetch_cache` Map
-- `staleTime` — serve cached data without fetch while fresh
-- `keepPreviousData: true` — keep old data on screen during revalidation
-- `mutate(key, data?)` — update cache and all live consumers, or revalidate
-
-**Retry with Exponential Backoff**
-- Only retries GET requests (or methods not explicitly set)
-- Never retries 4xx errors (client errors)
-- Retries on network failure or 5xx server errors
-- Configurable base delay: `retryDelay * 2^attempt`
-
-**Timeout**
-- Race-based timeout (works even with custom fn fetchers)
-- Combines with user-provided `signal` via `AbortSignal.any` + manual fallback
-- Returns `TimeoutError` on timeout
-
-**Abort & Lifecycle**
-- `refresh()` — force revalidation (bypasses stale cache, aborts in-flight)
-- `abort()` — cancel current request
-- `enabled: false` — skip fetch entirely
-- `on_destroy` + `is_destroyed` guard — abort on unmount, no writes to dead cells
-- Abort-on-replace: new request for same key aborts previous
-
-**SSR Integration**
-- Token-scoped promises: `__vsk_ssr_promises_${token}`
-- Token-scoped data: `__vsk_ssr_data` per render
-- `resolveSsrResources()` awaits all promises, returns serialized data
-- `globalThis.__vsk_ssr_data = {...}` script injection (not `const` — visible on `globalThis` in browser)
-
-**Error Handling**
-- `HttpError` with `.status` property for non-2xx responses
-- `TimeoutError` for timeouts
-- 4xx never retried
-- Abort errors silently ignored (don't set error state)
-
-**Static Helpers**
-```typescript
-useFetch.text(url, options?)   // .text() parse
-useFetch.json(url, options?)   // .json() parse (default)
-useFetch.arrayBuffer(url, options?) // .arrayBuffer() parse
-// All use fn-form internally for custom parsing
-```
+### Layout
+- `test-app/app/layout.vsk` — added Statements/Async/Map `NavLink`s
 
 ---
 
-## Compiler Changes
+## Bug Fixes
 
-### 1. Tracked Cell For-In Loops (`packages/compiler/src/server-jsgen.ts`)
-- `for (const x in trackedCell)` compiles to `for (const x of get(trackedCell))`
-- Automatic detection via `trackedExprRefs()`
-- Works in all server emit functions: `staticNodeToJS`, `dynamicBindingToJS`, `opaqueRegionToJS`, `mapRegionToJS`, `whileLoopToJS`, `switchBlockToJS`, `tryCatchToJS`, `forLoopToJS`, `componentCallToJS`
+### 1. `renderPage` ignored `load()` (`packages/compiler/src/server-render.ts`)
+- Dev server calls `renderPage` directly (not `renderFullPage`); `renderPage` never ran `loadFn`, so `/async` 500'd with `props.posts is not iterable`.
+- Refactored `renderPage` into a `doRender(ssrProps)` closure; when `ir.loadFn` exists it awaits `callLoadFunction`, merges `result.props` (or the result itself) into props, then renders. Sync path preserved for pages without `loadFn`.
 
-### 2. Tracked Cell Declaration (`TrackDecl`)
-- Creates real tracked cells in `__vsk_ssr_cells` Map with per-render token keys
-- Init evaluation wrapped in try/catch falling back to `track(void 0)` (handles TDZ: `let &[Header] = track(Header)`)
-- `get/set/track` auto-added to component scope when any component has `TrackDecl`
+### 2. `.map((item, index) => ...)` index param dropped
+- `MapRegion` IR gained `indexVariable: string | null` (`packages/compiler/src/ir.ts`).
+- `ir-generator.ts` extracts `arrowFn.params[1]?.name` at both map-call sites.
+- Server (`server-jsgen.ts` `mapRegionToJS`): emits `let __i = 0; for (const item of arr) { const i = __i; ...; __i++; }`.
+- Client (`client-codegen.ts` `emitMap`): `renderItem` gains `__i` param; non-keyed loops pass a counter; keyed path passes index through.
+- Runtime (`packages/runtime/src/reconcile.ts`): `createItem(item, index, effs)` — index threaded through initial render and reconcile re-renders.
 
-### 3. SSR Re-render Loop (`generateFunctionBody`)
-- Up to 3 passes for async components (`ssrAwait: true`)
-- Pass 1: render loading state, collect promises
-- Pass 2+: await `Promise.allSettled`, re-render with data
-- Returns `''` if still pending after 3 passes
+### 3. Home page rendered the wrong component (`packages/compiler/src/server-utils.ts`)
+- `resolveComponentName` preferred the first **exported** component; home page's `export component Appx`/`Appxx` beat `component Home`, so `/` showed `Appx`'s body.
+- New precedence: `defaultExport` → **first component** → exported component (matches all page conventions: home/about/blog use first, posts uses `export default`).
 
-### 4. Component Auto-detection (`packages/compiler/src/ir-generator.ts`)
-- `componentUsesFetch(nodes)` scans IR for `useFetch(` calls
-- Sets `ssrAwait: true` on `ComponentIR`
-- Server codegen wraps async components in async IIFE
-
-### 5. Tracked Transform Export (`packages/compiler/src/client-codegen.ts`)
-- Exported `TrackedInfo`, `transformTracked`, `collectTrackedNames`
-- `transformTracked` exempts `into:` property — passes cell identity, not `get(cell)`
+### 4. Client bundle duplicate `export default` broke hydration
+- `compileClient` emits `export default __components["Posts"]` for default-export pages; `generateClientBundle` (adapter `client-bundle.ts`) only stripped `export const|let|var ...` lines, so a single `/_vesk/client.js` module ended up with **two** `export default` statements → browser error `Identifier '.default' has already been declared` killed hydration (no count updates, markers never claimed).
+- Fixed by stripping `export default __components[...]` in both the code-split `compileFile` and mono `compileFileMono` paths (new `stripExports` helper), plus the dev-server HMR compile path.
 
 ---
 
-## Demo Implementation
+## Verification
 
-### API Endpoint: `test-app/app/api/posts/route.ts`
-```typescript
-// GET /api/posts?delay=500&fail=10&limit=3
-// Returns array of 5 posts with: id, title, slug, excerpt, body, author, tags, date
-// Supports delay (simulated latency), fail (random 503), limit
-```
-
-### Page: `test-app/app/posts/page.vsk`
-Showcases full `useFetch` capability:
-```typescript
-let &[posts] = track<Post[]>([])
-const postsResource = useFetch('/api/posts', {
-  key: 'posts',
-  into: posts,
-  staleTime: 30000,
-  keepPreviousData: true,
-  retry: 2,
-  retryDelay: 400,
-  timeout: 8000,
-})
-// Renders with: loading states, error + retry, refresh button, for-in loop
-```
-
-### Layout Update: `test-app/app/layout.vsk`
-Added "Posts" nav link
+- All 8 pages HTTP 200 with correct content: `/`, `/about`, `/blog`, `/blog/hello-world`, `/posts`, `/statements`, `/async`, `/map`
+- `hydration-test.mjs`: **60/60 passed** (was failing on JS error on load, reactivity, error boundaries, markers claimed)
+- Compiler unit suites: client-codegen **104**, server-codegen **69**, integration **77** — all green
+- `tsc --noEmit` clean on compiler, runtime, adapter, cli
 
 ---
 
-## Tests Added
+## Previous Session: useFetch System (2026-08-01)
 
-### Runtime Tests: `packages/runtime/src/resource.test.ts` (21 tests)
-1. **Fetch options**: method, headers, JSON body, credentials
-2. **HTTP errors**: `HttpError` with status, no retry on 4xx
-3. **Retry**: 3 attempts with backoff, success on 3rd
-4. **Non-GET no retry**: POST with 500 doesn't retry
-5. **Timeout**: hangs → `TimeoutError`
-6. **Dedup**: 2 components same key = 1 fetch
-7. **Dedup false**: separate requests
-8. **StaleTime cache**: 2nd call within window = no fetch
-9. **StaleTime expiry**: refetch after window
-10. **keepPreviousData**: loading=true, data=old during refresh
-11. **mutate(key, data)**: instant update all consumers
-12. **mutate(key)**: revalidate all consumers
-13. **refresh()**: bypasses stale cache
-14. **enabled: false**: no fetch, loading=false
-15. **Abort on destroy**: `destroy_block` → fetch aborted
-16. **No abort on re-run**: `run_block` → no abort
-17. **SSR pass loop**: token-scoped promises, `__vsk_ssr_data` written
-18. **SSR dedup**: 2 components same key = 1 fetch
-19. **createResource fn + into**: writes to tracked cell
-20. **useFetch.text/json/arrayBuffer**: helpers work
-21. **createResource with options**: full option passing
+### Core Runtime Changes
 
-### Integration Tests (updated)
-- 3 new tests in `integration.test.ts` for `into` + for-in SSR rendering
-- Async test runner serialized to prevent global state conflicts
-- `globalThis.fetch` save/restore instead of delete
+#### `packages/runtime/src/ripple-runtime.ts`
+- `Block.tc: (() => void)[]` teardown callbacks; `on_destroy(fn)` exported from `index-client.ts`/`index-server.ts`
+
+#### `packages/runtime/src/resource.ts` — complete rewrite
+- Full `RequestInit` compatibility, JSON body auto-stringify
+- Request dedup by key, per-render token scoping on SSR
+- SWR-style cache: `staleTime`, `keepPreviousData`, `mutate(key, data?)`
+- Retry with exponential backoff (GET only, never 4xx)
+- Race-based `timeout`, `HttpError`/`TimeoutError`, abort on unmount via `on_destroy`
+- SSR: `resolveSsrResources()`, `globalThis.__vsk_ssr_data` injection
+- Helpers: `useFetch.text/json/arrayBuffer`, fn-form for custom fetchers
+
+#### Compiler
+- Tracked for-in loops (`for (const x in trackedCell)` → `get(...)`), `TrackDecl` with per-render token keys, 3-pass SSR re-render loop for async components, `ssrAwait` auto-detection
+
+#### Demo
+- `test-app/app/api/posts/route.ts` (`?delay=&fail=&limit=`), `test-app/app/posts/page.vsk` full feature demo, Posts nav link
+
+#### Tests
+- `resource.test.ts` (21 tests); integration tests +3; total **852 passing** (28 files)
 
 ---
 
-## Test Results
-
-### Before Changes
-- 831 tests passing (27 files)
-
-### After Changes
-- **852 tests passing** (28 files, 21 new tests added)
-- All typechecks clean: `npm run tsc` on compiler, runtime, adapter
-- Build clean: `npm run build`
-- E2E suites: code-split (12), hmr (20), hydration (28), prod-hydration (34), edge (23)
-
----
-
-## Key Design Decisions
-
-1. **Fetch-like API**: `UseFetchOptions` extends `Omit<RequestInit, 'body'>` + `body?: unknown` — familiar to all JS developers
-2. **No `parse` option**: Default `.json()`, use `useFetch.text()` or fn-form for custom parsing
-3. **Dedup by key**: URL is default key, custom key for different endpoints same data
-4. **Token-scoped SSR**: No cross-request data leakage, safe for concurrent renders
-5. **Abort on unmount via `on_destroy`**: No framework-specific hooks needed
-6. **Retry GET only**: Safe default, non-idempotent methods never retried
-7. **Race-based timeout**: Works with any fetcher (fn-form or string URL)
-
----
-
-## Files Modified/Added
-
-### Core Runtime
-- `packages/runtime/src/ripple-runtime.ts` — `Block.tc`, `on_destroy`, `run_teardown`
-- `packages/runtime/src/ripple-blocks.ts` — `Block.tc = null` in constructor
-- `packages/runtime/src/index-client.ts` — export `on_destroy`
-- `packages/runtime/src/index-server.ts` — export `on_destroy`
-- `packages/runtime/src/resource.ts` — **complete rewrite** (504 lines)
-- `packages/runtime/src/resource.test.ts` — **new** (21 tests)
+## Files Changed This Session
 
 ### Compiler
-- `packages/compiler/src/server-jsgen.ts` — tracked for-in, TrackDecl, SSR loop, async components
-- `packages/compiler/src/ir-generator.ts` — `componentUsesFetch`, `ssrAwait`
-- `packages/compiler/src/ir.ts` — `ComponentIR.ssrAwait`
-- `packages/compiler/src/client-codegen.ts` — export `TrackedInfo`, `transformTracked`, `collectTrackedNames`; `into:` exemption
-- `packages/compiler/src/integration.test.ts` — 3 new tests, async serialization
+- `packages/compiler/src/server-render.ts` — `renderPage` runs `loadFn`
+- `packages/compiler/src/server-utils.ts` — `resolveComponentName` precedence
+- `packages/compiler/src/ir.ts` — `MapRegion.indexVariable`
+- `packages/compiler/src/ir-generator.ts` — extract map index param
+- `packages/compiler/src/server-jsgen.ts` — index-aware `mapRegionToJS`
+- `packages/compiler/src/client-codegen.ts` — index-aware `emitMap`
+
+### Runtime
+- `packages/runtime/src/reconcile.ts` — `createItem(item, index, effs)`
+
+### Adapter / CLI
+- `packages/adapter/src/client-bundle.ts` — strip `export default` from bundle (both paths)
+- `packages/cli/src/dev-server.ts` — strip `export default` in HMR compile; HMR client injection
 
 ### Demo App
-- `test-app/app/api/posts/route.ts` — **new** (posts API with delay/fail/limit)
-- `test-app/app/posts/page.vsk` — **new** (full feature demo page)
-- `test-app/app/layout.vsk` — added Posts nav link
-
-### Cleanup
-- Removed `chrome-headless-shell/` (187MB binary) from git history via `git filter-branch`
-- Deleted all `.js`, `.js.map`, `.d.ts.map`, `.test.js` build artifacts
-- Cleaned up `.gitignore`
-
----
-
-## Migration Notes
-
-### Breaking Changes
-- `useFetch` no longer accepts `parse` option
-  - **Before**: `useFetch(url, { parse: r => r.text() })`
-  - **After**: `useFetch.text(url)` or `useFetch(() => fetch(url).then(r => r.text()))`
-- `createResource` signature unchanged (backward compatible)
-
-### New Capabilities
-- All standard `fetch` options now supported
-- SWR-style caching with `staleTime` + `keepPreviousData`
-- Request deduplication out of the box
-- Automatic retry with backoff
-- Timeout that works with custom fetchers
-- `into` tracked cell + for-in loops render inline
-- `mutate()` for cache invalidation
-- `refresh()` / `abort()` on accessor
+- `test-app/app/statements/page.vsk` — **new**
+- `test-app/app/async/page.vsk` — **new**
+- `test-app/app/map/page.vsk` — **new**
+- `test-app/app/layout.vsk` — new nav links
 
 ---
 
 ## Future Improvements (Not Implemented)
 
-1. **Reactive keys**: `useFetch(() => url, { depends: [dep1, dep2] })` — auto-refetch on dep change
-2. **Server-side shared cache**: Cross-request dedup cache (requires cache key normalization)
-3. **Per-region re-render**: Only re-render affected `MapRegion` on data arrival
-4. **Prefetch on hover**: For navigation optimization
-5. **WebSocket/SSE support**: Real-time updates via same tracked cell pattern
+1. **`.vsk` as a first-class TS toolchain citizen**: make `tsc` typecheck `.vsk` and `tsx` execute `.vsk` "just as `.tsx`" — e.g., a `.vsk → .tsx` transpile step (or `foo.vsk.d.ts` + `allowArbitraryExtensions`) for tsc, and a Node module-loader hook (chained via `node --import`) or esbuild plugin for tsx
+2. **Reactive keys**: `useFetch(() => url, { depends: [dep1, dep2] })`
+3. **Server-side shared cache**: cross-request dedup
+4. **Per-region re-render** of `MapRegion` on data arrival
+5. **Prefetch on hover**, WebSocket/SSE support

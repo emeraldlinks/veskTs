@@ -67,39 +67,56 @@ export function renderPage(
     __vesk = compiled.__vesk;
   }
 
-  (globalThis as any).__vsk_ssr = true;
-  (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
-  const renderToken = (globalThis as any).__vsk_ssr_token;
   const renderFn = componentMap.get(componentName);
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
   const fullRegistry = new Map([...registry, ...componentMap]);
   const targetComp = ir.components.find((c) => c.name === componentName);
-  if (targetComp && (targetComp.isAsync || targetComp.ssrAwait)) {
+
+  const doRender = (ssrProps: Record<string, unknown>): RenderPageResult | Promise<RenderPageResult> => {
+    (globalThis as any).__vsk_ssr = true;
+    (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
+    const renderToken = (globalThis as any).__vsk_ssr_token;
+    if (targetComp && (targetComp.isAsync || targetComp.ssrAwait)) {
+      return (async () => {
+        let bodyHtml: string;
+        try {
+          bodyHtml = await renderFn(ssrProps, fullRegistry, __vesk);
+        } finally {
+          delete (globalThis as any).__vsk_ssr;
+          clearSsrCells(renderToken);
+        }
+        return {
+          body: bodyHtml,
+          head: renderHeadHtml(targetComp, ssrProps),
+          props: ssrProps
+        };
+      })();
+    }
+    let bodyHtml: unknown;
+    try {
+      bodyHtml = renderFn(ssrProps, fullRegistry, __vesk);
+    } finally {
+      delete (globalThis as any).__vsk_ssr;
+      clearSsrCells(renderToken);
+    }
+    const headHtml = targetComp ? renderHeadHtml(targetComp, ssrProps) : '';
+    return { body: bodyHtml as string, head: headHtml, props: ssrProps };
+  };
+
+  if (ir.loadFn) {
+    const loadFn = ir.loadFn;
     return (async () => {
-      let bodyHtml: string;
-      try {
-        bodyHtml = await renderFn(props, fullRegistry, __vesk);
-      } finally {
-        delete (globalThis as any).__vsk_ssr;
-        clearSsrCells(renderToken);
+      const loadResult = await callLoadFunction(loadFn, props, __vesk);
+      let ssrProps = { ...props };
+      if (loadResult && typeof loadResult === 'object') {
+        const result = loadResult as Record<string, unknown>;
+        if (result.props) ssrProps = { ...ssrProps, ...(result.props as Record<string, unknown>) };
+        else ssrProps = { ...ssrProps, ...result };
       }
-      return {
-        body: bodyHtml,
-        head: renderHeadHtml(targetComp, props),
-        props
-      };
+      return doRender(ssrProps);
     })();
   }
-  let bodyHtml: unknown;
-  try {
-    bodyHtml = renderFn(props, fullRegistry, __vesk);
-  } finally {
-    delete (globalThis as any).__vsk_ssr;
-    clearSsrCells(renderToken);
-  }
-
-  const headHtml = targetComp ? renderHeadHtml(targetComp, props) : '';
-  return { body: bodyHtml as string, head: headHtml, props };
+  return doRender(props);
 }
 
 function clearSsrCells(token: string | undefined): void {
