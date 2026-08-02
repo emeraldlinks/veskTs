@@ -127,14 +127,56 @@ function processAttribute(source: string, attr: any): { name: string; value: str
 
 function processJSXChildren(source: string, children: any[]): IRNode[] {
   const result: IRNode[] = [];
-  for (const child of children) {
+  let i = 0;
+  while (i < children.length) {
+    const child = children[i];
     if (child.type === 'JSXText') {
       const text = child.value.replace(/\n\s*/g, ' ');
       const trimmed = text.trim();
-      if (trimmed && !trimmed.startsWith('//')) result.push(new TextNode(text));
+      if (!trimmed || trimmed.startsWith('//')) { i++; continue; }
+
+      const forMatch = trimmed.match(/^for\s*\(([^)]+)\)/);
+      if (forMatch && i + 1 < children.length && children[i + 1].type === 'JSXExpressionContainer') {
+        const exprNode = children[i + 1].expression;
+        if (exprNode.type !== 'JSXEmptyExpression') {
+          const decl = forMatch[1];
+          let bodyNodes: IRNode[];
+          if (exprNode.type === 'JSXFragment') {
+            bodyNodes = [];
+            for (const c of exprNode.children) bodyNodes.push(...processJSXChildren(source, [c]));
+          } else if (exprNode.type === 'JSXElement') {
+            bodyNodes = processJSXElement(source, exprNode);
+          } else {
+            bodyNodes = exprToIR(source, exprNode);
+          }
+
+          if (/ of /.test(decl)) {
+            const ofParts = decl.split(' of ');
+            if (ofParts.length === 2) {
+              const itemVar = ofParts[0].trim();
+              const arrExpr = toExpression(source, ofParts[1]);
+              result.push(new MapRegion(arrExpr, itemVar, bodyNodes, null));
+              i += 2;
+              continue;
+            }
+          } else if (/ in /.test(decl)) {
+            const inParts = decl.split(' in ');
+            if (inParts.length === 2) {
+              const itemVar = inParts[0].trim().replace(/^(const|let|var)\s+/, '');
+              const arrExpr = toExpression(source, inParts[1]);
+              result.push(new ForLoop(itemVar, arrExpr, '', bodyNodes, 'for-in'));
+              i += 2;
+              continue;
+            }
+          }
+        }
+      }
+
+      result.push(new TextNode(text));
+      i++;
     } else if (child.type === 'JSXExpressionContainer') {
       const expr = child.expression;
-      if (expr.type === 'JSXEmptyExpression') continue;
+      if (expr.type === 'JSXEmptyExpression') { i++; continue; }
 
       if (isMapCall(expr)) {
         const arrowFn = expr.arguments[0];
@@ -143,6 +185,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
         const arrayExpr = toExpression(source, expr.callee.object);
         const keyExpr = extractKeyExpr(bodyNodes);
         result.push(new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr));
+        i++;
         continue;
       }
 
@@ -150,6 +193,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
         const condExpr = toExpression(source, expr.left);
         const consequent = exprToIR(source, expr.right);
         result.push(new OpaqueDynamicRegion(condExpr, consequent));
+        i++;
         continue;
       }
 
@@ -158,6 +202,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
         const consequent = exprToIR(source, expr.consequent);
         const alternate = exprToIR(source, expr.alternate);
         result.push(new OpaqueDynamicRegion(condExpr, consequent, alternate));
+        i++;
         continue;
       }
 
@@ -168,16 +213,20 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
         || (expr.type === 'Identifier' && expr.name === 'children')
       ) {
         result.push(new SlotNode());
+        i++;
         continue;
       }
 
       result.push(new DynamicBinding(toExpression(source, expr)));
+      i++;
     } else if (child.type === 'JSXElement') {
       result.push(...processJSXElement(source, child));
+      i++;
     } else if (child.type === 'JSXFragment') {
-      for (const c of child.children) {
-        result.push(...processJSXChildren(source, [c]));
-      }
+      for (const c of child.children) result.push(...processJSXChildren(source, [c]));
+      i++;
+    } else {
+      i++;
     }
   }
   return result;

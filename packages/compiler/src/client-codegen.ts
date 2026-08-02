@@ -223,7 +223,11 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
   if (node instanceof DynamicBinding) return emitDynamicBinding(ctx, node, tracked, effectsVar);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
-    ctx.push(`const ${cellName} = ${node.init};`);
+    let init = node.init;
+    if (/^track\s*</.test(init.trim())) {
+      init = init.replace(/\s*<\s*[\s\S]*?\s*>\s*/g, '');
+    }
+    ctx.push(`const ${cellName} = ${init};`);
     return null;
   }
   if (node instanceof ComponentRef) return null;
@@ -954,7 +958,12 @@ export function compileClient(source: string, _componentName: string | null, opt
     )) runtimeNames.push(name);
   }
   if (ir.components.some(c => hasKeyedMap(c.body))) runtimeNames.push('reconcile');
-  if (options.hydrate) runtimeNames.push('hydrate');
+  if (options.hydrate) {
+    const hydrateNames = ['hydrate', 'hydrateViewport', 'hydrateIdle', 'hydrateOnInteraction', 'needsHydration', 'createHydrateWalker', 'collectVskMarkers', 'reactiveProps'];
+    for (const name of hydrateNames) {
+      if (!runtimeNames.includes(name)) runtimeNames.push(name);
+    }
+  }
   const formNames = ['Form', 'Field', 'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom'];
   for (const name of formNames) {
     if (!runtimeNames.includes(name) && findFormNameInIR(ir.components.flatMap(c => c.body), name)) {
