@@ -431,7 +431,8 @@ async function main() {
 
     // optimistic render should happen first, then fresh head + props land
     await page.waitForFunction(() => document.title.includes('Async'), { timeout: 8000 });
-    await new Promise(r => setTimeout(r, 200));
+    // fresh props land asynchronously (cold-cache first fetch can exceed 200ms)
+    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
 
     const url = page.url();
     assert(url.includes('/async'), 'URL changed to /async');
