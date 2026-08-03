@@ -32,6 +32,16 @@ export async function generateClientBundle(
 
   const seen = new Set<string>();
   const chunks: ChunkEntry[] = [];
+  const runtimeImportNames = new Set<string>();
+
+  function collectRuntimeImports(code: string): void {
+    const m = code.match(/^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/m);
+    if (!m) return;
+    for (const name of m[1].split(',')) {
+      const trimmed = name.trim().replace(/^(\w+)\s+as\s+.*$/, '$1');
+      if (trimmed) runtimeImportNames.add(trimmed);
+    }
+  }
 
   function stripRuntimeImport(code: string): string {
     return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, '')
@@ -52,12 +62,14 @@ export async function generateClientBundle(
 
     const compCode = compileClient(src, null, { forceClient: true });
     if (compCode) {
+      collectRuntimeImports(compCode);
       const stripped = stripExports(stripRuntimeImport(compCode));
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
     }
 
     const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
     if (hydCode) {
+      collectRuntimeImports(hydCode);
       const stripped = stripExports(stripRuntimeImport(hydCode))
         .replace(/__components/g, '__hydrators');
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
@@ -142,7 +154,7 @@ export async function generateClientBundle(
     }
     annotate(routeTree);
 
-    const main = buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime);
+    const main = buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
     return { main, chunks };
   } else {
     let componentLines: string[] = [];
@@ -157,12 +169,14 @@ export async function generateClientBundle(
 
       const compCode = compileClient(src, null, { forceClient: true });
       if (compCode) {
+        collectRuntimeImports(compCode);
         const stripped = stripExports(stripRuntimeImport(compCode));
         componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
 
       const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
       if (hydCode) {
+        collectRuntimeImports(hydCode);
         const stripped = stripExports(stripRuntimeImport(hydCode))
           .replace(/__components/g, '__hydrators');
         hydratorLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
@@ -199,7 +213,7 @@ export async function generateClientBundle(
 
     const main = buildMainBundle(routeTree, runtimeDir, false, {
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
-    }, !!options?.hmr, !!options?.importRuntime);
+    }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
     return { main, chunks: [] };
   }
 }
@@ -252,11 +266,17 @@ function buildMainBundle(
   mono?: Partial<MonolithicBundleParts>,
   hmr?: boolean,
   importRuntime?: boolean,
+  runtimeImportNames?: Set<string>,
 ): string {
   const runtimeCode = buildRuntimeCode(runtimeDir);
 
+  const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps'];
+  const allRuntimeImports = runtimeImportNames && runtimeImportNames.size > 0
+    ? [...new Set([...baseRuntimeImports, ...runtimeImportNames])]
+    : baseRuntimeImports;
+
   const preamble = importRuntime
-    ? "import { createFileRouter, get, set, effect, track, destroy_block, getActiveComponent, setActiveComponent, NavLink, Link, reactiveProps } from '/_vesk/runtime.js';\n\n"
+    ? `import { ${allRuntimeImports.join(', ')} } from '/_vesk/runtime.js';\n\n`
     : runtimeCode + '\n';
 
   const cleanupFn = 'function __cleanup(start, end) {\n\tlet n = start.nextSibling;\n\twhile (n && n !== end) {\n\t\tconst next = n.nextSibling;\n\t\tn.remove();\n\t\tn = next;\n\t}\n}\n';
@@ -321,9 +341,16 @@ function buildMainBundle(
       'globalThis.get = get;\n' +
       'globalThis.effect = effect;\n' +
       'globalThis.destroy_block = destroy_block;\n' +
+      'globalThis.reconcile = reconcile;\n' +
       'globalThis.NavLink = NavLink;\n' +
       'globalThis.Link = Link;\n' +
       'globalThis.createHydrateWalker = createHydrateWalker;\n' +
+      'globalThis.needsHydration = needsHydration;\n' +
+      'globalThis.hydrate = hydrate;\n' +
+      'globalThis.hydrateViewport = hydrateViewport;\n' +
+      'globalThis.hydrateIdle = hydrateIdle;\n' +
+      'globalThis.hydrateOnInteraction = hydrateOnInteraction;\n' +
+      'globalThis.collectVskMarkers = collectVskMarkers;\n' +
       'globalThis.__runtime_comps = __runtime_comps;\n' +
       'globalThis.__cleanup = __cleanup;\n\n';
 

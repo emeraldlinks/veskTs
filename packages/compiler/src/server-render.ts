@@ -190,7 +190,7 @@ ${bodyHtml}${scriptBlock}</body>
 
   const staticLists = ir.components.some((c) => {
     return c.body.some((node) => {
-      if (node instanceof MapRegion) return isStaticIR(node.bodyTemplate);
+      if (node instanceof MapRegion) return isStaticIR(node.bodyTemplate) && isStaticIR(node.alternateNodes);
       return false;
     });
   });

@@ -1,0 +1,47 @@
+component EmptyDemo(props) {
+	<Head>
+		<title>Empty — keyed for-of with empty fallback</title>
+	</Head>
+	let &[todos] = track([
+		{ id: 1, text: 'Buy milk' },
+		{ id: 2, text: 'Write docs' },
+	])
+
+	function clear() { todos = [] }
+	function restore() {
+		todos = [
+			{ id: 1, text: 'Buy milk' },
+			{ id: 2, text: 'Write docs' },
+		]
+	}
+
+	<h1 class="text-3xl font-bold mb-4">Empty-state Demo</h1>
+
+	<div class="flex gap-2 mb-6">
+		<button onclick={clear} class="bg-red-600 text-white text-sm px-3 py-1 rounded">Clear</button>
+		<button onclick={restore} class="bg-blue-600 text-white text-sm px-3 py-1 rounded">Restore</button>
+	</div>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">Keyed for-of with empty block</h2>
+	<ul class="space-y-2">
+		for (const todo of todos; key todo.id) {
+			<li class="bg-gray-50 rounded px-3 py-2"><b>{todo.text}</b> <span class="text-gray-400 text-sm">#{todo.id}</span></li>
+		}
+		empty {
+			<li class="bg-gray-100 rounded px-3 py-2 text-gray-500">No todos yet — click Restore to add some.</li>
+		}
+	</ul>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">Statement-mode empty block</h2>
+	for (const todo of todos; key todo.id) {
+		<div class="bg-gray-50 rounded px-3 py-2 mb-2"><b>{todo.text}</b> <span class="text-gray-400 text-sm">#{todo.id}</span></div>
+	}
+	empty {
+		<div class="bg-gray-100 rounded px-3 py-2 mb-2 text-gray-500">Statement-mode: list is empty.</div>
+	}
+
+	<p class="text-gray-500 text-sm mt-6">
+		The <code>empty</code> block renders when the list is empty. The
+		list uses <code>; key todo.id</code> for keyed reconciliation.
+	</p>
+}

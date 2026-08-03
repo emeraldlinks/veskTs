@@ -23,6 +23,36 @@ import {
 } from '@vesk/compiler/src/ir';
 import type { IRNode } from '@vesk/compiler/src/ir';
 import { VeskError } from '@vesk/compiler/src/errors';
+import { createBaseParser } from '@vesk/compiler/src/parser';
+import type { VeskAnnotation } from '@vesk/compiler/src/parser';
+
+let __vskAnnotations: VeskAnnotation[] = [];
+
+function parseExprNode(text: string): ESTreeNode | null {
+  try {
+    const parser = createBaseParser();
+    const ast = parser.parse(`(${text})`, { ecmaVersion: 'latest', sourceType: 'module' });
+    return ((ast as { body: Array<{ expression?: ESTreeNode }> }).body[0]?.expression as ESTreeNode) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function getForClauseAnnotation(forStart: number): VeskAnnotation | null {
+  let keyRange: [number, number] | undefined;
+  let indexName: string | undefined;
+  let clauseStart = -1;
+  let clauseEnd = -1;
+  for (const ann of __vskAnnotations) {
+    if (ann.kind !== 'for-clause' || ann.forStart !== forStart) continue;
+    if (ann.keyRange) keyRange = ann.keyRange;
+    if (ann.indexName) indexName = ann.indexName;
+    clauseStart = ann.clauseStart;
+    clauseEnd = ann.clauseEnd;
+  }
+  if (clauseStart === -1) return null;
+  return { kind: 'for-clause', forStart, clauseStart, clauseEnd, ...(keyRange ? { keyRange } : {}), ...(indexName !== undefined ? { indexName } : {}) };
+}
 
 function getSource(source: string, node: { start: number; end: number }): string {
   return source.slice(node.start, node.end);
@@ -38,6 +68,7 @@ function componentUsesFetch(nodes: IRNode[]): boolean {
       if (node.expression.raw.includes('useFetch(')) return true;
     } else if (node instanceof MapRegion) {
       if (componentUsesFetch(node.bodyTemplate)) return true;
+      if (componentUsesFetch(node.alternateNodes)) return true;
     } else if (node instanceof OpaqueDynamicRegion) {
       if (componentUsesFetch(node.consequentNodes) || componentUsesFetch(node.alternateNodes)) return true;
     } else if (node instanceof WhileLoop) {
@@ -153,10 +184,27 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
           if (/ of /.test(decl)) {
             const ofParts = decl.split(' of ');
             if (ofParts.length === 2) {
-              const itemVar = ofParts[0].trim();
-              const arrExpr = new Expression(ofParts[1].trim());
-              result.push(new MapRegion(arrExpr, itemVar, bodyNodes, null));
-              i += 2;
+              const itemVar = ofParts[0].trim().replace(/^(const|let|var)\s+/, '');
+              const exprText = ofParts[1].trim();
+              const arrExpr = new Expression(exprText, [], parseExprNode(exprText), null);
+              const rawFor = child.value.match(/^\s*for\s*\(/);
+              const ann = rawFor ? getForClauseAnnotation(child.start + rawFor[0].indexOf('for')) : null;
+              const keyExpr = ann?.keyRange ? new Expression(source.slice(ann.keyRange[0], ann.keyRange[1])) : null;
+              const indexVar = ann?.indexName ?? null;
+              let alternate: IRNode[] = [];
+              let consumed = 2;
+              const emptyText = children[i + 2];
+              const emptyContainer = children[i + 3];
+              if (
+                emptyText && emptyText.type === 'JSXText' && ['#empty', 'empty'].includes(emptyText.value.trim()) &&
+                emptyContainer && emptyContainer.type === 'JSXExpressionContainer' &&
+                emptyContainer.expression.type !== 'JSXEmptyExpression'
+              ) {
+                alternate = exprToIR(source, emptyContainer.expression);
+                consumed = 4;
+              }
+              result.push(new MapRegion(arrExpr, itemVar, bodyNodes, keyExpr, indexVar, alternate));
+              i += consumed;
               continue;
             }
           } else if (/ in /.test(decl)) {
@@ -435,7 +483,7 @@ function processIfStatement(source: string, stmt: any): IRNode[] {
   return [new OpaqueDynamicRegion(condExpr, consequent, alternate)];
 }
 
-function processForStatement(source: string, stmt: any): IRNode[] {
+function processForStatement(source: string, stmt: any, alternate: IRNode[] = []): IRNode[] {
   if (stmt.type === 'ForOfStatement') {
     const left = stmt.left;
     const itemVar =
@@ -444,7 +492,10 @@ function processForStatement(source: string, stmt: any): IRNode[] {
         : left.name ?? 'item';
     const arrayExpr = toExpression(source, stmt.right);
     const bodyTemplate = processBlockBody(source, stmt.body);
-    return [new MapRegion(arrayExpr, itemVar, bodyTemplate)];
+    const ann = getForClauseAnnotation(stmt.start);
+    const keyExpr = ann?.keyRange ? new Expression(source.slice(ann.keyRange[0], ann.keyRange[1])) : null;
+    const indexVar = ann?.indexName ?? null;
+    return [new MapRegion(arrayExpr, itemVar, bodyTemplate, keyExpr, indexVar, alternate)];
   }
   if (stmt.type === 'ForInStatement') {
     const left = getSource(source, stmt.left);
@@ -487,7 +538,8 @@ function processTryStatement(source: string, stmt: any): IRNode[] {
 
 function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
   const nodes: IRNode[] = [];
-  for (const stmt of bodyStmts) {
+  for (let i = 0; i < bodyStmts.length; i++) {
+    const stmt = bodyStmts[i];
     if (stmt.type === 'JSXElement') {
       nodes.push(...processJSXElement(source, stmt));
     } else if (stmt.type === 'JSXExpressionContainer') {
@@ -507,6 +559,7 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
         nodes.push(...processJSXChildren(source, [c]));
       }
     } else if (stmt.type === 'VeskBlock') {
+      if (stmt.tag === 'empty') continue;
       const inner = processStatementModeBody(source, stmt.body);
       if (stmt.tag === 'server') {
         nodes.push(new ServerBlock(inner));
@@ -524,7 +577,15 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
     } else if (stmt.type === 'IfStatement') {
       nodes.push(...processIfStatement(source, stmt));
     } else if (stmt.type === 'ForOfStatement') {
-      nodes.push(...processForStatement(source, stmt));
+      let alternate: IRNode[] = [];
+      let consumed = 1;
+      const next = bodyStmts[i + 1];
+      if (next && next.type === 'VeskBlock' && next.tag === 'empty') {
+        alternate = processStatementModeBody(source, next.body);
+        consumed = 2;
+      }
+      nodes.push(...processForStatement(source, stmt, alternate));
+      i += consumed - 1;
     } else if (stmt.type === 'WhileStatement' || stmt.type === 'DoWhileStatement') {
       nodes.push(...processWhileStatement(source, stmt));
     } else if (stmt.type === 'SwitchStatement') {
@@ -608,6 +669,7 @@ function processEnum(node: any, source: string, exported: boolean): string {
 }
 
 export function generateIR(ast: any, source: string): IRRoot {
+  __vskAnnotations = (ast as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations ?? [];
   const components: ComponentIR[] = [];
   const imports: string[] = [];
   const importedNames = new Set<string>();
@@ -766,6 +828,14 @@ export function generateIR(ast: any, source: string): IRRoot {
           }
         }
         scanForAutoImport(node.children);
+      }
+      if (node instanceof MapRegion) {
+        scanForAutoImport(node.bodyTemplate);
+        scanForAutoImport(node.alternateNodes);
+      }
+      if (node instanceof OpaqueDynamicRegion) {
+        scanForAutoImport(node.consequentNodes);
+        scanForAutoImport(node.alternateNodes);
       }
       if (node instanceof DynamicBinding && node.expression && node.expression.raw) {
         for (const fn of autoImportable) {

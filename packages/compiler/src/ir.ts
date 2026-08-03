@@ -136,13 +136,15 @@ export class MapRegion {
   indexVariable: string | null;
   bodyTemplate: IRNode[];
   keyExpr: Expression | null;
+  alternateNodes: IRNode[];
 
-  constructor(expression: Expression, itemVariable: string, bodyTemplate: IRNode[], keyExpr: Expression | null = null, indexVariable: string | null = null) {
+  constructor(expression: Expression, itemVariable: string, bodyTemplate: IRNode[], keyExpr: Expression | null = null, indexVariable: string | null = null, alternateNodes: IRNode[] = []) {
     this.expression = expression;
     this.itemVariable = itemVariable;
     this.indexVariable = indexVariable;
     this.bodyTemplate = bodyTemplate;
     this.keyExpr = keyExpr;
+    this.alternateNodes = alternateNodes;
   }
 }
 

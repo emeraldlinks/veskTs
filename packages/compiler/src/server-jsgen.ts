@@ -11,7 +11,7 @@ import type { Node as ESTreeNode } from 'estree';
 import {
   isStatic, escapeHtml, indent, exprJS, childrenToHTML,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
-  __vskHydrate, __vskImportedNames, setVskImportedNames,
+  __vskHydrate, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
 
 export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isAsync: boolean = false, tracked?: Map<string, TrackedInfo>): string {
@@ -87,7 +87,8 @@ function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): s
   const hasDynamicAttrs = dynAttrTargets.size > 0;
 
   let openTag = `<${node.tag}`;
-  const subtreeNeedsJS = __vskHydrate && !isStaticIR(node.children);
+  const forceClaim = takeVskForceClaim();
+  const subtreeNeedsJS = __vskHydrate && (forceClaim || !isStaticIR(node.children));
   if (subtreeNeedsJS) {
     lines.push(`__out.push('<!--vsk-->');`);
   }
@@ -179,9 +180,26 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
   const lines: string[] = [];
   const arr = exprJSX(node.expression, tracked);
   const item = node.itemVariable;
+
+  const hasAlternate = node.alternateNodes.length > 0;
+  const arrVar = hasAlternate ? `__a${nextVskId()}` : null;
+
+  if (hasAlternate) {
+    lines.push(`const ${arrVar} = ${arr};`);
+    lines.push(`if (${arrVar} == null || ${arrVar}.length === 0) {`);
+    for (const n of node.alternateNodes) {
+      setVskForceClaim(true);
+      const code = irNodeToJS(n, null, false, tracked);
+      if (code) lines.push(indent(code));
+    }
+    setVskForceClaim(false);
+    lines.push(`} else {`);
+  }
+
+  const loopArr = arrVar || arr;
   if (node.indexVariable) {
     lines.push('let __i = 0;');
-    lines.push(`for (const ${item} of ${arr}) {`);
+    lines.push(`for (const ${item} of ${loopArr}) {`);
     lines.push(indent(`const ${node.indexVariable} = __i;`));
     for (const n of node.bodyTemplate) {
       const code = irNodeToJS(n, null, false, tracked);
@@ -189,14 +207,18 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
     }
     lines.push(indent('__i++;'));
     lines.push(`}`);
-    return lines.join('\n');
+  } else {
+    lines.push(`for (const ${item} of ${loopArr}) {`);
+    for (const n of node.bodyTemplate) {
+      const code = irNodeToJS(n, null, false, tracked);
+      if (code) lines.push(indent(code));
+    }
+    lines.push(`}`);
   }
-  lines.push(`for (const ${item} of ${arr}) {`);
-  for (const n of node.bodyTemplate) {
-    const code = irNodeToJS(n, null, false, tracked);
-    if (code) lines.push(indent(code));
+
+  if (hasAlternate) {
+    lines.push(`}`);
   }
-  lines.push(`}`);
   return lines.join('\n');
 }
 

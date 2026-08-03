@@ -594,6 +594,70 @@ describe('Keyed .map() reconciliation', () => {
 	});
 });
 
+describe('Keyed for-of with ; key clause and #empty block', () => {
+	bothModes('statement-mode keyed for-of uses reconcile and empty fallback', `
+		component App(props: { todos: { id: number, text: string }[] }) {
+			for (const todo of props.todos; key todo.id) {
+				<li>{todo.text}</li>
+			}
+			#empty {
+				<li>No todos yet</li>
+			}
+		}
+	`, (code) => {
+		if (!code.includes('reconcile')) throw new Error('Expected reconcile import, got:\n' + code);
+		if (!code.includes('todo.id')) throw new Error('Expected key expression todo.id in output, got:\n' + code);
+		if (!/__l != null && __l\.length > 0/.test(code)) throw new Error('Expected empty-state tracking, got:\n' + code);
+		if (!code.includes('No todos yet')) throw new Error('Expected #empty content in output, got:\n' + code);
+	});
+
+	bothModes('statement-mode keyed for-of compiles without errors', `
+		component App(props: { todos: { id: number, text: string }[] }) {
+			for (const todo of props.todos; key todo.id) {
+				<li>{todo.text}</li>
+			}
+			#empty {
+				<li>No todos yet</li>
+			}
+		}
+	`, (code) => {
+		try {
+			new Function('track, effect, reconcile', stripModuleWrapper(code));
+		} catch (e) {
+			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
+		}
+	});
+
+	bothModes('statement-mode for-of with ; index clause compiles', `
+		component App(props: { todos: { id: number, text: string }[] }) {
+			for (const todo of props.todos; key todo.id; index i) {
+				<li>{i}: {todo.text}</li>
+			}
+		}
+	`, (code) => {
+		if (!code.includes('reconcile')) throw new Error('Expected reconcile import, got:\n' + code);
+		try {
+			new Function('track, effect, reconcile', stripModuleWrapper(code));
+		} catch (e) {
+			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
+		}
+	});
+
+	bothModes('classic for-loop with key variable still compiles', `
+		component App() {
+			for (let key = 0; key < 5; key++) {
+				<li>{key}</li>
+			}
+		}
+	`, (code) => {
+		try {
+			new Function('track, effect', stripModuleWrapper(code));
+		} catch (e) {
+			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
+		}
+	});
+});
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

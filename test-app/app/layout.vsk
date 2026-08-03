@@ -9,6 +9,7 @@ component Layout(props) {
 		<NavLink href="/statements" class="text-gray-500 hover:text-black font-medium no-underline">Statements</NavLink>
 		<NavLink href="/async" class="text-gray-500 hover:text-black font-medium no-underline">Async</NavLink>
 		<NavLink href="/map" class="text-gray-500 hover:text-black font-medium no-underline">Map</NavLink>
+		<NavLink href="/empty" class="text-gray-500 hover:text-black font-medium no-underline">Empty</NavLink>
 	</nav>
 	<style> 
 	.nav {

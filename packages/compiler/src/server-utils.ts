@@ -11,15 +11,31 @@ const RAW_TEXT_ELEMENTS = new Set(['style','script','title']);
 
 export let __vskHydrate = false;
 export let __vskId = 0;
+export let __vskForceClaim = false;
 export let __vskImportedNames: Set<string> | null = null;
 
 export function resetVskState(hydrate = false): void {
   __vskHydrate = hydrate;
   __vskId = 0;
+  __vskForceClaim = false;
 }
 
 export function setVskImportedNames(names: Set<string> | null): void {
   __vskImportedNames = names;
+}
+
+export function setVskForceClaim(v: boolean): void {
+  __vskForceClaim = v;
+}
+
+export function takeVskForceClaim(): boolean {
+  const v = __vskForceClaim;
+  __vskForceClaim = false;
+  return v;
+}
+
+export function nextVskId(): number {
+  return __vskId++;
 }
 
 export function prettifyHtml(html: string): string {

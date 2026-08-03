@@ -21,6 +21,7 @@ import {
   HeadBlock,
   SlotNode,
 } from '@vesk/compiler/src/ir';
+import type { Expression } from '@vesk/compiler/src/ir';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 
@@ -146,7 +147,6 @@ export function transformTracked(irNode: Expression | RuntimeStatement | Dynamic
 }
 
 import type { Node as ESTreeNode } from 'estree';
-import type { Expression } from '@vesk/compiler/src/ir';
 
 export function collectTrackedNames(body: IRNode[]): Map<string, TrackedInfo> {
   const names = new Map<string, TrackedInfo>();
@@ -187,6 +187,7 @@ class Ctx {
   directEvents = new Set<string>();
   hydrate = false;
   inTryBody = false;
+  claimStatic = false;
 
   push(...args: (string | null | undefined | false)[]): void {
     for (const a of args) if (a) this.lines.push(a as string);
@@ -286,7 +287,9 @@ const PROPERTY_ATTRS: Record<string, Set<string>> = {
 function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo>, effectsVar: string | null): string | null {
   const el = ctx.n();
   if (ctx.hydrate) {
-    if (isStaticIR(node.children)) return null;
+    const claim = ctx.claimStatic;
+    ctx.claimStatic = false;
+    if (!claim && isStaticIR(node.children)) return null;
     ctx.push(`const ${el} = __hydrate.nextElement(${JSON.stringify(node.tag)});`);
   } else {
     ctx.push(`const ${el} = document.createElement(${JSON.stringify(node.tag)});`);
@@ -594,10 +597,13 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   const conRenderName = ctx.n();
   ctx.push(`const ${conRenderName} = () => {`);
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  const conFrag = ctx.n();
+  ctx.push(indent(`const ${conFrag} = document.createDocumentFragment();`));
   for (const n of node.consequentNodes) {
-    const v = emitNode(ctx, n, tracked, effectsVar);
-    if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+    const v = emitNode(ctx, n, tracked, effectsVar, conFrag);
+    if (v) ctx.push(indent(`${conFrag}.appendChild(${v});`));
   }
+  ctx.push(indent(`__p.insertBefore(${conFrag}, ${endAnchor});`));
   ctx.push(`};`);
 
   let altRenderName: string | null = null;
@@ -605,10 +611,13 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
     altRenderName = ctx.n();
     ctx.push(`const ${altRenderName} = () => {`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+    const altFrag = ctx.n();
+    ctx.push(indent(`const ${altFrag} = document.createDocumentFragment();`));
     for (const n of node.alternateNodes) {
-      const v = emitNode(ctx, n, tracked, effectsVar);
-      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, altFrag);
+      if (v) ctx.push(indent(`${altFrag}.appendChild(${v});`));
     }
+    ctx.push(indent(`__p.insertBefore(${altFrag}, ${endAnchor});`));
     ctx.push(`};`);
   }
 
@@ -661,55 +670,124 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   }
   ctx.push(`};`);
 
+  let emptyRenderName: string | null = null;
+  if (node.alternateNodes.length > 0) {
+    emptyRenderName = ctx.n();
+    ctx.push(`const ${emptyRenderName} = () => {`);
+    ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+    const frag = ctx.n();
+    ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
+    const savedClaim = ctx.claimStatic;
+    for (const n of node.alternateNodes) {
+      ctx.claimStatic = true;
+      const v = emitNode(ctx, n, tracked, effectsVar, frag);
+      if (v) ctx.push(indent(`${frag}.appendChild(${v});`));
+    }
+    ctx.claimStatic = savedClaim;
+    ctx.push(indent(`__p.insertBefore(${frag}, ${endAnchor});`));
+    ctx.push(`};`);
+  }
+
   ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+
+  const hasItems = ctx.n();
+  ctx.push(`const ${hasItems} = () => { const __l = ${arrExpr}; return __l != null && __l.length > 0; };`);
 
   if (node.keyExpr) {
     const keyExpr = transformTracked(node.keyExpr as any, tracked);
     const reconciler = ctx.n();
-    ctx.push(`const ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}${indexParam}, __e, __r) => ${renderItem}(${itemVar}${indexParam ? ', __i' : ''}, __e, __r));`);
+    const initList = ctx.n();
+    ctx.push(`let ${reconciler} = () => {};`);
+    ctx.push(`const ${initList} = () => { ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}, __i, __e) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'})); };`);
 
-    ctx.effects.push(`{
+    if (emptyRenderName) {
+      const isEmptyVar = ctx.n();
+      ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
+      ctx.push(`if (!${isEmptyVar}) { ${initList}(); } else { ${emptyRenderName}(); }`);
+      ctx.effects.push(`{
   let __first = true;
   effect(() => {
+    const __new = ${hasItems}();
+    if (__first) { __first = false; return; }
+    if (__new !== ${isEmptyVar}) {
+      if (__new) ${reconciler}(${arrExpr});
+      return;
+    }
+    ${isEmptyVar} = !__new;
+    for (const e of ${effectsVar}) destroy_block(e);
+    ${effectsVar}.length = 0;
+    __cleanup(${anchor}, ${endAnchor});
+    if (__new) { ${initList}(); } else { ${emptyRenderName}(); }
+  });
+}`);
+    } else {
+      ctx.push(`${initList}();`);
+      ctx.effects.push(`{
+  let __first = true;
+  effect(() => {
+    const __nv = ${arrExpr};
     if (__first) { __first = false; return; }
     ${reconciler}(${arrExpr});
   });
 }`);
+    }
   } else {
-    if (node.indexVariable) {
-      ctx.push(`let __i = 0;`);
-      ctx.push(`for (const ${itemVar} of ${arrExpr}) {`);
-      ctx.push(indent(`${renderItem}(${itemVar}, ${effectsVar}, void 0, __i);`));
-      ctx.push(indent(`__i++;`));
-      ctx.push(`}`);
+    const renderAllItems = (ind: string): string => {
+      const lines: string[] = [];
+      if (node.indexVariable) {
+        lines.push(`${ind}let __i = 0;`);
+        lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
+        lines.push(`${ind}\t${renderItem}(${itemVar}, __i, ${effectsVar});`);
+        lines.push(`${ind}\t__i++;`);
+        lines.push(`${ind}}`);
+      } else {
+        lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
+        lines.push(`${ind}\t${renderItem}(${itemVar}, ${effectsVar});`);
+        lines.push(`${ind}}`);
+      }
+      return lines.join('\n');
+    };
+
+    if (emptyRenderName) {
+      const isEmptyVar = ctx.n();
+      ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
+      ctx.push(`if (!${isEmptyVar}) {`);
+      ctx.push(indent(renderAllItems('')));
+      ctx.push(indent(`} else { ${emptyRenderName}(); }`));
       ctx.effects.push(`{
   let __first = true;
   effect(() => {
+    const __new = ${hasItems}();
     if (__first) { __first = false; return; }
+    if (__new !== ${isEmptyVar}) {
+      if (__new) {
+        for (const e of ${effectsVar}) destroy_block(e);
+        ${effectsVar}.length = 0;
+        __cleanup(${anchor}, ${endAnchor});
+${renderAllItems('        ')}
+      }
+      return;
+    }
+    ${isEmptyVar} = !__new;
     for (const e of ${effectsVar}) destroy_block(e);
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
-    let __i = 0;
-    for (const ${itemVar} of ${arrExpr}) {
-      ${renderItem}(${itemVar}, ${effectsVar}, void 0, __i);
-      __i++;
-    }
+    if (__new) {
+${renderAllItems('      ')}
+    } else { ${emptyRenderName}(); }
   });
 }`);
     } else {
-      ctx.push(`for (const ${itemVar} of ${arrExpr}) {`);
-      ctx.push(indent(`${renderItem}(${itemVar}, ${effectsVar});`));
-      ctx.push(`}`);
+      ctx.push(renderAllItems(''));
       ctx.effects.push(`{
   let __first = true;
   effect(() => {
+    const __nv = ${arrExpr};
     if (__first) { __first = false; return; }
     for (const e of ${effectsVar}) destroy_block(e);
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
-    for (const ${itemVar} of ${arrExpr}) {
-      ${renderItem}(${itemVar}, ${effectsVar});
-    }
+${renderAllItems('    ')}
   });
 }`);
     }
@@ -849,6 +927,7 @@ function findBindingInIR(nodes: IRNode[], names: Set<string>): boolean {
     } else if (node instanceof MapRegion) {
       if (astHasBinding(node.expression.ast, names)) return true;
       if (findBindingInIR(node.bodyTemplate, names)) return true;
+      if (findBindingInIR(node.alternateNodes, names)) return true;
     } else if (node instanceof WhileLoop) {
       if (astHasBinding(node.condition.ast, names)) return true;
       if (findBindingInIR(node.bodyTemplate, names)) return true;
@@ -919,6 +998,7 @@ function hasKeyedMap(nodes: IRNode[]): boolean {
   for (const node of nodes) {
     if (node instanceof MapRegion && node.keyExpr) return true;
     if (node instanceof MapRegion && hasKeyedMap(node.bodyTemplate)) return true;
+    if (node instanceof MapRegion && hasKeyedMap(node.alternateNodes)) return true;
     if (node instanceof WhileLoop && hasKeyedMap(node.bodyTemplate)) return true;
     if (node instanceof SwitchBlock) {
       for (const c of node.cases) {

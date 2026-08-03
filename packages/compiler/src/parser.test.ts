@@ -876,6 +876,131 @@ describe('Server/Client Blocks ({#server} / {#client})', () => {
 	});
 });
 
+describe('For-of key/index clauses and #empty blocks', () => {
+	const getComp = (s) => {
+		const ast = parse(s);
+		const comp = ast.body.find((n) => n.type === 'ComponentDeclaration' || (n.type === 'ExportNamedDeclaration' && n.declaration?.type === 'ComponentDeclaration'));
+		return comp.type === 'ComponentDeclaration' ? comp : comp.declaration;
+	};
+
+	it('parses for-of with ; key clause (statement mode)', () => {
+		const decl = getComp(`component App {
+			for (const todo of todos; key todo.id) {
+				<li>{todo.text}</li>
+			}
+		}`);
+		const stmt = decl.body.body[0];
+		expect(stmt.type).toBe('ForOfStatement');
+	});
+
+	it('parses for-of with ; key and ; index clauses', () => {
+		const decl = getComp(`component App {
+			for (const todo of todos; key todo.id; index i) {
+				<li>{i}{todo.text}</li>
+			}
+		}`);
+		expect(decl.body.body[0].type).toBe('ForOfStatement');
+	});
+
+	it('parses for-of with ; index clause only', () => {
+		const decl = getComp(`component App {
+			for (const t of todos; index i) {
+				<li>{i}{t}</li>
+			}
+		}`);
+		expect(decl.body.body[0].type).toBe('ForOfStatement');
+	});
+
+	it('records key/index annotations on the ast', () => {
+		const s = `component App {
+			for (const todo of todos; key todo.id; index i) {
+				<li>{todo.text}</li>
+			}
+		}`;
+		const ast = parse(s);
+		const anns = ast.__vskAnnotations;
+		expect(anns).toBeTruthy();
+		expect(anns.length).toBe(2);
+		expect(anns[0].keyRange).toBeTruthy();
+		expect(anns[0].keyRange[0]).toBe(s.indexOf('todo.id'));
+		expect(anns[0].keyRange[1]).toBe(s.indexOf('todo.id') + 'todo.id'.length);
+		expect(anns[1].indexName).toBe('i');
+	});
+
+	it('does not blank classic for-loops with a key variable', () => {
+		const decl = getComp(`component App {
+			for (let key = 0; key < 5; key++) {
+				<li>{key}</li>
+			}
+		}`);
+		expect(decl.body.body[0].type).toBe('ForStatement');
+	});
+
+	it('does not blank classic for-loops with an index variable', () => {
+		const decl = getComp(`component App {
+			for (let index = 0; index < 5; index++) {
+				<li>{index}</li>
+			}
+		}`);
+		expect(decl.body.body[0].type).toBe('ForStatement');
+	});
+
+	it('does not blank for-of without a key clause', () => {
+		const decl = getComp(`component App {
+			for (const todo of todos) {
+				<li>{todo.text}</li>
+			}
+		}`);
+		expect(decl.body.body[0].type).toBe('ForOfStatement');
+	});
+
+	it('parses #empty block as VeskBlock(empty) in statement mode', () => {
+		const decl = getComp(`component App {
+			for (const todo of todos; key todo.id) {
+				<li>{todo.text}</li>
+			}
+			#empty {
+				<li>No todos yet</li>
+			}
+		}`);
+		const stmts = decl.body.body;
+		expect(stmts[0].type).toBe('ForOfStatement');
+		expect(stmts[1].type).toBe('VeskBlock');
+		expect(stmts[1].tag).toBe('empty');
+	});
+
+	it('parses #empty inside a text-mode (JSX children) loop', () => {
+		const decl = getComp(`component App {
+			<ul>
+				for (const todo of todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+				#empty {
+					<li>No todos yet</li>
+				}
+			</ul>
+		}`);
+		const ul = decl.body.body[0];
+		expect(ul.type).toBe('JSXElement');
+		const types = ul.children.map((c) => c.type);
+		expect(types.some((t) => t === 'JSXText')).toBe(true);
+		expect(types.some((t) => t === 'JSXExpressionContainer')).toBe(true);
+		expect(ul.children.some((c) => c.type === 'JSXText' && c.value.trim() === '#empty')).toBe(true);
+	});
+
+	it('leaves strings and comments containing for-clauses untouched', () => {
+		const s = `component App {
+			const a = "for (const x of y; key z) { }";
+			// for (const x of y; key z) { }
+			/* for (const x of y; key z) { } */
+			const b = \`for (const x of y; key z) {\`;
+			<p>{a}{b}</p>
+		}`;
+		const ast = parse(s);
+		expect(ast.__vskAnnotations).toBeFalsy();
+	});
+});
+
 // ============================================================
 // Results
 // ============================================================

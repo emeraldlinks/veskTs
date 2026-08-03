@@ -357,13 +357,170 @@ describe('Statement Mode Server Rendering', () => {
 			}
 		`, 'App', { s: false })).toBe('<div>Off</div>');
 	});
-	it('renders for-of at body level', () => {
+ 	it('renders for-of at body level', () => {
 		const html = render(`
 			component App(props: { items: string[] }) {
 				for (const item of props.items) { <div>{item}</div> }
 			}
 		`, 'App', { items: ['A', 'B', 'C'] });
 		expect(html).toBe('<div>A</div><div>B</div><div>C</div>');
+	});
+	it('renders keyed for-of with #empty state (items present)', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				for (const todo of props.todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+				#empty {
+					<li>No todos yet</li>
+				}
+			}
+		`, 'App', { todos: [{ id: 1, text: 'A' }, { id: 2, text: 'B' }] });
+		expect(html).toBe('<li>A</li><li>B</li>');
+	});
+	it('renders keyed for-of with #empty state (empty list)', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				for (const todo of props.todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+				#empty {
+					<li>No todos yet</li>
+				}
+			}
+		`, 'App', { todos: [] });
+		expect(html).toBe('<li>No todos yet</li>');
+	});
+	it('renders for-of with ; index clause', () => {
+		const html = render(`
+			component App(props: { items: string[] }) {
+				for (const item of props.items; index i) {
+					<div>{i}:{item}</div>
+				}
+			}
+		`, 'App', { items: ['A', 'B'] });
+		expect(html).toBe('<div>0:A</div><div>1:B</div>');
+	});
+	it('renders text-mode for-of with #empty state', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				<ul>
+					for (const todo of props.todos; key todo.id) {
+						<li>{todo.text}</li>
+					}
+					#empty {
+						<li>No todos yet</li>
+					}
+				</ul>
+			}
+		`, 'App', { todos: [] });
+		expect(html).toBe('<ul><li>No todos yet</li></ul>');
+	});
+	it('renders tracked items in text-mode for-of', () => {
+		const html = render(`
+			component App() {
+				let &[todos] = track([{ id: 1, text: 'A' }, { id: 2, text: 'B' }]);
+				<ul>
+					for (const todo of todos; key todo.id) {
+						<li>{todo.text}</li>
+					}
+					empty {
+						<li>No todos yet</li>
+					}
+				</ul>
+			}
+		`, 'App', {});
+		expect(html).toBe('<ul><li>A</li><li>B</li></ul>');
+	});
+	it('renders keyed for-of with items', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				for (const todo of props.todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+			}
+		`, 'App', { todos: [{ id: 1, text: 'A' }, { id: 2, text: 'B' }] });
+		expect(html).toBe('<li>A</li><li>B</li>');
+	});
+	it('renders empty block for empty list', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				for (const todo of props.todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+				empty {
+					<li>No todos yet</li>
+				}
+			}
+		`, 'App', { todos: [] });
+		expect(html).toBe('<li>No todos yet</li>');
+	});
+	it('renders empty block for null list', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				for (const todo of props.todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+				empty {
+					<li>No todos yet</li>
+				}
+			}
+		`, 'App', { todos: null });
+		expect(html).toBe('<li>No todos yet</li>');
+	});
+	it('renders items when list is populated despite empty block', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				for (const todo of props.todos; key todo.id) {
+					<li>{todo.text}</li>
+				}
+				empty {
+					<li>No todos yet</li>
+				}
+			}
+		`, 'App', { todos: [{ id: 1, text: 'A' }] });
+		expect(html).toBe('<li>A</li>');
+	});
+	it('renders empty block with index clause', () => {
+		const html = render(`
+			component App(props: { todos: string[] }) {
+				for (const todo of props.todos; index i) {
+					<li>{i}: {todo}</li>
+				}
+				empty {
+					<li>None</li>
+				}
+			}
+		`, 'App', { todos: [] });
+		expect(html).toBe('<li>None</li>');
+	});
+	it('renders empty block for empty #empty syntax', () => {
+		const html = render(`
+			component App(props: { todos: string[] }) {
+				for (const todo of props.todos) {
+					<li>{todo}</li>
+				}
+				#empty {
+					<li>Nothing here</li>
+				}
+			}
+		`, 'App', { todos: [] });
+		expect(html).toBe('<li>Nothing here</li>');
+	});
+	it('renders nested empty block inside if', () => {
+		const html = render(`
+			component App(props: { show: boolean, todos: string[] }) {
+				if (props.show) {
+					for (const todo of props.todos) {
+						<div>{todo}</div>
+					}
+					empty {
+						<p>No todos</p>
+					}
+				}
+			}
+		`, 'App', { show: true, todos: [] });
+		expect(html).toBe('<p>No todos</p>');
 	});
 	it('renders return escape in statement mode', () => {
 		expect(render(`

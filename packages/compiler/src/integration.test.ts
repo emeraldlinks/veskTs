@@ -185,6 +185,48 @@ it('[stmt] renders server block', () => {
   assert(html.includes('ALL'), `always missing: ${JSON.stringify(html)}`);
 });
 
+it('[stmt] renders keyed for-of with #empty (items)', () => {
+  const html = show('html', render(`component App(props) {
+    for (const todo of props.todos; key todo.id) {
+      <li>{todo.text}</li>
+    }
+    #empty {
+      <li>No todos yet</li>
+    }
+  }`, 'App', { todos: [{ id: 1, text: 'A' }, { id: 2, text: 'B' }] }));
+  assert(html === '<li>A</li><li>B</li>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] renders keyed for-of with #empty (empty)', () => {
+  const html = show('html', render(`component App(props) {
+    for (const todo of props.todos; key todo.id) {
+      <li>{todo.text}</li>
+    }
+    #empty {
+      <li>No todos yet</li>
+    }
+  }`, 'App', { todos: [] }));
+  assert(html === '<li>No todos yet</li>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] renders for-of with ; index clause', () => {
+  const html = show('html', render(`component App(props) {
+    for (const item of props.items; index i) {
+      <div>{i}:{item}</div>
+    }
+  }`, 'App', { items: ['X', 'Y'] }));
+  assert(html === '<div>0:X</div><div>1:Y</div>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] classic for-loop with key variable still renders', () => {
+  const html = show('html', render(`component App {
+    for (let key = 0; key < 3; key++) {
+      <span>{key}</span>
+    }
+  }`, 'App'));
+  assert(html === '<span>0</span><span>1</span><span>2</span>', `got ${JSON.stringify(html)}`);
+});
+
 // =============================================================
 // SSG — Static Site Generation
 // =============================================================
