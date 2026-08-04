@@ -1,0 +1,13 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "installCommand": "npm install",
+  "buildCommand": "vesk build",
+  "outputDirectory": ".vercel/output",
+  "regions": ["iad1"],
+  "functions": {
+    "**/*.js": {
+      "runtime": "edge"
+    }
+  }
+}
