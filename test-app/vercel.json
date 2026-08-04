@@ -4,10 +4,5 @@
   "installCommand": "npm install",
   "buildCommand": "vesk build",
   "outputDirectory": ".vercel/output",
-  "regions": ["iad1"],
-  "functions": {
-    "**/*.js": {
-      "runtime": "edge"
-    }
-  }
+  "regions": ["iad1"]
 }

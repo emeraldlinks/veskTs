@@ -1,12 +1,18 @@
-import { writeFileSync, existsSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as esbuild from 'esbuild';
 import type { RouteNode, ApiRouteNode } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-function routeName(segments: string[]): string {
+export interface PlatformHandlerInput {
+  ssrRoutes: RouteNode[];
+  apiRoutes: ApiRouteNode[];
+  prerenderedPaths: string[];
+  hasMiddleware: boolean;
+}
+
+export function routeName(segments: string[]): string {
   const parts = segments.filter(Boolean).map(s => {
     if (s.startsWith(':')) return s.slice(1) || 'param';
     return s;
@@ -14,12 +20,12 @@ function routeName(segments: string[]): string {
   return parts.join('_') || 'index';
 }
 
-function apiRouteName(fullPath: string): string {
+export function apiRouteName(fullPath: string): string {
   const parts = fullPath.split('/').filter(Boolean);
-  return parts.map(s => s.startsWith(':') ? s.slice(1) || 'param' : s).join('_') || 'index';
+  return parts.map(s => (s.startsWith(':') ? s.slice(1) || 'param' : s)).join('_') || 'index';
 }
 
-function toId(s: string): string {
+export function toId(s: string): string {
   return s.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_/, '');
 }
 
@@ -29,20 +35,14 @@ function findCompilerSrc(): string {
   throw new Error('@vesk/compiler/dist not found — run "npm run build" first');
 }
 
-function findRuntimeSrc(): string {
-  const monorepo = resolve(__dirname, '..', '..', '..', 'packages', 'runtime', 'src');
-  if (existsSync(monorepo)) return monorepo;
-  throw new Error('@vesk/runtime/src not found');
-}
-
-export async function generateEdgeEntry(
-  outDir: string,
-  ssrRoutes: RouteNode[],
-  apiRoutes: ApiRouteNode[],
-  prerenderedPaths: string[],
-  hasMiddleware: boolean,
-): Promise<string> {
-  const entryFile = resolve(outDir, '.edge-entry.mjs');
+/**
+ * Generate a self-contained platform handler: a `handleRequest(request: Request)`
+ * that routes SSR pages, API routes and middleware for any edge/serverless runtime.
+ * The output references server functions via relative imports so it can be bundled
+ * with esbuild for each target platform.
+ */
+export function generatePlatformHandlerSource(input: PlatformHandlerInput): string {
+  const { ssrRoutes, apiRoutes, prerenderedPaths, hasMiddleware } = input;
 
   let imports = '';
   const routeEntries: string[] = [];
@@ -65,9 +65,7 @@ export async function generateEdgeEntry(
     routeEntries.push(`{ path: ${JSON.stringify('/api' + r.fullPath)}, type: 'api', handler: ${id} }`);
   }
 
-  const mwImport = hasMiddleware
-    ? 'import { execute as __executeMw } from \'./server/middleware.js\';'
-    : '';
+  const mwImport = hasMiddleware ? "import { execute as __executeMw } from './server/middleware.js';" : '';
   const hasMwLiteral = hasMiddleware ? 'true' : 'false';
 
   const prerenderedList = prerenderedPaths.length > 0
@@ -76,14 +74,12 @@ export async function generateEdgeEntry(
 
   const isrCache = 'const __isrCache = new Map();';
 
-  // Import parseCookies for middleware from source.
-  // SSR/API functions import the runtime themselves from ../runtime.js.
   const compilerSrc = findCompilerSrc();
   const parseCookiesImport = hasMiddleware
     ? `import { parseCookies } from ${JSON.stringify(resolve(compilerSrc, 'server-cookies.js'))};`
     : '';
 
-  const code = `
+  return `
 ${imports}
 ${parseCookiesImport}
 ${mwImport}
@@ -169,26 +165,23 @@ export async function handleRequest(request) {
   });
 }
 `;
-
-  writeFileSync(entryFile, code, 'utf-8');
-  return entryFile;
 }
 
-export async function bundleEdgeEntry(entryFile: string, outDir: string): Promise<string> {
-  const outfile = resolve(outDir, 'edge.js');
-  const result = await esbuild.build({
-    entryPoints: [entryFile],
-    bundle: true,
-    platform: 'neutral',
-    format: 'esm',
-    target: ['es2022'],
-    outfile,
-    minify: false,
-    sourcemap: false,
-    logOverride: { 'direct-eval': 'silent' },
-    plugins: [{
+export interface BundlePlatformOptions {
+  /** Keep real node builtins (node:fs, node:path) in the bundle. */
+  nodeBuiltins?: boolean;
+  outfile: string;
+  entry: string;
+}
+
+export async function bundlePlatformHandler(options: BundlePlatformOptions): Promise<void> {
+  const { nodeBuiltins = false, outfile, entry } = options;
+  const esbuild = await import('esbuild');
+  const plugins = [];
+  if (!nodeBuiltins) {
+    plugins.push({
       name: 'empty-node-builtins',
-      setup(build) {
+      setup(build: any) {
         const builtins = /^(fs|path|node:fs|node:path|child_process|os|crypto|net|stream|buffer|events|util|url|querystring|http|https|zlib|tty)$/;
         build.onResolve({ filter: builtins }, () => {
           return { path: 'node-builtin-empty', namespace: 'empty-node' };
@@ -226,10 +219,29 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
           loader: 'js',
         }));
       },
-    }],
+    });
+  }
+  const result = await esbuild.build({
+    entryPoints: [entry],
+    bundle: true,
+    platform: nodeBuiltins ? 'node' : 'neutral',
+    format: 'esm',
+    target: ['es2022'],
+    outfile,
+    minify: false,
+    sourcemap: false,
+    logOverride: { 'direct-eval': 'silent' },
+    plugins,
   });
   if (result.errors.length > 0) {
-    throw new Error(`Edge bundle errors: ${result.errors.map(e => e.text).join(', ')}`);
+    throw new Error(`Platform bundle errors: ${result.errors.map((e: any) => e.text).join(', ')}`);
   }
-  return outfile;
+}
+
+export interface PlatformBuildContext {
+  outDir: string;
+  ssrRoutes: RouteNode[];
+  apiRoutes: ApiRouteNode[];
+  prerenderedPaths: string[];
+  hasMiddleware: boolean;
 }

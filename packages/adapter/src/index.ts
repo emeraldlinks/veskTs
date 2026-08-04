@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
@@ -296,15 +296,27 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
 
-  if (options?.target === 'edge') {
-    const { generateEdgeEntry, bundleEdgeEntry } = await import('@vesk/adapter/src/edge-entry') as {
-      generateEdgeEntry: typeof import('@vesk/adapter/src/edge-entry').generateEdgeEntry;
-      bundleEdgeEntry: typeof import('@vesk/adapter/src/edge-entry').bundleEdgeEntry;
-    };
-    const prerenderedPaths = prerenderedRoutes.map(r => r.path);
-    const entryFile = await generateEdgeEntry(outDir, ssrRoutes, apiRoutes, prerenderedPaths, middlewareEnabled);
-    const edgeFile = await bundleEdgeEntry(entryFile, outDir);
-    console.error(`vesk build: edge → edge.js  (${edgeFile})`);
+  {
+    const { detectPlatform } = await import('@vesk/adapter/src/platform') as { detectPlatform: typeof import('@vesk/adapter/src/platform').detectPlatform };
+    const { emitPlatformOutput } = await import('@vesk/adapter/src/platform-deploy') as { emitPlatformOutput: typeof import('@vesk/adapter/src/platform-deploy').emitPlatformOutput };
+    let platform = detectPlatform(options?.platform ? ['--platform', options.platform] : [], process.env);
+    if (platform === 'node' && options?.target === 'edge') platform = 'edge';
+    if (platform !== 'node') {
+      const outRoot = await emitPlatformOutput(platform, {
+        outDir,
+        ssrRoutes,
+        apiRoutes,
+        prerenderedPaths: prerenderedRoutes.map(r => r.path),
+        prerenderedRoutes,
+        hasMiddleware: middlewareEnabled,
+      });
+      if (outRoot) {
+        console.error(`vesk build: ${platform} → ${relative(projectRoot, outRoot)}`);
+        if (platform === 'vercel') {
+          console.error('vesk build: vercel → .vercel/output (symlink)');
+        }
+      }
+    }
   }
 
   for (const plugin of plugins) {

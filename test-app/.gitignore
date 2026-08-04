@@ -2,5 +2,6 @@ node_modules/
 dist/
 .vesk/
 .vsk-cache/
+.vercel/
 *.log
 .DS_Store

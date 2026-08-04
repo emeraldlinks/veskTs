@@ -71,6 +71,7 @@ export interface BuildOptions {
   codeSplit?: boolean;
   hmr?: boolean;
   target?: 'node' | 'edge';
+  platform?: 'node' | 'vercel' | 'netlify' | 'cloudflare' | 'deno' | 'aws' | 'edge' | 'coxmos';
 }
 
 export interface DevServerOptions {

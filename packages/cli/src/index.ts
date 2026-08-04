@@ -21,7 +21,8 @@ function usage(code = 0) {
   console.error('Vesk CLI — Compiler-First Framework for the Post-VDOM Web');
   console.error('');
   console.error('Usage:');
-  console.error('  vesk build [--seo] [--strict] [--skip-split] Build app/ for production');
+  console.error('  vesk build [--platform <name>] [--seo] [--strict] [--skip-split]  Build app/ for production');
+  console.error('  vesk build                       Auto-detect platform from CI env (vercel/netlify/cf/deno/aws/coxmos)');
   console.error('  vesk seo [--strict]           Run SEO analysis on app/');
   console.error('  vesk start [-p 3000]          Start production server');
   console.error('  vesk dev [-p 3000]            Start dev server with HMR');
@@ -127,12 +128,16 @@ if (cmd === 'build') {
   const seo = restArgs.includes('--seo');
   const strict = restArgs.includes('--strict');
 
+  const platformIdx = restArgs.indexOf('--platform');
+  const platform = platformIdx !== -1 ? restArgs[platformIdx + 1] : undefined;
+
   const targetIdx = restArgs.indexOf('--target');
   const target = targetIdx !== -1 && restArgs[targetIdx + 1] === 'edge' ? 'edge' : 'node';
 
   const config = await loadConfig(projectDir);
   const plugins = (config as Record<string, unknown>)?.plugins || [];
   const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
+  if (platform) opts.platform = platform;
 
   try {
     await build(appDirPath, opts);
