@@ -1,3 +1,5 @@
+import { readFileSync, existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
 import type { IRRoot, ComponentIR, IRNode } from '@vesk/compiler/src/ir';
 import { MapRegion } from '@vesk/compiler/src/ir';
 import { parse } from '@vesk/compiler/src/parser';
@@ -13,11 +15,32 @@ import {
 import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
+import { collectVskImportPaths } from '@vesk/compiler/src/vsk-imports';
 
-export function compileFile(source: string): CompileFileResult {
+
+export function compileFile(source: string, options?: { sourcePath?: string }): CompileFileResult {
+  return compileFileInternal(source, options?.sourcePath, new Set());
+}
+
+function compileFileInternal(source: string, sourcePath: string | undefined, seenImportFiles: Set<string>): CompileFileResult {
   const ast = parse(source);
   const ir = generateIR(ast, source);
   const componentMap = buildComponentMap(ir, true);
+  if (sourcePath) {
+    for (const importPath of collectVskImportPaths(ir.imports, sourcePath)) {
+      if (seenImportFiles.has(importPath)) continue;
+      seenImportFiles.add(importPath);
+      try {
+        const importedSrc = readFileSync(importPath, 'utf-8');
+        const sub = compileFileInternal(importedSrc, importPath, seenImportFiles);
+        for (const [name, fn] of sub.componentMap) {
+          if (!componentMap.has(name)) componentMap.set(name, fn);
+        }
+      } catch {
+        // skip unresolvable imports
+      }
+    }
+  }
   const __vesk = loadRuntimeImports(ir.imports);
   evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
   return { ir, componentMap, __vesk };
@@ -31,16 +54,14 @@ export function render(
   options: Record<string, unknown> = {}
 ): string | Promise<string> {
   resetVskState(!!options.hydrate);
-  const ast = parse(source);
-  const ir = generateIR(ast, source);
-  const componentMap = buildComponentMap(ir, true);
+  const compiled = compileFile(source, { sourcePath: (options.sourcePath as string) || undefined });
+  const componentMap = compiled.componentMap;
   const renderFn = componentMap.get(componentName);
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
   const fullRegistry = new Map([...registry, ...componentMap]);
-  const __vesk = (options.__vesk as Record<string, unknown>) || loadRuntimeImports(ir.imports);
-  evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
+  const __vesk = (options.__vesk as Record<string, unknown>) || compiled.__vesk;
   const result = renderFn(props, fullRegistry, __vesk);
-  const targetComp = ir.components.find((c) => c.name === componentName);
+  const targetComp = compiled.ir.components.find((c) => c.name === componentName);
   if (targetComp?.isAsync) {
     return (result as Promise<string>).then ? result as Promise<string> : Promise.resolve(result as string);
   }
@@ -62,7 +83,7 @@ export function renderPage(
     componentMap = cached.componentMap;
     __vesk = cached.__vesk;
   } else {
-    const compiled = compileFile(source);
+    const compiled = compileFile(source, { sourcePath: (options.sourcePath as string) || undefined });
     ir = compiled.ir;
     componentMap = compiled.componentMap;
     __vesk = compiled.__vesk;
@@ -306,7 +327,7 @@ export async function* renderPageStream(
     serializedProps = JSON.stringify(ssrProps);
   }
 
-  const { componentMap } = compileFile(source);
+  const { componentMap } = compileFile(source, { sourcePath: (options.sourcePath as string) || undefined });
   const fullRegistry = new Map([...registry, ...componentMap]);
   const renderFn = componentMap.get(componentName);
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);

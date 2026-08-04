@@ -125,6 +125,7 @@ export interface FullPageOptions {
   security?: VeskSecurity;
   __vesk?: Record<string, unknown>;
   hydrate?: boolean;
+  sourcePath?: string;
 }
 
 export const VESK_BUILTINS = [

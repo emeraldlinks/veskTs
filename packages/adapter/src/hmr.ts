@@ -155,6 +155,7 @@ function regenerateSsrFunction(
     const layoutComp = extractCompName(layoutSrc) || 'Layout';
     src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _layoutPath = ${JSON.stringify(layoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
   } else if (hasAncestorLayout) {
     const outerLayout = ancestorLayouts[0];
     const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
@@ -164,8 +165,10 @@ function regenerateSsrFunction(
     src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
     src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
+    src += `const _layoutPath = ${JSON.stringify(outerLayoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _srcPath = ${JSON.stringify(pagePath)};\n`;
   }
 
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
@@ -178,7 +181,7 @@ function regenerateSsrFunction(
   for (const [compName, compPath] of compMap) {
     const compSrc = readFileSync(compPath, 'utf-8');
     const escapedSrc = escapeSource(compSrc);
-    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true });\n    return result.body;\n  })`);
+    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, sourcePath: ${JSON.stringify(compPath)} });\n    return result.body;\n  })`);
   }
   if (compRegEntries.length > 0) {
     registryCode = `const __componentRegistry = new Map();\n{\n${compRegEntries.join('\n')}\n}\n`;
@@ -189,19 +192,19 @@ function regenerateSsrFunction(
   let renderCode: string;
   if (hasLayout) {
     renderCode = [
-      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
+      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
     ].join('\n');
   } else if (hasAncestorLayout) {
     renderCode = [
-      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
+      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
     ].join('\n');
   } else {
     renderCode = [
-      "  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + " });",
+      "  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + ", sourcePath: _srcPath });",
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',

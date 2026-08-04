@@ -1,0 +1,7 @@
+import { Helper } from './helper.vsk'
+
+component CompTest {
+	<Head> <title> CompTest </title></Head>
+	<h1>Component import test</h1>
+	<Helper base={5} />
+}

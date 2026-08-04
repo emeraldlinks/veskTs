@@ -291,8 +291,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
         res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
         res.end(body);
         return;
-      }
-      if (mwResult.rewriteUrl) {
+      }      if (mwResult.rewriteUrl) {
         url.pathname = mwResult.rewriteUrl;
       }
     }
@@ -316,8 +315,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
         const response = await mod.handleAction(webRequest, actionId);
         const body = await response.text();
         res.writeHead(response.status, Object.fromEntries(response.headers));
-        res.end(body);
-      } catch (e) {
+        res.end(body);      } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
         res.writeHead(500, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: message }));
@@ -409,7 +407,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
                   const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
                   const src = readFileSync(errPath, 'utf-8');
                   const compName = resolveComponentName(src) || 'Error';
-                  errorHtml = await renderFullPage(src, compName, { error: (e instanceof Error ? e.message : String(e)), stack: (e instanceof Error ? e.stack : ''), statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {} });
+                  errorHtml = await renderFullPage(src, compName, { error: (e instanceof Error ? e.message : String(e)), stack: (e instanceof Error ? e.stack : ''), statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: errPath });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });
@@ -430,7 +428,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
         const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
         const src = readFileSync(nfPath, 'utf-8');
         const compName = resolveComponentName(src) || 'NotFound';
-        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {} });
+        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: nfPath });
       } catch {}
     }
     res.writeHead(404, { 'Content-Type': 'text/html' });

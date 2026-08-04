@@ -25,6 +25,7 @@ import type { Expression } from '@vesk/compiler/src/ir';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
+import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
 
 function memberExpr(object: string, property: string): Record<string, unknown> {
   return {
@@ -189,6 +190,7 @@ class Ctx {
   hydrate = false;
   inTryBody = false;
   claimStatic = false;
+  walker = '__hydrate';
 
   push(...args: (string | null | undefined | false)[]): void {
     for (const a of args) if (a) this.lines.push(a as string);
@@ -263,7 +265,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     if (ctx.hydrate) {
       ctx.push(`if (props.children !== undefined && props.children !== null) {`);
       ctx.push(`  if (typeof props.children === 'function') {`);
-      ctx.push(`    props.children(__hydrate.subWalker(${parentVar}));`);
+      ctx.push(`    props.children(${ctx.walker}.subWalker(${parentVar}));`);
       ctx.push(`  } else {`);
       ctx.push(`    ${parentVar}.appendChild(props.children);`);
       ctx.push(`  }`);
@@ -291,7 +293,7 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     const claim = ctx.claimStatic;
     ctx.claimStatic = false;
     if (!claim && isStaticIR(node.children)) return null;
-    ctx.push(`const ${el} = __hydrate.nextElement(${JSON.stringify(node.tag)});`);
+    ctx.push(`const ${el} = ${ctx.walker}.nextElement(${JSON.stringify(node.tag)});`);
   } else {
     ctx.push(`const ${el} = document.createElement(${JSON.stringify(node.tag)});`);
   }
@@ -472,33 +474,49 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     propsEntries.push(`...${expr}`);
   }
 
-  if (node.children.length > 0) {
-    const frag = ctx.n();
-    ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
-    for (const child of node.children) {
-      const childVar = emitNode(ctx, child, tracked, null, '$f');
-      if (childVar) ctx.push(`$f.appendChild(${childVar});`);
-    }
-    ctx.push(`return $f; })();`);
-    propsEntries.push(`children: ${frag}`);
-  }
-
   const propsObj = `{ ${propsEntries.join(', ')} }`;
   const v = ctx.n();
   if (ctx.hydrate) {
     const access = ctx.importedNames.has(node.componentName)
       ? node.componentName
       : `__components[${JSON.stringify(node.componentName)}]`;
-    const subScope = ctx.inTryBody
-      ? `__hydrate.subWalker(${parentVar})`
-      : `__hydrate.subWalker(__hydrate.nextElement())`;
-    ctx.push(`const ${v} = ${access}(${propsObj}, __registry, ${subScope});`);
+    const subScope = () => ctx.inTryBody
+      ? `${ctx.walker}.subWalker(${parentVar})`
+      : `${ctx.walker}.subWalker(${ctx.walker}.nextElement())`;
+    if (node.children.length > 0) {
+      const walkerVar = ctx.n();
+      ctx.push(`const ${walkerVar} = ${subScope()};`);
+      const frag = ctx.n();
+      ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
+      const savedWalker = ctx.walker;
+      ctx.walker = walkerVar;
+      for (const child of node.children) {
+        const childVar = emitNode(ctx, child, tracked, null, '$f');
+        if (childVar) ctx.push(`$f.appendChild(${childVar});`);
+      }
+      ctx.walker = savedWalker;
+      ctx.push(`return $f; })();`);
+      propsEntries.push(`children: ${frag}`);
+      ctx.push(`const ${v} = ${access}({ ${propsEntries.join(', ')} }, __registry, ${walkerVar});`);
+      return v;
+    }
+    ctx.push(`const ${v} = ${access}(${propsObj}, __registry, ${subScope()});`);
     return v;
   } else {
+    if (node.children.length > 0) {
+      const frag = ctx.n();
+      ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
+      for (const child of node.children) {
+        const childVar = emitNode(ctx, child, tracked, null, '$f');
+        if (childVar) ctx.push(`$f.appendChild(${childVar});`);
+      }
+      ctx.push(`return $f; })();`);
+      propsEntries.push(`children: ${frag}`);
+    }
     if (ctx.importedNames.has(node.componentName)) {
-      ctx.push(`const ${v} = ${node.componentName}(${propsObj});`);
+      ctx.push(`const ${v} = ${node.componentName}({ ${propsEntries.join(', ')} });`);
     } else {
-      ctx.push(`const ${v} = ${compPrefix}[${JSON.stringify(node.componentName)}](${propsObj});`);
+      ctx.push(`const ${v} = ${compPrefix}[${JSON.stringify(node.componentName)}]({ ${propsEntries.join(', ')} });`);
     }
   }
   return v;
@@ -867,7 +885,7 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
       mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
-    const code = generateComponent(comp, irRoot.importedNames, hydrate);
+    const code = generateComponent(comp, new Set(extractRuntimeNames(irRoot.imports)), hydrate);
     mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
   }
 

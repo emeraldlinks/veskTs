@@ -92,7 +92,7 @@ function scanApiDir(rootDir: string, dir: string, parentPath: string): ApiRouteN
 }
 
 export function matchApiUrl(tree: ApiRouteNode[], pathname: string): { node: ApiRouteNode; params: Record<string, string> } | null {
-  const normalized = pathname.replace(/^\/api(\/|$)/, '/');
+  const normalized = (pathname.split('?')[0].split('#')[0]).replace(/^\/api(\/|$)/, '/');
   const parts = normalized.split('/').filter(Boolean);
   const params: Record<string, string> = {};
 

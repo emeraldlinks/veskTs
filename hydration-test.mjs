@@ -500,6 +500,208 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 14: Cross-file .vsk component imports ──
+  console.log('\n=== TEST 14: .vsk component imports ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE + '/comp-test', { waitUntil: 'networkidle0' });
+
+    const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
+    assert(h1 === 'Component import test', 'h1: ' + h1);
+
+    // Imported Helper component must be SSR'd from its own .vsk file
+    const helperBox = await page.evaluate(() => {
+      const box = document.querySelector('.helper-box');
+      if (!box) return null;
+      return {
+        label: box.querySelector('.helper-label')?.textContent?.trim() || '',
+        hasButton: !!box.querySelector('button'),
+      };
+    });
+    assert(helperBox !== null, 'helper-box present (imported component rendered)');
+    assert(helperBox.label === 'Helper says 5', 'SSR helper label: "' + helperBox.label + '"');
+    assert(helperBox.hasButton, 'imported component has its own button');
+
+    // Reactivity inside the imported component must work after hydration
+    await page.click('.helper-box button');
+    await new Promise(r => setTimeout(r, 200));
+    const afterClick = await page.evaluate(() => document.querySelector('.helper-label')?.textContent?.trim() || '');
+    assert(afterClick === 'Helper says 6', 'imported component reactive state updates: "' + afterClick + '"');
+
+    // Multiple clicks continue to update
+    await page.click('.helper-box button');
+    await page.click('.helper-box button');
+    await new Promise(r => setTimeout(r, 200));
+    const afterThree = await page.evaluate(() => document.querySelector('.helper-label')?.textContent?.trim() || '');
+    assert(afterThree === 'Helper says 8', 'imported component persists state across clicks: "' + afterThree + '"');
+
+    assert(errors.length === 0, 'zero JS errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    await page.close();
+  }
+
+  // ── Test 15: Server actions (defineAction + Form) ──
+  console.log('\n=== TEST 15: Server actions ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE + '/actions', { waitUntil: 'networkidle0' });
+
+    const formInfo = await page.evaluate(() => {
+      const form = document.querySelector('form');
+      if (!form) return null;
+      return {
+        action: form.getAttribute('action'),
+        hasName: !!form.querySelector('input[name="name"]'),
+        hasEmail: !!form.querySelector('input[name="email"]'),
+        hasPassword: !!form.querySelector('input[name="password"]'),
+        errorEls: form.querySelectorAll('[data-vsk-error]').length,
+      };
+    });
+    assert(formInfo !== null, 'form exists');
+    assert(formInfo.action && formInfo.action.startsWith('/_vesk/action/'), 'form action is an action endpoint: ' + formInfo.action);
+    assert(formInfo.hasName && formInfo.hasEmail && formInfo.hasPassword, 'form has name/email/password inputs');
+    assert(formInfo.errorEls === 3, '3 field error slots rendered (' + formInfo.errorEls + ')');
+
+    // Client-side validation: empty/invalid values → field errors appear
+    await page.type('input[name="name"]', '');
+    await page.type('input[name="email"]', 'not-an-email');
+    await page.type('input[name="password"]', '123');
+    await page.click('button[type="submit"]');
+    await new Promise(r => setTimeout(r, 300));
+
+    const clientErrors = await page.evaluate(() => {
+      return Array.from(document.querySelectorAll('[data-vsk-error]'))
+        .map(el => el.textContent?.trim() || '')
+        .filter(Boolean);
+    });
+    assert(clientErrors.some(t => t.includes('Name is required')), 'name required error shown');
+    assert(clientErrors.some(t => t.includes('Enter a valid email')), 'email validation error shown');
+    assert(clientErrors.some(t => t.includes('at least 6 characters')), 'password length error shown');
+
+    // Valid submission → action executes, vsk-success fires, SPA preserved
+    await page.evaluate(() => { window.__spaFlag = true; });
+    const successFired = await page.evaluate(async () => {
+      const form = document.querySelector('form');
+      return await new Promise((resolve) => {
+        form.addEventListener('vsk-success', () => resolve(true), { once: true });
+        const name = form.querySelector('input[name="name"]');
+        const email = form.querySelector('input[name="email"]');
+        const password = form.querySelector('input[name="password"]');
+        name.value = 'Alice';
+        email.value = 'alice@example.com';
+        password.value = 'secret123';
+        form.requestSubmit();
+      });
+    });
+    assert(successFired, 'valid submit fired vsk-success (action executed)');
+    assert(await page.evaluate(() => window.__spaFlag === true), 'action submit preserved SPA (no full reload)');
+    assert(await page.evaluate(() => document.querySelectorAll('[data-vsk-error]').length > 0), 'field error slots still rendered');
+
+    // Server-side validation round-trip: client passes but server rejects
+    await page.evaluate(() => { window.__spaFlag = true; });
+    const serverErrorShown = await page.evaluate(async () => {
+      const form = document.querySelector('form');
+      return await new Promise((resolve) => {
+        form.addEventListener('vsk-error', () => {
+          const msg = Array.from(form.querySelectorAll('[data-vsk-error]'))
+            .map(el => el.textContent?.trim() || '').join(' ');
+          resolve(msg.includes('Enter a valid email'));
+        }, { once: true });
+        const name = form.querySelector('input[name="name"]');
+        const email = form.querySelector('input[name="email"]');
+        const password = form.querySelector('input[name="password"]');
+        name.value = 'Bob';
+        email.value = 'bob';          // passes client rule, rejected by server rule
+        password.value = 'hunter22';
+        form.requestSubmit();
+      });
+    });
+    assert(serverErrorShown, 'server-side field error rendered after action round-trip');
+    assert(await page.evaluate(() => window.__spaFlag === true), 'server-rejected submit preserved SPA (no reload)');
+
+    assert(errors.length === 0, 'zero JS errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    await page.close();
+  }
+
+  // ── Test 16: API / server routes ──
+  console.log('\n=== TEST 16: API routes ===');
+  {
+    const page = await browser.newPage();
+    await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+    const results = await page.evaluate(async () => {
+      const j = (r) => r.json().catch(() => null);
+      const get = (u, init) => fetch(u, init);
+
+      const helloGet = await get('/api/hello');
+      const helloJson = await j(helloGet);
+
+      const helloPost = await get('/api/hello', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ foo: 'bar', n: 42 }),
+      });
+      const postJson = await j(helloPost);
+
+      const echo = await get('/api/echo/hello-world');
+      const echoJson = await j(echo);
+
+      const posts2 = await get('/api/posts?limit=2');
+      const posts2Json = await j(posts2);
+
+      const posts1 = await get('/api/posts?limit=1');
+      const posts1Json = await j(posts1);
+
+      const postsFail = await get('/api/posts?fail=100');
+      const postsFailJson = await j(postsFail);
+
+      return {
+        helloStatus: helloGet.status,
+        helloMessage: helloJson?.message,
+        postStatus: helloPost.status,
+        postReceived: postJson?.received,
+        postOk: postJson?.ok,
+        echoMessage: echoJson?.message,
+        echoMethod: echoJson?.method,
+        posts2Count: Array.isArray(posts2Json) ? posts2Json.length : -1,
+        posts2First: Array.isArray(posts2Json) && posts2Json.length > 0 ? posts2Json[0].title : '',
+        posts1Count: Array.isArray(posts1Json) ? posts1Json.length : -1,
+        postsFailStatus: postsFail.status,
+        postsFailError: postsFailJson?.error,
+      };
+    });
+
+    const cookieResp = await fetch(BASE + '/api/hello');
+    assert(results.helloStatus === 201, 'GET /api/hello → 201 (got ' + results.helloStatus + ')');
+    assert(results.helloMessage === 'Hello from Vesk!', 'GET /api/hello JSON message: ' + results.helloMessage);
+    assert((cookieResp.headers.get('set-cookie') || '').includes('session='), 'GET /api/hello sets session cookie');
+    assert(results.postStatus === 201, 'POST /api/hello → 201 (got ' + results.postStatus + ')');
+    assert(results.postOk === true && results.postReceived?.foo === 'bar', 'POST /api/hello echoes JSON body');
+    assert(results.echoMessage === 'hello-world', 'GET /api/echo/:msg → dynamic param echoed');
+    assert(results.echoMethod === 'GET', 'GET /api/echo/:msg method = GET');
+    assert(results.posts2Count === 2, 'GET /api/posts?limit=2 → 2 posts (got ' + results.posts2Count + ')');
+    assert(results.posts2First === 'Hello Vesk', 'first post title: ' + results.posts2First);
+    assert(results.posts1Count === 1, 'GET /api/posts?limit=1 → respects query param');
+    assert(results.postsFailStatus === 503, 'GET /api/posts?fail=100 → 503 (got ' + results.postsFailStatus + ')');
+    assert(results.postsFailError === 'simulated failure', 'failure body: ' + results.postsFailError);
+
+    // The /posts page itself (SSR route) renders the API data
+    await page.goto(BASE + '/posts', { waitUntil: 'networkidle0' });
+    const postsPage = await page.evaluate(() => {
+      const t = document.body.textContent || '';
+      return {
+        hasHelloVesk: t.includes('Hello Vesk'),
+        hasSsrInVesk: t.includes('SSR in Vesk'),
+      };
+    });
+    assert(postsPage.hasHelloVesk && postsPage.hasSsrInVesk, '/posts SSR page renders post titles from API');
+
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

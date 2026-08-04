@@ -95,6 +95,7 @@ export function generateSsrFunction(
     const layoutComp = extractCompName(layoutSrc) || 'Layout';
     src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _layoutPath = ${JSON.stringify(layoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
   } else if (hasAncestorLayout) {
     const outerLayout = ancestorLayouts[0];
     const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
@@ -104,8 +105,10 @@ export function generateSsrFunction(
     src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
     src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
+    src += `const _layoutPath = ${JSON.stringify(outerLayoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _srcPath = ${JSON.stringify(pagePath)};\n`;
   }
 
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
@@ -120,7 +123,7 @@ export function generateSsrFunction(
   for (const [compName, compPath] of compMap) {
     const compSrc = readFileSync(compPath, 'utf-8');
     const escapedSrc = escapeSource(compSrc);
-    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true });\n    return result.body;\n  })`);
+    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, sourcePath: ${JSON.stringify(compPath)} });\n    return result.body;\n  })`);
   }
   if (compRegEntries.length > 0) {
     registryCode = `const __componentRegistry = new Map();\n{\n${compRegEntries.join('\n')}\n}\n`;
@@ -132,8 +135,8 @@ export function generateSsrFunction(
   if (hasLayout || hasAncestorLayout) {
     htmlFnCode = [
       'async function __renderHtml(params) {',
-      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
+      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
       '}',
       '',
@@ -141,7 +144,7 @@ export function generateSsrFunction(
   } else {
     htmlFnCode = [
       'async function __renderHtml(params) {',
-      '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ' });',
+      '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', sourcePath: _srcPath });',
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',
@@ -158,8 +161,8 @@ export function generateSsrFunction(
   if (hasLayout || hasAncestorLayout) {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
-      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true });",
+      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true, sourcePath: _layoutPath });",
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
       "      headers: { 'Content-Type': 'application/json' },",
       '    });',
@@ -169,7 +172,7 @@ export function generateSsrFunction(
   } else {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
-      '    const dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true });',
+      '    const dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true, sourcePath: _srcPath });',
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: dataPage.head || '' }), {",
       "      headers: { 'Content-Type': 'application/json' },",
       '    });',
@@ -215,8 +218,8 @@ export function generateSsrFunction(
       'async function __registerActions() {',
       '  if (__actionsRegistered) return;',
       '  __actionsRegistered = true;',
-      '  compileFile(_layoutSrc);',
-      '  compileFile(_pageSrc);',
+      '  compileFile(_layoutSrc, { sourcePath: _layoutPath });',
+      '  compileFile(_pageSrc, { sourcePath: _pagePath });',
       '}',
       '',
     ].join('\n');
@@ -225,7 +228,7 @@ export function generateSsrFunction(
       'async function __registerActions() {',
       '  if (__actionsRegistered) return;',
       '  __actionsRegistered = true;',
-      '  compileFile(_src);',
+      '  compileFile(_src, { sourcePath: _srcPath });',
       '}',
       '',
     ].join('\n');

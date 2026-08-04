@@ -1,3 +1,5 @@
+import type { HydrateWalker } from '@vesk/runtime/src/hydrate';
+
 export interface ValidationRule {
 	validate: (v: unknown) => boolean;
 	message: string;
@@ -7,7 +9,7 @@ interface FieldProps {
 	name: string;
 	label?: string;
 	rules?: ValidationRule[];
-	children?: string;
+	children?: string | Node;
 	errorClass?: string;
 	class?: string;
 	style?: string;
@@ -15,7 +17,7 @@ interface FieldProps {
 }
 
 interface FormProps {
-	children?: string;
+	children?: string | Node;
 	onSubmit?: (data: Record<string, unknown>, form: HTMLFormElement) => void | Promise<void>;
 	onError?: (err: unknown) => void;
 	onSuccess?: (res: Response) => void;
@@ -24,6 +26,17 @@ interface FormProps {
 	class?: string;
 	style?: string;
 	[k: string]: unknown;
+}
+
+function appendChildren(parent: HTMLElement, children: unknown): void {
+	if (children == null) return;
+	if (typeof children === 'string' || typeof children === 'number') {
+		parent.insertAdjacentHTML('beforeend', String(children));
+	} else if (children instanceof Node) {
+		parent.appendChild(children);
+	} else if (Array.isArray(children)) {
+		for (const c of children) appendChildren(parent, c);
+	}
 }
 
 function formIsSSR(): boolean {
@@ -75,7 +88,7 @@ export function custom(fn: (v: unknown) => boolean, msg?: string): ValidationRul
 	return { validate: fn, message: msg || 'Invalid value' };
 }
 
-export function Field(props: FieldProps): HTMLElement | string {
+export function Field(props: FieldProps, registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string {
 	const { name, label, rules = [], children, errorClass, class: className, style, ...rest } = props;
 
 	if (formIsSSR()) {
@@ -92,6 +105,18 @@ export function Field(props: FieldProps): HTMLElement | string {
 		return `<div${fieldAttrs}${wrapCls}${wrapStyle}${extra}>${labelHtml}${children || ''}<div data-vsk-error style="${errStyle}"${errCls}>${errText}</div></div>`;
 	}
 
+	if (hydrate && hydrate.nextElement) {
+		let wrapper = hydrate.nextElement('div') as HTMLElement;
+		if (wrapper && !wrapper.parentNode && hydrate.root) {
+			const existing = hydrate.root.querySelector(`[data-vsk-field="${name}"]`);
+			if (existing) wrapper = existing as HTMLElement;
+		}
+		const inner = wrapper ? wrapper.querySelector(`[data-vsk-field="${name}"]`) : null;
+		const fieldEl = inner || wrapper;
+		if (fieldEl) (fieldEl as unknown as Record<string, unknown>).__vsk_rules = rules;
+		return document.createDocumentFragment();
+	}
+
 	const wrapper = document.createElement('div');
 	wrapper.setAttribute('data-vsk-field', name);
 	if (className) wrapper.className = className;
@@ -106,7 +131,7 @@ export function Field(props: FieldProps): HTMLElement | string {
 		lbl.textContent = label;
 		wrapper.appendChild(lbl);
 	}
-	if (children) wrapper.insertAdjacentHTML('beforeend', children);
+	if (children) appendChildren(wrapper, children);
 
 	const errEl = document.createElement('div');
 	errEl.setAttribute('data-vsk-error', '');
@@ -117,34 +142,19 @@ export function Field(props: FieldProps): HTMLElement | string {
 	return wrapper;
 }
 
-export function Form(props: FormProps): HTMLElement | string {
-	const { children, onSubmit, onError, onSuccess, action, method = 'POST', class: className, style, ...rest } = props;
+interface FormSubmitOptions {
+	action?: string | Record<string, unknown>;
+	method: string;
+	onSubmit?: (data: Record<string, unknown>, form: HTMLFormElement) => void | Promise<void>;
+	onError?: (err: unknown) => void;
+	onSuccess?: (res: Response) => void;
+}
 
-	if (formIsSSR()) {
-		const attrs: Record<string, string | boolean> = { action: actionUrl(action), method };
-		if (className) attrs.class = className;
-		if (style) attrs.style = style;
-		for (const [k, v] of Object.entries(rest)) {
-			if (v != null && v !== false) attrs[k] = v as string | boolean;
-		}
-		const attrStr = Object.entries(attrs)
-			.filter(([, v]) => v != null && v !== false)
-			.map(([k, v]) => v === true ? k : `${k}="${String(v).replace(/"/g, '&quot;')}"`)
-			.join(' ');
-		return `<form ${attrStr}>${children || ''}</form>`;
-	}
-
-	const form = document.createElement('form');
+function bindFormSubmit(form: HTMLFormElement, { action, method, onSubmit, onError, onSuccess }: FormSubmitOptions): void {
 	const resolvedAction = actionUrl(action);
-	if (resolvedAction) form.action = resolvedAction;
-	if (method) form.method = method;
-	if (className) form.className = className;
-	if (style) form.style.cssText = style;
-	for (const [k, v] of Object.entries(rest)) {
-		if (typeof v === 'string') form.setAttribute(k, v);
-	}
-
-	if (children) form.insertAdjacentHTML('beforeend', children);
+	const actionSchema = (typeof action === 'object' && action !== null && (action as Record<string, unknown>).input)
+		? (action as Record<string, unknown>).input as Record<string, ValidationRule | ValidationRule[]>
+		: undefined;
 
 	form.addEventListener('submit', async (e) => {
 		e.preventDefault();
@@ -163,7 +173,11 @@ export function Form(props: FormProps): HTMLElement | string {
 		let hasErrors = false;
 		for (const el of fields) {
 			const fieldName = el.getAttribute('data-vsk-field');
-			const rules = ((el as unknown as Record<string, unknown>).__vsk_rules || []) as ValidationRule[];
+			const propRules = ((el as unknown as Record<string, unknown>).__vsk_rules || []) as ValidationRule[];
+			const schemaRules = fieldName && actionSchema && actionSchema[fieldName]
+				? (Array.isArray(actionSchema[fieldName]) ? actionSchema[fieldName] : [actionSchema[fieldName]] as ValidationRule[])
+				: [];
+			const rules = [...propRules, ...schemaRules];
 			const errEl = el.querySelector('[data-vsk-error]');
 			let errMsg = '';
 			for (const rule of rules) {
@@ -235,6 +249,52 @@ export function Form(props: FormProps): HTMLElement | string {
 			form.dispatchEvent(new CustomEvent('vsk-loading', { detail: { loading: false } }));
 		}
 	});
+}
+
+export function Form(props: FormProps, registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string {
+	const { children, onSubmit, onError, onSuccess, action, method = 'POST', class: className, style, ...rest } = props;
+
+	if (formIsSSR()) {
+		const attrs: Record<string, string | boolean> = { action: actionUrl(action), method, novalidate: true };
+		if (className) attrs.class = className;
+		if (style) attrs.style = style;
+		for (const [k, v] of Object.entries(rest)) {
+			if (v != null && v !== false) attrs[k] = v as string | boolean;
+		}
+		const attrStr = Object.entries(attrs)
+			.filter(([, v]) => v != null && v !== false)
+			.map(([k, v]) => v === true ? k : `${k}="${String(v).replace(/"/g, '&quot;')}"`)
+			.join(' ');
+		return `<form ${attrStr}>${children || ''}</form>`;
+	}
+
+	if (hydrate && hydrate.nextElement) {
+		let form = hydrate.nextElement('form') as HTMLFormElement;
+		if (form && !form.parentNode && hydrate.root) {
+			const existing = hydrate.root.querySelector('form');
+			if (existing) form = existing as HTMLFormElement;
+		}
+		if (form) {
+			form.noValidate = true;
+			bindFormSubmit(form, { action, method, onSubmit, onError, onSuccess });
+		}
+		return document.createDocumentFragment();
+	}
+
+	const form = document.createElement('form');
+	const resolvedAction = actionUrl(action);
+	if (resolvedAction) form.action = resolvedAction;
+	if (method) form.method = method;
+	form.noValidate = true;
+	if (className) form.className = className;
+	if (style) form.style.cssText = style;
+	for (const [k, v] of Object.entries(rest)) {
+		if (typeof v === 'string') form.setAttribute(k, v);
+	}
+
+	if (children) appendChildren(form, children);
+
+	bindFormSubmit(form, { action, method, onSubmit, onError, onSuccess });
 
 	return form;
 }

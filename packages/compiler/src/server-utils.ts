@@ -559,7 +559,7 @@ export function extractRuntimeNames(importStrs: string[]): string[] {
     if (match) {
       for (const part of match[1].split(',')) {
         const name = part.trim().split(/\s+as\s+/).pop();
-        if (name) names.push(name);
+        if (name && !/^(type|typeof)\s/.test(name)) names.push(name);
       }
     }
   }

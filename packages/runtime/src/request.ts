@@ -581,6 +581,7 @@ class _VeskResponse extends ServerResponse {
 			const existing = this.headers?.get(name);
 			if (!existing) this.headers?.set(name, value);
 		}
+		this._secHeaders = {};
 		if (this._cookieHeaders.length > 0) {
 			const existing = this.headers?.get('Set-Cookie');
 			if (existing) {
@@ -589,6 +590,7 @@ class _VeskResponse extends ServerResponse {
 				this.headers?.set('Set-Cookie', this._cookieHeaders.join(', '));
 			}
 		}
+		this._cookieHeaders = [];
 	}
 
 	static json(body: unknown, init?: ResponseInit): _VeskResponse {

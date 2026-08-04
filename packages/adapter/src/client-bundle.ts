@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { transformSync } from 'esbuild';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
+import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +41,8 @@ export async function generateClientBundle(
     for (const m of code.matchAll(re)) {
       for (const name of m[1].split(',')) {
         const trimmed = name.trim().replace(/^(\w+)\s+as\s+.*$/, '$1');
-        if (trimmed) runtimeImportNames.add(trimmed);
+        if (!trimmed || /^(type|typeof)\s/.test(trimmed)) continue;
+        runtimeImportNames.add(trimmed);
       }
     }
   }
@@ -49,6 +51,23 @@ export async function generateClientBundle(
     return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, '')
                .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '')
                .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '');
+  }
+
+  function stripVskImports(code: string): string {
+    return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"][^'"]*\.vsk['"];?\s*\n?/gm, '');
+  }
+
+  function resolveVskImports(filePath: string, compile: (path: string, resolvedName: string | null) => void): void {
+    const src = readFileSync(filePath, 'utf-8');
+    for (const importPath of collectVskImportPaths(vskImportLines(src), filePath)) {
+      let importedName: string | null = null;
+      try {
+        importedName = resolveComponentName(readFileSync(importPath, 'utf-8'));
+      } catch {
+        continue;
+      }
+      compile(importPath, importedName);
+    }
   }
 
   function stripExports(code: string): string {
@@ -62,17 +81,19 @@ export async function generateClientBundle(
     seen.add(filePath);
     const src = readFileSync(filePath, 'utf-8');
 
+    resolveVskImports(filePath, (p, n) => compileFile(p, n || '', output));
+
     const compCode = compileClient(src, null, { forceClient: true });
     if (compCode) {
       collectRuntimeImports(compCode);
-      const stripped = stripExports(stripRuntimeImport(compCode));
+      const stripped = stripExports(stripVskImports(stripRuntimeImport(compCode)));
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
     }
 
     const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
     if (hydCode) {
       collectRuntimeImports(hydCode);
-      const stripped = stripExports(stripRuntimeImport(hydCode))
+      const stripped = stripExports(stripVskImports(stripRuntimeImport(hydCode)))
         .replace(/__components/g, '__hydrators');
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
     }
@@ -169,17 +190,19 @@ export async function generateClientBundle(
       seen.add(filePath);
       const src = readFileSync(filePath, 'utf-8');
 
+      resolveVskImports(filePath, (p, n) => compileFileMono(p, n || ''));
+
       const compCode = compileClient(src, null, { forceClient: true });
       if (compCode) {
         collectRuntimeImports(compCode);
-        const stripped = stripExports(stripRuntimeImport(compCode));
+        const stripped = stripExports(stripVskImports(stripRuntimeImport(compCode)));
         componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
 
       const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
       if (hydCode) {
         collectRuntimeImports(hydCode);
-        const stripped = stripExports(stripRuntimeImport(hydCode))
+        const stripped = stripExports(stripVskImports(stripRuntimeImport(hydCode)))
           .replace(/__components/g, '__hydrators');
         hydratorLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
@@ -357,7 +380,7 @@ function buildMainBundle(
       'globalThis.__cleanup = __cleanup;\n\n';
 
     const extraGlobals = [...(runtimeImportNames || [])]
-      .filter(n => n && n !== 'default' && !/^[A-Z]/.test(n))
+      .filter(n => n && n !== 'default')
       .map(n => `globalThis.${n} = ${n};\n`)
       .join('');
 

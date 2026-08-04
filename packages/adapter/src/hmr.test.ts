@@ -19,7 +19,7 @@ const devDir = resolve(root, 'test-app', '.vesk', 'dev');
 mkdirSync(resolve(devDir, 'static'), { recursive: true });
 const clientBundlePath = resolve(devDir, 'static', 'client.js');
 const runtimeDir = resolve(root, 'node_modules', '@vesk', 'runtime');
-const hmrClientPath = resolve(runtimeDir, 'hmr-client.js');
+const hmrClientPath = resolve(runtimeDir, 'dist', 'hmr-client.js');
 
 let passed = 0;
 let failed = 0;

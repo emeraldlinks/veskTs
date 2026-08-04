@@ -1,0 +1,9 @@
+import { track } from '@vesk/runtime'
+
+component Helper(props) {
+	const &[n] = track(props.base || 1)
+	<div class="helper-box">
+		<p class="helper-label">Helper says {n}</p>
+		<button onClick={() => n++}> + </button>
+	</div>
+}

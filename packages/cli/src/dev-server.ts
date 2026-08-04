@@ -13,6 +13,7 @@ import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/s
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { ensurePackagesBuilt } from './build-packages';
+import { handleActionRequest } from './action-handler';
 
 function resolveRuntimeDir(projectDir: string): string | null {
   const pkgDir = resolve(projectDir, 'node_modules', '@vesk/runtime');
@@ -493,6 +494,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
 
+    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security })) {
+      return;
+    }
+
     if (url.pathname !== '/') {
       const staticPath = join(publicDir, url.pathname);
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
@@ -547,8 +552,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
           return;
         }
         logRequest(response.status);
-        res.writeHead(response.status, Object.fromEntries(response.headers));
         const body = await response.text();
+        res.writeHead(response.status, Object.fromEntries(response.headers));
         res.end(body);
         return;
       }
@@ -567,7 +572,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           try {
             const nfSrc = readFileSync(nfPath, 'utf-8');
             const nfCompName = extractCompName(nfSrc) || (rootNode.notFound as string);
-            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: nfPath });
           } catch {}
         }
       }
@@ -609,7 +614,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (i === chain.length - 1 && node.page && existsSync(pageFilePath)) {
           const src = readFileSync(pageFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.page as string);
-          const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, sourcePath: pageFilePath });
           body = result.body;
           head = result.head || '';
           props = result.props;
@@ -618,7 +623,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (node.layout && existsSync(layoutFilePath)) {
           const src = readFileSync(layoutFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.layout as string);
-          const result = await renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { children: body }, new Map(), { hydrate: true, sourcePath: layoutFilePath });
           body = result.body;
           head = (result.head || '') + head;
         }
@@ -643,7 +648,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
           html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
         } else {
           throw new Error('No page or layout matched');
@@ -661,7 +666,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
         } else {
           throw new Error('No page or layout matched');
         }
@@ -679,7 +684,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (i === chain.length - 1 && node.page && existsSync(pageFilePath)) {
           const src = readFileSync(pageFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.page as string);
-          const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, sourcePath: pageFilePath });
           body = result.body;
           head = result.head || '';
         }
@@ -687,7 +692,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (node.layout && existsSync(layoutFilePath)) {
           const src = readFileSync(layoutFilePath, 'utf-8');
           const compName = extractCompName(src) || (node.layout as string);
-          const result = await renderPage(src, compName, { children: body }, new Map(), { hydrate: true });
+          const result = await renderPage(src, compName, { children: body }, new Map(), { hydrate: true, sourcePath: layoutFilePath });
           body = result.body;
           head = (result.head || '') + head;
         }
@@ -785,7 +790,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 try {
                   const nfSrc = readFileSync(nfPath, 'utf-8');
                   const nfCompName = extractCompName(nfSrc) || (node.notFound as string);
-                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: nfPath });
                   notFoundHtml = html.replace('</body>',
                     `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch {}
@@ -809,7 +814,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                   const errSrc = readFileSync(errPath, 'utf-8');
                   const errCompName = extractCompName(errSrc) || (node.error as string);
                   const errProps = { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname };
-                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security });
+                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: errPath });
                   errorHtml = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch (e2) {
                   LOG.err(`error page render failed:`, (e2 as Error).message);
