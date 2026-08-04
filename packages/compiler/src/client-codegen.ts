@@ -24,6 +24,7 @@ import {
 import type { Expression } from '@vesk/compiler/src/ir';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
+import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 
 function memberExpr(object: string, property: string): Record<string, unknown> {
   return {
@@ -1029,7 +1030,7 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean } = {}): string {
+export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean } = {}): string {
   const ast = parse(source);
   const ir = generateIR(ast, source);
 
@@ -1040,7 +1041,7 @@ export function compileClient(source: string, _componentName: string | null, opt
 
   const componentMapCode = buildComponentMap(ir, options.hydrate);
   const importLines = ir.imports.length > 0 ? ir.imports.join('\n') + '\n' : '';
-  const topCode = ir.topLevelCode.length > 0 ? ir.topLevelCode.join('\n') + '\n' : '';
+  const topCode = (options.includeTopLevel === false ? [] : transformTopLevelForActions(ir.topLevelCode, 'client')).join('\n') + '\n';
 
   const exportLines: string[] = [];
   for (const comp of ir.components) {

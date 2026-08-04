@@ -4,7 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName } from '@vesk/compiler/src/server-codegen';
-import { securityHeaders } from '@vesk/compiler/src/server-utils';
+import { securityHeaders, getClientProtocol } from '@vesk/compiler/src/server-utils';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const _require = createRequire(import.meta.url);
@@ -19,7 +19,10 @@ async function readBody(req: AsyncIterable<Uint8Array>): Promise<Buffer> {
 interface ExtendedRequest extends Request {
   json(): Promise<unknown>;
   text(): Promise<string>;
+  formData(): Promise<FormData>;
   clone(): ExtendedRequest;
+  cookies: Record<string, string>;
+  query: Record<string, string>;
 }
 
 function makeWebRequest(nodeReq: IncomingMessage, url: string): ExtendedRequest {
@@ -36,7 +39,29 @@ function makeWebRequest(nodeReq: IncomingMessage, url: string): ExtendedRequest 
   const webRequest = new Request(parsedUrl, { method, headers: nodeReq.headers as Record<string, string>, body: null }) as ExtendedRequest;
   webRequest.json = async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } };
   webRequest.text = async () => (await getBody()).toString('utf-8');
+  webRequest.formData = async () => {
+    const body = await getBody();
+    const ct = String(nodeReq.headers['content-type'] || '');
+    if (ct.includes('multipart/form-data')) {
+      const temp = new Request('http://localhost', { method: 'POST', headers: nodeReq.headers as Record<string, string>, body: body as unknown as BodyInit });
+      return temp.formData();
+    }
+    const fd = new FormData();
+    if (ct.includes('x-www-form-urlencoded')) {
+      for (const [k, v] of new URLSearchParams(body.toString()).entries()) fd.append(k, v);
+    }
+    return fd;
+  };
   webRequest.clone = () => webRequest;
+  const cookies: Record<string, string> = {};
+  for (const [k, v] of String(nodeReq.headers.cookie || '').split(';').map(s => s.trim()).filter(Boolean)) {
+    const eq = k.indexOf('=');
+    if (eq > -1) cookies[k.slice(0, eq)] = decodeURIComponent(k.slice(eq + 1));
+  }
+  webRequest.cookies = cookies;
+  const query: Record<string, string> = {};
+  for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
+  webRequest.query = query;
   return webRequest;
 }
 
@@ -64,6 +89,7 @@ interface BuildConfig {
     prefix: string;
     dir: string;
   };
+  actions?: Array<{ id: string; function: string }>;
 }
 
 interface MatchPathResult {
@@ -128,14 +154,19 @@ export async function startProdServer(outDir: string, options?: { port?: number 
     }
   }
 
-  const functionCache = new Map<string, { handle: (req: Request) => Promise<Response> }>();
+  interface SsrFunctionModule {
+    handle: (req: Request) => Promise<Response>;
+    handleAction?: (req: Request, id: string) => Promise<Response>;
+  }
 
-  async function loadFunction(funcPath: string): Promise<{ handle: (req: Request) => Promise<Response> } | null> {
+  const functionCache = new Map<string, SsrFunctionModule>();
+
+  async function loadFunction(funcPath: string): Promise<SsrFunctionModule | null> {
     if (functionCache.has(funcPath)) return functionCache.get(funcPath)!;
     const fullPath = resolve(outDir, funcPath);
     if (!existsSync(fullPath)) return null;
     try {
-      const mod = await import(`${fullPath}?t=${Date.now()}`) as { handle: (req: Request) => Promise<Response> };
+      const mod = await import(`${fullPath}?t=${Date.now()}`) as SsrFunctionModule;
       functionCache.set(funcPath, mod);
       return mod;
     } catch {
@@ -172,6 +203,11 @@ export async function startProdServer(outDir: string, options?: { port?: number 
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
+    const reqHost = (req.headers.host as string) || `localhost:${port}`;
+    const proto = (req.socket as { encrypted?: boolean }).encrypted
+      ? 'https'
+      : getClientProtocol({ headers: req.headers } as Record<string, unknown>, !!securityConfig?.trustProxy);
+    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
 
     if (rateLimiter) {
       const clientIp = getClientIpFromReq(req);
@@ -259,6 +295,34 @@ export async function startProdServer(outDir: string, options?: { port?: number 
       if (mwResult.rewriteUrl) {
         url.pathname = mwResult.rewriteUrl;
       }
+    }
+
+    if (url.pathname.startsWith('/_vesk/action/')) {
+      const actionId = url.pathname.replace('/_vesk/action/', '');
+      const actionEntry = buildConfig.actions && buildConfig.actions.find(a => a.id === actionId);
+      if (!actionEntry) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Action not found' }));
+        return;
+      }
+      const mod = await loadFunction(actionEntry.function);
+      if (!mod || !mod.handleAction) {
+        res.writeHead(404, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: 'Action not found' }));
+        return;
+      }
+      try {
+        const webRequest = makeWebRequest(req, url.href);
+        const response = await mod.handleAction(webRequest, actionId);
+        const body = await response.text();
+        res.writeHead(response.status, Object.fromEntries(response.headers));
+        res.end(body);
+      } catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ ok: false, error: message }));
+      }
+      return;
     }
 
     if (url.pathname.startsWith('/api')) {

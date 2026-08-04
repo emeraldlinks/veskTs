@@ -1,4 +1,4 @@
-interface ValidationRule {
+export interface ValidationRule {
 	validate: (v: unknown) => boolean;
 	message: string;
 }
@@ -19,7 +19,7 @@ interface FormProps {
 	onSubmit?: (data: Record<string, unknown>, form: HTMLFormElement) => void | Promise<void>;
 	onError?: (err: unknown) => void;
 	onSuccess?: (res: Response) => void;
-	action?: string;
+	action?: string | Record<string, unknown>;
 	method?: string;
 	class?: string;
 	style?: string;
@@ -28,6 +28,27 @@ interface FormProps {
 
 function formIsSSR(): boolean {
 	return typeof document === 'undefined';
+}
+
+function escapeHtml(s: string): string {
+	return s
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;');
+}
+
+function actionUrl(action: unknown): string {
+	if (typeof action === 'string') return action;
+	if (action && typeof action === 'object') {
+		const a = action as { __veskAction?: unknown; url?: unknown };
+		if (a.__veskAction === true || typeof a.url === 'string') return String(a.url || '');
+	}
+	return '';
+}
+
+function readServerFieldErrors(): Record<string, string> {
+	return (globalThis as { __vesk_action_errors?: Record<string, string> }).__vesk_action_errors || {};
 }
 
 export function required(msg?: string): ValidationRule {
@@ -59,13 +80,16 @@ export function Field(props: FieldProps): HTMLElement | string {
 
 	if (formIsSSR()) {
 		const labelHtml = label ? `<label>${label}</label>` : '';
-		const errStyle = 'display:none';
+		const serverErrors = readServerFieldErrors();
+		const serverErr = serverErrors[name] ? String(serverErrors[name]) : '';
+		const errStyle = serverErr ? '' : 'display:none';
+		const errText = serverErr ? escapeHtml(serverErr) : '';
 		const errCls = errorClass ? ` class="${errorClass}"` : '';
 		const wrapCls = className ? ` class="${className}"` : '';
 		const wrapStyle = style ? ` style="${String(style).replace(/"/g, '&quot;')}"` : '';
 		const fieldAttrs = ` data-vsk-field="${name}"`;
 		const extra = Object.entries(rest).filter(([, v]) => v != null && v !== false).map(([k, v]) => ` ${k}="${String(v).replace(/"/g, '&quot;')}"`).join('');
-		return `<div${fieldAttrs}${wrapCls}${wrapStyle}${extra}>${labelHtml}${children || ''}<div data-vsk-error style="${errStyle}"${errCls}></div></div>`;
+		return `<div${fieldAttrs}${wrapCls}${wrapStyle}${extra}>${labelHtml}${children || ''}<div data-vsk-error style="${errStyle}"${errCls}>${errText}</div></div>`;
 	}
 
 	const wrapper = document.createElement('div');
@@ -97,7 +121,7 @@ export function Form(props: FormProps): HTMLElement | string {
 	const { children, onSubmit, onError, onSuccess, action, method = 'POST', class: className, style, ...rest } = props;
 
 	if (formIsSSR()) {
-		const attrs: Record<string, string | boolean> = { action: action || '', method };
+		const attrs: Record<string, string | boolean> = { action: actionUrl(action), method };
 		if (className) attrs.class = className;
 		if (style) attrs.style = style;
 		for (const [k, v] of Object.entries(rest)) {
@@ -111,7 +135,8 @@ export function Form(props: FormProps): HTMLElement | string {
 	}
 
 	const form = document.createElement('form');
-	if (action) form.action = action;
+	const resolvedAction = actionUrl(action);
+	if (resolvedAction) form.action = resolvedAction;
 	if (method) form.method = method;
 	if (className) form.className = className;
 	if (style) form.style.cssText = style;
@@ -153,13 +178,50 @@ export function Form(props: FormProps): HTMLElement | string {
 		if (hasErrors) { form.dispatchEvent(new CustomEvent('vsk-error', { detail: { errors: true } })); return; }
 
 		form.classList.add('vsk-submitting');
+		const submitBtn = form.querySelector<HTMLElement>('[type="submit"], button[type="submit"]');
+		if (submitBtn) (submitBtn as HTMLButtonElement).disabled = true;
+		form.dispatchEvent(new CustomEvent('vsk-loading', { detail: { loading: true } }));
+		const isActionDescriptor = typeof action === 'object' && action !== null;
 
 		try {
 			if (onSubmit) {
 				const result = onSubmit(obj, form);
 				if (result && typeof (result as Promise<void>).then === 'function') await (result as Promise<void>);
-			} else if (action) {
-				const res = await fetch(action, { method, body: data });
+			} else if (isActionDescriptor) {
+				const res = await fetch(resolvedAction, {
+					method,
+					headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+					body: JSON.stringify(obj),
+				});
+				const payload = await res.json().catch(() => null);
+				if (payload && payload.ok === false && Array.isArray(payload.issues)) {
+					const byField: Record<string, string> = {};
+					for (const issue of payload.issues) {
+						if (issue && typeof issue.field === 'string' && !(issue.field in byField)) {
+							byField[issue.field] = String(issue.message || 'Invalid value');
+						}
+					}
+					let hasServerErrors = false;
+					for (const el of fields) {
+						const fieldName = el.getAttribute('data-vsk-field');
+						const errEl = el.querySelector('[data-vsk-error]');
+						const msg = fieldName ? byField[fieldName] : '';
+						if (errEl) {
+							errEl.textContent = msg;
+							(errEl as HTMLElement).style.display = msg ? '' : 'none';
+						}
+						if (msg) hasServerErrors = true;
+					}
+					if (hasServerErrors) {
+						form.dispatchEvent(new CustomEvent('vsk-error', { detail: { issues: payload.issues } }));
+						return;
+					}
+				}
+				if (!res.ok) throw res;
+				form.dispatchEvent(new CustomEvent('vsk-success', { detail: { response: res, data: payload } }));
+				if (onSuccess) onSuccess(res);
+			} else if (resolvedAction) {
+				const res = await fetch(resolvedAction, { method, body: data });
 				if (!res.ok) throw res;
 				form.dispatchEvent(new CustomEvent('vsk-success', { detail: { response: res } }));
 				if (onSuccess) onSuccess(res);
@@ -168,7 +230,9 @@ export function Form(props: FormProps): HTMLElement | string {
 			form.dispatchEvent(new CustomEvent('vsk-error', { detail: { error: err } }));
 			if (onError) onError(err);
 		} finally {
+			if (submitBtn) (submitBtn as HTMLButtonElement).disabled = false;
 			form.classList.remove('vsk-submitting');
+			form.dispatchEvent(new CustomEvent('vsk-loading', { detail: { loading: false } }));
 		}
 	});
 

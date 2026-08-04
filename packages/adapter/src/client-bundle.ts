@@ -10,15 +10,16 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 function findRuntimeSrc(appDir: string): string {
   const monorepoRoot = resolve(__dirname, '..', '..', '..');
-  const monorepoRuntime = resolve(monorepoRoot, 'packages', 'runtime', 'dist');
-  if (existsSync(join(monorepoRuntime, 'index-client.js'))) return monorepoRuntime;
-
-  const projectRuntime = resolve(appDir, '..', 'node_modules', '@vesk/runtime');
-  if (existsSync(join(projectRuntime, 'index-client.js'))) return projectRuntime;
-
-  const appRuntime = resolve(appDir, 'node_modules', '@vesk/runtime');
-  if (existsSync(join(appRuntime, 'index-client.js'))) return appRuntime;
-
+  const candidates = [
+    resolve(monorepoRoot, 'packages', 'runtime', 'dist'),
+    resolve(appDir, '..', 'node_modules', '@vesk/runtime'),
+    resolve(appDir, 'node_modules', '@vesk/runtime'),
+  ];
+  for (const base of candidates) {
+    for (const dir of [base, join(base, 'dist')]) {
+      if (existsSync(join(dir, 'index-client.js'))) return dir;
+    }
+  }
   throw new Error('@vesk/runtime/dist not found — run "npm run build" first');
 }
 
@@ -35,11 +36,12 @@ export async function generateClientBundle(
   const runtimeImportNames = new Set<string>();
 
   function collectRuntimeImports(code: string): void {
-    const m = code.match(/^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/m);
-    if (!m) return;
-    for (const name of m[1].split(',')) {
-      const trimmed = name.trim().replace(/^(\w+)\s+as\s+.*$/, '$1');
-      if (trimmed) runtimeImportNames.add(trimmed);
+    const re = /^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm;
+    for (const m of code.matchAll(re)) {
+      for (const name of m[1].split(',')) {
+        const trimmed = name.trim().replace(/^(\w+)\s+as\s+.*$/, '$1');
+        if (trimmed) runtimeImportNames.add(trimmed);
+      }
     }
   }
 
@@ -67,7 +69,7 @@ export async function generateClientBundle(
       output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
     }
 
-    const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
+    const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
     if (hydCode) {
       collectRuntimeImports(hydCode);
       const stripped = stripExports(stripRuntimeImport(hydCode))
@@ -174,7 +176,7 @@ export async function generateClientBundle(
         componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
 
-      const hydCode = compileClient(src, null, { hydrate: true, forceClient: true });
+      const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
       if (hydCode) {
         collectRuntimeImports(hydCode);
         const stripped = stripExports(stripRuntimeImport(hydCode))
@@ -228,7 +230,7 @@ export function buildRuntimeCode(runtimeDir: string): string {
     'context.js', 'hydrate.js', 'resource.js',
     'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
     'portal.js',
-    'seo.js', 'image.js', 'experiment.js', 'form.js',
+    'seo.js', 'image.js', 'experiment.js', 'form.js', 'action.js',
   ];
   let code = '';
   for (const f of runtimeFiles) {
@@ -354,11 +356,16 @@ function buildMainBundle(
       'globalThis.__runtime_comps = __runtime_comps;\n' +
       'globalThis.__cleanup = __cleanup;\n\n';
 
+    const extraGlobals = [...(runtimeImportNames || [])]
+      .filter(n => n && n !== 'default' && !/^[A-Z]/.test(n))
+      .map(n => `globalThis.${n} = ${n};\n`)
+      .join('');
+
     const code = preamble +
       'const __components = globalThis.__components || (globalThis.__components = {});\n' +
       'const __hydrators = globalThis.__hydrators || (globalThis.__hydrators = {});\n' +
       'const __runtime_comps = __components;\n\n' +
-      runtimeGlobals +
+      runtimeGlobals + extraGlobals +
       cleanupFn +
       'globalThis.__components = __components;\n' +
       resolveNamesFn +

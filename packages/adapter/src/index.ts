@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
+import { collectActionIds } from '@vesk/compiler/src/actions';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
@@ -24,7 +25,7 @@ async function resolveCompilerApi<T = Record<string, unknown>>(name: string): Pr
     }
     return import(resolve(monorepoSrc, name)) as Promise<T>;
   }
-  return import(`@vesk/compiler/src/${name}`) as Promise<T>;
+  return import(`@vesk/compiler/src/${name.replace(/\.js$/, '')}`) as Promise<T>;
 }
 
 export async function build(appDir: string, options?: BuildOptions): Promise<BuildResult | undefined> {
@@ -82,6 +83,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   await bundleRuntime(appDir, outDir);
 
   const ssrRoutes: RouteNode[] = [];
+  const actionMap: Record<string, string> = {};
   function walk(nodes: RouteNode[], ancestorLayouts: AncestorLayout[] = []): void {
     for (const node of nodes) {
       const childAncestorLayouts = node.layout
@@ -100,6 +102,18 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (existsSync(pagePath)) {
           const src = readFileSync(pagePath, 'utf-8');
+          const actionIds = collectActionIds(src);
+          if (node.layout) {
+            const layoutSrc = readFileSync(resolve(appDir, node.sourceDir, 'layout.vsk'), 'utf-8');
+            actionIds.push(...collectActionIds(layoutSrc));
+          }
+          for (const a of ancestorLayouts) {
+            const ancestorSrc = readFileSync(resolve(appDir, a.sourceDir, 'layout.vsk'), 'utf-8');
+            actionIds.push(...collectActionIds(ancestorSrc));
+          }
+          for (const id of actionIds) {
+            if (!actionMap[id]) actionMap[id] = `server/functions/${name}.js`;
+          }
           const revalidateMatch = src.match(/export\s+const\s+revalidate\s*=\s*(\d+)/);
           if (revalidateMatch) node._revalidate = parseInt(revalidateMatch[1], 10);
           const tagsMatch = src.match(/export\s+const\s+isrTags\s*=\s*\[([^\]]*)\]/);
@@ -278,7 +292,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
-  const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled);
+  const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap);
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
 

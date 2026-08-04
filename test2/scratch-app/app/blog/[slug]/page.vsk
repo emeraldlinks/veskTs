@@ -1,0 +1,11 @@
+import { Link } from '@vesk/runtime';
+
+component BlogPost(props: { params: { slug: string } }) {
+	<Link href="/blog" class="inline-block mb-6 text-blue-600 no-underline hover:underline">
+		← Back to blog
+	</Link>
+	<h1 class="text-3xl font-bold mb-2">Post: {props.params.slug}</h1>
+	<div class="text-gray-600 leading-relaxed">
+		<p>This is a dynamic blog post rendered at <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">/{props.params.slug}</code>.</p>
+	</div>
+}

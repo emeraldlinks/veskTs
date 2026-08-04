@@ -1,7 +1,7 @@
 export { track, get, set, untrack, peek_tracked as peek, derived, flush_sync as flushSync, tick, schedule_update, queue_microtask, active_block, set_active_block, set_active_component, is_mutating_allowed, tracking, teardown, run_block, run_teardown, create_component_ctx, push_component, pop_component, with_block, with_scope, scope, safe_scope, set_tracking, set_active_reaction, is_block_dirty, destroy_non_branch_children, disable_scoped_flush, on_destroy } from '@vesk/runtime/src/ripple-runtime';
 export { effect, user_effect, block, branch, root, render, pre_effect, destroy_block, destroy_block_children, pause_block, resume_block, is_destroyed, unlink_block, create_try_block, boundary_fn_running_block } from '@vesk/runtime/src/ripple-blocks';
 export { hydrate, hydrateViewport, hydrateIdle, hydrateOnInteraction, needsHydration, hydrationCount, createHydrateWalker, collectVskMarkers, reactiveProps } from '@vesk/runtime/src/hydrate';
-export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound } from '@vesk/runtime/src/router';
+export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound, NotFoundError } from '@vesk/runtime/src/router';
 export { bindValue, bindChecked, bindGroup } from '@vesk/runtime/src/bindings';
 export { createContext, Context, getActiveComponent, setActiveComponent } from '@vesk/runtime/src/context';
 export { createResource, setSsrData, clearSsrData, resolveSsrResources, useFetch } from '@vesk/runtime/src/resource';
@@ -11,3 +11,4 @@ export { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSche
 export { Image } from '@vesk/runtime/src/image';
 export { Experiment } from '@vesk/runtime/src/experiment';
 export { Form, Field, required, email, minLength, maxLength, pattern, custom } from '@vesk/runtime/src/form';
+export { defineAction, getAction, clearActions, validateActionInput, issuesToFieldMap, isFormAction } from '@vesk/runtime/src/action';

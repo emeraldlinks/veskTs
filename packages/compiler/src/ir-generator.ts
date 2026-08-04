@@ -796,6 +796,7 @@ export function generateIR(ast: any, source: string): IRRoot {
   const autoImportable = [
     'useFetch', 'useRouter', 'useParams', 'usePathname', 'useSearchParams', 'useNavigate',
     'useHead', 'useTitle',
+    'defineAction',
     'Form', 'Field', 'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom',
     'Link', 'NavLink', 'Outlet',
     'Image', 'Portal',

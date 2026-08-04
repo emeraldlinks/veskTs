@@ -1,5 +1,5 @@
 {
-  "name": "vesk-monorepo",
+  "name": "vesk",
   "private": true,
   "type": "module",
   "description": "Vesk — A Compiler-First Framework for the Post-VDOM Web",
@@ -12,6 +12,7 @@
     "packages/adapter",
     "packages/cli",
     "packages/compiler",
+    "packages/create-vesk",
     "packages/plugin-tailwind",
     "packages/runtime",
     "packages/lsp"
@@ -22,7 +23,9 @@
     "test:dev": "npx tsx tests/dev-test.mjs",
     "test:prod": "npx tsx tests/prod-test.mjs",
     "test:unit": "node scripts/test.js",
-    "test": "npm run test:unit && npm run test:dev"
+    "test": "npm run test:unit && npm run test:dev",
+    "release": "node scripts/release.mjs",
+    "release:dry": "node scripts/release.mjs --dry-run"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.3",

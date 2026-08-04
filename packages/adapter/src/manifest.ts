@@ -1,4 +1,4 @@
-import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, SsgRouteResult } from '@vesk/adapter/src/types';
+import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, ManifestActionEntry, SsgRouteResult } from '@vesk/adapter/src/types';
 
 export function generateManifest(
   routes: RouteNode[],
@@ -6,6 +6,7 @@ export function generateManifest(
   apiRoutes: ApiRouteNode[],
   staticRoutes: SsgRouteResult[],
   middlewareEnabled: boolean,
+  actionMap?: Record<string, string>,
 ): Manifest {
   const routeEntries: ManifestRouteEntry[] = [];
 
@@ -40,6 +41,10 @@ export function generateManifest(
     });
   }
 
+  const actionEntries: ManifestActionEntry[] = actionMap
+    ? Object.entries(actionMap).map(([id, fn]) => ({ id, function: fn }))
+    : [];
+
   return {
     version: 1,
     middleware: middlewareEnabled,
@@ -49,5 +54,6 @@ export function generateManifest(
       prefix: '/_vesk/static',
       dir: 'static',
     },
+    ...(actionEntries.length > 0 ? { actions: actionEntries } : {}),
   };
 }

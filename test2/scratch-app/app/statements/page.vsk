@@ -1,0 +1,65 @@
+component Statements {
+	<Head>
+		<title>Statements — every JS construct</title>
+	</Head>
+	const items = ['alpha', 'beta', 'gamma']
+	const obj = { name: 'Vesk', year: 2026, tags: ['fast', 'reactive'] }
+	const score = 7
+	let n = 0
+
+	<h1 class="text-3xl font-bold mb-4">JS Statement Demo</h1>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">if / else</h2>
+	if (score > 5) {
+		<p class="text-green-600">Score {score} is above the threshold</p>
+	} else {
+		<p class="text-red-600">Score {score} is low</p>
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">ternary</h2>
+	<p>{score % 2 === 0 ? 'even' : 'odd'}</p>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">switch</h2>
+	switch (score) {
+		case 1:
+			<p>One</p>
+			break
+		case 7:
+			<p>Seven</p>
+			break
+		default:
+			<p>Something else</p>
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">for loop</h2>
+	for (let i = 0; i < 3; i++) {
+		<span class="mr-2">i={i}</span>
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">for-of (array values)</h2>
+	for (const item of items) {
+		<span class="mr-2">{item}</span>
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">for-in (object keys)</h2>
+	for (const key in obj) {
+		<span class="mr-2">{key}:{obj[key]}</span>
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">while</h2>
+	while (n < 3) {
+		<span class="mr-2">{n}</span>
+		n = n + 1
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">try / catch / throw</h2>
+	try {
+		throw new Error('Boom!')
+	} catch(e) {
+		<p class="text-red-600">Caught: {e.message}</p>
+	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">runtime statements</h2>
+	const total = items.length * 2
+	<p>items.length * 2 = {total}</p>
+}

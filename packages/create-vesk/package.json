@@ -8,6 +8,19 @@
   },
   "dependencies": {},
   "engines": {
-    "node": ">=18"
-  }
+    "node": ">=20.0.0"
+  },
+  "license": "MIT",
+  "author": "emeraldlinks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs.git"
+  },
+  "homepage": "https://github.com/emeraldlinks/veskTs#readme",
+  "bugs": {
+    "url": "https://github.com/emeraldlinks/veskTs/issues"
+  },
+  "files": [
+    "src"
+  ]
 }

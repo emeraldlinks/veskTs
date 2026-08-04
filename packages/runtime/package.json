@@ -22,12 +22,30 @@
     "./package.json": "./package.json"
   },
   "dependencies": {
-    "@vesk/compiler": "*"
+    "@vesk/compiler": "^0.1.0"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
-  }
+  },
+  "license": "MIT",
+  "author": "emeraldlinks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs.git"
+  },
+  "homepage": "https://github.com/emeraldlinks/veskTs#readme",
+  "bugs": {
+    "url": "https://github.com/emeraldlinks/veskTs/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }

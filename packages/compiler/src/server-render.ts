@@ -12,13 +12,14 @@ import {
 } from '@vesk/compiler/src/server-utils';
 import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
+import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 
 export function compileFile(source: string): CompileFileResult {
   const ast = parse(source);
   const ir = generateIR(ast, source);
   const componentMap = buildComponentMap(ir, true);
   const __vesk = loadRuntimeImports(ir.imports);
-  evalTopLevelCode(ir.topLevelCode, __vesk);
+  evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
   return { ir, componentMap, __vesk };
 }
 
@@ -37,7 +38,7 @@ export function render(
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
   const fullRegistry = new Map([...registry, ...componentMap]);
   const __vesk = (options.__vesk as Record<string, unknown>) || loadRuntimeImports(ir.imports);
-  evalTopLevelCode(ir.topLevelCode, __vesk);
+  evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
   const result = renderFn(props, fullRegistry, __vesk);
   const targetComp = ir.components.find((c) => c.name === componentName);
   if (targetComp?.isAsync) {

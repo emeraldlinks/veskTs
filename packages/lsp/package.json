@@ -9,15 +9,32 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@vesk/compiler": "*",
+    "@vesk/compiler": "^0.1.0",
     "vscode-languageserver": "^9.0.0",
     "vscode-languageserver-textdocument": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "typescript": "^5.8.0"
-  }
+  },
+  "license": "MIT",
+  "author": "emeraldlinks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs.git"
+  },
+  "homepage": "https://github.com/emeraldlinks/veskTs#readme",
+  "bugs": {
+    "url": "https://github.com/emeraldlinks/veskTs/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }

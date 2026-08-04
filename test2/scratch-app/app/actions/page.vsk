@@ -1,0 +1,33 @@
+import { Form, Field, required, email, minLength, defineAction } from '@vesk/runtime'
+
+const signup = defineAction({
+	input: {
+		name: required('Name is required'),
+		email: [required('Email is required'), email('Enter a valid email')],
+		password: minLength(6, 'Password must be at least 6 characters'),
+	},
+	execute: async ({ name, email }) => {
+		await new Promise(r => setTimeout(r, 50))
+		return { received: `${name} <${email}>` }
+	},
+})
+
+component Actions {
+	<Head>
+		<title>Actions demo</title>
+	</Head>
+
+	<h1 class="text-2xl font-bold mb-4">Server actions</h1>
+	<Form action={signup} onSuccess={() => console.log('done')}>
+		<Field name="name" label="Name">
+			<input name="name" class="border rounded px-2 py-1" />
+		</Field>
+		<Field name="email" label="Email">
+			<input name="email" type="email" class="border rounded px-2 py-1" />
+		</Field>
+		<Field name="password" label="Password">
+			<input name="password" type="password" class="border rounded px-2 py-1" />
+		</Field>
+		<button type="submit" class="bg-blue-600 text-white px-4 py-2 rounded">Submit</button>
+	</Form>
+}

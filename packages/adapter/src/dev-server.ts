@@ -13,6 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 interface ExtendedRequest extends Request {
   json(): Promise<unknown>;
   text(): Promise<string>;
+  formData(): Promise<FormData>;
   clone(): ExtendedRequest;
 }
 
@@ -36,6 +37,19 @@ function makeWebRequest(nodeReq: IncomingMessage, url: string): ExtendedRequest 
   const webRequest = new Request(parsedUrl, { method, headers: nodeReq.headers as Record<string, string>, body: null }) as ExtendedRequest;
   webRequest.json = async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } };
   webRequest.text = async () => (await getBody()).toString('utf-8');
+  webRequest.formData = async () => {
+    const body = await getBody();
+    const ct = String(nodeReq.headers['content-type'] || '');
+    if (ct.includes('multipart/form-data')) {
+      const temp = new Request('http://localhost', { method: 'POST', headers: nodeReq.headers as Record<string, string>, body: body as unknown as BodyInit });
+      return temp.formData();
+    }
+    const fd = new FormData();
+    if (ct.includes('x-www-form-urlencoded')) {
+      for (const [k, v] of new URLSearchParams(body.toString()).entries()) fd.append(k, v);
+    }
+    return fd;
+  };
   webRequest.clone = () => webRequest;
   return webRequest;
 }
@@ -151,6 +165,43 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         res.end(readFileSync(buildPath));
         return;
       }
+    }
+
+    if (config && url.pathname.startsWith('/_vesk/action/')) {
+      const actionId = url.pathname.replace('/_vesk/action/', '');
+      const actionEntry = config.actions && config.actions.find(a => a.id === actionId);
+      if (actionEntry) {
+        const handlerPath = resolve(devDir, actionEntry.function);
+        if (existsSync(handlerPath)) {
+          try {
+            const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handleAction?: (req: Request, id: string) => Promise<Response> };
+            if (mod.handleAction) {
+              const webRequest = makeWebRequest(req, url.href);
+              const response = await mod.handleAction(webRequest, actionId);
+              const body = await response.text();
+              const headers = Object.fromEntries(response.headers);
+              const contentType = headers['content-type'] || '';
+              let finalBody = body;
+              if (contentType.includes('text/html')) {
+                finalBody = body.replace(
+                  '</body>',
+                  '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'
+                );
+              }
+              res.writeHead(response.status, headers);
+              res.end(finalBody);
+              return;
+            }
+          } catch (e) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
+            return;
+          }
+        }
+      }
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: 'Action not found' }));
+      return;
     }
 
     if (config && url.pathname.startsWith('/api')) {

@@ -1,0 +1,20 @@
+import { track } from '@vesk/runtime'
+
+component Home {
+	<Head>
+		<title>scratch-app</title>
+	</Head>
+	const &[count] = track(0)
+
+	<h1 class="text-4xl font-bold mb-2">Welcome to Vesk</h1>
+	<p class="text-gray-500 mb-4">
+		A compiler-first reactive UI framework for the post-VDOM web.
+	</p>
+	<p class="text-2xl font-semibold">count: {count}</p>
+	<button onClick={() => count++} class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg mr-2">+</button>
+	<button onClick={() => count--} class="bg-gray-600 hover:bg-gray-700 text-white px-4 py-2 rounded-lg">-</button>
+	<div class="bg-white rounded-xl p-6 mt-8 shadow-sm border border-gray-100">
+		<h2 class="text-xl font-semibold mb-2">Getting Started</h2>
+		<p>Edit <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">app/page.vsk</code> to change this page.</p>
+	</div>
+}

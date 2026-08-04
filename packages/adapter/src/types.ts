@@ -116,6 +116,11 @@ export interface ManifestRouteEntry {
   tags?: string[];
 }
 
+export interface ManifestActionEntry {
+  id: string;
+  function: string;
+}
+
 export interface ManifestPrerenderedEntry {
   path: string;
   file: string;
@@ -130,6 +135,7 @@ export interface Manifest {
     prefix: string;
     dir: string;
   };
+  actions?: ManifestActionEntry[];
 }
 
 export interface SsgRouteResult {

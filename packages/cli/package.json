@@ -1,15 +1,23 @@
 {
-  "name": "@vesk/cli",
+  "name": "vesk",
   "version": "0.1.0",
   "type": "module",
-  "description": "Vesk CLI — vesk dev, vesk build",
+  "description": "Vesk — compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
   "bin": {
     "vesk": "./dist/cli.js"
   },
   "main": "./dist/cli.js",
   "dependencies": {
-    "@vesk/compiler": "*",
-    "@vesk/runtime": "*"
+    "@vesk/adapter": "^0.1.0",
+    "@vesk/compiler": "^0.1.0",
+    "@vesk/plugin-tailwind": "^0.1.0",
+    "@vesk/runtime": "^0.1.0",
+    "esbuild": "^0.25.0",
+    "esrap": "^2.3.0",
+    "sharp": "^0.35.3",
+    "typescript": "^5.8.0",
+    "ws": "^8.18.0",
+    "zimmerframe": "^1.1.0"
   },
   "scripts": {
     "build": "npx tsx build.ts",
@@ -17,5 +25,21 @@
   },
   "devDependencies": {
     "typescript": "^5.8.0"
-  }
+  },
+  "license": "MIT",
+  "author": "emeraldlinks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs.git"
+  },
+  "homepage": "https://github.com/emeraldlinks/veskTs#readme",
+  "bugs": {
+    "url": "https://github.com/emeraldlinks/veskTs/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "files": [
+    "dist"
+  ]
 }

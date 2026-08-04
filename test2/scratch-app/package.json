@@ -1,0 +1,22 @@
+{
+  "name": "scratch-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vesk dev",
+    "build": "vesk build",
+    "start": "vesk start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vesk/adapter": "file:../../../../tmp/opencode/tarballs/vesk-adapter-0.1.0.tgz",
+    "vesk": "file:../../../../tmp/opencode/tarballs/vesk-0.1.0.tgz",
+    "@vesk/compiler": "file:../../../../tmp/opencode/tarballs/vesk-compiler-0.1.0.tgz",
+    "@vesk/plugin-tailwind": "file:../../../../tmp/opencode/tarballs/vesk-plugin-tailwind-0.1.0.tgz",
+    "@vesk/runtime": "file:../../../../tmp/opencode/tarballs/vesk-runtime-0.1.0.tgz"
+  },
+  "devDependencies": {
+    "tailwindcss": "^4.0.0",
+    "typescript": "^5.8.0"
+  }
+}

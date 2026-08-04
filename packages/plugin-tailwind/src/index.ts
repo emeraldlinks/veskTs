@@ -5,8 +5,8 @@
  * @module plugin-tailwind
  */
 
-import { readFileSync, existsSync, globSync } from 'fs'
-import { resolve } from 'path'
+import { readFileSync, existsSync, readdirSync, statSync } from 'fs'
+import { resolve, join } from 'path'
 
 interface GlobScanOptions {
   cwd?: string
@@ -20,15 +20,30 @@ export interface TailwindOptions {
   appDir?: string
 }
 
+const SCAN_EXT = /\.(vsk|js|ts|jsx|tsx)$/
+
+function walkFiles(dir: string): string[] {
+  const out: string[] = []
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name)
+    const st = statSync(p)
+    if (st.isDirectory()) {
+      if (name === 'node_modules' || name === 'dist' || name === '.vesk') continue
+      out.push(...walkFiles(p))
+    } else if (SCAN_EXT.test(name)) {
+      out.push(p)
+    }
+  }
+  return out
+}
+
 function scanCandidates(dir: string): string[] {
   const candidates = new Set<string>()
   const base = resolve(dir)
   if (!existsSync(base)) return []
-  const globOpts: GlobScanOptions = { cwd: base, nodir: true }
-  const files = globSync('**/*.{vsk,js,ts,jsx,tsx}', globOpts)
-  for (const file of files) {
+  for (const file of walkFiles(base)) {
     try {
-      const content = readFileSync(resolve(base, file), 'utf-8')
+      const content = readFileSync(file, 'utf-8')
       let match
       while ((match = CLASS_RE.exec(content)) !== null) {
         const classes = match[1].split(/\s+/)

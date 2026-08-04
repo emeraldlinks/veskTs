@@ -8,7 +8,7 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
-const BASE = 'http://localhost:3000';
+const BASE = process.env.BASE || 'http://localhost:3000';
 let passed = 0;
 let failed = 0;
 let browser;

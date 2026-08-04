@@ -9,7 +9,7 @@ import { isStaticIR, collectTrackedNames, transformTracked, type TrackedInfo } f
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
 import {
-  isStatic, escapeHtml, indent, exprJS, childrenToHTML,
+  isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
   __vskHydrate, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
@@ -310,9 +310,21 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   for (const sp of node.spreadProps) {
     propsEntries.push(`...${exprJSX(sp, tracked)}`);
   }
+  const lines: string[] = [];
   if (node.children.length > 0) {
-    const childCode = childrenToHTML(node.children);
-    propsEntries.push(`children: ${JSON.stringify(childCode)}`);
+    const childLines: string[] = [];
+    for (const child of node.children) {
+      const code = irNodeToJS(child, importedNames, isAsync, tracked);
+      if (code) childLines.push(code);
+    }
+    if (childLines.length > 0) {
+      const childrenVar = `__ch${nextVskId()}`;
+      propsEntries.push(`children: ${childrenVar}`);
+      lines.push(`const ${childrenVar} = ${isAsync ? 'await (async ' : '('}() => {`);
+      lines.push(`const __out = [];`);
+      lines.push(indent(childLines.join('\n')));
+      lines.push(`return __out.join(''); })();`);
+    }
   }
   const propsObj = `{ ${propsEntries.join(', ')} }`;
   const compName = node.componentName;
@@ -320,9 +332,11 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   const callee = isImported ? compName : `__registry.get(${JSON.stringify(compName)})`;
   const awaitKw = isAsync ? 'await ' : '';
   if (__vskHydrate) {
-    return `__out.push('<!--vsk--><div>' + (${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`;
+    lines.push(`__out.push('<!--vsk--><div>' + (${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`);
+  } else {
+    lines.push(`__out.push(${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '');`);
   }
-  return `__out.push(${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '');`;
+  return lines.join('\n');
 }
 
 export function generateFunctionBody(comp: ComponentIR, importedNames: Set<string>): string {

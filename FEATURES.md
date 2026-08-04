@@ -175,7 +175,7 @@
 |---|---|---|---|---|---|
 | ★★★ | Dev server | `vesk dev` — HTTP + HMR | `next dev` — Turbopack | `npm run dev` | `astro dev` |
 | ★★★ | Build | `vesk build` — routes, SSR, API, client, runtime, manifest | `next build` — full build | `npm run build` | `astro build` |
-| ★★★ | Init | `vesk init` — scaffolding with tailwind, example routes | `create-next-app` | `npm create qwik` | `create astro` |
+| ★★★ | Scaffolding | `create-vesk` — new project with tailwind, example routes | `create-next-app` | `npm create qwik` | `create astro` |
 | ★★ | HMR | WebSocket + surgical page updates + component hot-patching | React Fast Refresh (full refresh) | Hot Module Replacement | HMR |
 | ★★ | HMR indicator | Visual floating dot (green/yellow/red/gray) | Console logs | — | — |
 | ★ | SEO audit | `vesk seo` — 12-point checklist | Lighthouse / `next/seo` | — | — |

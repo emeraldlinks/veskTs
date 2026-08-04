@@ -110,12 +110,7 @@ export function generateSsrFunction(
 
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
   const paramExprs = buildParamExtraction(routeNode, urlParts);
-  let paramsCode: string;
-  if (paramExprs.length > 0) {
-    paramsCode = `const params = { ${paramExprs.join(', ')} };\n`;
-  } else {
-    paramsCode = 'const params = {};\n';
-  }
+  const paramsCode = `function __paramsFor(pathname) {\n  const urlParts = pathname.split('/').filter(Boolean);\n  return { ${paramExprs.join(', ')} };\n}\n`;
 
   const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
 
@@ -133,57 +128,53 @@ export function generateSsrFunction(
     registryCode = 'const __componentRegistry = new Map();\n';
   }
 
-  let renderCode: string;
-  if (hasLayout) {
-    renderCode = [
-      "  if (request.headers.get('x-vesk-data') === '1') {",
-      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true });",
-      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
-      "      headers: { 'Content-Type': 'application/json' },",
-      '    });',
-      '  }',
+  let htmlFnCode: string;
+  if (hasLayout || hasAncestorLayout) {
+    htmlFnCode = [
+      'async function __renderHtml(params) {',
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
       '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
-      '  return new Response(html, {',
-      "    headers: { 'Content-Type': 'text/html' },",
-      '  });',
-    ].join('\n');
-  } else if (hasAncestorLayout) {
-    renderCode = [
-      "  if (request.headers.get('x-vesk-data') === '1') {",
-      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true });",
-      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
-      "      headers: { 'Content-Type': 'application/json' },",
-      '    });',
-      '  }',
-      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head });',
-      '  return new Response(html, {',
-      "    headers: { 'Content-Type': 'text/html' },",
-      '  });',
+      "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
+      '}',
+      '',
     ].join('\n');
   } else {
-    renderCode = [
+    htmlFnCode = [
+      'async function __renderHtml(params) {',
+      '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ' });',
+      '  return new Response(new ReadableStream({',
+      '    async start(controller) {',
+      '      const enc = new TextEncoder();',
+      "      for await (const chunk of stream) { controller.enqueue(enc.encode(chunk)); }",
+      '      controller.close();',
+      '    },',
+      "  }), { headers: { 'Content-Type': 'text/html' } });",
+      '}',
+      '',
+    ].join('\n');
+  }
+
+  let dataCode: string;
+  if (hasLayout || hasAncestorLayout) {
+    dataCode = [
+      "  if (request.headers.get('x-vesk-data') === '1') {",
+      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true });',
+      "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true });",
+      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
+      "      headers: { 'Content-Type': 'application/json' },",
+      '    });',
+      '  }',
+      '  return __renderHtml(params);',
+    ].join('\n');
+  } else {
+    dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
       '    const dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true });',
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: dataPage.head || '' }), {",
       "      headers: { 'Content-Type': 'application/json' },",
       '    });',
       '  }',
-      "  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + " });",
-      '  return new Response(new ReadableStream({',
-      '    async start(controller) {',
-      '      const enc = new TextEncoder();',
-      '      for await (const chunk of stream) {',
-      '        controller.enqueue(enc.encode(chunk));',
-      '      }',
-      '      controller.close();',
-      '    },',
-      '  }), {',
-      "    headers: { 'Content-Type': 'text/html' },",
-      '  });',
+      '  return __renderHtml(params);',
     ].join('\n');
   }
 
@@ -191,7 +182,7 @@ export function generateSsrFunction(
 
   let bodyCode: string;
   if (hasMiddleware) {
-    const indentedRender = renderCode.split('\n').map(l => l ? `  ${l}` : '').join('\n');
+    const indentedRender = dataCode.split('\n').map(l => l ? `  ${l}` : '').join('\n');
     bodyCode = [
       '  // ── Middleware context ──',
       '  const __ctx = {',
@@ -215,24 +206,124 @@ export function generateSsrFunction(
       '  }',
     ].join('\n');
   } else {
-    bodyCode = renderCode;
+    bodyCode = dataCode;
   }
 
+  let registerActionsCode: string;
+  if (hasLayout || hasAncestorLayout) {
+    registerActionsCode = [
+      'async function __registerActions() {',
+      '  if (__actionsRegistered) return;',
+      '  __actionsRegistered = true;',
+      '  compileFile(_layoutSrc);',
+      '  compileFile(_pageSrc);',
+      '}',
+      '',
+    ].join('\n');
+  } else {
+    registerActionsCode = [
+      'async function __registerActions() {',
+      '  if (__actionsRegistered) return;',
+      '  __actionsRegistered = true;',
+      '  compileFile(_src);',
+      '}',
+      '',
+    ].join('\n');
+  }
+
+  const actionCode = [
+    'export async function handleAction(request, id) {',
+    '  await __registerActions();',
+    '  const action = getAction(id);',
+    '  if (!action) {',
+    "    return new Response(JSON.stringify({ ok: false, error: 'Action not found' }), { status: 404, headers: { 'Content-Type': 'application/json' } });",
+    '  }',
+    '  let input = {};',
+    "  const ct = request.headers.get('content-type') || '';",
+    "  if (ct.includes('json')) {",
+    '    input = await request.json().catch(() => ({}));',
+    "  } else if (ct.includes('multipart/form-data') || ct.includes('x-www-form-urlencoded')) {",
+    '    const fd = await request.formData().catch(() => null);',
+    '    if (fd) input = Object.fromEntries(fd.entries());',
+    '  } else {',
+    "    const text = await request.text().catch(() => '');",
+    '    if (text) { try { input = JSON.parse(text); } catch {} }',
+    '  }',
+    '  const issues = validateActionInput(action, input);',
+    "  const referer = request.headers.get('referer') || '';",
+    "  const isFetch = !(request.headers.get('accept') || '').includes('text/html');",
+    '  const base = referer || request.url;',
+    '  const pageUrl = new URL(base);',
+    '  const params = __paramsFor(pageUrl.pathname);',
+    '  if (issues.length > 0) {',
+    '    if (isFetch) {',
+    "      return new Response(JSON.stringify({ ok: false, issues }), { status: 200, headers: { 'Content-Type': 'application/json' } });",
+    '    }',
+    '    const prevReq = globalThis.__vesk_request;',
+    '    globalThis.__vesk_action_errors = issuesToFieldMap(issues);',
+    '    try {',
+    '      return await __renderHtml(params);',
+    '    } finally {',
+    '      globalThis.__vesk_action_errors = undefined;',
+    '      globalThis.__vesk_request = prevReq;',
+    '    }',
+    '  }',
+    '  const prevReq = globalThis.__vesk_request;',
+    '  globalThis.__vesk_request = {',
+    '    request,',
+    '    params,',
+    '    url: pageUrl,',
+    '    locals: {},',
+    "    cookies: parseCookies(request.headers.get('cookie') || ''),",
+    '  };',
+    '  try {',
+    '    const result = await action.execute(input, {',
+    '      request,',
+    '      params,',
+    '      url: pageUrl.href,',
+    '      headers: () => { const m = new Map(); for (const [k, v] of request.headers.entries()) m.set(k.toLowerCase(), String(v)); return m; },',
+    "      cookies: () => parseCookies(request.headers.get('cookie') || ''),",
+    "      locals: () => (globalThis.__vesk_request ? globalThis.__vesk_request.locals : {}),",
+    "      redirect: (u, status) => new Response(null, { status: status || 303, headers: { Location: u } }),",
+    '    });',
+    '    if (isFetch) {',
+    "      return new Response(JSON.stringify({ ok: true, data: result ?? null }), { status: 200, headers: { 'Content-Type': 'application/json' } });",
+    '    }',
+    "    const location = referer ? new URL(referer).pathname + new URL(referer).search : '/';",
+    "    return new Response(null, { status: 303, headers: { Location: location } });",
+    '  } catch (err) {',
+    "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Action failed';",
+    '    if (isFetch) {',
+    "      return new Response(JSON.stringify({ ok: false, error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });",
+    '    }',
+    "    return new Response(message, { status: 500, headers: { 'Content-Type': 'text/plain' } });",
+    '  } finally {',
+    '    globalThis.__vesk_request = prevReq;',
+    '  }',
+    '}',
+    '',
+  ].join('\n');
+
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';",
-    hasMiddleware ? "import { parseCookies } from '../runtime.js';" : '',
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, parseCookies, getAction, validateActionInput, issuesToFieldMap } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,
     src,
     '',
+    paramsCode,
+    htmlFnCode,
+    '',
     'export async function handle(request) {',
     '  const url = new URL(request.url);',
-    "  const urlParts = url.pathname.split('/').filter(Boolean);",
-    `  ${paramsCode}`,
+    '  const params = __paramsFor(url.pathname);',
     bodyCode,
     '}',
     '',
+    'let __actionsRegistered = false;',
+    '',
+    registerActionsCode,
+    actionCode,
   ].filter(Boolean).join('\n');
 
   return { funcPath, funcCode, name };

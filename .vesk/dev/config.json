@@ -1,0 +1,77 @@
+{
+  "version": 1,
+  "middleware": true,
+  "routes": [
+    {
+      "path": "/app",
+      "type": "ssr",
+      "function": "server/functions/app.js"
+    },
+    {
+      "path": "/app/about",
+      "type": "ssr",
+      "function": "server/functions/app_about.js"
+    },
+    {
+      "path": "/app/actions",
+      "type": "ssr",
+      "function": "server/functions/app_actions.js"
+    },
+    {
+      "path": "/app/async",
+      "type": "ssr",
+      "function": "server/functions/app_async.js"
+    },
+    {
+      "path": "/app/blog",
+      "type": "ssr",
+      "function": "server/functions/app_blog.js"
+    },
+    {
+      "path": "/app/blog/:slug",
+      "type": "ssr",
+      "function": "server/functions/app_blog_slug.js"
+    },
+    {
+      "path": "/app/empty",
+      "type": "ssr",
+      "function": "server/functions/app_empty.js"
+    },
+    {
+      "path": "/app/map",
+      "type": "ssr",
+      "function": "server/functions/app_map.js"
+    },
+    {
+      "path": "/app/posts",
+      "type": "ssr",
+      "function": "server/functions/app_posts.js"
+    },
+    {
+      "path": "/app/statements",
+      "type": "ssr",
+      "function": "server/functions/app_statements.js"
+    },
+    {
+      "path": "/app/store",
+      "type": "ssr",
+      "function": "server/functions/app_store.js"
+    },
+    {
+      "path": "/app/store/:item",
+      "type": "ssr",
+      "function": "server/functions/app_store_item.js"
+    }
+  ],
+  "prerendered": [],
+  "static": {
+    "prefix": "/_vesk/static",
+    "dir": "static"
+  },
+  "actions": [
+    {
+      "id": "-mvdn9i",
+      "function": "server/functions/app_actions.js"
+    }
+  ]
+}

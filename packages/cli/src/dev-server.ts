@@ -1,17 +1,26 @@
-import { readFileSync, watch, statSync, existsSync, mkdirSync } from 'node:fs';
+import { readFileSync, watch, statSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { resolve, extname, join } from 'node:path';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { transformSync } from 'esbuild';
-import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName } from '@vesk/compiler/src/server-codegen';
+import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol } from '@vesk/compiler/src/server-codegen';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
+import { ensurePackagesBuilt } from './build-packages';
+
+function resolveRuntimeDir(projectDir: string): string | null {
+  const pkgDir = resolve(projectDir, 'node_modules', '@vesk/runtime');
+  if (existsSync(join(pkgDir, 'ripple-runtime.js'))) return pkgDir;
+  const distDir = join(pkgDir, 'dist');
+  if (existsSync(join(distDir, 'ripple-runtime.js'))) return distDir;
+  return null;
+}
 
 const LOG = {
   reset: '\x1b[0m',
@@ -44,13 +53,46 @@ const LOG = {
   },
 };
 
+function countPages(nodes: RouteNode[]): number {
+  let n = 0;
+  for (const node of nodes) {
+    if (node.page) n++;
+    if (node.children.length > 0) n += countPages(node.children);
+  }
+  return n;
+}
+
+function collectRoutePaths(nodes: RouteNode[], out: string[] = []): string[] {
+  for (const node of nodes) {
+    if (node.page && node.fullPath) out.push(node.fullPath);
+    if (node.children.length > 0) collectRoutePaths(node.children, out);
+  }
+  return out;
+}
+
+function countFilesNamed(dir: string, name: string): number {
+  if (!existsSync(dir)) return 0;
+  let n = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const p = join(dir, entry.name);
+    if (entry.isDirectory()) n += countFilesNamed(p, name);
+    else if (entry.name === name) n++;
+  }
+  return n;
+}
+
 export async function startDevServer(port: number, projectDir: string, config: Record<string, unknown>): Promise<void> {
 
   const appDirPath = join(projectDir, 'app');
   const publicDir = join(projectDir, 'public');
-  const runtimeDir = resolve(projectDir, 'node_modules', '@vesk/runtime');
-  if (!existsSync(join(runtimeDir, 'ripple-runtime.js'))) {
-    LOG.err('@vesk/runtime not built. Run "npm run build" (or packages/cli/build-packages.ts) first.');
+
+  try {
+    ensurePackagesBuilt();
+  } catch (e) {
+    LOG.warn('package auto-build failed:', (e as Error).message);
+  }
+  const runtimeDir = resolveRuntimeDir(projectDir);
+  if (!runtimeDir) {
     process.exit(1);
   }
   const devPlugins = (config.plugins || []) as { onBuildStart?: () => Promise<void>; onCSS?: (css: string, path: string) => Promise<string | null> }[];
@@ -97,7 +139,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
         'context.js', 'hydrate.js', 'resource.js', 'portal.js',
         'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
-        'seo.js', 'image.js', 'experiment.js', 'form.js',
+        'seo.js', 'image.js', 'experiment.js', 'form.js', 'action.js',
       ];
       let code = '';
       for (const f of files) {
@@ -120,7 +162,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (name) code += `export { ${name} };\n`;
       }
       runtimeBundle = code;
-      LOG.info(`runtime bundle: ${code.length} bytes`);
     } catch (e) {
       LOG.err(`runtime bundle error:`, (e as Error).message);
     }
@@ -133,7 +174,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
         hmr: true,
       });
       clientBundle = main;
-      LOG.info(`client bundle: ${clientBundle.length} bytes`);
     } catch (e) {
       LOG.err(`client build error:`, (e as Error).message);
       throw e;
@@ -382,7 +422,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
     const url = new URL(req.url || '/', `http://localhost:${port}`);
     const reqStart = Date.now();
     const reqHost = req.headers.host || `localhost:${port}`;
-    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `http://${reqHost}`;
+    const proto = (req.socket as { encrypted?: boolean }).encrypted
+      ? 'https'
+      : getClientProtocol({ headers: req.headers } as Record<string, unknown>, !!security?.trustProxy);
+    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
 
     const logRequest = (status: number) => {
       if (url.pathname.startsWith('/_vesk')) return;
@@ -783,8 +826,23 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   });
 
+  server.on('error', (e: NodeJS.ErrnoException) => {
+    if (e.code === 'EADDRINUSE') {
+      LOG.err(`port ${port} is already in use — is another vesk dev server running?`);
+      process.exit(1);
+    }
+    throw e;
+  });
+
   server.listen(port, () => {
     LOG.ok(`dev server at http://localhost:${port}`);
+    const routes = collectRoutePaths(routeTree);
+    const pageCount = countPages(routeTree);
+    const apiCount = countFilesNamed(join(appDirPath, 'api'), 'route.ts');
+    LOG.info(`${projectDir}`);
+    LOG.info(`${pageCount} page${pageCount === 1 ? '' : 's'}: ${routes.join(', ') || '(none)'}`);
+    if (apiCount > 0) LOG.info(`${apiCount} api route${apiCount === 1 ? '' : 's'} (app/api)`);
+    LOG.info('hmr enabled — edit app/ to hot reload');
   });
 
   updateSourceMapping();

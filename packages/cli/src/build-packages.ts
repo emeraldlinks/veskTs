@@ -70,6 +70,7 @@ function distPackageJson(pkgName: string, entry: string, serverEntry: string | u
 export function buildPackages(force = false): void {
   for (const [pkg, cfg] of Object.entries(PACKAGES)) {
     const pkgDir = resolve(root, 'packages', pkg);
+    if (!existsSync(join(pkgDir, 'src'))) continue;
     if (!force && !distStale(pkgDir, cfg.entry)) continue;
 
     console.log(`[build] ${cfg.name} -> tsc`);

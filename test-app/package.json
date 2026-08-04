@@ -10,7 +10,7 @@
   },
   "dependencies": {
     "@vesk/adapter": "file:../packages/adapter",
-    "@vesk/cli": "file:../packages/cli",
+    "vesk": "file:../packages/cli",
     "@vesk/compiler": "file:../packages/compiler",
     "@vesk/plugin-tailwind": "file:../packages/plugin-tailwind",
     "@vesk/runtime": "file:../packages/runtime"
