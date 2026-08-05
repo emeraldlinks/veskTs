@@ -26,9 +26,14 @@ function walkFiles(dir: string): string[] {
   const out: string[] = []
   for (const name of readdirSync(dir)) {
     const p = join(dir, name)
-    const st = statSync(p)
+    if (name === 'node_modules' || name === 'dist' || name === '.vesk' || name === '.vercel' || name === '.git') continue
+    let st
+    try {
+      st = statSync(p)
+    } catch {
+      continue
+    }
     if (st.isDirectory()) {
-      if (name === 'node_modules' || name === 'dist' || name === '.vesk') continue
       out.push(...walkFiles(p))
     } else if (SCAN_EXT.test(name)) {
       out.push(p)
@@ -99,44 +104,76 @@ async function loadFallbackModule(id: string, base: string): Promise<{ module: u
 
 const TAILWIND_BLOCK = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/m
 
-function extractTailwindDirectives(css: string): { directives: string; userCSS: string } {
-  let tailwindLines: string[] = []
-  let userLines: string[] = []
-  let i = 0
-  const lines = css.split('\n')
+/**
+ * Scans a CSS block starting at `start` (an opening `{`) and returns the
+ * index just past its matching `}`. Quoted strings and `/* ... *​/`
+ * comments are skipped so braces inside them (e.g. `url("data:...{}")`)
+ * do not confuse the nesting count. (Mirrors `cssBlockEnd` in
+ * `@vesk/compiler/src/scan.ts` — kept local so this package stays
+ * independent of the compiler.)
+ */
+function cssBlockEnd(css: string, start: number): number {
+  let depth = 0
+  let i = start
+  while (i < css.length) {
+    const c = css[i]
+    if (c === '"' || c === "'") {
+      i++
+      while (i < css.length && css[i] !== c) i++
+      i++
+      continue
+    }
+    if (c === '/' && css[i + 1] === '*') {
+      i += 2
+      while (i < css.length && !(css[i] === '*' && css[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+    if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) return i + 1
+    }
+    i++
+  }
+  return css.length
+}
 
-  while (i < lines.length) {
-    const trimmed = lines[i].trim()
+function extractTailwindDirectives(css: string): { directives: string; userCSS: string } {
+  const tailwindChunks: string[] = []
+  const userChunks: string[] = []
+  let pos = 0
+
+  while (pos < css.length) {
+    const lineStart = pos
+    const nl = css.indexOf('\n', pos)
+    const lineEnd = nl === -1 ? css.length : nl + 1
+    const line = css.slice(lineStart, lineEnd)
+    const trimmed = line.trim()
 
     const isImport = trimmed.startsWith('@import') && trimmed.includes('tailwindcss')
     const isSource = trimmed.startsWith('@source ')
     const isBlockStart = TAILWIND_BLOCK.test(trimmed)
 
-    if (isImport || isSource || isBlockStart) {
-      if (isImport || isSource) {
-        tailwindLines.push(lines[i])
-        i++
-        continue
-      }
-      const blockStart = i
-      let braceCount = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length
-      i++
-      while (i < lines.length && braceCount > 0) {
-        braceCount += (lines[i].match(/\{/g) || []).length
-        braceCount -= (lines[i].match(/\}/g) || []).length
-        i++
-      }
-      tailwindLines.push(lines.slice(blockStart, i).join('\n'))
+    if (isImport || isSource) {
+      tailwindChunks.push(line)
+      pos = lineEnd
+      continue
+    }
+    if (isBlockStart) {
+      const end = cssBlockEnd(css, lineStart)
+      tailwindChunks.push(css.slice(lineStart, end))
+      pos = end
       continue
     }
 
-    userLines.push(lines[i])
-    i++
+    userChunks.push(line)
+    pos = lineEnd
   }
 
   return {
-    directives: tailwindLines.join('\n').trim(),
-    userCSS: userLines.join('\n').trim(),
+    directives: tailwindChunks.join('').trim(),
+    userCSS: userChunks.join('').trim(),
   }
 }
 
