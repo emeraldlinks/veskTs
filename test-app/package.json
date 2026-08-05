@@ -6,7 +6,9 @@
     "dev": "vesk dev",
     "build": "vesk build",
     "start": "vesk start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"app/**/*.{vsk,ts,tsx,js,jsx}\"",
+    "format:check": "prettier --check \"app/**/*.{vsk,ts,tsx,js,jsx}\""
   },
   "dependencies": {
     "@vesk/adapter": "file:./tarballs/vesk-adapter-0.1.0.tgz",
@@ -17,6 +19,8 @@
   },
   "devDependencies": {
     "@types/node": "^26.1.2",
+    "@vesk/prettier-plugin": "file:../packages/prettier-plugin",
+    "prettier": "^3.9.6",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.8.0"
   }
