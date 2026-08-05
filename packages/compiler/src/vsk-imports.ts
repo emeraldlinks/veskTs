@@ -1,5 +1,6 @@
 import { dirname, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
+import { parse } from '@vesk/compiler/src/parser';
 
 /**
  * Resolve `import ... from './path.vsk'` statements so helper components can
@@ -8,19 +9,38 @@ import { existsSync } from 'node:fs';
  */
 
 export function vskImportTarget(importText: string): string | null {
-  const m = importText.match(/from\s+['"]([^'"]+)['"]/);
+  const m = importText.match(/from\s+['"]([^'"]+)['"]\s*;?\s*$/);
   if (!m) return null;
   const spec = m[1];
   if (!spec.endsWith('.vsk')) return null;
   return spec;
 }
 
+const LEGACY_IMPORT_RE = /import\s+[\s\S]*?from\s+['"][^'"]+['"];?/g;
+
+/**
+ * Extracts import statements from a `.vsk` source file. The source is parsed
+ * with the Vesk parser so imports inside strings, comments or template
+ * literals are never mistaken for real imports, and multi-line import lists
+ * are handled correctly. Falls back to a regex scan when the file does not
+ * parse (e.g. mid-edit content in tooling).
+ */
 export function extractImportStatements(source: string): string[] {
-  const out: string[] = [];
-  const re = /import\s+[\s\S]*?from\s+['"][^'"]+['"];?/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(source)) !== null) out.push(m[0]);
-  return out;
+  try {
+    const ast = parse(source, { filename: 'imports.vsk' });
+    const out: string[] = [];
+    for (const stmt of ast.body as any[]) {
+      if (stmt.type === 'ImportDeclaration') {
+        out.push(source.slice(stmt.start, stmt.end));
+      }
+    }
+    return out;
+  } catch {
+    const out: string[] = [];
+    let m: RegExpExecArray | null;
+    while ((m = LEGACY_IMPORT_RE.exec(source)) !== null) out.push(m[0]);
+    return out;
+  }
 }
 
 export function collectVskImportPaths(imports: string[], sourcePath: string): string[] {

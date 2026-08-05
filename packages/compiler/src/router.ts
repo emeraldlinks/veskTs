@@ -1,6 +1,7 @@
 import { readdirSync, statSync, existsSync, readFileSync } from 'fs';
 import { join, relative, basename, dirname, resolve as resolvePath } from 'path';
 import type { RouteNode } from '@vesk/compiler/src/types';
+import { parse } from '@vesk/compiler/src/parser';
 
 export interface ScanOptions {
   layoutCompName?: string;
@@ -13,10 +14,28 @@ export interface MatchResult {
   params: Record<string, string>;
 }
 
-export function extractMiddleware(sourcePath: string): string | null {
+/**
+ * Extracts `export (async) function middleware(params) { body }` from
+ * middleware source text. Parses with acorn (via the Vesk parser) so
+ * default params, nested parens and strings in the parameter list are
+ * handled correctly; falls back to the old regex + brace balance when the
+ * source does not parse.
+ */
+export function extractMiddlewareParts(src: string): { params: string; body: string } | null {
   try {
-    if (!existsSync(sourcePath)) return null;
-    const src = readFileSync(sourcePath, 'utf-8');
+    const ast = parse(src, { filename: 'middleware.ts' });
+    for (const stmt of (ast as any).body) {
+      const target = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
+      if (!target || target.type !== 'FunctionDeclaration') continue;
+      if (!(target.id && target.id.name === 'middleware')) continue;
+      const params = target.params.length
+        ? src.slice(target.params[0].start, target.params[target.params.length - 1].end)
+        : '';
+      const body = src.slice(target.body.start + 1, target.body.end - 1);
+      return { params, body: body.trim() };
+    }
+    return null;
+  } catch {
     const prefixMatch = src.match(/export\s+(?:async\s+)?function\s+middleware\s*\(([\s\S]*?)\)\s*\{/);
     if (!prefixMatch) return null;
     const start = prefixMatch.index! + prefixMatch[0].length;
@@ -29,7 +48,17 @@ export function extractMiddleware(sourcePath: string): string | null {
       i++;
     }
     const body = src.slice(start, i - 1);
-    return `async function middleware(${params}) {\n${body.trim()}\n}`;
+    return { params, body: body.trim() };
+  }
+}
+
+export function extractMiddleware(sourcePath: string): string | null {
+  try {
+    if (!existsSync(sourcePath)) return null;
+    const src = readFileSync(sourcePath, 'utf-8');
+    const parts = extractMiddlewareParts(src);
+    if (!parts) return null;
+    return `async function middleware(${parts.params}) {\n${parts.body}\n}`;
   } catch {
     return null;
   }

@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
-import { scanRoutes, matchUrl, collectSources, generateRouteManifest } from '@vesk/compiler/src/router';
+import { scanRoutes, matchUrl, collectSources, generateRouteManifest, extractMiddleware } from '@vesk/compiler/src/router';
 
 let passed = 0;
 let failed = 0;
@@ -236,6 +236,79 @@ test('generates import statements for all components', () => {
 	expect(code).toContain('import { Page_');
 	expect(code).toContain('export default');
 	cleanup(tmp);
+});
+
+// ── Middleware extraction ──────────────────────────────────────
+
+console.log('\nMiddleware Extraction\n');
+
+test('extracts simple middleware', () => {
+	const tmp = createFixture({
+		'app/middleware.ts': "export async function middleware(ctx) {\n\tctx.set('x', '1');\n}",
+	});
+	try {
+		const out = extractMiddleware(join(tmp, 'app/middleware.ts'));
+		expect(out).toContain('async function middleware(ctx)');
+		expect(out).toContain("ctx.set('x', '1')");
+	} finally { cleanup(tmp); }
+});
+
+test('extracts middleware with default params containing parens', () => {
+	const tmp = createFixture({
+		'app/middleware.ts': [
+			"import { someDefault } from './defaults';",
+			'export function middleware(ctx = someDefault({ mode: "x" })) {',
+			"  return ctx.set('k', 'v');",
+			'}',
+		].join('\n'),
+	});
+	try {
+		const out = extractMiddleware(join(tmp, 'app/middleware.ts'));
+		expect(out).toContain('async function middleware(ctx = someDefault({ mode: "x" }))');
+		expect(out).toContain("ctx.set('k', 'v')");
+	} finally { cleanup(tmp); }
+});
+
+test('extracts middleware with string default containing parens', () => {
+	const tmp = createFixture({
+		'app/middleware.ts': [
+			'export async function middleware({ path = "/fallback", tags = ["a", "b"] }) {',
+			'  console.log(path);',
+			'}',
+		].join('\n'),
+	});
+	try {
+		const out = extractMiddleware(join(tmp, 'app/middleware.ts'));
+		expect(out).toContain('async function middleware({ path = "/fallback", tags = ["a", "b"] })');
+		expect(out).toContain('console.log(path)');
+	} finally { cleanup(tmp); }
+});
+
+test('extracts body with braces and template strings', () => {
+	const tmp = createFixture({
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			'  const msg = `count: ${ctx.count}`;',
+			'  if (ctx.ok) { return; }',
+			'  return msg;',
+			'}',
+		].join('\n'),
+	});
+	try {
+		const out = extractMiddleware(join(tmp, 'app/middleware.ts'));
+		expect(out).toContain('const msg = `count: ${ctx.count}`;');
+		expect(out).toContain('if (ctx.ok) { return; }');
+		expect(out).toContain('return msg;');
+	} finally { cleanup(tmp); }
+});
+
+test('returns null when no middleware export exists', () => {
+	const tmp = createFixture({
+		'app/middleware.ts': 'export const x = 1;',
+	});
+	try {
+		expect(extractMiddleware(join(tmp, 'app/middleware.ts'))).toBeNull();
+	} finally { cleanup(tmp); }
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

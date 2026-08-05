@@ -26,6 +26,7 @@ import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
+import { stripTrackGeneric } from '@vesk/compiler/src/scan';
 
 function memberExpr(object: string, property: string): Record<string, unknown> {
   return {
@@ -230,10 +231,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
   if (node instanceof DynamicBinding) return emitDynamicBinding(ctx, node, tracked, effectsVar);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
-    let init = node.init;
-    if (/^track\s*</.test(init.trim())) {
-      init = init.replace(/\s*<\s*[\s\S]*?\s*>\s*/g, '');
-    }
+    const init = stripTrackGeneric(node.init);
     ctx.push(`const ${cellName} = ${init};`);
     return null;
   }

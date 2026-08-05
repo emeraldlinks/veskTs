@@ -112,52 +112,122 @@ export function renderHeadHtml(comp: ComponentIR, props: Record<string, unknown>
   return parts.join('\n');
 }
 
-export function mergeHeadHtml(pageHead: string, layoutHead: string): { html: string; conflicts: Array<{ key: string; message: string }> } {
-  const parseHead = (html: string): string[] => {
-    const entries: string[] = [];
-    const tagRegex = /<(base|meta|link|script|style)[^>]*\/?>|<title[^>]*>[^<]*<\/title>/gi;
-    let m: RegExpExecArray | null;
-    while ((m = tagRegex.exec(html)) !== null) {
-      entries.push(m[0]);
-    }
-    return entries;
-  };
+interface HeadTagEntry {
+  raw: string;
+  tag: string;
+  attrs: Map<string, string>;
+  selfClosing: boolean;
+  end: number;
+}
 
-  const extractKey = (tagStr: string): string | null => {
-    if (tagStr.startsWith('<title')) return 'title';
-    if (tagStr.startsWith('<base')) {
-      const h = tagStr.match(/href=["']([^"']+)["']/);
-      return h ? `base[href=${h[1]}]` : 'base';
+function scanHeadTag(html: string, lt: number): HeadTagEntry | null {
+  let i = lt + 1;
+  if (html[i] === '/') i++;
+  const nameStart = i;
+  while (i < html.length && /[a-zA-Z0-9-]/.test(html[i])) i++;
+  const tag = html.slice(nameStart, i).toLowerCase();
+  if (!tag) return null;
+
+  const attrs = new Map<string, string>();
+  let selfClosing = false;
+  while (i < html.length) {
+    while (i < html.length && /\s/.test(html[i])) i++;
+    if (html[i] === '>') { i++; break; }
+    if (html[i] === '/' && html[i + 1] === '>') { selfClosing = true; i += 2; break; }
+    if (i >= html.length || html[i] === '>' || html[i] === '/') continue;
+
+    const aStart = i;
+    while (i < html.length && !/[\s=/>]/.test(html[i])) i++;
+    const aName = html.slice(aStart, i).toLowerCase();
+    while (i < html.length && /\s/.test(html[i])) i++;
+    let value = '';
+    if (html[i] === '=') {
+      i++;
+      while (i < html.length && /\s/.test(html[i])) i++;
+      const q = html[i];
+      if (q === '"' || q === "'") {
+        i++;
+        const vStart = i;
+        while (i < html.length && html[i] !== q) i++;
+        value = html.slice(vStart, i);
+        if (i < html.length) i++;
+      } else {
+        const vStart = i;
+        while (i < html.length && !/[\s/>]/.test(html[i])) i++;
+        value = html.slice(vStart, i);
+      }
     }
-    if (tagStr.startsWith('<meta')) {
-      const n = tagStr.match(/\sname=["']([^"']+)["']/);
-      if (n) return `meta[name=${n[1]}]`;
-      const p = tagStr.match(/\sproperty=["']([^"']+)["']/);
-      if (p) return `meta[property=${p[1]}]`;
-      const c = tagStr.match(/\scharset=["']?([^"'\s>]+)/);
-      if (c) return `meta[charset]`;
+    if (aName) attrs.set(aName, value);
+  }
+
+  let raw = html.slice(lt, i);
+  if (!selfClosing && tag === 'title') {
+    const closeTag = html.indexOf('</title', i);
+    if (closeTag !== -1) {
+      const end = html.indexOf('>', closeTag);
+      if (end !== -1) {
+        raw = html.slice(lt, end + 1);
+        i = end + 1;
+      }
+    }
+  }
+  return { raw, tag, attrs, selfClosing, end: i };
+}
+
+function parseHeadTags(html: string): HeadTagEntry[] {
+  const entries: HeadTagEntry[] = [];
+  let i = 0;
+  while (i < html.length) {
+    const lt = html.indexOf('<', i);
+    if (lt === -1) break;
+    if (html.startsWith('<!--', lt)) {
+      const close = html.indexOf('-->', lt + 4);
+      i = close === -1 ? html.length : close + 3;
+      continue;
+    }
+    const entry = scanHeadTag(html, lt);
+    if (!entry) break;
+    entries.push(entry);
+    i = entry.end;
+  }
+  return entries;
+}
+
+export function mergeHeadHtml(pageHead: string, layoutHead: string): { html: string; conflicts: Array<{ key: string; message: string }> } {
+  const extractKey = (entry: HeadTagEntry): string | null => {
+    if (entry.tag === 'title') return 'title';
+    if (entry.tag === 'base') {
+      const h = entry.attrs.get('href');
+      return h !== undefined ? `base[href=${h}]` : 'base';
+    }
+    if (entry.tag === 'meta') {
+      const n = entry.attrs.get('name');
+      if (n !== undefined) return `meta[name=${n}]`;
+      const p = entry.attrs.get('property');
+      if (p !== undefined) return `meta[property=${p}]`;
+      if (entry.attrs.has('charset')) return 'meta[charset]';
       return null;
     }
-    if (tagStr.startsWith('<link')) {
-      const h = tagStr.match(/href=["']([^"']+)["']/);
-      if (h) return `link[href=${h[1]}]`;
+    if (entry.tag === 'link') {
+      const h = entry.attrs.get('href');
+      if (h !== undefined) return `link[href=${h}]`;
       return null;
     }
-    if (tagStr.startsWith('<script')) {
-      const s = tagStr.match(/src=["']([^"']+)["']/);
-      if (s) return `script[src=${s[1]}]`;
+    if (entry.tag === 'script') {
+      const s = entry.attrs.get('src');
+      if (s !== undefined) return `script[src=${s}]`;
       return null;
     }
     return null;
   };
 
-  const layoutEntries = parseHead(layoutHead);
-  const pageEntries = parseHead(pageHead);
+  const layoutEntries = parseHeadTags(layoutHead);
+  const pageEntries = parseHeadTags(pageHead);
 
   const merged = new Map<string, { html: string; source: string }>();
   for (const tag of layoutEntries) {
     const key = extractKey(tag);
-    if (key) merged.set(key, { html: tag, source: 'layout' });
+    if (key) merged.set(key, { html: tag.raw, source: 'layout' });
   }
 
   const conflicts: Array<{ key: string; message: string }> = [];
@@ -165,9 +235,9 @@ export function mergeHeadHtml(pageHead: string, layoutHead: string): { html: str
     const key = extractKey(tag);
     if (key) {
       if (merged.has(key) && merged.get(key)!.source === 'page') {
-        conflicts.push({ key, message: `Sibling conflict for <head> key "${key}":\n  ${merged.get(key)!.html}\n  ${tag}` });
+        conflicts.push({ key, message: `Sibling conflict for <head> key "${key}":\n  ${merged.get(key)!.html}\n  ${tag.raw}` });
       }
-      merged.set(key, { html: tag, source: 'page' });
+      merged.set(key, { html: tag.raw, source: 'page' });
     }
   }
 

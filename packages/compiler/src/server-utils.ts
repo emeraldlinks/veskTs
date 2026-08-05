@@ -3,6 +3,7 @@ import { StaticNode, TextNode, DynamicBinding } from '@vesk/compiler/src/ir';
 import * as __defaultRuntimeModule from '@vesk/runtime/src/index-server';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
+import { htmlTagName, htmlTagEnd } from '@vesk/compiler/src/scan';
 
 const VOID_ELEMENTS = new Set([
   'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
@@ -43,8 +44,7 @@ export function prettifyHtml(html: string): string {
   let depth = 0;
   let inRaw = false;
   let rawTag = '';
-  const tokens = html.replace(/>\s+</g, '><').split(/(<[^>]+>)/);
-  for (const token of tokens) {
+  for (const token of htmlTokenize(html)) {
     if (!token) continue;
     if (!token.startsWith('<')) {
       const text = token.trim();
@@ -61,12 +61,12 @@ export function prettifyHtml(html: string): string {
       out += '\t'.repeat(depth) + token + '\n';
       continue;
     }
-    const tagMatch = token.match(/^<\/?([a-zA-Z][a-zA-Z0-9-]*)/);
-    if (!tagMatch) {
+    const tagName = htmlTagName(token);
+    if (!tagName) {
       out += token;
       continue;
     }
-    const tag = tagMatch[1].toLowerCase();
+    const tag = tagName.toLowerCase();
     const selfClose = token.endsWith('/>');
     if (isClose) {
       if (inRaw && tag === rawTag) inRaw = false;
@@ -84,6 +84,43 @@ export function prettifyHtml(html: string): string {
     }
   }
   return out.trimEnd();
+}
+
+/**
+ * Splits HTML into text and tag tokens. `>` inside quoted attribute values
+ * does not end a tag, so `alt="a > b"` and `data-x="1>0"` are kept intact
+ * (the old `split(/(<[^>]+>)/)` approach could not do this).
+ */
+function htmlTokenize(html: string): string[] {
+  const tokens: string[] = [];
+  let i = 0;
+  while (i < html.length) {
+    if (html[i] === '<') {
+      if (html.startsWith('<!--', i)) {
+        const close = html.indexOf('-->', i + 4);
+        const end = close === -1 ? html.length : close + 3;
+        tokens.push(html.slice(i, end));
+        i = end;
+        continue;
+      }
+      const end = htmlTagEnd(html, i);
+      if (end === -1) {
+        tokens.push(html.slice(i));
+        break;
+      }
+      tokens.push(html.slice(i, end));
+      i = end;
+    } else {
+      const next = html.indexOf('<', i);
+      if (next === -1) {
+        tokens.push(html.slice(i));
+        break;
+      }
+      tokens.push(html.slice(i, next));
+      i = next;
+    }
+  }
+  return tokens;
 }
 
 export function isStatic(body: IRNode[]): boolean {
@@ -546,15 +583,64 @@ export function childrenToHTML(nodes: IRNode[]): string {
 export function extractTopLevelNames(topLevelCode: string[]): string[] {
   const names: string[] = [];
   for (const code of topLevelCode) {
+    const ast = tryParseTopLevel(code);
+    if (ast) {
+      for (const stmt of ast.body as any[]) {
+        const target = unwrapExport(stmt);
+        if (!target) continue;
+        if (target.type === 'VariableDeclaration') {
+          for (const d of target.declarations) {
+            if (d.id && d.id.type === 'Identifier') names.push(d.id.name);
+          }
+        } else if (target.type === 'FunctionDeclaration' && target.id) {
+          names.push(target.id.name);
+        } else if (target.type === 'ClassDeclaration' && target.id) {
+          names.push(target.id.name);
+        }
+      }
+      continue;
+    }
     const match = code.match(/^(?:export\s+)?(?:const|let|var)\s+(\w+)/);
     if (match) names.push(match[1]);
   }
   return names;
 }
 
+function unwrapExport(stmt: any): any | null {
+  if (stmt.type === 'ExportNamedDeclaration') return stmt.declaration;
+  if (stmt.type === 'ExportDefaultDeclaration') return stmt.declaration;
+  return stmt;
+}
+
+function tryParseTopLevel(code: string): any | null {
+  try {
+    return parse(code, { filename: 'top-level.mjs' });
+  } catch {
+    return null;
+  }
+}
+
 export function extractRuntimeNames(importStrs: string[]): string[] {
   const names: string[] = [];
   for (const imp of importStrs) {
+    const ast = tryParseImport(imp);
+    if (ast) {
+      for (const stmt of ast.body as any[]) {
+        if (stmt.type !== 'ImportDeclaration') continue;
+        const src = stmt.source?.value;
+        if (typeof src !== 'string' || (src !== '@vesk/runtime' && src !== '@vesk/reactivity')) continue;
+        for (const spec of stmt.specifiers || []) {
+          if (spec.importKind === 'type') continue;
+          if (spec.type === 'ImportSpecifier') {
+            const name = spec.local?.name || spec.imported?.name;
+            if (name) names.push(name);
+          } else if (spec.type === 'ImportDefaultSpecifier' || spec.type === 'ImportNamespaceSpecifier') {
+            if (spec.local?.name) names.push(spec.local.name);
+          }
+        }
+      }
+      continue;
+    }
     const match = imp.match(/import\s+\{([^}]+)\}\s+from\s+['"](?:@vesk\/runtime|@vesk\/reactivity)['"]/);
     if (match) {
       for (const part of match[1].split(',')) {
@@ -564,6 +650,14 @@ export function extractRuntimeNames(importStrs: string[]): string[] {
     }
   }
   return names;
+}
+
+function tryParseImport(code: string): any | null {
+  try {
+    return parse(code, { filename: 'import.mjs' });
+  } catch {
+    return null;
+  }
 }
 
 export function buildParamInit(paramNames: string[]): string {
@@ -614,6 +708,48 @@ export function loadRuntimeImports(importStrs: string[]): Record<string, unknown
 
 export function evalTopLevelCode(topLevelCode: string[], __vesk: Record<string, unknown>): void {
   for (const code of topLevelCode) {
+    const ast = tryParseTopLevel(code);
+    if (ast && ast.body.length > 0) {
+      let handled = false;
+      for (const stmt of ast.body as any[]) {
+        const target = unwrapExport(stmt);
+        if (!target) continue;
+        if (target.type === 'VariableDeclaration') {
+          for (const d of target.declarations) {
+            if (!d.id || d.id.type !== 'Identifier') continue;
+            const initSrc = d.init ? code.slice(d.init.start, d.init.end) : 'undefined';
+            try {
+              const keys = Object.keys(__vesk);
+              const params = [...keys, '__vesk', 'result'];
+              const body = `result.value = (${initSrc});`;
+              const fn = new Function(...params, body);
+              const result = { value: undefined as unknown };
+              fn(...keys.map(k => __vesk[k]), __vesk, result);
+              __vesk[d.id.name] = result.value;
+            } catch {
+              // skip evaluation errors
+            }
+          }
+          handled = true;
+        } else if (target.type === 'FunctionDeclaration' && target.id) {
+          try {
+            const keys = Object.keys(__vesk);
+            const params = [...keys, '__vesk'];
+            const paramSrc = target.params.length
+              ? code.slice(target.params[0].start, target.params[target.params.length - 1].end)
+              : '';
+            const bodySrc = code.slice(target.body.start, target.body.end);
+            const asyncKw = target.async ? 'async ' : '';
+            const fn = new Function(...params, `__vesk['${target.id.name}'] = ${asyncKw}function ${target.id.name}(${paramSrc}) ${bodySrc};`);
+            fn(...keys.map(k => __vesk[k]), __vesk);
+          } catch {
+            // skip evaluation errors
+          }
+          handled = true;
+        }
+      }
+      if (handled) continue;
+    }
     const constMatch = code.match(/^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(.+);?\s*$/s);
     if (constMatch) {
       try {

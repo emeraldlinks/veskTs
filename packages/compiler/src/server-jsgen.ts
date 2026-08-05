@@ -8,6 +8,7 @@ import {
 import { isStaticIR, collectTrackedNames, transformTracked, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
+import { unwrapTrackCall } from '@vesk/compiler/src/scan';
 import {
   isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
@@ -42,10 +43,7 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
   if (node instanceof ForLoop) return forLoopToJS(node, tracked);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
-    const init = node.init.trim();
-    let inner = init;
-    const m = init.match(/^track\s*(?:<[^>]*>)?\s*\(([\s\S]*)\)\s*$/);
-    if (m) inner = m[1];
+    const inner = unwrapTrackCall(node.init);
     const key = JSON.stringify(`${compKey(node)}:${node.name}`);
     return [
       `const ${cellName} = (() => {`,

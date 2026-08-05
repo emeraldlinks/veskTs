@@ -1,6 +1,7 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { cssBlockEnd } from '@vesk/compiler/src/scan';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
 import { collectActionIds } from '@vesk/compiler/src/actions';
@@ -191,24 +192,20 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     const blockStart = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/;
     let result = css.replace(/^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$/gm, '');
     result = result.replace(/^\s*@source\s+['"][^'"]+['"]\s*;?\s*$/gm, '');
-    const lines = result.split('\n');
     const output: string[] = [];
-    let i = 0;
-    while (i < lines.length) {
-      if (blockStart.test(lines[i].trim())) {
-        let braceCount = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
-        i++;
-        while (i < lines.length && braceCount > 0) {
-          braceCount += (lines[i].match(/\{/g) || []).length;
-          braceCount -= (lines[i].match(/\}/g) || []).length;
-          i++;
-        }
+    let pos = 0;
+    while (pos < result.length) {
+      const lineEnd = result.indexOf('\n', pos) === -1 ? result.length : result.indexOf('\n', pos) + 1;
+      const line = result.slice(pos, lineEnd);
+      if (blockStart.test(line.trim())) {
+        const end = cssBlockEnd(result, pos);
+        pos = end;
         continue;
       }
-      output.push(lines[i]);
-      i++;
+      output.push(line);
+      pos = lineEnd;
     }
-    return output.join('\n').trim();
+    return output.join('').trim();
   }
 
   if (cssContent !== null) {

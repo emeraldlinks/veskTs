@@ -1,21 +1,12 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import type { MiddlewareChainItem, MiddlewareExtractResult } from '@vesk/adapter/src/types';
+import { extractMiddlewareParts } from '@vesk/compiler/src/router';
 
 function extractMiddlewareBody(src: string): MiddlewareExtractResult | null {
-  const m = src.match(/export\s+(?:async\s+)?function\s+middleware\s*\(([\s\S]*?)\)\s*\{/);
-  if (!m) return null;
-  const start = (m.index ?? 0) + m[0].length;
-  const params = m[1];
-  let depth = 1;
-  let j = start;
-  while (j < src.length && depth > 0) {
-    if (src[j] === '{') depth++;
-    else if (src[j] === '}') depth--;
-    j++;
-  }
-  const body = src.slice(start, j - 1);
-  return { params, body: body.trim() };
+  const parts = extractMiddlewareParts(src);
+  if (!parts) return null;
+  return { params: parts.params, body: parts.body };
 }
 
 export function compileMiddleware(mwChain: MiddlewareChainItem[], _appDir: string): string | null {

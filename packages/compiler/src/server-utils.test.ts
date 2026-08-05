@@ -4,6 +4,7 @@ import {
 	securityHeaders, corsHeaders, corsPreflight,
 	createRateLimiter, getClientIp, getClientProtocol, applyTrustProxy,
 	redactLog, setRedactLogging, securityComment,
+	prettifyHtml, extractTopLevelNames, extractRuntimeNames, evalTopLevelCode,
 } from '@vesk/compiler/src/server-utils';
 
 let passed = 0;
@@ -519,6 +520,110 @@ describe('securityComment', () => {
 		const comment = securityComment({ security: { csrf: false, autoEscape: false } });
 		expect(comment).not.toContain('csrf');
 		expect(comment).not.toContain('auto-escape');
+	});
+});
+
+// ── prettifyHtml ─────────────────────────────────────────────────
+
+describe('prettifyHtml', () => {
+
+	it('indents nested elements and text', () => {
+		const out = prettifyHtml('<div><span>a</span></div>');
+		expect(out).toBe('<div>\n\t<span>\n\t\ta\n\t</span>\n</div>');
+	});
+
+	it('does not break on > inside quoted attributes', () => {
+		const out = prettifyHtml('<img alt="a > b" src="x.png" />');
+		expect(out).toContain('alt="a > b"');
+		expect(out).toContain('<img');
+	});
+
+	it('does not treat > inside unquoted data as a tag boundary', () => {
+		const out = prettifyHtml('<div data-x="1>0">text</div>');
+		expect(out).toContain('data-x="1>0"');
+	});
+
+	it('does not merge text and tag across > < like the old replace did', () => {
+		const out = prettifyHtml('<p>a > <b</p>');
+		expect(out).toContain('a >');
+		expect(out).toContain('<p>');
+		expect(out).toContain('</p>');
+	});
+
+	it('handles comments and raw text elements', () => {
+		const out = prettifyHtml('<!-- c --><style>.a > .b { }</style>');
+		expect(out).toContain('<!-- c -->');
+		expect(out).toContain('.a > .b');
+	});
+});
+
+// ── Top-level code extraction / evaluation ───────────────────────
+
+describe('extractTopLevelNames', () => {
+
+	it('extracts const, let and var names', () => {
+		expect(extractTopLevelNames(['const x = 1', 'let y = 2', 'var z = 3'])).toEqual(['x', 'y', 'z']);
+	});
+
+	it('extracts exported declarations', () => {
+		expect(extractTopLevelNames(['export const x = 1'])).toEqual(['x']);
+	});
+
+	it('extracts function names', () => {
+		expect(extractTopLevelNames(['export async function load() {}'])).toEqual(['load']);
+	});
+
+	it('does not split destructured names like the old regex did', () => {
+		expect(extractTopLevelNames(['const { a, b } = props'])).toEqual([]);
+	});
+});
+
+describe('extractRuntimeNames', () => {
+
+	it('extracts named imports from @vesk/runtime', () => {
+		expect(extractRuntimeNames(["import { get, set, track as t } from '@vesk/runtime';"]))
+			.toEqual(['get', 'set', 't']);
+	});
+
+	it('extracts default imports', () => {
+		expect(extractRuntimeNames(["import Vesk from '@vesk/runtime';"])).toEqual(['Vesk']);
+	});
+
+	it('skips imports of other modules', () => {
+		expect(extractRuntimeNames(["import { x } from 'other-pkg';"])).toEqual([]);
+	});
+});
+
+describe('evalTopLevelCode', () => {
+
+	it('evaluates const declarations', () => {
+		const scope = {};
+		evalTopLevelCode(['const answer = 40 + 2;'], scope);
+		expect(scope.answer).toBe(42);
+	});
+
+	it('evaluates const initializers with nested parens and ternaries', () => {
+		const scope = {};
+		evalTopLevelCode(['const label = (true ? "yes" : "no") + "!";'], scope);
+		expect(scope.label).toBe('yes!');
+	});
+
+	it('evaluates async function declarations', () => {
+		const scope = {};
+		evalTopLevelCode(['export async function load() { return 7; }'], scope);
+		expect(typeof scope.load).toBe('function');
+	});
+
+	it('evaluates functions with params', () => {
+		const scope = {};
+		evalTopLevelCode(['function add(a, b) { return a + b; }'], scope);
+		expect(scope.add(2, 3)).toBe(5);
+	});
+
+	it('skips code it cannot evaluate', () => {
+		const scope = {};
+		evalTopLevelCode(['const broken = (;'], scope);
+		expect(scope.broken).toBeUndefined();
 	});
 });
 

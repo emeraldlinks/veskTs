@@ -221,7 +221,7 @@ describe('.vsk file compilation', () => {
 	it('deep nested imports via registry', () => {
 		const code = compileVsk('simple');
 		expect(code).toContain(`import { Button } from './Button.vsk'`);
-		expect(code).toContain('Button({ "label": "Click me" })');
+		expect(code).toContain(`__components["Button"]({ "label": "Click me" })`);
 		expect(code).toContain('export const App = ');
 	});
 });

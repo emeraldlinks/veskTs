@@ -24,6 +24,7 @@ import {
 import type { IRNode } from '@vesk/compiler/src/ir';
 import { VeskError } from '@vesk/compiler/src/errors';
 import { createBaseParser } from '@vesk/compiler/src/parser';
+import { skipWhitespace, findBalancedEnd, splitTopLevel } from '@vesk/compiler/src/scan';
 import type { VeskAnnotation } from '@vesk/compiler/src/parser';
 
 let __vskAnnotations: VeskAnnotation[] = [];
@@ -156,6 +157,15 @@ function processAttribute(source: string, attr: any): { name: string; value: str
   return { name, value: '' };
 }
 
+function extractForHeader(text: string): string | null {
+  const m = /^for\b/.exec(text);
+  if (!m) return null;
+  const i = skipWhitespace(text, m[0].length);
+  if (text[i] !== '(') return null;
+  const end = findBalancedEnd(text, i);
+  return text.slice(i + 1, end);
+}
+
 function processJSXChildren(source: string, children: any[]): IRNode[] {
   const result: IRNode[] = [];
   let i = 0;
@@ -166,12 +176,24 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
       const trimmed = text.trim();
       if (!trimmed || trimmed.startsWith('//')) { i++; continue; }
 
-      const forMatch = trimmed.match(/^for\s*\(([^)]+)\)/);
-      if (forMatch && i + 1 < children.length && children[i + 1].type === 'JSXExpressionContainer') {
-        const exprNode = children[i + 1].expression;
-        if (exprNode.type !== 'JSXEmptyExpression') {
-          const decl = forMatch[1];
-          let bodyNodes: IRNode[];
+      const forDecl = extractForHeader(trimmed);
+      const nextChild = children[i + 1];
+      if (
+        forDecl !== null && nextChild !== undefined && (
+          nextChild.type === 'JSXExpressionContainer' ||
+          nextChild.type === 'JSXElement' ||
+          nextChild.type === 'JSXFragment'
+        )
+      ) {
+        const decl = forDecl;
+        let bodyNodes: IRNode[];
+        if (nextChild.type === 'JSXExpressionContainer') {
+          const exprNode = nextChild.expression;
+          if (exprNode.type === 'JSXEmptyExpression') {
+            result.push(new TextNode(text));
+            i++;
+            continue;
+          }
           if (exprNode.type === 'JSXFragment') {
             bodyNodes = [];
             for (const c of exprNode.children) bodyNodes.push(...processJSXChildren(source, [c]));
@@ -180,43 +202,46 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
           } else {
             bodyNodes = exprToIR(source, exprNode);
           }
+        } else if (nextChild.type === 'JSXFragment') {
+          bodyNodes = [];
+          for (const c of nextChild.children) bodyNodes.push(...processJSXChildren(source, [c]));
+        } else {
+          bodyNodes = processJSXElement(source, nextChild);
+        }
 
-          if (/ of /.test(decl)) {
-            const ofParts = decl.split(' of ');
-            if (ofParts.length === 2) {
-              const itemVar = ofParts[0].trim().replace(/^(const|let|var)\s+/, '');
-              const exprText = ofParts[1].trim();
-              const arrExpr = new Expression(exprText, [], parseExprNode(exprText), null);
-              const rawFor = child.value.match(/^\s*for\s*\(/);
-              const ann = rawFor ? getForClauseAnnotation(child.start + rawFor[0].indexOf('for')) : null;
-              const keyExpr = ann?.keyRange ? new Expression(source.slice(ann.keyRange[0], ann.keyRange[1])) : null;
-              const indexVar = ann?.indexName ?? null;
-              let alternate: IRNode[] = [];
-              let consumed = 2;
-              const emptyText = children[i + 2];
-              const emptyContainer = children[i + 3];
-              if (
-                emptyText && emptyText.type === 'JSXText' && ['#empty', 'empty'].includes(emptyText.value.trim()) &&
-                emptyContainer && emptyContainer.type === 'JSXExpressionContainer' &&
-                emptyContainer.expression.type !== 'JSXEmptyExpression'
-              ) {
-                alternate = exprToIR(source, emptyContainer.expression);
-                consumed = 4;
-              }
-              result.push(new MapRegion(arrExpr, itemVar, bodyNodes, keyExpr, indexVar, alternate));
-              i += consumed;
-              continue;
-            }
-          } else if (/ in /.test(decl)) {
-            const inParts = decl.split(' in ');
-            if (inParts.length === 2) {
-              const itemVar = inParts[0].trim().replace(/^(const|let|var)\s+/, '');
-              const arrExpr = new Expression(inParts[1].trim());
-              result.push(new ForLoop(itemVar, arrExpr, '', bodyNodes, 'for-in'));
-              i += 2;
-              continue;
-            }
+        const ofParts = splitTopLevel(decl, /\s+of\s+/);
+        if (ofParts.length === 2) {
+          const itemVar = ofParts[0].trim().replace(/^(const|let|var)\s+/, '');
+          const exprText = ofParts[1].trim();
+          const arrExpr = new Expression(exprText, [], parseExprNode(exprText), null);
+          const rawFor = child.value.match(/^\s*for\s*\(/);
+          const ann = rawFor ? getForClauseAnnotation(child.start + rawFor[0].indexOf('for')) : null;
+          const keyExpr = ann?.keyRange ? new Expression(source.slice(ann.keyRange[0], ann.keyRange[1])) : null;
+          const indexVar = ann?.indexName ?? null;
+          let alternate: IRNode[] = [];
+          let consumed = 2;
+          const emptyText = children[i + 2];
+          const emptyContainer = children[i + 3];
+          if (
+            emptyText && emptyText.type === 'JSXText' && ['#empty', 'empty'].includes(emptyText.value.trim()) &&
+            emptyContainer && emptyContainer.type === 'JSXExpressionContainer' &&
+            emptyContainer.expression.type !== 'JSXEmptyExpression'
+          ) {
+            alternate = exprToIR(source, emptyContainer.expression);
+            consumed = 4;
           }
+          result.push(new MapRegion(arrExpr, itemVar, bodyNodes, keyExpr, indexVar, alternate));
+          i += consumed;
+          continue;
+        }
+
+        const inParts = splitTopLevel(decl, /\s+in\s+/);
+        if (inParts.length === 2) {
+          const itemVar = inParts[0].trim().replace(/^(const|let|var)\s+/, '');
+          const arrExpr = new Expression(inParts[1].trim());
+          result.push(new ForLoop(itemVar, arrExpr, '', bodyNodes, 'for-in'));
+          i += 2;
+          continue;
         }
       }
 

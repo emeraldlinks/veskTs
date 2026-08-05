@@ -13,6 +13,7 @@ const testDirs = [
   resolve(root, 'packages/compiler/src'),
   resolve(root, 'packages/runtime/src'),
   resolve(root, 'packages/adapter/src'),
+  resolve(root, 'packages/plugin-tailwind/src'),
 ]
 
 const e2eFiles = new Set([

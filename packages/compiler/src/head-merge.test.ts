@@ -120,6 +120,49 @@ describe('mergeHeadHtml', () => {
     );
     expect.that(result.conflicts.length).toBe(0);
   });
+
+  it('handles > inside quoted attribute values', () => {
+    const result = mergeHeadHtml(
+      '<meta name="description" content="a > b" />',
+      ''
+    );
+    expect.that(result.html).toContain('content="a > b"');
+  });
+
+  it('dedupes meta by name even with > in other attrs', () => {
+    const result = mergeHeadHtml(
+      '<meta name="description" content="a > b" />',
+      '<meta name="description" content="layout desc" />'
+    );
+    expect.that(result.html).toContain('a > b');
+    expect.that(result.html).notToContain('layout desc');
+    expect.that(result.conflicts.length).toBe(0);
+  });
+
+  it('parses unquoted attribute values', () => {
+    const result = mergeHeadHtml(
+      '<meta name=robots content="index" />',
+      ''
+    );
+    expect.that(result.html).toContain('<meta name=robots');
+  });
+
+  it('ignores HTML comments', () => {
+    const result = mergeHeadHtml(
+      '<title>Page</title>',
+      '<!-- layout head --><title>Layout</title>'
+    );
+    expect.that(result.html).toContain('Page');
+    expect.that(result.html).notToContain('layout head');
+  });
+
+  it('keeps title element with nested content', () => {
+    const result = mergeHeadHtml(
+      '<title>Hello <b>World</b></title>',
+      ''
+    );
+    expect.that(result.html).toContain('<title>Hello <b>World</b></title>');
+  });
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
