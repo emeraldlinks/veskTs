@@ -1,0 +1,16 @@
+{
+  "plugins": ["./node_modules/@vesk/prettier-plugin/src/index.js"],
+  "overrides": [
+    {
+      "files": "*.vsk",
+      "options": {
+        "parser": "vesk",
+        "semi": false,
+        "singleQuote": false,
+        "trailingComma": "es5",
+        "tabWidth": 2,
+        "printWidth": 100
+      }
+    }
+  ]
+}

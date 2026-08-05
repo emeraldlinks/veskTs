@@ -121,3 +121,6 @@
 - [ ] `/docu/compiler/pipeline-overview.md`
 - [ ] `/docu/runtime/hydration.md`
 - [ ] Worked examples for every grammar construct
+
+
+type checking, prop inference.

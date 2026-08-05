@@ -1,4 +1,4 @@
-import {track} from "@vesk/runtime"
+import {track, effect} from "@vesk/runtime"
 
 component Home (){
 	<Head> <title> VeskTS test app </title></Head>
@@ -10,6 +10,7 @@ component Home (){
 		A compiler-first reactive UI framework for the post-VDOM web.
 	</p>
 	<p>{count} </p>
+		
 	if (2 > 3){
 		<p> 2 is higher</p>
 	} else{
@@ -33,6 +34,10 @@ component Home (){
 
 
 
+interface Typee {
+	name?: string
+}
+
 
 component Throws(props) {
 	if (props.fail) throw new Error(props.msg);
@@ -41,7 +46,10 @@ component Throws(props) {
 
 
 
+
 export component Appx {
+	<a>
+		</a>
 	try {
 		<Throws fail={true} msg="Boom!" />
 	} catch(e) {
@@ -61,6 +69,7 @@ component Throw(props) client {
 
 export component Appxx(props)  {
 	<p> Count: {props.count} </p>
+		
 	try {
 		<Throw count={props.count} msg={`Insufficient! ${props.count} `}/>
 	} catch(e) {

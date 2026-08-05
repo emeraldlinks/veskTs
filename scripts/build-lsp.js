@@ -3,10 +3,14 @@ import resolve from '@rollup/plugin-node-resolve';
 import commonjs from '@rollup/plugin-commonjs';
 import json from '@rollup/plugin-json';
 import typescript from '@rollup/plugin-typescript';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve as resolvePath } from 'node:path';
+
+const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 
 async function build() {
   const bundle = await rollup({
-    input: '/home/joe/vesk/packages/lsp/src/server.ts',
+    input: resolvePath(repoRoot, 'packages/lsp/src/server.ts'),
     plugins: [
       resolve({
         extensions: ['.js', '.ts', '.mjs', '.cjs', '.json'],
@@ -35,12 +39,22 @@ async function build() {
   });
 
   await bundle.write({
-    file: '/home/joe/vesk/extension/vsk-vscode/lsp-server/index.mjs',
+    file: resolvePath(repoRoot, 'extension/vsk-vscode/lsp-server/index.mjs'),
     format: 'esm',
+    inlineDynamicImports: true,
     sourcemap: true,
   });
 
   console.log('LSP server bundle written to extension/vsk-vscode/lsp-server/index.mjs');
+
+  await bundle.write({
+    file: resolvePath(repoRoot, 'extension/vsk-neovim/lsp-server/index.mjs'),
+    format: 'esm',
+    inlineDynamicImports: true,
+    sourcemap: true,
+  });
+
+  console.log('LSP server bundle written to extension/vsk-neovim/lsp-server/index.mjs');
 }
 
 build().catch(e => {

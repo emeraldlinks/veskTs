@@ -2,7 +2,7 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "publisher": "vesk",
@@ -33,6 +33,11 @@
         "default": true,
         "description": "Enable Tailwind CSS class completion in class attributes"
       },
+      "vesk.tagAutoClose": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically insert closing tags when typing '>'"
+      },
       "vesk.lsp.trace.server": {
         "type": "string",
         "enum": ["off", "messages", "verbose"],
@@ -56,17 +61,35 @@
         "configuration": "./language-configuration.json"
       }
     ],
+    "configurationDefaults": {
+      "emmet.includeLanguages": {
+        "vsk": "html"
+      },
+      "emmet.showExpandedAbbreviation": "always",
+      "[vsk]": {
+        "editor.defaultFormatter": "vesk.vesk-vscode"
+      }
+    },
     "grammars": [
       {
         "language": "vsk",
         "scopeName": "source.vsk",
-        "path": "./syntaxes/vsk.tmLanguage.json"
+        "path": "./syntaxes/vsk.tmLanguage.json",
+        "embeddedLanguages": {
+          "source.ts": "typescript",
+          "source.tsx": "typescriptreact",
+          "source.css": "css"
+        }
       }
     ],
     "commands": [
       {
         "command": "vesk.restartLsp",
         "title": "Vesk: Restart Language Server"
+      },
+      {
+        "command": "vesk.formatDocument",
+        "title": "Vesk: Format Document"
       }
     ]
   },

@@ -1,0 +1,7 @@
+import { helper, VALUE } from "../lib/helpers"
+import { track } from "@vesk/runtime"
+
+component UsesImports() {
+	const &[count] = track(0)
+	<p>{helper(count)} {VALUE}</p>
+}

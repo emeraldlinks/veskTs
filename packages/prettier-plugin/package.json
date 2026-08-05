@@ -1,0 +1,29 @@
+{
+  "name": "@vesk/prettier-plugin",
+  "version": "0.1.0",
+  "description": "Prettier plugin for the Vesk component language",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": {
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/"
+  ],
+  "keywords": [
+    "prettier",
+    "plugin",
+    "vesk",
+    "formatter"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "prettier": "^3.0.0"
+  },
+  "dependencies": {
+    "@vesk/compiler": "0.1.0"
+  }
+}
