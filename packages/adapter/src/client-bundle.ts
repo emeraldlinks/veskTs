@@ -1,7 +1,7 @@
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { transformSync } from 'esbuild';
+import { build, transformSync } from 'esbuild';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
@@ -177,7 +177,7 @@ export async function generateClientBundle(
     }
     annotate(routeTree);
 
-    const main = buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
+    const main = await buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
     return { main, chunks };
   } else {
     let componentLines: string[] = [];
@@ -236,7 +236,7 @@ export async function generateClientBundle(
       compileFileMono(compPath, compName);
     }
 
-    const main = buildMainBundle(routeTree, runtimeDir, false, {
+    const main = await buildMainBundle(routeTree, runtimeDir, false, {
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
     }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
     return { main, chunks: [] };
@@ -263,6 +263,7 @@ export function buildRuntimeCode(runtimeDir: string): string {
       src = stripTypes(src);
       src = src.replace(/^import\s+[\s\S]*?from\s+['"](?:\.\/.*?|@vesk\/runtime\/src\/.*?)['"];?\n?/gm, '');
       src = src.replace(/^import\s+['"](?:\.\/.*?|@vesk\/runtime\/src\/.*?)['"];?\n?/gm, '');
+      src = src.replace(/^export\s*\{\s*[\s\S]*?\}\s*from\s+['"][^'"]+['"];?\n?/gm, '');
       src = src.replace(/^export\s*\{\s*[\s\S]*?\};?\n?/gm, '');
       src = src.replace(/^export\s+/gm, '');
       code += `// --- ${f} ---\n${src}\n`;
@@ -279,12 +280,72 @@ export function buildRuntimeCode(runtimeDir: string): string {
   return code;
 }
 
+/**
+ * Names the client runtime actually exports, so the tree-shaken bundle only
+ * emits the modules reachable from the used set.
+ */
+export function runtimeExportNames(runtimeDir: string): Set<string> {
+  const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
+  const names = new Set<string>();
+  for (const m of indexSrc.matchAll(/export\s*\{([^}]+)\}\s*from/g)) {
+    for (const raw of m[1].split(',')) {
+      const n = raw.trim().split(/\s+as\s+/).pop()!.trim();
+      if (n) names.add(n);
+    }
+  }
+  return names;
+}
+
+let runtimeEntryId = 0;
+
+/**
+ * Builds a single self-contained runtime module for the given used names.
+ *
+ * The runtime's real module graph is bundled by esbuild into one IIFE whose
+ * scope is fully closed, so its internal identifiers can never collide with
+ * page code. Only the exact names the app uses are re-exported as module-scope
+ * const bindings. This replaces the old regex-based file concatenation, which
+ * leaked runtime module-scope names into the page scope.
+ */
+export async function buildTreeShakenRuntime(runtimeDir: string, usedNames: string[]): Promise<string> {
+  const unique = [...new Set(usedNames)];
+  const available = runtimeExportNames(runtimeDir);
+  const missing = unique.filter((n) => !available.has(n));
+  if (missing.length > 0) {
+    console.error(`vesk: runtime names not exported — ${missing.join(', ')}; falling back to full runtime`);
+    return buildRuntimeCode(runtimeDir);
+  }
+  const entry = join(runtimeDir, `.runtime-tree-entry-${runtimeEntryId++}.mjs`);
+  try {
+    writeFileSync(entry, `export { ${unique.join(', ')} } from './index-client.js';\n`);
+    const result = await build({
+      entryPoints: [entry],
+      bundle: true,
+      format: 'iife',
+      globalName: '__veskRuntime',
+      platform: 'browser',
+      target: ['es2022'],
+      treeShaking: true,
+      minify: true,
+      write: false,
+      logLevel: 'silent',
+    });
+    const bundle = result.outputFiles[0].text;
+    return `${bundle}\nconst { ${unique.join(', ')} } = __veskRuntime;\nexport { ${unique.join(', ')} };\n`;
+  } catch (e) {
+    console.error('vesk: runtime tree-shake failed, falling back to full runtime:', (e as Error).message);
+    return buildRuntimeCode(runtimeDir);
+  } finally {
+    try { unlinkSync(entry); } catch { /* ignore */ }
+  }
+}
+
 function appendHmrGlobals(code: string): string {
   return code +
     "globalThis.__vesk_hmr_eval = (code) => eval(code);\n";
 }
 
-function buildMainBundle(
+async function buildMainBundle(
   routeTree: RouteNode[],
   runtimeDir: string,
   codeSplit: boolean,
@@ -292,13 +353,19 @@ function buildMainBundle(
   hmr?: boolean,
   importRuntime?: boolean,
   runtimeImportNames?: Set<string>,
-): string {
-  const runtimeCode = buildRuntimeCode(runtimeDir);
-
+): Promise<string> {
   const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps'];
   const allRuntimeImports = runtimeImportNames && runtimeImportNames.size > 0
     ? [...new Set([...baseRuntimeImports, ...runtimeImportNames])]
     : baseRuntimeImports;
+
+  const runtimeGlobals = [
+    'reconcile', 'createHydrateWalker', 'needsHydration', 'hydrate',
+    'hydrateViewport', 'hydrateIdle', 'hydrateOnInteraction', 'collectVskMarkers',
+    'matchRoute', 'ensureChunk',
+  ];
+  const usedRuntimeNames = [...new Set([...baseRuntimeImports, ...allRuntimeImports, ...runtimeGlobals])];
+  const runtimeCode = importRuntime ? '' : await buildTreeShakenRuntime(runtimeDir, usedRuntimeNames);
 
   const preamble = importRuntime
     ? `import { ${allRuntimeImports.join(', ')} } from '/_vesk/runtime.js';\n\n`

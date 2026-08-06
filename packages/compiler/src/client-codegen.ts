@@ -27,6 +27,7 @@ import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
 import { stripTrackGeneric } from '@vesk/compiler/src/scan';
+import { stripTsTypes, hasTsSyntax } from '@vesk/compiler/src/strip-ts';
 
 function memberExpr(object: string, property: string): Record<string, unknown> {
   return {
@@ -42,17 +43,37 @@ function callExpr(callee: Record<string, unknown>, args: Record<string, unknown>
   return { type: 'CallExpression', callee, arguments: args, optional: false };
 }
 
+/**
+ * When `expr` is exactly `get(<word>)`, returns the word; otherwise `null`.
+ * Used to substitute `get(tracked)` back to the raw tracked cell name.
+ */
+function simpleGetName(expr: string): string | null {
+  if (!expr.startsWith('get(') || !expr.endsWith(')')) return null;
+  const inner = expr.slice(4, -1);
+  if (inner.length === 0) return null;
+  for (let i = 0; i < inner.length; i++) {
+    const code = inner.charCodeAt(i);
+    const ok = (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95;
+    if (!ok) return null;
+  }
+  return inner;
+}
+
 export interface TrackedInfo {
   cellName: string;
   kind: 'virtual' | 'cell';
 }
 
 export function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
-  if (tracked.size === 0) return (irNode as any).raw;
   const ast = (irNode as any).ast;
   if (!ast) return (irNode as any).raw;
+  if (tracked.size === 0) {
+    if (!hasTsSyntax(ast)) return (irNode as any).raw;
+    return print(stripTsTypes(ast), ts()).code;
+  }
+  const stripped = stripTsTypes(ast);
 
-  const transformed = walk(ast, tracked, {
+  const transformed = walk(stripped, tracked, {
     AssignmentExpression(node: any, context: any) {
       if (node.left.type === 'Identifier') {
         const info = context.state.get(node.left.name);
@@ -236,7 +257,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     return null;
   }
   if (node instanceof ComponentRef) return null;
-  if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked, parentVar, compPrefix);
+  if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked, effectsVar, parentVar, compPrefix);
   if (node instanceof OpaqueDynamicRegion) return emitOpaque(ctx, node, tracked, parentVar);
   if (node instanceof MapRegion) return emitMap(ctx, node, tracked, parentVar);
   if (node instanceof ServerBlock) return null;
@@ -274,6 +295,9 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     return null;
   }
   if (node instanceof TryCatch) return emitTryCatch(ctx, node, tracked, effectsVar, parentVar);
+  if (node instanceof WhileLoop) return emitWhileLoop(ctx, node, tracked, parentVar);
+  if (node instanceof ForLoop) return emitForLoop(ctx, node, tracked, parentVar);
+  if (node instanceof SwitchBlock) return emitSwitchBlock(ctx, node, tracked, parentVar);
   return null;
 }
 
@@ -456,13 +480,13 @@ function emitDynamicBinding(ctx: Ctx, node: DynamicBinding, tracked: Map<string,
   return v;
 }
 
-function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, TrackedInfo>, parentVar?: string, compPrefix = '__components'): string | null {
+function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, compPrefix = '__components'): string | null {
   const propsEntries: string[] = node.props.map((p) => {
     if (typeof p.value === 'string') return `${JSON.stringify(p.name)}: ${JSON.stringify(p.value)}`;
     const expr = transformTracked(p.value as any, tracked);
-    const simpleGet = expr.match(/^get\((\w+)\)$/);
-    if (simpleGet && tracked.has(simpleGet[1]!)) {
-      return `${JSON.stringify(p.name)}: ${simpleGet[1]}`;
+    const simpleGet = simpleGetName(expr);
+    if (simpleGet !== null && tracked.has(simpleGet)) {
+      return `${JSON.stringify(p.name)}: ${simpleGet}`;
     }
     return `${JSON.stringify(p.name)}: ${expr}`;
   });
@@ -487,11 +511,15 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       const frag = ctx.n();
       ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
       const savedWalker = ctx.walker;
+      const savedEffects = ctx.effects;
       ctx.walker = walkerVar;
+      ctx.effects = [];
       for (const child of node.children) {
-        const childVar = emitNode(ctx, child, tracked, null, '$f');
+        const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
         if (childVar) ctx.push(`$f.appendChild(${childVar});`);
       }
+      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${eff});` : eff);
+      ctx.effects = savedEffects;
       ctx.walker = savedWalker;
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
@@ -504,10 +532,14 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     if (node.children.length > 0) {
       const frag = ctx.n();
       ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
+      const savedEffects = ctx.effects;
+      ctx.effects = [];
       for (const child of node.children) {
-        const childVar = emitNode(ctx, child, tracked, null, '$f');
+        const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
         if (childVar) ctx.push(`$f.appendChild(${childVar});`);
       }
+      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${eff});` : eff);
+      ctx.effects = savedEffects;
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
     }
@@ -647,7 +679,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   }
 
   ctx.effects.push(`{
-    let __iv = ${ctx.hydrate ? `!${condExpr}` : 'true'};
+    let __iv = ${ctx.hydrate ? `!(${condExpr})` : 'true'};
     effect(() => {
       const __nv = ${condExpr};
       if (__nv !== __iv) {
@@ -659,6 +691,195 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       }
     });
   }`);
+
+  return null;
+}
+
+function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+  const condExpr = transformTracked(node.condition as any, tracked);
+  const anchor = ctx.n();
+  const endAnchor = ctx.n();
+  const effectsVar = ctx.n();
+
+  ctx.push(`const ${anchor} = document.createComment('while');`);
+  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  ctx.push(`let ${effectsVar} = [];`);
+  ctx.push(`const ${endAnchor} = document.createComment('while-end');`);
+
+  const renderLoop = ctx.n();
+  ctx.push(`const ${renderLoop} = () => {`);
+  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (node.isDoWhile) {
+    ctx.push(indent(`do {`));
+    for (const n of node.bodyTemplate) {
+      const v = emitNode(ctx, n, tracked, effectsVar);
+      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+    }
+    ctx.push(indent(`} while (${condExpr});`));
+  } else {
+    ctx.push(indent(`while (${condExpr}) {`));
+    for (const n of node.bodyTemplate) {
+      const v = emitNode(ctx, n, tracked, effectsVar);
+      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+    }
+    ctx.push(indent(`}`));
+  }
+  ctx.push(`};`);
+
+  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+
+  if (ctx.hydrate) {
+    // During hydration, SSR content is already in the DOM.
+  } else {
+    ctx.push(`${renderLoop}();`);
+  }
+
+  ctx.effects.push(`{
+  let __busy = false;
+  let __iv = ${ctx.hydrate ? `!(${condExpr})` : `(${condExpr})`};
+  effect(() => {
+    if (__busy) return;
+    const __nv = (${condExpr});
+    if (__nv !== __iv) {
+      for (const e of ${effectsVar}) destroy_block(e);
+      ${effectsVar}.length = 0;
+      __cleanup(${anchor}, ${endAnchor});
+      __busy = true;
+      ${renderLoop}();
+      __busy = false;
+      __iv = (${condExpr});
+    }
+  });
+}`);
+
+  return null;
+}
+
+function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+  const anchor = ctx.n();
+  const endAnchor = ctx.n();
+  const effectsVar = ctx.n();
+
+  ctx.push(`const ${anchor} = document.createComment('for');`);
+  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  ctx.push(`let ${effectsVar} = [];`);
+  ctx.push(`const ${endAnchor} = document.createComment('for-end');`);
+
+  const renderLoop = ctx.n();
+  ctx.push(`const ${renderLoop} = () => {`);
+  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (node.kind === 'for-in') {
+    const srcExpr = transformTracked(node.condition as any, tracked);
+    ctx.push(indent(`for (${node.init} of (Array.isArray(${srcExpr}) ? ${srcExpr} : (${srcExpr} == null ? [] : Object.keys(${srcExpr})))) {`));
+    for (const n of node.bodyTemplate) {
+      const v = emitNode(ctx, n, tracked, effectsVar);
+      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+    }
+    ctx.push(indent(`}`));
+  } else {
+    const condExpr = transformTracked(node.condition as any, tracked);
+    if (node.init) ctx.push(indent(`${node.init}`));
+    ctx.push(indent(`while (${condExpr}) {`));
+    for (const n of node.bodyTemplate) {
+      const v = emitNode(ctx, n, tracked, effectsVar);
+      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+    }
+    if (node.update) ctx.push(indent(`${node.update}`));
+    ctx.push(indent(`}`));
+  }
+  ctx.push(`};`);
+
+  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+
+  if (ctx.hydrate) {
+    // During hydration, SSR content is already in the DOM.
+  } else {
+    ctx.push(`${renderLoop}();`);
+  }
+
+  if (node.kind === 'for-in') {
+    const srcExpr = transformTracked(node.condition as any, tracked);
+    ctx.effects.push(`{
+  let __busy = false;
+  let __iv = undefined;
+  effect(() => {
+    if (__busy) return;
+    const __nv = (${srcExpr});
+    if (__nv !== __iv) {
+      for (const e of ${effectsVar}) destroy_block(e);
+      ${effectsVar}.length = 0;
+      __cleanup(${anchor}, ${endAnchor});
+      __busy = true;
+      ${renderLoop}();
+      __busy = false;
+      __iv = (${srcExpr});
+    }
+  });
+}`);
+  } else {
+    // Classic `for` loops declare their loop variable in the init clause, so the
+    // condition only refers to loop-local bindings. The loop renders once and is
+    // not reactive, so no re-render effect is emitted.
+  }
+
+  return null;
+}
+
+function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+  const discExpr = transformTracked(node.discriminant as any, tracked);
+  const anchor = ctx.n();
+  const endAnchor = ctx.n();
+  const effectsVar = ctx.n();
+
+  ctx.push(`const ${anchor} = document.createComment('switch');`);
+  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  ctx.push(`let ${effectsVar} = [];`);
+  ctx.push(`const ${endAnchor} = document.createComment('switch-end');`);
+
+  const renderSwitch = ctx.n();
+  ctx.push(`const ${renderSwitch} = () => {`);
+  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  ctx.push(indent(`switch (${discExpr}) {`));
+  for (const c of node.cases) {
+    if (c.test) {
+      ctx.push(indent(`case ${transformTracked(c.test as any, tracked)}:`));
+    } else {
+      ctx.push(indent(`default:`));
+    }
+    for (const n of c.body) {
+      const v = emitNode(ctx, n, tracked, effectsVar);
+      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+    }
+    ctx.push(indent(`break;`));
+  }
+  ctx.push(indent(`}`));
+  ctx.push(`};`);
+
+  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+
+  if (ctx.hydrate) {
+    // During hydration, SSR content is already in the DOM.
+  } else {
+    ctx.push(`${renderSwitch}();`);
+  }
+
+  ctx.effects.push(`{
+  let __busy = false;
+  let __iv = ${ctx.hydrate ? `!(${discExpr})` : `(${discExpr})`};
+  effect(() => {
+    if (__busy) return;
+    const __nv = (${discExpr});
+    if (__nv !== __iv) {
+      for (const e of ${effectsVar}) destroy_block(e);
+      ${effectsVar}.length = 0;
+      __cleanup(${anchor}, ${endAnchor});
+      __busy = true;
+      ${renderSwitch}();
+      __busy = false;
+      __iv = (${discExpr});
+    }
+  });
+}`);
 
   return null;
 }
@@ -1074,7 +1295,7 @@ export function compileClient(source: string, _componentName: string | null, opt
   const runtimeNames: string[] = ['track', 'get', 'set', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'reactiveProps'];
   if (ir.components.some(c => !isStaticIR(c.body))) runtimeNames.push('effect');
   for (const name of usedRuntimeBindings(ir)) runtimeNames.push(name);
-  for (const name of ['batch', 'derived']) {
+  for (const name of ['derived']) {
     if (findBindingInIR(
       ir.components.flatMap(c => c.body),
       new Set([name])

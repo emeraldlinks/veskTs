@@ -2,6 +2,8 @@ import { readdirSync, statSync, existsSync, readFileSync } from 'fs';
 import { join, relative, basename, dirname, resolve as resolvePath } from 'path';
 import type { RouteNode } from '@vesk/compiler/src/types';
 import { parse } from '@vesk/compiler/src/parser';
+import { tokenizeCode } from '@vesk/compiler/src/tokens';
+import { skipWhitespace, findBalancedEnd } from '@vesk/compiler/src/scan';
 
 export interface ScanOptions {
   layoutCompName?: string;
@@ -36,20 +38,46 @@ export function extractMiddlewareParts(src: string): { params: string; body: str
     }
     return null;
   } catch {
-    const prefixMatch = src.match(/export\s+(?:async\s+)?function\s+middleware\s*\(([\s\S]*?)\)\s*\{/);
-    if (!prefixMatch) return null;
-    const start = prefixMatch.index! + prefixMatch[0].length;
-    const params = prefixMatch[1];
+    return fallbackExtractMiddleware(src);
+  }
+}
+
+/**
+ * Token-based fallback for `export (async) function middleware(params) { body }`
+ * used when the source does not parse. Identifies the `middleware` function by
+ * its token neighbours, then extracts the parameter list and body with balanced
+ * delimiter scans (so nested parens/braces and strings stay intact).
+ */
+function fallbackExtractMiddleware(src: string): { params: string; body: string } | null {
+  const tokens = tokenizeCode(src);
+  if (tokens === null) return null;
+  for (let i = 0; i < tokens.length; i++) {
+    const t = tokens[i];
+    if (t.label !== 'name' || t.value !== 'middleware') continue;
+    const fnTok = tokens[i - 1];
+    if (!fnTok || fnTok.label !== 'name' || fnTok.value !== 'function') continue;
+    let prevIdx = i - 2;
+    if (tokens[prevIdx] && tokens[prevIdx].label === 'name' && tokens[prevIdx].value === 'async') prevIdx--;
+    const exportTok = tokens[prevIdx];
+    if (!exportTok || exportTok.label !== 'export') continue;
+    let k = i + 1;
+    while (k < tokens.length && tokens[k].label !== '(') k++;
+    if (k >= tokens.length) continue;
+    const paramsEnd = findBalancedEnd(src, tokens[k].start);
+    const params = src.slice(tokens[k].start + 1, paramsEnd);
+    let b = skipWhitespace(src, paramsEnd + 1);
+    if (src[b] !== '{') continue;
     let depth = 1;
-    let i = start;
-    while (i < src.length && depth > 0) {
-      if (src[i] === '{') depth++;
-      else if (src[i] === '}') depth--;
-      i++;
+    let m = b + 1;
+    while (m < src.length && depth > 0) {
+      if (src[m] === '{') depth++;
+      else if (src[m] === '}') depth--;
+      m++;
     }
-    const body = src.slice(start, i - 1);
+    const body = src.slice(b + 1, m - 1);
     return { params, body: body.trim() };
   }
+  return null;
 }
 
 export function extractMiddleware(sourcePath: string): string | null {
@@ -200,7 +228,12 @@ function extractComponentName(dir: string, type: string, rootDir: string): strin
   const rel = relative(rootDir, dir);
   const parts = rel.split('/').filter(Boolean);
   const clean = parts.map(p => {
-    return p.replace(/[\[\]()\.]/g, '').replace(/^\.+/, '');
+    let out = '';
+    for (const ch of p) {
+      if (ch === '[' || ch === ']' || ch === '(' || ch === ')' || ch === '.') continue;
+      out += ch;
+    }
+    return out;
   });
   const suffix = clean.length > 0 ? clean.join('_') : 'index';
   const capitalized = suffix.charAt(0).toUpperCase() + suffix.slice(1);

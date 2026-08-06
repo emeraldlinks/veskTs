@@ -100,9 +100,19 @@ function makeEl(tag) {
 		_listeners: {},
 		addEventListener(type, fn) { if (!this._listeners[type]) this._listeners[type] = []; this._listeners[type].push(fn); },
 		removeEventListener(type, fn) { if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(l => l !== fn); },
-		appendChild(c) { children.push(c); if (c && typeof c === 'object') c.parentNode = this; },
-		replaceChildren(...args) { children.length = 0; for (const a of args) { children.push(a); if (a && typeof a === 'object') a.parentNode = this; } },
-		insertBefore(c, ref) { const idx = ref ? children.indexOf(ref) : children.length; children.splice(idx, 0, c); if (c && typeof c === 'object') c.parentNode = this; },
+		appendChild(c) {
+			if (c && c.nodeType === 11) { for (const ch of [...c.children]) this.appendChild(ch); return; }
+			children.push(c); if (c && typeof c === 'object') c.parentNode = this;
+		},
+		replaceChildren(...args) { children.length = 0; for (const a of args) this.appendChild(a); },
+		insertBefore(c, ref) {
+			if (c && c.nodeType === 11) {
+				let idx = ref ? children.indexOf(ref) : children.length;
+				for (const ch of [...c.children]) { children.splice(idx++, 0, ch); if (ch && typeof ch === 'object') ch.parentNode = this; }
+				return;
+			}
+			const idx = ref ? children.indexOf(ref) : children.length; children.splice(idx, 0, c); if (c && typeof c === 'object') c.parentNode = this;
+		},
 		replaceChild(newChild, oldChild) { const idx = children.indexOf(oldChild); if (idx === -1) throw new Error('replaceChild: oldChild not found'); children.splice(idx, 1, newChild); if (newChild && typeof newChild === 'object') newChild.parentNode = this; if (oldChild && typeof oldChild === 'object') oldChild.parentNode = null; },
 		remove() { if (this.parentNode) { const idx = this.parentNode.children.indexOf(this); if (idx > -1) this.parentNode.children.splice(idx, 1); } },
 		querySelector() { return null; },
@@ -130,8 +140,29 @@ function setupMockDom() {
 		getElementById() { return null; },
 		createElement(tag) { return makeEl(tag); },
 		createTextNode(text) { return { nodeType: 3, textContent: String(text), data: String(text) }; },
-		createComment(text) { return { nodeType: 8, textContent: String(text) }; },
+		createComment(text) { return { nodeType: 8, textContent: String(text), nodeValue: String(text), data: String(text) }; },
 		createDocumentFragment() { const f = { nodeType: 11, children: [], appendChild(c) { this.children.push(c); if (c) c.parentNode = this; } }; return f; },
+		createTreeWalker(root, whatToShow) {
+			const nodes = [];
+			(function collect(el) {
+				for (const c of (el.children || [])) {
+					nodes.push(c);
+					if (c.children) collect(c);
+				}
+			})(root);
+			let i = -1;
+			return {
+				currentNode: null,
+				nextNode() {
+					while (i + 1 < nodes.length) {
+						i++;
+						const n = nodes[i];
+						if (n.nodeType === 8) { this.currentNode = n; return n; }
+					}
+					return null;
+				},
+			};
+		},
 		head,
 		querySelector() { return null; },
 		querySelectorAll() { return []; },
@@ -459,7 +490,7 @@ test('hmrUpdate swaps page component DOM in-place without navigate', () => {
 	router.hmrUpdate();
 
 	expect(oldRoot.parentNode).toBeNull();
-	expect(container.children.length).toBe(1);
+	expect(container.children.filter(c => c.nodeType === 1).length).toBe(1);
 	expect(container.textContent).toBe('New Page');
 });
 

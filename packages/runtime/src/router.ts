@@ -1,4 +1,4 @@
-import { track, get, set } from '@vesk/runtime/src/ripple-runtime';
+import { track, get, set, scope, set_active_block } from '@vesk/runtime/src/ripple-runtime';
 import { root } from '@vesk/runtime/src/ripple-blocks';
 import { createHydrateWalker, hydrateViewport, hydrateIdle, hydrateOnInteraction } from '@vesk/runtime/src/hydrate';
 import type { HydrateWalker } from '@vesk/runtime/src/hydrate';
@@ -18,7 +18,10 @@ export {
 	Outlet, Link, NavLink,
 	useNavigate, useParams, usePathname, useSearchParams, useRouter,
 	Redirect, redirect, permanentRedirect, NotFoundError, notFound,
+	ensureChunk,
 };
+
+export { matchRoute } from '@vesk/runtime/src/router-match';
 
 interface RouterInstance {
 	routeTree: RouteNode[];
@@ -123,11 +126,11 @@ function findPageNode(match: RouteMatch): RouteNode | null {
 	return null;
 }
 
-function renderNotFound(
+async function renderNotFound(
 	router: RouterInstance,
 	match: RouteMatch,
 	container: HTMLElement,
-): void {
+): Promise<void> {
 	const chain = match.matchChain;
 	const paramValues = match.params;
 	const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
@@ -135,7 +138,7 @@ function renderNotFound(
 		const tempRoot = document.createDocumentFragment();
 		const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
 		const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
-		const nfDom = notFoundFn(nfProps, new Map(), walker);
+		const nfDom = await runInBlockWindow(() => notFoundFn(nfProps, new Map(), walker));
 		if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
 			if (container.replaceChildren) container.replaceChildren(nfDom as Node);
 			else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
@@ -150,15 +153,15 @@ function renderNotFound(
 	router._currentMatch = match;
 }
 
-function applyRouteData(
+async function applyRouteData(
 	router: RouterInstance,
 	match: RouteMatch,
 	data: RouteDataResult,
 	container: HTMLElement,
-	render: (router: RouterInstance, match: RouteMatch, container: HTMLElement) => void = renderMatch,
-): void {
+	render: (router: RouterInstance, match: RouteMatch, container: HTMLElement) => Promise<void> | void = renderMatch,
+): Promise<void> {
 	if (data.notFound) {
-		renderNotFound(router, match, container);
+		await renderNotFound(router, match, container);
 		return;
 	}
 	const pathname = match.pathname || window.location.pathname;
@@ -171,7 +174,30 @@ function applyRouteData(
 		applyHead(data.head);
 		if (pageNode) pageNode._head = data.head;
 	}
-	render(router, match, container);
+	const hasRealProps = data.props
+		? Object.keys(data.props as Record<string, unknown>).some(k => k !== 'params')
+		: false;
+	if (!hasRealProps) {
+		// Head-only/params-only payload: the page is already rendered by the
+		// initial renderMatch. Cache the fresh marker (_dataPath) so revisits
+		// skip the fetch, but don't re-render — an async page's pending render
+		// continuation could otherwise land after a later navigation and
+		// clobber the newly mounted DOM.
+		router._currentMatch = match;
+		return;
+	}
+	let swapped = false;
+	try {
+		const fresh = await renderPageOnly(router, match);
+		if (fresh !== undefined) {
+			swapped = replacePageContent(container, fresh);
+		}
+	} catch {
+		swapped = false;
+	}
+	if (!swapped) {
+		await render(router, match, container);
+	}
 	router._currentMatch = match;
 }
 
@@ -180,6 +206,14 @@ function shouldFetchData(router: RouterInstance, match: RouteMatch): boolean {
 	if (!pageNode) return false;
 	const pathname = match.pathname || window.location.pathname;
 	return (pageNode._dataPath as string | undefined) !== pathname;
+}
+
+function hasRealPageData(data: RouteDataResult): boolean {
+	if (data.notFound || data.redirect) return true;
+	if (data.head && data.head.trim().length > 0) return true;
+	const props = data.props as Record<string, unknown> | undefined;
+	if (!props) return false;
+	return Object.keys(props).some(k => k !== 'params');
 }
 
 function storePrefetchedData(match: RouteMatch, data: RouteDataResult): void {
@@ -193,7 +227,92 @@ function storePrefetchedData(match: RouteMatch, data: RouteDataResult): void {
 	if (data.head && pageNode) pageNode._head = data.head;
 }
 
-function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement): void {
+const PAGE_START_MARKER = 'vesk:page';
+const PAGE_END_MARKER = '/vesk:page';
+
+function wrapPageContent(result: Node | string | undefined): Node {
+	const frag = document.createDocumentFragment();
+	frag.appendChild(document.createComment(PAGE_START_MARKER));
+	if (result && typeof result === 'object' && (result as Node).nodeType) {
+		frag.appendChild(result as Node);
+	} else if (typeof result === 'string') {
+		frag.appendChild(document.createTextNode(result));
+	}
+	frag.appendChild(document.createComment(PAGE_END_MARKER));
+	return frag;
+}
+
+async function renderPageOnly(router: RouterInstance, match: RouteMatch): Promise<Node | string | undefined> {
+	const pageNode = findPageNode(match);
+	if (!pageNode || !pageNode.page) return undefined;
+	const tempRoot = document.createDocumentFragment();
+	const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
+	const pageProps = { params: match.params, ...(pageNode.props as Record<string, unknown>) };
+	const result = await runInBlockWindow(() => pageNode!.page!(pageProps, new Map(), walker) as Node | string | undefined);
+	if (result && (result as Node).nodeType === 1 && pageNode._pageName && router.__componentInstances) {
+		const list = router.__componentInstances.get(pageNode._pageName as string);
+		if (list && list.length > 0) list[list.length - 1].root = result as Element;
+	}
+	return result;
+}
+
+/**
+ * Runs a render call with an active root block that stays active across
+ * `await` suspensions. Async components suspend at `await useFetch(...)` and
+ * resume in a microtask continuation; without a persistent active block every
+ * `track()`/`effect()` created after the await would be orphaned (a null owner
+ * block) and its updates silently dropped by `schedule_update`.
+ *
+ * Fully synchronous renders return synchronously (so `navigate()` keeps its
+ * synchronous behavior for plain pages); only thenable results suspend.
+ */
+function runInBlockWindow<T>(fn: () => T): T | Promise<T> {
+	const previous = scope();
+	const block = root(() => {});
+	set_active_block(block);
+	let result: T;
+	try {
+		result = fn();
+	} catch (error) {
+		set_active_block(previous);
+		throw error;
+	}
+	if (result && typeof (result as { then?: unknown }).then === 'function') {
+		return (result as unknown as Promise<T>).then(
+			(value) => { set_active_block(previous); return value; },
+			(error) => { set_active_block(previous); throw error; },
+		);
+	}
+	set_active_block(previous);
+	return result;
+}
+
+function replacePageContent(container: HTMLElement, newContent: Node | string | undefined): boolean {
+	if (newContent === undefined || newContent === null) return false;
+	let start: Node | null = null;
+	let end: Node | null = null;
+	const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
+	while (walker.nextNode()) {
+		const n = walker.currentNode;
+		if (!start && n.nodeValue === PAGE_START_MARKER) start = n;
+		else if (start && n.nodeValue === PAGE_END_MARKER) { end = n; break; }
+	}
+	if (!start || !end || !end.parentNode) return false;
+	let cur = start.nextSibling;
+	while (cur && cur !== end) {
+		const next = cur.nextSibling;
+		cur.remove();
+		cur = next;
+	}
+	if (typeof newContent === 'string') {
+		end.parentNode.insertBefore(document.createTextNode(newContent), end);
+	} else {
+		end.parentNode.insertBefore(newContent, end);
+	}
+	return true;
+}
+
+function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement): void | Promise<void> {
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
@@ -202,19 +321,26 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		if (chain[i].page) { pageNode = chain[i]; break; }
 	}
 
+	const mountNotFound = (nfDom: unknown): void => {
+		if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
+			if (container.replaceChildren) container.replaceChildren(nfDom as Node);
+			else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
+		} else if (typeof nfDom === 'string') {
+			container.innerHTML = nfDom;
+		}
+	};
+
 	if (!pageNode) {
 		const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
 		if (notFoundFn) {
 			const tempRoot = document.createDocumentFragment();
 			const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
 			const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
-			const nfDom = notFoundFn(nfProps, new Map(), walker);
-			if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
-				if (container.replaceChildren) container.replaceChildren(nfDom as Node);
-				else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
-			} else if (typeof nfDom === 'string') {
-				container.innerHTML = nfDom;
+			const nfDom = runInBlockWindow(() => notFoundFn(nfProps, new Map(), walker));
+			if (nfDom && typeof (nfDom as { then?: unknown }).then === 'function') {
+				return (nfDom as Promise<unknown>).then(mountNotFound);
 			}
+			mountNotFound(nfDom);
 			return;
 		}
 		if (container.replaceChildren) {
@@ -230,55 +356,85 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	const tempRoot = document.createDocumentFragment();
 	const clientWalker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
 
-	function renderLayoutChain(index: number): Node | string | undefined {
+	// Renders the layout+page chain. Returns the DOM node synchronously when
+	// every component is synchronous; returns a Promise when any component
+	// suspends (async page / `await useFetch`). Sync throws propagate to the
+	// caller so `navigate()` keeps throwing synchronously for plain pages.
+	function renderLayoutChain(index: number): unknown {
 		if (index >= layoutNodes.length) {
 			set(_state.params, paramValues);
 			set(_state.path, match.pathname || window.location.pathname);
 			set(_state.search, window.location.search || '');
 			const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
-			const result = pageNode!.page!(pageProps, new Map(), clientWalker) as Node | string | undefined;
-			if (router && pageNode!._pageName && result && (result as Node).nodeType === 1) {
-				if (!router.__componentInstances) router.__componentInstances = new Map();
-				const name = pageNode!._pageName as string;
-				if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
-				router.__componentInstances.get(name)!.push({ root: result as Element, props: pageProps as Record<string, unknown>, node: pageNode!, type: 'page' });
+			const result = pageNode!.page!(pageProps, new Map(), clientWalker) as unknown;
+			if (result && typeof (result as { then?: unknown }).then === 'function') {
+				return (result as Promise<unknown>).then((res) => {
+					storePageInstance(router, pageNode!, pageProps, res);
+					return wrapPageContent(res as Node | string | undefined);
+				});
 			}
-			return result;
+			storePageInstance(router, pageNode!, pageProps, result);
+			return wrapPageContent(result as Node | string | undefined);
 		}
 		const node = layoutNodes[index]!;
 		const childDom = renderLayoutChain(index + 1);
-		const layoutProps = { children: childDom, params: paramValues };
-		const result = node.layout!(layoutProps, new Map(), clientWalker) as Node | string | undefined;
-		if (router && node._layoutName && result && (result as Node).nodeType === 1) {
-			if (!router.__componentInstances) router.__componentInstances = new Map();
-			const name = node._layoutName as string;
-			if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
-			router.__componentInstances.get(name)!.push({ root: result as Element, props: layoutProps as Record<string, unknown>, node, type: 'layout' });
+		if (childDom && typeof (childDom as { then?: unknown }).then === 'function') {
+			return (childDom as Promise<unknown>).then((resolved) => {
+				const layoutProps = { children: resolved, params: paramValues };
+				const result = node.layout!(layoutProps, new Map(), clientWalker) as unknown;
+				if (result && typeof (result as { then?: unknown }).then === 'function') {
+					return (result as Promise<unknown>).then((res) => {
+						storeLayoutInstance(router, node, layoutProps, res);
+						return res;
+					});
+				}
+				storeLayoutInstance(router, node, layoutProps, result);
+				return result;
+			});
 		}
+		const layoutProps = { children: childDom, params: paramValues };
+		const result = node.layout!(layoutProps, new Map(), clientWalker) as unknown;
+		if (result && typeof (result as { then?: unknown }).then === 'function') {
+			return (result as Promise<unknown>).then((res) => {
+				storeLayoutInstance(router, node, layoutProps, res);
+				return res;
+			});
+		}
+		storeLayoutInstance(router, node, layoutProps, result);
 		return result;
 	}
 
-	let rootDom: Node | string | undefined;
+	function storePageInstance(router: RouterInstance, pageNode: RouteNode, pageProps: Record<string, unknown>, result: unknown): void {
+		if (!router || !pageNode._pageName || !result || (result as Node).nodeType !== 1) return;
+		if (!router.__componentInstances) router.__componentInstances = new Map();
+		const name = pageNode._pageName as string;
+		if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
+		router.__componentInstances.get(name)!.push({ root: result as Element, props: pageProps as Record<string, unknown>, node: pageNode, type: 'page' });
+	}
+
+	function storeLayoutInstance(router: RouterInstance, node: RouteNode, layoutProps: Record<string, unknown>, result: unknown): void {
+		if (!router || !node._layoutName || !result || (result as Node).nodeType !== 1) return;
+		if (!router.__componentInstances) router.__componentInstances = new Map();
+		const name = node._layoutName as string;
+		if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
+		router.__componentInstances.get(name)!.push({ root: result as Element, props: layoutProps as Record<string, unknown>, node, type: 'layout' });
+	}
+
+	const mountDom = (dom: unknown): void => {
+		if (dom && typeof dom === 'object' && (dom as Node).nodeType) {
+			if (container.replaceChildren) container.replaceChildren(dom as Node);
+			else { container.innerHTML = ''; container.appendChild(dom as Node); }
+		} else if (typeof dom === 'string') {
+			container.innerHTML = dom;
+		}
+	};
+
+	let rootDom: unknown;
 	try {
-		root(() => {
-			rootDom = renderLayoutChain(0);
-		});
+		rootDom = runInBlockWindow(() => renderLayoutChain(0));
 	} catch (error: unknown) {
 		if (error && (error as Error).name === 'NotFoundError') {
-			const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
-			if (notFoundFn) {
-				const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
-				const nfDom = notFoundFn(nfProps, new Map(), clientWalker);
-				if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
-					if (container.replaceChildren) container.replaceChildren(nfDom as Node);
-					else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
-				} else if (typeof nfDom === 'string') {
-					container.innerHTML = nfDom;
-				}
-				return;
-			}
-			container.innerHTML = '<h1>404 — Not Found</h1>';
-			return;
+			return renderNotFound(router, match, container);
 		}
 		const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
 		if (errorFn) {
@@ -288,36 +444,46 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 				}
 			};
 			const errorProps = { error, retry, params: paramValues };
-			const errorDom = errorFn(errorProps, new Map(), clientWalker);
-			if (errorDom && typeof errorDom === 'object' && (errorDom as Node).nodeType) {
-				if (container.replaceChildren) container.replaceChildren(errorDom as Node);
-				else { container.innerHTML = ''; container.appendChild(errorDom as Node); }
-			} else if (typeof errorDom === 'string') {
-				container.innerHTML = errorDom;
-			}
+			mountDom(runInBlockWindow(() => errorFn(errorProps, new Map(), clientWalker)));
 			return;
 		}
 		throw error;
 	}
-
-	if (rootDom && typeof rootDom === 'object' && (rootDom as Node).nodeType) {
-		if (container.replaceChildren) {
-			container.replaceChildren(rootDom as Node);
-		} else {
-			container.innerHTML = '';
-			container.appendChild(rootDom as Node);
-		}
-	} else if (typeof rootDom === 'string') {
-		container.innerHTML = rootDom;
+	if (rootDom && typeof (rootDom as { then?: unknown }).then === 'function') {
+		return (rootDom as Promise<unknown>).then(
+			(resolved) => { mountDom(resolved); },
+			(error: unknown) => {
+				if (error && (error as Error).name === 'NotFoundError') {
+					return renderNotFound(router, match, container);
+				}
+				const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+				if (errorFn) {
+					const retry = () => {
+						if (router && router.navigate) {
+							router.navigate(window.location.pathname, { replace: true });
+						}
+					};
+					const errorProps = { error, retry, params: paramValues };
+					const errDom = runInBlockWindow(() => errorFn(errorProps, new Map(), clientWalker));
+					if (errDom && typeof (errDom as { then?: unknown }).then === 'function') {
+						return (errDom as Promise<unknown>).then(mountDom);
+					}
+					mountDom(errDom);
+					return;
+				}
+				throw error;
+			},
+		);
 	}
+	mountDom(rootDom);
 }
 
-function hydrateInitial(
+async function hydrateInitial(
 	router: RouterInstance,
 	match: RouteMatch,
 	container: HTMLElement,
 	strategy: string,
-): void {
+): Promise<void> {
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
@@ -357,30 +523,33 @@ function hydrateInitial(
 	});
 
 	if (layoutNodes.length === 0) {
+		const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
 		if (!strategy || strategy === 'full') {
 			const walker = createHydrateWalker(container);
 			setIsHydrating(true);
-			root(() => {
-				hydPage({ params: paramValues, ...(pageNode!.props as Record<string, unknown>) }, new Map(), walker);
-			});
+			await runInBlockWindow(() => hydPage(pageProps, new Map(), walker));
 			setIsHydrating(false);
 		} else if (strategy === 'viewport') {
-			hydrateViewport(container, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
+			root(() => { hydrateViewport(container, hydPage, pageProps); });
 		} else if (strategy === 'idle') {
-			hydrateIdle(container, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
+			root(() => { hydrateIdle(container, hydPage, pageProps); });
 		} else if (strategy === 'interaction') {
-			hydrateOnInteraction(container, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
+			root(() => { hydrateOnInteraction(container, hydPage, pageProps); });
 		}
 		return;
 	}
 
 	setIsHydrating(true);
 
-	function renderLayoutChain(index: number) {
+	// Keep the hydration chain synchronous so every track()/effect() created by
+	// the layout and page hydrators runs inside the root() block context below.
+	// Awaiting between layers would resume with a null active block, orphaning
+	// cells and effect blocks (counters would render but never update).
+	function renderLayoutChain(index: number): unknown {
 		if (index >= layoutNodes.length) {
 			return (subWalker: HydrateWalker) => {
 				if (!strategy || strategy === 'full') {
-					hydPage({ params: paramValues, ...(pageNode!.props as Record<string, unknown>) }, new Map(), subWalker);
+					return hydPage({ params: paramValues, ...(pageNode!.props as Record<string, unknown>) }, new Map(), subWalker);
 				} else if (strategy === 'viewport') {
 					hydrateViewport(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
 				} else if (strategy === 'idle') {
@@ -388,21 +557,24 @@ function hydrateInitial(
 				} else if (strategy === 'interaction') {
 					hydrateOnInteraction(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
 				}
+				return undefined;
 			};
 		}
 		const node = layoutNodes[index]!;
 		const hydLayout = hydLayouts[index]!;
 		const childHydrator = renderLayoutChain(index + 1);
 		const layoutProps = { children: childHydrator, params: paramValues };
-		hydLayout(layoutProps, new Map(), walker);
-		return null;
+		return hydLayout(layoutProps, new Map(), walker);
 	}
 
 	const walker = createHydrateWalker(container);
+	let pending: unknown;
 	root(() => {
-		renderLayoutChain(0);
+		pending = renderLayoutChain(0);
 	});
-
+	if (pending !== null && pending !== undefined && typeof (pending as { then?: unknown }).then === 'function') {
+		await (pending as Promise<unknown>);
+	}
 	setIsHydrating(false);
 }
 
@@ -526,15 +698,16 @@ export function createRouter(
 			const fetchData = () => {
 				if (firstRenderFailed) return;
 				if (!shouldFetchData(this, match!)) return;
-				getRouteData(url.pathname + url.search).then((data) => {
-					if (navToken !== this._navToken) return;
-					if (!data) return;
-					if (data.redirect) {
-						this.navigate(data.redirect, { replace: true });
-						return;
-					}
-					applyRouteData(this, match!, data, this.container);
-				});
+			getRouteData(url.pathname + url.search).then(async (data) => {
+				if (navToken !== this._navToken) return;
+				if (!data) return;
+				if (data.redirect) {
+					this.navigate(data.redirect, { replace: true });
+					return;
+				}
+				if (!hasRealPageData(data)) return;
+				await applyRouteData(this, match!, data, this.container);
+			});
 			};
 
 			if (loadingFn) {
@@ -689,16 +862,18 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				const chain = flattenLayoutChain(routeTree, url.pathname.split('/').filter(Boolean));
 				const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
 				if (notFoundFn) {
-					const tempRoot = document.createDocumentFragment();
-					const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
-					const nfProps = { params: {}, url: url.pathname };
-					const nfDom = notFoundFn(nfProps, new Map(), walker);
-					if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
-						if (container.replaceChildren) container.replaceChildren(nfDom as Node);
-						else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
-					} else if (typeof nfDom === 'string') {
-						container.innerHTML = nfDom;
-					}
+					void (async () => {
+						const tempRoot = document.createDocumentFragment();
+						const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
+						const nfProps = { params: {}, url: url.pathname };
+						const nfDom = await runInBlockWindow(() => notFoundFn(nfProps, new Map(), walker));
+						if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
+							if (container.replaceChildren) container.replaceChildren(nfDom as Node);
+							else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
+						} else if (typeof nfDom === 'string') {
+							container.innerHTML = nfDom;
+						}
+					})();
 				} else {
 					container.innerHTML = '<h1>404 — Not Found</h1>';
 				}
@@ -748,6 +923,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						router.navigate(data.redirect, { replace: true });
 						return;
 					}
+					if (!hasRealPageData(data)) return;
 					const pending = hasPendingChunks(match!.matchChain);
 					if (pending.length > 0) {
 						await Promise.all(pending.map(ensureChunk));
@@ -756,7 +932,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 							router.__updateComponents(match!.matchChain);
 						}
 					}
-					applyRouteData(router, match!, data, container, renderFn);
+					await applyRouteData(router, match!, data, container, renderFn);
 				});
 			};
 

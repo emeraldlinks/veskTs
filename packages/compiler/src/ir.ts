@@ -42,6 +42,7 @@ export class IRRoot {
 export class ComponentIR {
   name: string;
   paramNames: string[];
+  propsType: string | null;
   isClient: boolean;
   isAsync: boolean;
   ssrAwait: boolean;
@@ -62,6 +63,7 @@ export class ComponentIR {
       mode?: 'expression' | 'statement';
       exported?: boolean;
       defaultExport?: boolean;
+      propsType?: string | null;
     } = {}
   ) {
     this.name = name;
@@ -74,6 +76,7 @@ export class ComponentIR {
     this.style = null;
     this.exported = opts.exported ?? false;
     this.defaultExport = opts.defaultExport ?? false;
+    this.propsType = opts.propsType ?? null;
   }
 }
 

@@ -8,7 +8,7 @@ import {
 import { isStaticIR, collectTrackedNames, transformTracked, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
-import { unwrapTrackCall } from '@vesk/compiler/src/scan';
+import { unwrapTrackCall, skipWhitespace, findBalancedEnd, startsWithIdentifier } from '@vesk/compiler/src/scan';
 import {
   isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
@@ -68,18 +68,24 @@ function compKey(_node: TrackDecl): string {
   return __currentCompName || 'comp';
 }
 
+function isEvent(target: string | null): boolean {
+  return !!target && target.startsWith('on') && target.length > 2;
+}
+
 function exprJSX(node: { raw: string; ast: ESTreeNode | null }, tracked?: Map<string, TrackedInfo>): string {
-  const code = tracked && tracked.size > 0 ? transformTracked(node as any, tracked) : node.raw;
-  return exprJS(code);
+  return exprJS(transformTracked(node as any, tracked || new Map()));
 }
 
 function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
 
   const dynAttrTargets = new Set<string>();
+  const dynAttrOrder: string[] = [];
   for (const child of node.children) {
     if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target !== null && child.target !== 'ref') {
+      if (isEvent(child.target)) continue;
       dynAttrTargets.add(child.target);
+      dynAttrOrder.push(child.target);
     }
   }
   const hasDynamicAttrs = dynAttrTargets.size > 0;
@@ -91,12 +97,16 @@ function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): s
     lines.push(`__out.push('<!--vsk-->');`);
   }
   for (const attr of node.attributes) {
-    if (attr.name.startsWith('on') && attr.name.length > 2) continue;
-    if (attr.value === '' && !dynAttrTargets.has(attr.name)) {
+    if (isEvent(attr.name)) continue;
+    if (dynAttrTargets.has(attr.name)) continue;
+    if (attr.value === '') {
       openTag += ` ${attr.name}`;
     } else {
       openTag += ` ${attr.name}="${escapeHtml(attr.value)}"`;
     }
+  }
+  for (const target of dynAttrOrder) {
+    openTag += ` ${target}=""`;
   }
 
   if (node.selfClosing) {
@@ -104,8 +114,8 @@ function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): s
     if (hasDynamicAttrs) {
       let expr = JSON.stringify(tag);
       for (const child of node.children) {
-        if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target !== 'ref') {
-          const val = `__escape(String(${exprJS(child.expression.raw)}))`;
+        if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target !== 'ref' && !isEvent(child.target)) {
+          const val = `__escape(String(${exprJSX(child.expression, tracked)}))`;
           expr = `${expr}.replace(${JSON.stringify(' ' + child.target + '=""')}, ' ' + ${JSON.stringify(child.target)} + '=\"' + ${val} + '\"')`;
         }
       }
@@ -123,8 +133,8 @@ function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): s
   if (hasDynamicAttrs) {
     let expr = JSON.stringify(openTag);
     for (const child of node.children) {
-      if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target !== 'ref') {
-        const val = `__escape(String(${exprJS(child.expression.raw)}))`;
+      if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target !== 'ref' && !isEvent(child.target)) {
+        const val = `__escape(String(${exprJSX(child.expression, tracked)}))`;
         expr = `${expr}.replace(${JSON.stringify(' ' + child.target + '=""')}, ' ' + ${JSON.stringify(child.target)} + '=\"' + ${val} + '\"')`;
       }
     }
@@ -143,12 +153,24 @@ function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): s
   return lines.join('\n');
 }
 
+/**
+ * Returns the inner expression of a whole `raw(<expr>)` binding, or `null`
+ * when `raw` is not a complete `raw(...)` call.
+ */
+function extractRawInner(raw: string): string | null {
+  if (!startsWithIdentifier(raw, 'raw')) return null;
+  let i = skipWhitespace(raw, 3);
+  if (raw[i] !== '(') return null;
+  const end = findBalancedEnd(raw, i);
+  if (skipWhitespace(raw, end + 1) !== raw.length) return null;
+  return raw.slice(i + 1, end);
+}
+
 function dynamicBindingToJS(node: DynamicBinding, tracked?: Map<string, TrackedInfo>): string {
   if (node.kind === 'attribute') return '';
   const raw = node.expression.raw;
-  const isRaw = /^\s*raw\s*\(/.test(raw);
-  if (isRaw) {
-    const inner = raw.replace(/^\s*raw\s*\(/, '').replace(/\)\s*$/, '');
+  const inner = extractRawInner(raw);
+  if (inner !== null) {
     const innerAst = (node.expression.ast as any)?.arguments?.[0] ?? null;
     return `{ const __v = ${exprJSX({ raw: inner, ast: innerAst }, tracked)}; if (__v != null) __out.push(typeof __v === 'boolean' ? 'true' : String(__v)); }`;
   }
@@ -253,6 +275,7 @@ function switchBlockToJS(node: SwitchBlock, tracked?: Map<string, TrackedInfo>):
       const code = irNodeToJS(n, null, false, tracked);
       if (code) lines.push(indent(code, 2));
     }
+    lines.push(indent('break;', 2));
   }
   lines.push(`}`);
   return lines.join('\n');

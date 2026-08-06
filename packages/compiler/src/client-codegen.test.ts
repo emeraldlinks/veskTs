@@ -203,7 +203,8 @@ describe('Client Codegen — Control Flow', () => {
 		component App(props: { items: string[] }) { return <div>{props.items.map((i) => <span>{i}</span>)}</div>; }
 	`, (code) => {
 		expect(code).toContain('createComment');
-		expect(code).toContain('for (const ');
+		expect(code).toContain('effect(');
+		expect(code).toContain('for (const i of ');
 	});
 	// Statement mode: for-of
 	bothModes('.map() statement mode (for-of)', `
@@ -213,6 +214,7 @@ describe('Client Codegen — Control Flow', () => {
 	`, (code) => {
 		expect(code).toContain('createComment');
 		expect(code).toContain('effect(');
+		expect(code).toContain('for (const item of ');
 	});
 
 	// Expression mode: child component call
@@ -234,6 +236,31 @@ describe('Client Codegen — Control Flow', () => {
 		expect(code).toContain('__components[');
 		expect(code).toContain('Child');
 		if (mode === 'hydrate') expect(code).toContain('__hydrate');
+	});
+
+	// Dynamic text child of a component call must scope its effect next to the
+	// text node (inside the children fragment), not at the parent component level.
+	bothModes('dynamic text child of component call scopes effect in fragment', `
+		component Demo { const name = 'Vesk'; <Link href="/">{name}</Link> }
+	`, (code) => {
+		const iText = code.indexOf('document.createTextNode');
+		const iEffect = code.indexOf('effect(() => { $n');
+		const iFragEnd = code.indexOf('return $f; })();');
+		expect(iText >= 0).toBe(true);
+		expect(iEffect >= 0).toBe(true);
+		expect(iFragEnd >= 0).toBe(true);
+		expect(iEffect < iFragEnd).toBe(true);
+		expect(iEffect > iText).toBe(true);
+	});
+
+	// Dynamic text child of a component call inside a keyed-map block must push
+	// its effect into the block's per-item effects array (in the block's scope).
+	bothModes('dynamic text child of component call in loop pushes effect into item array', `
+		component Demo {
+			for (const item of items) { <Link href={item.href}>{item.label}</Link> }
+		}
+	`, (code) => {
+		expect(code).toContain('__e.push(effect(() => { $n');
 	});
 
 });
@@ -655,6 +682,122 @@ describe('Keyed for-of with ; key clause and #empty block', () => {
 		} catch (e) {
 			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
 		}
+	});
+});
+
+describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
+	bothModes('while loop emits anchor pair + render function', `
+		component App() {
+			let n = 0;
+			while (n < 3) { <span>{n}</span>; n = n + 1 }
+		}
+	`, (code) => {
+		expect(code).toContain("createComment('while')");
+		expect(code).toContain("createComment('while-end')");
+		expect(code).toContain('while (n < 3) {');
+		expect(code).toContain('__cleanup(');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('do-while loop emits do block', `
+		component App() {
+			let n = 0;
+			do { <span>{n}</span>; n = n + 1 } while (n < 3)
+		}
+	`, (code) => {
+		expect(code).toContain('do {');
+		expect(code).toContain('} while (n < 3);');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('for-in loop iterates keys via Object.keys', `
+		component App() {
+			const obj = { a: 1, b: 2 };
+			for (const key in obj) { <span>{key}</span> }
+		}
+	`, (code) => {
+		expect(code).toContain("createComment('for')");
+		expect(code).toContain('Object.keys(');
+		expect(code).toContain('for (const key of ');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('classic for loop emits init + while + update', `
+		component App() {
+			let i = 0;
+			for (i = 0; i < 3; i = i + 1) { <span>{i}</span> }
+		}
+	`, (code) => {
+		expect(code).toContain('i = 0');
+		expect(code).toContain('while (i < 3) {');
+		expect(code).toContain('i = i + 1');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// A for-loop with a loop-local binding (`for (let i ...)`) is static: it must
+	// not emit a re-render effect that references the loop-local variable from the
+	// component scope (which would throw "i is not defined").
+	bothModes('for loop with local binding is static (no outer effect)', `
+		component App() {
+			for (let i = 0; i < 3; i++) { <span>{i}</span> }
+		}
+	`, (code) => {
+		expect(code).toContain('while (i < 3) {');
+		expect(code).not.toContain('let __iv = !(i < 3)');
+		expect(code).not.toContain('const __nv = (i < 3)');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// The if/else empty-state marker must parenthesize the negated condition so a
+	// compound condition (`props.x && props.x.length > 0`) does not throw when
+	// props.x is undefined.
+	bothModes('if/else negated condition is parenthesized', `
+		component App(props: { posts?: { title: string }[] }) {
+			if (props.posts && props.posts.length > 0) {
+				<p>Has posts</p>
+			} else {
+				<p>No posts</p>
+			}
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('let __iv = !(props.posts && props.posts.length > 0);');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('switch block emits case rendering', `
+		component App() {
+			const score = 7;
+			switch (score) { case 7: <p>Seven</p>; default: <p>Other</p> }
+		}
+	`, (code) => {
+		expect(code).toContain("createComment('switch')");
+		expect(code).toContain('switch (score) {');
+		expect(code).toContain('case 7:');
+		expect(code).toContain('default:');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('while condition rewrites track reads/writes', `
+		component App() {
+			const &[n] = track(0);
+			while (n < 3) { <span>{n}</span>; n = n + 1 }
+		}
+	`, (code) => {
+		expect(code).toContain('while (get(n) < 3) {');
+		expect(code).toContain('set(n, get(n) + 1)');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('switch discriminant rewrites track reads', `
+		component App() {
+			const &[score] = track(7);
+			switch (score) { case 7: <p>Seven</p> }
+		}
+	`, (code) => {
+		expect(code).toContain('switch (get(score)) {');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 });
 

@@ -1,11 +1,23 @@
+interface Feature {
+	title: string
+	body: string
+}
+
+const features: Feature[] = [
+	{ title: 'Compiler-first', body: 'Vesk compiles .vsk components to standard ESM with SSR, hydration, and fine-grained reactivity.' },
+	{ title: 'Islands architecture', body: 'Zero-JS pages with client islands, AOT event delegation, and streaming SSR.' },
+]
+
 component About {
 	<h1 class="text-3xl font-bold mb-4">About Vesk</h1>
 	<p class="text-gray-600 mb-3">
 		Vesk is a compiler-first reactive UI framework. It compiles .vsk components
 		to standard ESM with SSR, hydration, and fine-grained reactivity.
 	</p>
-	<p class="text-gray-600 mb-3">
-		Key features include zero-JS pages, islands architecture, AOT event delegation,
-		and streaming SSR.
-	</p>
+	for (const feature of features) {
+		<div class="mb-3">
+			<h2 class="text-lg font-semibold">{feature.title}</h2>
+			<p class="text-gray-600">{feature.body}</p>
+		</div>
+	}
 }

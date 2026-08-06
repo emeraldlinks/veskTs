@@ -1,17 +1,24 @@
 import { Link } from '@vesk/runtime';
 
+interface PostLink {
+	title: string
+	href: string
+	summary: string
+}
+
+const blogPosts: PostLink[] = [
+	{ title: 'Hello World', href: '/blog/hello-world', summary: 'First post powered by Vesk' },
+	{ title: 'SSR in Vesk', href: '/blog/ssr-in-vesk', summary: 'How server-side rendering works' },
+]
+
 component Blog {
 	<h1 class="text-3xl font-bold mb-4">Blog</h1>
-	<div class="bg-white rounded-lg p-5 mb-4 shadow-sm border border-gray-100">
-		<h2 class="text-lg font-semibold mb-1">
-			<Link href="/blog/hello-world" class="text-gray-900 no-underline hover:text-blue-600">Hello World</Link>
-		</h2>
-		<p class="text-gray-400 text-sm">First post powered by Vesk</p>
-	</div>
-	<div class="bg-white rounded-lg p-5 mb-4 shadow-sm border border-gray-100">
-		<h2 class="text-lg font-semibold mb-1">
-			<Link href="/blog/ssr-in-vesk" class="text-gray-900 no-underline hover:text-blue-600">SSR in Vesk</Link>
-		</h2>
-		<p class="text-gray-400 text-sm">How server-side rendering works</p>
-	</div>
+	for (const post of blogPosts) {
+		<div class="bg-white rounded-lg p-5 mb-4 shadow-sm border border-gray-100">
+			<h2 class="text-lg font-semibold mb-1">
+				<Link href={post.href} class="text-gray-900 no-underline hover:text-blue-600">{post.title}</Link>
+			</h2>
+			<p class="text-gray-400 text-sm">{post.summary}</p>
+		</div>
+	}
 }

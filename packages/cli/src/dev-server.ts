@@ -10,7 +10,7 @@ import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
-import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
+import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
@@ -134,35 +134,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
   let clientBundle = '';
   let runtimeBundle = '';
 
-  function bundleRuntime() {
+  async function bundleRuntime() {
     try {
-      const files = [
-        'ripple-constants.js', 'ripple-utils.js', 'ripple-runtime.js', 'ripple-blocks.js',
-        'context.js', 'hydrate.js', 'resource.js', 'portal.js',
-        'reconcile.js', 'bindings.js', 'router-match.js', 'router-components.js', 'router.js',
-        'seo.js', 'image.js', 'experiment.js', 'form.js', 'action.js',
-      ];
-      let code = '';
-      for (const f of files) {
-        const p = join(runtimeDir, f);
-        if (existsSync(p)) {
-          let src = readFileSync(p, 'utf-8');
-          src = transformSync(src, { loader: 'ts' }).code;
-          src = src.replace(/^import\s+[\s\S]*?from\s+['"].*?['"];?\n?/gm, '');
-          src = src.replace(/^export\s*\{\s*[\s\S]*?\};?\n?/gm, '');
-          src = src.replace(/^export\s+/gm, '');
-          code += `// --- ${f} ---\n${src}\n`;
-        }
-      }
-      const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
-      const indexCompiled = transformSync(indexSrc, { loader: 'ts' }).code;
-      const exportNames = indexCompiled.match(/export\s*\{\s*([^}]+)\s*\}\s*from/g)
-        ?.flatMap(m => m.replace(/export\s*\{\s*|\s*\}\s*from/g, '').split(',').map(s => s.trim())) || [];
-      code += '// --- exports ---\n';
-      for (const name of [...new Set(exportNames)]) {
-        if (name) code += `export { ${name} };\n`;
-      }
-      runtimeBundle = code;
+      const available = runtimeExportNames(runtimeDir);
+      runtimeBundle = await buildTreeShakenRuntime(runtimeDir, [...available]);
     } catch (e) {
       LOG.err(`runtime bundle error:`, (e as Error).message);
     }
@@ -181,7 +156,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   }
 
-  bundleRuntime();
+  await bundleRuntime();
   await buildClientBundle();
 
   const sourceToComponents = new Map<string, string[]>();

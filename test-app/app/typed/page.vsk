@@ -1,0 +1,66 @@
+import { track } from '@vesk/runtime'
+
+interface Post {
+	title: string
+	tags?: string[]
+	likes: number
+}
+
+type Id = string | number
+
+const typedPosts: Post[] = [
+	{ title: 'Vesk goes typed', tags: ['ts', 'compiler'], likes: 42 },
+	{ title: 'Islands in the stream', likes: 17 },
+]
+
+function pick<T>(arr: T[], i: number): T {
+	return arr[i]
+}
+
+component Typed(props: { label: string }) {
+	const &[liked] = track(false)
+	const totalLikes: number = typedPosts.reduce((sum, p) => sum + p.likes, 0)
+	const first: Post | undefined = typedPosts[0]
+	const firstTitle: string = first!.title
+	const maybeTag: string | undefined = first?.tags?.[0]
+	const label: string = props.label as string
+	const sorted: Post[] = typedPosts
+		.filter((p): p is Post => p.likes > 0)
+		.sort((a, b) => b.likes - a.likes)
+	const chosen = pick<string>(['a', 'b', 'c'], 1)
+	const id: Id = 7
+	const config = { mode: 'ssr' } satisfies { mode: string }
+	const coords = [1, 2] as const
+
+	<Head>
+		<title>Typed — full TS in .vsk</title>
+	</Head>
+
+	<h1 class="text-3xl font-bold mb-4">{label}</h1>
+
+	<p class="mb-2">
+		Total likes: <strong>{totalLikes}</strong> · first post: <em>{firstTitle}</em> ·
+		tags[0]: {maybeTag ?? 'none'}
+	</p>
+
+	<p class="mb-2">Type guard filter → {sorted.length} posts · pick → {chosen} · id → {id}</p>
+
+	<p class="mb-2">satisfies → {config.mode} · as const → ({coords[0]},{coords[1]})</p>
+
+	<ul class="mb-4 space-y-1">
+		for (const post of typedPosts) {
+			<li class="flex items-center gap-2">
+				<span>{post.title}</span>
+				<span class="text-xs text-zinc-500">{post.tags?.join(', ') ?? 'no tags'}</span>
+				<span class="text-amber-600">{post.likes} ♥</span>
+			</li>
+		}
+	</ul>
+
+	<button
+		class="rounded bg-blue-600 text-white px-3 py-1"
+		onclick={() => (liked = !liked)}
+	>
+		{liked ? 'Liked ♥' : 'Like'}
+	</button>
+}

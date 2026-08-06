@@ -951,6 +951,187 @@ it('[stmt] useFetch in SSR renders loading state', async () => {
   assert(html.length > 0, `html should not be empty`);
 });
 
+// =============================================================
+// Statement-mode loops + switch — SSR
+// =============================================================
+console.log('\n=== SSR — Statement Loops + Switch ===');
+
+it('[stmt] while loop renders iterations server-side', () => {
+  const html = show('html', render(`component App {
+    let n = 0;
+    while (n < 3) { <span>{n}</span>; n = n + 1 }
+  }`, 'App'));
+  assert(html === '<span>0</span><span>1</span><span>2</span>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] do-while loop renders at least one iteration', () => {
+  const html = show('html', render(`component App {
+    let n = 0;
+    do { <span>{n}</span>; n = n + 1 } while (n < 2)
+  }`, 'App'));
+  assert(html === '<span>0</span><span>1</span>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] for-in loop renders object keys', () => {
+  const html = show('html', render(`component App {
+    const obj = { name: 'Vesk', year: 2026 };
+    for (const key in obj) { <span>{key}</span> }
+  }`, 'App'));
+  assert(html === '<span>name</span><span>year</span>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] classic for loop renders iterations', () => {
+  const html = show('html', render(`component App {
+    let i = 0;
+    for (i = 0; i < 3; i = i + 1) { <span>{i}</span> }
+  }`, 'App'));
+  assert(html === '<span>0</span><span>1</span><span>2</span>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] switch renders matching case only', () => {
+  const html = show('html', render(`component App {
+    const score = 7;
+    switch (score) { case 5: <p>Five</p>; case 7: <p>Seven</p>; default: <p>Other</p> }
+  }`, 'App'));
+  assert(html === '<p>Seven</p>', `got ${JSON.stringify(html)}`);
+});
+
+it('[stmt] switch renders default case', () => {
+  const html = show('html', render(`component App {
+    const score = 9;
+    switch (score) { case 7: <p>Seven</p>; default: <p>Other</p> }
+  }`, 'App'));
+  assert(html === '<p>Other</p>', `got ${JSON.stringify(html)}`);
+});
+
+// =============================================================
+// effect() inside components
+// =============================================================
+console.log('\n=== effect() in Components ===');
+
+it('[effect] auto-imports effect for server scope', () => {
+  const source = `component App {
+    const &[count] = track(0);
+    effect(() => console.log('count is', get(count)));
+    <button onclick={count = count + 1}>{count}</button>
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.some(i => i.includes('effect')), `effect import missing: ${JSON.stringify(ir.imports)}`);
+  const html = show('html', render(source, 'App')) as string;
+  assert(html.includes('<button>0</button>'), `ssr failed: ${JSON.stringify(html)}`);
+});
+
+it('[effect] client bundle imports effect and rewrites handler', () => {
+  const code = compileClient(`component App {
+    const &[count] = track(0);
+    effect(() => console.log('count is', get(count)));
+    <button onclick={count = count + 1}>{count}</button>
+  }`, 'App', { forceClient: true });
+  assert(code.includes('effect'), `missing effect import/usage: ${code.slice(0, 200)}`);
+  assert(code.includes('set(count, get(count) + 1)'), `onclick not rewritten: ${code.slice(0, 400)}`);
+});
+
+it('[effect] derived/untrack/peek auto-import for server scope', () => {
+  const source = `component App {
+    const &[count] = track(0);
+    const doubled = derived(() => get(count) * 2);
+    untrack(() => { peek(count); });
+    <p>{get(doubled)}</p>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const imported = ir.imports.join(', ');
+  assert(imported.includes('derived') && imported.includes('untrack') && imported.includes('peek'),
+    `missing reactivity imports: ${JSON.stringify(ir.imports)}`);
+  const html = show('html', render(source, 'App')) as string;
+  assert(html.includes('<p>0</p>'), `ssr failed: ${JSON.stringify(html)}`);
+});
+
+it('[effect] on_destroy and createContext auto-import', () => {
+  const source = `component App {
+    const Ctx = createContext(1);
+    on_destroy(() => {});
+    <p>{Ctx.get()}</p>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const imported = ir.imports.join(', ');
+  assert(imported.includes('createContext') && imported.includes('on_destroy'),
+    `missing imports: ${JSON.stringify(ir.imports)}`);
+});
+
+// =============================================================
+// Client islands — component-level `client` / `#client` keyword
+// =============================================================
+console.log('\n=== Client Islands (component keyword) ===');
+
+it('[island] component declared with `client` keyword is flagged', () => {
+  const source = `component Counter() client {
+    const &[count] = track(0);
+    <button onclick={count = count + 1}>{count}</button>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const comp = ir.components.find(c => c.name === 'Counter');
+  assert(comp?.isClient === true, `isClient not set: ${JSON.stringify(comp && comp.isClient)}`);
+});
+
+it('[island] component declared with `#client` keyword is flagged', () => {
+  const source = `component Counter() #client {
+    const &[count] = track(0);
+    <button onclick={count = count + 1}>{count}</button>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const comp = ir.components.find(c => c.name === 'Counter');
+  assert(comp?.isClient === true, `isClient not set: ${JSON.stringify(comp && comp.isClient)}`);
+});
+
+it('[island] #client before params is accepted', () => {
+  const source = `component Counter #client () {
+    <p>hi</p>
+  }`;
+  const ir = generateIR(parse(source), source);
+  const comp = ir.components.find(c => c.name === 'Counter');
+  assert(comp?.isClient === true, `isClient not set: ${JSON.stringify(comp && comp.isClient)}`);
+});
+
+it('[island] client island renders on server like a normal component', () => {
+  const html = show('html', render(`component Counter() #client {
+    <button>Click</button>
+  }`, 'Counter'));
+  assert(html === '<button>Click</button>', `client island SSR: ${JSON.stringify(html)}`);
+});
+
+it('[island] client island still compiles for the client bundle', () => {
+  const code = compileClient(`component Counter() #client {
+    const &[count] = track(0);
+    <button onclick={count = count + 1}>{count}</button>
+  }`, 'Counter', { forceClient: true });
+  assert(code.includes('__components["Counter"]'), `missing component: ${code.slice(0, 200)}`);
+  assert(code.includes('set(count, get(count) + 1)'), `handler not rewritten`);
+});
+
+it('[island] {#client} block renders on client only (skipped in SSR)', () => {
+  const source = `component Card() #client {
+    {#client}<p>Client only</p>{/client}
+    <p>Shared</p>
+  }`;
+  const html = show('html', render(source, 'Card'));
+  assert(html === '<p>Shared</p>', `island SSR should skip {#client} block: ${JSON.stringify(html)}`);
+  const code = compileClient(source, 'Card', { forceClient: true });
+  assert(code.includes('Client only'), `client block missing from bundle: ${code.slice(0, 300)}`);
+});
+
+it('[island] {#client} block in non-island component throws', () => {
+  const source = `component Card() {
+    {#client}<p>Client only</p>{/client}
+  }`;
+  let threw = false;
+  try {
+    render(source, 'Card');
+  } catch (e) {
+    threw = /client island/.test(String(e.message));
+  }
+  assert(threw, `expected client-island error, got no error`);
+});
+
 // Summary
 await asyncChain;
 console.log(`\n${'='.repeat(50)}`);

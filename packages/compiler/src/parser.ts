@@ -3,6 +3,7 @@ import type { Options } from 'acorn';
 import type { Program } from 'estree';
 import { tsPlugin } from './acorn-ts-plugin/index.js';
 import { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
+import { containsForOfIn } from '@vesk/compiler/src/scan';
 
 export interface ParseOptions {
   filename?: string;
@@ -34,6 +35,10 @@ function isIdentChar(code: number): boolean {
   return (
     (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36
   );
+}
+
+function isWhitespaceChar(ch: string): boolean {
+  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v' || ch === '\u00a0' || ch === '\ufeff';
 }
 
 /**
@@ -85,7 +90,7 @@ export function preprocessForClauses(source: string): { code: string; annotation
       const before = i === 0 ? ' ' : source[i - 1];
       if (!isIdentChar(source.charCodeAt(i + 3) || 0) && (i === 0 || !isIdentChar(before.charCodeAt(0)))) {
         let p = i + 3;
-        while (p < source.length && /\s/.test(source[p])) p++;
+        while (p < source.length && isWhitespaceChar(source[p])) p++;
         if (source[p] === '(') {
           let depth = 0;
           let j = p;
@@ -124,7 +129,7 @@ export function preprocessForClauses(source: string): { code: string; annotation
             else if (c === ';' && depth1 === 0) { firstSemi = q; break; }
           }
           const preSemi = source.slice(p + 1, firstSemi === -1 ? headerEnd : firstSemi);
-          if (!/\b(of|in)\b/.test(preSemi)) {
+          if (!containsForOfIn(preSemi)) {
             i = headerEnd;
             continue;
           }
@@ -160,20 +165,32 @@ export function preprocessForClauses(source: string): { code: string; annotation
             let keyRange: [number, number] | undefined;
             let indexName: string | undefined;
 
-            const keyMatch = clause.match(/^;\s*key\b([\s\S]*)$/);
-            if (keyMatch) {
-              const expr = keyMatch[1].trim();
+            // `clause` starts with the `;` — parse the keyword by hand so no
+            // regex is involved: `; key <expr>` or `; index <ident>`.
+            let q = start;
+            if (source[q] === ';') q++;
+            while (q < end && isWhitespaceChar(source[q])) q++;
+            let kwStart = q;
+            while (q < end && isIdentChar(source.charCodeAt(q))) q++;
+            const keyword = source.slice(kwStart, q);
+            if (keyword === 'key') {
+              let k = q;
+              while (k < end && isWhitespaceChar(source[k])) k++;
+              const expr = source.slice(k, end).trim();
               if (expr) {
-                // `clause` starts at the `;`, so `expr` begins at
-                // start + indexOf(expr) and ends where the clause ends.
-                const exprOffset = start + clause.indexOf(expr);
-                keyRange = [exprOffset, start + clause.length];
+                keyRange = [k, start + clause.length];
                 clauseCode = ' '.repeat(clause.length);
               }
-            } else {
-              const indexMatch = clause.match(/^;\s*index\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*$/);
-              if (indexMatch) {
-                indexName = indexMatch[1];
+            } else if (keyword === 'index') {
+              let k = q;
+              while (k < end && isWhitespaceChar(source[k])) k++;
+              const identStart = k;
+              while (k < end && isIdentChar(source.charCodeAt(k))) k++;
+              const ident = source.slice(identStart, k);
+              let m = k;
+              while (m < end && isWhitespaceChar(source[m])) m++;
+              if (ident && m === end) {
+                indexName = ident;
                 clauseCode = ' '.repeat(clause.length);
               }
             }
@@ -206,15 +223,15 @@ export function createBaseParser(): typeof acorn.Parser {
 }
 
 export function parse(source: string, options: ParseOptions = {}): Program {
-  const parser = createBaseParser();
+  const ParserClass = createBaseParser();
   const { code, annotations } = preprocessForClauses(source);
-  const ast = parser.parse(code, {
+  const ast = (ParserClass as unknown as { parse(input: string, opts: Options): Program }).parse(code, {
     ecmaVersion: 'latest',
     sourceType: 'module',
     locations: true,
     ranges: true,
     ...(options.filename ? { sourceFilename: options.filename } : {}),
-  } as Options) as unknown as Program;
+  } as Options);
   if (annotations.length > 0) {
     (ast as unknown as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations = annotations;
   }

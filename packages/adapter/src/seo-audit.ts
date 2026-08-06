@@ -139,7 +139,10 @@ export function runSeoAudit(appDir: string, _options?: Record<string, unknown>):
   let warnings = 0;
 
   for (const { path, src } of combined) {
-    const relPath = path.replace(appDir, '').replace(/^\//, '');
+    const relPath = path.replace(appDir, '').replace(/^[\\/]/, '');
+    const routeDir = relPath === 'page.vsk' ? '' : relPath.replace(/[\\/]page\.vsk$/, '');
+    const route = routeDir ? '/' + routeDir.replace(/\\/g, '/') : '/';
+    const label = relPath + (route === '/' ? ' (index)' : ` (route: ${route})`);
     let fileErrors = 0;
     let fileWarnings = 0;
     const fileIssues: SeoCheckIssue[] = [];
@@ -157,9 +160,9 @@ export function runSeoAudit(appDir: string, _options?: Record<string, unknown>):
     warnings += fileWarnings;
 
     if (fileIssues.length === 0) {
-      console.error(`  ✓ ${relPath}`);
+      console.error(`  ✓ ${label}`);
     } else {
-      console.error(`  ${fileErrors > 0 ? '✗' : '⚠'} ${relPath} (${fileErrors} errors, ${fileWarnings} warnings)`);
+      console.error(`  ${fileErrors > 0 ? '✗' : '⚠'} ${label} (${fileErrors} errors, ${fileWarnings} warnings)`);
       for (const issue of fileIssues) {
         const prefix = issue.severity === SEVERITY.ERROR ? '    ✗' : '    ⚠';
         console.error(`  ${prefix} ${issue.message}`);

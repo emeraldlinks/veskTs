@@ -1,6 +1,6 @@
 {
   "name": "vesk",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "type": "module",
   "description": "Vesk — compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
   "bin": {

@@ -1,18 +1,22 @@
-component EmptyDemo(props) {
+interface Todo {
+	id: number
+	text: string
+}
+
+const initialTodos: Todo[] = [
+	{ id: 1, text: 'Buy milk' },
+	{ id: 2, text: 'Write docs' },
+]
+
+component EmptyDemo {
 	<Head>
 		<title>Empty — keyed for-of with empty fallback</title>
 	</Head>
-	let &[todos] = track([
-		{ id: 1, text: 'Buy milk' },
-		{ id: 2, text: 'Write docs' },
-	])
+	let &[todos] = track<Todo[]>(initialTodos)
 
-	function clear() { todos = [] }
-	function restore() {
-		todos = [
-			{ id: 1, text: 'Buy milk' },
-			{ id: 2, text: 'Write docs' },
-		]
+	function clear(): void { todos = [] }
+	function restore(): void {
+		todos = [...initialTodos]
 	}
 
 	<h1 class="text-3xl font-bold mb-4">Empty-state Demo</h1>

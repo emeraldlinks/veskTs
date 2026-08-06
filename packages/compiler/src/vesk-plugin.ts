@@ -19,6 +19,7 @@ declare module 'acorn' {
     parseBlock(createNewLexicalScope?: boolean, node?: any, exitStrict?: boolean): any;
     startNode(): any;
     finishNode(node: any, type: string): any;
+    finishToken(type: any, value?: any): any;
     expect(token: any): void;
     enterScope(flags: number): void;
     exitScope(): void;
@@ -52,6 +53,14 @@ export interface VeskPluginConfig {
   [key: string]: unknown;
 }
 
+function isWsChar(code: number): boolean {
+  return code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
+}
+
+function isStyleBoundary(code: number): boolean {
+  return isWsChar(code) || code === 62 || code === 47 || code === 123;
+}
+
 export function VeskParserPlugin(config: VeskPluginConfig = {}) {
   return (Parser: typeof acorn.Parser): typeof acorn.Parser => {
     const tt = (Parser as any).tokTypes || acorn.tokTypes;
@@ -71,14 +80,32 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
       }
 
       readToken(code: number): any {
-        if (this.#componentDepth > 0 && code === 60 && !(this as any).inType && this.#isBlockContext()) {
+        if (this.#componentDepth > 0 && code === 60 && this.#isBlockContext()) {
           const next = this.input.charCodeAt(this.pos + 1);
           if (next === 47 || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
-            const savedExprAllowed = (this as any).exprAllowed;
-            (this as any).exprAllowed = true;
-            const result = super.readToken(code);
-            (this as any).exprAllowed = savedExprAllowed;
-            return result;
+            const startsNewStatement = (this as any).hasPrecedingLineBreak();
+            const inType = (this as any).inType;
+            const forceJsx = () => {
+              const savedExprAllowed = (this as any).exprAllowed;
+              (this as any).exprAllowed = true;
+              const result = super.readToken(code);
+              (this as any).exprAllowed = savedExprAllowed;
+              return result;
+            };
+            if (inType) {
+              if (startsNewStatement) {
+                ++this.pos;
+                return this.finishToken(tstt.jsxTagStart);
+              }
+            } else {
+              const prev = this.type;
+              const canEndExpr =
+                prev === tt.name || prev === tt.num || prev === tt.string || prev === tt.regexp ||
+                prev === tt.bracketR || prev === tt.backQuote || prev === tt.template ||
+                prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
+                prev === tt._null || prev === tt.jsxTagEnd;
+              if (!canEndExpr || startsNewStatement) return forceJsx();
+            }
           }
         }
         return super.readToken(code);
@@ -87,16 +114,12 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
       isLet(context: any): boolean {
         if (!(this as any).isContextual('let')) return false;
 
-        const skip = /\s*/y as any;
-        skip.lastIndex = this.pos;
-        const match = skip.exec(this.input);
-        if (!match) return super.isLet(context);
-
-        const next = this.pos + match[0].length;
-        const nextCh = this.input.charCodeAt(next);
+        let p = this.pos;
+        while (p < this.input.length && isWsChar(this.input.charCodeAt(p))) p++;
+        const nextCh = this.input.charCodeAt(p);
 
         if (nextCh === 38) {
-          const afterAmp = this.input.charCodeAt(next + 1);
+          const afterAmp = this.input.charCodeAt(p + 1);
           if (afterAmp === 123 || afterAmp === 91) return true;
         }
 
@@ -175,12 +198,12 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           return node;
         }
 
-        if (this.#componentDepth > 0 && this.type === tt.privateId && this.value === 'empty') {
+        if (this.#componentDepth > 0 && this.type === tt.privateId && (this.value === 'server' || this.value === 'client' || this.value === 'empty')) {
           let p = this.end;
-          while (p < this.input.length && /\s/.test(this.input[p])) p++;
+          while (p < this.input.length && isWsChar(this.input.charCodeAt(p))) p++;
           if (this.input.charCodeAt(p) === 123) {
             const node = this.startNode();
-            (node as any).tag = 'empty';
+            (node as any).tag = this.value;
             (node as any).body = [];
             this.next();
             this.expect(tt.braceL);
@@ -192,7 +215,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
 
         if (this.#componentDepth > 0 && this.type === tt.name && this.value === 'empty') {
           let p = this.end;
-          while (p < this.input.length && /\s/.test(this.input[p])) p++;
+          while (p < this.input.length && isWsChar(this.input.charCodeAt(p))) p++;
           if (this.input.charCodeAt(p) === 123) {
             const node = this.startNode();
             (node as any).tag = 'empty';
@@ -343,7 +366,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         }
         this.enterScope(2 | (isAsync ? 4 : 0));
 
-        (node as any).client = this.type === tt.name && this.value === 'client' ? (this.next(), true) : false;
+        (node as any).client = (this.type === tt.name || this.type === tt.privateId) && this.value === 'client' ? (this.next(), true) : false;
 
         if (this.type === tt.parenL) {
           this.parseFunctionParams(node);
@@ -351,7 +374,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           (node as any).params = [];
         }
 
-        if (!(node as any).client && this.type === tt.name && this.value === 'client') {
+        if (!(node as any).client && (this.type === tt.name || this.type === tt.privateId) && this.value === 'client') {
           (node as any).client = true;
           this.next();
         }
@@ -368,7 +391,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
       jsx_parseElementAt(startPos: number, startLoc?: any): any {
         const prefixLen = Math.min(20, this.input.length - startPos);
         const prefix = this.input.slice(startPos, startPos + prefixLen);
-        if (/^<style[\s/>{\n]/.test(prefix) || prefix.startsWith('<style>')) {
+        if (prefix.startsWith('<style') && isStyleBoundary(prefix.charCodeAt(6))) {
           return this.parseStyleElement(startPos, startLoc);
         }
         return super.jsx_parseElementAt(startPos, startLoc);

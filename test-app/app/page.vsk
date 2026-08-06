@@ -1,8 +1,18 @@
 import {track} from "@vesk/runtime"
 
+interface CountProps {
+	count: number
+}
+
+interface ThrowProps {
+	fail: boolean
+	count: number
+	msg: string
+}
+
 component Home (){
 	<Head> <title> VeskTS test app </title></Head>
-  const &[count] = track(10)
+  const &[count] = track<number>(10)
   
  
 	<h1 class="text-4xl font-bold mb-2">Welcome to Vesk</h1>
@@ -34,7 +44,7 @@ component Home (){
 
 
 
-component Throws(props) {
+component Throws(props: ThrowProps) {
 	if (props.fail) throw new Error(props.msg);
 	return <p>OK</p>
 }
@@ -43,13 +53,13 @@ component Throws(props) {
 
 export component Appx {
 	try {
-		<Throws fail={true} msg="Boom!" />
+		<Throws fail={true} count={0} msg="Boom!" />
 	} catch(e) {
-		<p class="error">Error: {e.message}</p>
+		<p class="error">Error: {(e as Error).message}</p>
 	}
 }
 
-component Throw(props) client {
+component Throw(props: ThrowProps) client {
 
 
 	if (props.count < 15) throw new Error(props.msg);
@@ -59,11 +69,11 @@ component Throw(props) client {
 
 
 
-export component Appxx(props)  {
+export component Appxx(props: CountProps)  {
 	<p> Count: {props.count} </p>
 	try {
-		<Throw count={props.count} msg={`Insufficient! ${props.count} `}/>
+		<Throw count={props.count} fail={true} msg={`Insufficient! ${props.count} `}/>
 	} catch(e) {
-		<p class="error">Error: {e.message}</p>
+		<p class="error">Error: {(e as Error).message}</p>
 	}
 }

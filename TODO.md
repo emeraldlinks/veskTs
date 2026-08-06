@@ -4,7 +4,7 @@
 
 **Current phase:** 5 (CLI + Dev Tooling)
 
-**Total tests:** 386 passing (69 parser + 69 server + 104 client + 41 integration + 22 runtime + 14 CLI + 8 SSG + 14 compiler router + 11 runtime router + 17 E2E router demo + 17 fixtures)
+**Total tests:** compiler 685 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 22 + parser 79 + server-codegen 86 + integration 98 + client-codegen 134 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 111
 **Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
 
 ---
@@ -109,6 +109,85 @@
 - [ ] `vesk init` creates `src/global.css` (Tailwind entrypoint)
 - [ ] `packages/adapters/vite` — vite-plugin-vesk
 - [ ] Write `/docu/cli/commands.md`
+
+---
+
+## Current Session Work
+
+### Reactivity in components
+- [x] **`effect()` in components** — auto-imported (`@vesk/runtime`) in server + client scopes; expressions rewritten with `set()/get()` on both sides; works in statement and expression mode. 3 integration tests.
+- [x] **`derived`/`untrack`/`peek`/`tick`/`flushSync`/`on_destroy`/`createContext` auto-import** — server scope via `autoImportable` scan (RuntimeStatement + loadFn + staticProps).
+- [x] **Phantom `batch` import removed** — `batch` doesn't exist in the runtime; no auto-import, no client import emission.
+
+### Client islands
+- [x] **`component Name() #client {}` syntax** — `#client` keyword accepted before and after params (`tt.privateId`).
+- [x] **`{#client}` / `{#server}` / `{#empty}` blocks** — parsed as block tags; server skips `{#client}` content, client skips `{#server}`.
+- [x] Islands render on both server and client (per design); `{#client}` content is SSR-stripped, present in client bundle.
+
+### Loops + switch on client (statements page fix)
+- [x] **`WhileLoop` / `ForLoop` / `SwitchBlock` client emission** — anchor comments + render function + flip-effect re-render (`destroy_block` + `__cleanup`), wired into `emitNode`.
+- [x] **Switch SSR fall-through fixed** — `break;` emitted per case (server + client); old test updated to matching-case-only semantics.
+- [ ] **Hydrate-mode loop claiming** — initial claim of SSR-present loop content not implemented yet (flip-effect only on condition change); leftover SSR markers inside loop bodies may still confuse subsequent claiming. **Blocks the original statements-page browser bug from being fully fixed in hydrate mode.**
+
+### SSR correctness
+- [x] **Event handlers excluded from SSR HTML** — `on*` dynamic attributes no longer evaluated server-side (was executing mutations / crashing); skipped like static handlers.
+- [x] **Dynamic attribute placeholder bug** — `class={x}` etc. never rendered server-side (replace never matched); placeholders now appended to openTag.
+- [ ] **Async page 500** — server-only issue, undiagnosed.
+
+### Full TypeScript support in .vsk (tsc-in-.vsk)
+- [x] **Runtime TS-stripping for emitted JS** — new `strip-ts.ts`: removes annotations, `as`/`satisfies`/`!`/`<T>expr`/generic-call wrappers, type arguments, and drops type-only statements (interfaces/type aliases/enums/declare) from both server and client bundles; raw text preserved when no TS syntax present (`hasTsSyntax` fast path). Top-level `evalTopLevelCode` regex fallbacks removed (AST-only). **Fix: TS-wrapper stripping is now recursive** (`context.visit(node.expression)` for TSAsExpression/TSSatisfiesExpression/TSNonNullExpression/TSTypeAssertion/TSInstantiationExpression) — nested `as unknown as`, `as const as`, `!`+`satisfies` chains strip fully.
+- [x] **Tokenizer: JSX-vs-generic + JSX-after-statement** — `vesk-plugin.ts` `readToken` forces `jsxTagStart` when `<`+letter/`/` follows a non-expression-ending token OR starts a new statement (line break), so `helper<string>('x')` stays generic while `[3, 4]\n<p>{x}</p>` parses as JSX (ASI). **Fix: statement-mode `as`/`satisfies` + newline + bare JSX** — acorn-typescript leaves `inType` set after a trailing `as <Type>`, so `<` was eaten as generic type args (`string<p>`). `readToken` now also emits `jsxTagStart` directly (`finishToken(tstt.jsxTagStart)`) when in a type context AND a new statement begins on a new line.
+- [x] **Type-only imports** — `import type { X }` and inline `import { type A }` from `.ts`/`.vsk` are dropped from IR imports and both bundles (via `isTypeOnlyImport`/`stripTypeImport` in `vsk-imports.ts`, using esrap `print`), never resolved as `.vsk` component imports by `collectVskImportPaths`, but kept intact by `vskToTsx` for tsc. 15 vsk-imports tests.
+- [x] **Server codegen: dynamic attributes rendered exactly once** — `class={x}` / `` class={`bg-${x}`} `` rendered once in both modes (was duplicated `class="" class="bg-red"` when a static attr preceded the dynamic one); dynamic attrs skipped in the static loop via `dynAttrTargets`.
+- [ ] **Every TS operation works in .vsk** — interfaces, type aliases, casts (`as` chains), assertions (`!`, `satisfies`), generics, union/intersection/mapped/conditional types, utility types, keyof typeof, template literal types, enums, optional chaining, destructuring, statement-mode casts — all tested (25 ts-support tests). **Known tokenizer limits (same as TSX, JSX-before-generic ambiguity):** angle-bracket assertions `<number>expr` and generic arrows `<T,>` fail to parse.
+- [ ] **`tsc` typechecks .vsk files** — via `vskToTsx` transform + generated `.d.ts` (`generateVskDts`); `vesk typecheck` CLI command (in-memory `ts.LanguageServiceHost` — no tsx on disk, like `vue-tsc`/Volar).
+- [x] `vskToTsx` — statement mode header transform (`component → function` + `()` synthesis), track decl rewrite (`&[a, b]` → typed aliases), style blocks stripped, `client` keyword stripped.
+- [x] `generateVskDts` — typed/untyped props aliases (`AppProps = any`), collision inlining, destructured params from annotations, imports/type decls preserved. 22 tests.
+- [ ] `propsType` on ComponentIR — wire through + tests.
+- [x] TS support test suite — `ts-support.test.ts` (25 tests: parse/SSR/client/imports/casts/types in both modes).
+
+### Tree-shaken client runtime (0.1.5)
+- [x] **Tree-shaken runtime bundle** — `buildTreeShakenRuntime(runtimeDir, usedNames)` (`packages/adapter/src/client-bundle.ts`): temp entry `export { … } from './index-client.js'`, esbuild IIFE (`globalName: __veskRuntime`, treeShaking, minify, es2022), then `const { … } = __veskRuntime;` + explicit `export { … };`. Replaces regex file concatenation (fixed identifier-collision source). Falls back to legacy `buildRuntimeCode` on missing names/esbuild error.
+- [x] **ESM explicit-export bug (critical)** — top-level `const` bindings are NOT module exports in Chrome/Node; the IIFE alone yielded 0 exports in the browser. Fixed by appending the explicit `export { … };` line. Verified via Chrome 149 puppeteer probe: 110/110 names resolve.
+- [x] `runtimeExportNames(runtimeDir)` — parses `export { … } from` lines of `dist/index-client.js` (112 names); dev server uses the full set (one runtime serves all pages, 59606B), production uses per-app used names.
+- [x] `matchRoute` + `ensureChunk` exported from `@vesk/runtime/src/router` + `index-client`; legacy concat strips `export { … } from '…'` lines.
+- [x] **Production sizes** — minimal app `static/client.js` = 37596B (under 38KB; tree-shake drops reconcile/form/resource/image modules), 14-page feature-heavy test-app = 48168B (code-split page chunks keep pages small).
+- [x] **Tree-shake test suite** — `packages/adapter/src/tree-shake.test.ts` (17 asserts: IIFE, explicit exports, unused modules dropped, ESM importability, full-set exports, legacy fallback).
+- [x] Version 0.1.5 (cli/runtime/compiler/adapter) + tarballs refreshed in `test-app/tarballs/`; clean reinstall verified. `npm run dev` chain works.
+
+### Session status
+- Compiler test files run individually via `npx tsx packages/compiler/src/<file>.test.ts` (rebuild first: `npx tsx packages/cli/src/build-packages.ts`).
+- 18 compiler test files: all passing individually. Compiler 685, runtime 257, hydration 111. Server codegen: 86 passed. Client codegen: 134 passed. Integration: 98 passed. ts-support: 25 passed. vsk-imports: 15 passed.
+- Hard rule (AGENTS.md): **never use regex in the compiler/codegen** — all source manipulation through tokenizer/AST parser. Replace remaining regexes in `packages/compiler/src` (e.g. `vsk-tsx.ts` TRACK_RE/header transforms) with AST-based equivalents.
+- Hard rule (AGENTS.md): **every job completes with tests**, including the production-hydration path via `hydration-test.mjs` (`node hydration-test.mjs`). Rigorous use of the features/fixes made.
+- Hard rule (AGENTS.md): **statement mode is first-class** — every body-level feature/fix and every test suite exercising component bodies must cover both expression and statement mode.
+
+---
+
+## Before Phase 6 — remaining gaps
+
+Phase 6 is docs + examples; the items below should be closed first (blockers / in-progress milestones).
+
+### Blockers (bugs)
+- [ ] **Async page 500** — server-only issue, undiagnosed.
+- [ ] **Hydrate-mode loop claiming** — initial claim of SSR-present loop content not implemented yet (flip-effect only on condition change); leftover SSR markers inside loop bodies may confuse subsequent claiming. Blocks the original statements-page browser bug from being fully fixed in hydrate mode.
+
+### In-progress milestone: tsc-in-.vsk
+- [ ] `tsc` typechecks `.vsk` via `vskToTsx` + `generateVskDts`; `vesk typecheck` CLI command.
+- [ ] `propsType` on ComponentIR — wire through + tests.
+- [ ] Angle-bracket assertions `<T>expr` + generic arrows `<T,>` (JSX/tokenizer ambiguity, likely needs doc'd limitation + `vskToTsx`-side handling).
+
+### Phase 5 open items
+- [ ] `vesk init` creates `src/global.css` (Tailwind entrypoint)
+- [ ] `packages/adapters/vite` — vite-plugin-vesk
+- [ ] Write `/docu/cli/commands.md`
+
+### Phase 4 open items (optional before Phase 6)
+- [ ] npm packaging (`@vesk/compiler`, `@vesk/runtime`)
+- [ ] Suspense / async resources (compiler-level `SuspenseBlock` IR node)
+- [ ] Transitions / animations
+- [ ] Form actions (progressive enhancement)
+- [ ] Headless component primitives (Show/For/Switch/Match)
 
 ---
 

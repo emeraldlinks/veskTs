@@ -5,6 +5,7 @@ import {
   vskImportTarget,
   vskImportLines,
   collectVskImportPaths,
+  stripTypeImport,
 } from '@vesk/compiler/src/vsk-imports';
 
 let passed = 0;
@@ -123,6 +124,60 @@ describe('collectVskImportPaths', () => {
     } finally {
       rmSync(tmp, { recursive: true });
     }
+  });
+
+  it('ignores type-only imports', () => {
+    const tmp = mkdtempSync('/tmp/vesk-vskimports-test-');
+    try {
+      const srcDir = join(tmp, 'app');
+      mkdirSync(srcDir, { recursive: true });
+      const helperPath = join(srcDir, 'helpers.vsk');
+      writeFileSync(helperPath, 'component Helper {}');
+      const paths = collectVskImportPaths([
+        `import { Helper } from './helpers.vsk';`,
+        `import type { HelperProps } from './helpers.vsk';`,
+      ], join(srcDir, 'page.vsk'));
+      expect(paths.length).toBe(1);
+      expect(paths[0]).toBe(helperPath);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+});
+
+describe('stripTypeImport', () => {
+  it('drops whole import type statements', () => {
+    expect(stripTypeImport("import type { User } from './types.ts';")).toBeNull();
+    expect(stripTypeImport("import type { Theme } from './types.vsk';")).toBeNull();
+    expect(stripTypeImport("import type Foo from './x.ts';")).toBeNull();
+    expect(stripTypeImport("import type * as ns from './x.ts';")).toBeNull();
+  });
+
+  it('drops imports whose specifiers are all type specifiers', () => {
+    expect(stripTypeImport("import { type A, type B } from './x.ts';")).toBeNull();
+  });
+
+  it('strips inline type specifiers from mixed imports', () => {
+    expect(stripTypeImport("import { type A, helper } from './x.ts';")).toBe("import { helper } from './x.ts';");
+    expect(stripTypeImport("import value, { type C } from './x.ts';")).toBe("import value from './x.ts';");
+  });
+
+  it('leaves value imports untouched', () => {
+    expect(stripTypeImport("import { helper } from './x.ts';")).toBe("import { helper } from './x.ts';");
+    expect(stripTypeImport("import * as ns from './x.ts';")).toBe("import * as ns from './x.ts';");
+  });
+});
+
+describe('vskImportLines', () => {
+  it('skips type-only imports even from .vsk targets', () => {
+    const src = [
+      "import { Helper } from './helpers.vsk';",
+      "import type { HelperProps } from './helpers.vsk';",
+      'component App {}',
+    ].join('\n');
+    const lines = vskImportLines(src);
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('Helper }');
   });
 });
 

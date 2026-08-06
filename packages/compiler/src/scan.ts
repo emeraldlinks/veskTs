@@ -5,9 +5,97 @@
  * inside quoted attributes or braces inside strings/comments.
  */
 
+export function isWhitespaceChar(ch: string): boolean {
+  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v' || ch === '\u00a0' || ch === '\ufeff';
+}
+
+export function isIdentStartCode(code: number): boolean {
+  return (
+    (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || code === 95 || code === 36 || code >= 128
+  );
+}
+
+export function isIdentCharCode(code: number): boolean {
+  return isIdentStartCode(code) || (code >= 48 && code <= 57);
+}
+
+export function isIdentStart(ch: string): boolean {
+  return ch.length > 0 && isIdentCharCode(ch.charCodeAt(0));
+}
+
+export function isIdentChar(ch: string): boolean {
+  return ch.length > 0 && isIdentCharCode(ch.charCodeAt(0));
+}
+
+/**
+ * True when `text` (ignoring leading whitespace) begins with the whole
+ * identifier `ident` — the character after it is not an identifier char,
+ * and the character before its start is not an identifier char either.
+ */
+export function startsWithIdentifier(text: string, ident: string): boolean {
+  let i = 0;
+  while (i < text.length && isWhitespaceChar(text[i])) i++;
+  if (text.slice(i, i + ident.length) !== ident) return false;
+  if (i > 0 && isIdentChar(text[i - 1])) return false;
+  const after = i + ident.length;
+  return after >= text.length || !isIdentChar(text[after]);
+}
+
+/**
+ * Strips a leading `const` / `let` / `var` keyword (plus surrounding
+ * whitespace) from a declaration prefix. Returns the remainder or the
+ * input unchanged when no keyword is present.
+ */
+export function stripDeclKeyword(text: string): string {
+  for (const kw of ['const', 'let', 'var']) {
+    if (startsWithIdentifier(text, kw)) {
+      let i = 0;
+      while (i < text.length && isWhitespaceChar(text[i])) i++;
+      i += kw.length;
+      while (i < text.length && isWhitespaceChar(text[i])) i++;
+      return text.slice(i);
+    }
+  }
+  return text;
+}
+
+/**
+ * Removes trailing semicolons (and whitespace between them) from `text`.
+ */
+export function stripTrailingSemicolons(text: string): string {
+  let end = text.length;
+  while (end > 0) {
+    const ch = text[end - 1];
+    if (ch === ';') { end--; continue; }
+    if (isWhitespaceChar(ch)) { end--; continue; }
+    break;
+  }
+  return text.slice(0, end);
+}
+
 export function skipWhitespace(text: string, i: number): number {
-  while (i < text.length && /\s/.test(text[i])) i++;
+  while (i < text.length && isWhitespaceChar(text[i])) i++;
   return i;
+}
+
+/**
+ * Collapses runs starting at a newline into a single space (JSX text
+ * normalization): every `\n` plus any following whitespace becomes `' '`.
+ */
+export function collapseNewlineWhitespace(text: string): string {
+  let out = '';
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '\n') {
+      out += ' ';
+      while (i < text.length && isWhitespaceChar(text[i])) i++;
+      continue;
+    }
+    out += c;
+    i++;
+  }
+  return out;
 }
 
 /**
@@ -85,12 +173,13 @@ export function findBalancedEnd(text: string, openIndex: number): number {
 }
 
 /**
- * Splits `text` on every match of `sep` that occurs at bracket depth 0,
- * outside strings and comments. `sep` is matched with its own flags plus
- * `g` (a new global regex is built, so a sticky `y` flag is not preserved).
+ * Splits `text` on every whole-identifier occurrence of `sep` that sits at
+ * bracket depth 0, outside strings and comments. The identifier must be a
+ * complete word (non-identifier characters on both sides), so `of` matches
+ * `for (x of y)` but not `xoff` or `info`. The surrounding separator text
+ * is not included in the parts.
  */
-export function splitTopLevel(text: string, sep: RegExp): string[] {
-  const re = new RegExp(sep.source, sep.flags.includes('g') ? sep.flags : sep.flags + 'g');
+export function splitTopLevel(text: string, sep: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let last = 0;
@@ -102,12 +191,13 @@ export function splitTopLevel(text: string, sep: RegExp): string[] {
     if (c === '(' || c === '[' || c === '{') depth++;
     else if (c === ')' || c === ']' || c === '}') {
       if (depth > 0) depth--;
-    } else if (depth === 0) {
-      re.lastIndex = i;
-      const m = re.exec(text);
-      if (m && m.index === i) {
-        parts.push(text.slice(last, i));
-        i += m[0].length;
+    } else if (depth === 0 && c === sep[0] && text.slice(i, i + sep.length) === sep) {
+      const before = i === 0 ? ' ' : text[i - 1];
+      const after = i + sep.length < text.length ? text[i + sep.length] : ' ';
+      if (!isIdentChar(before) && !isIdentChar(after)) {
+        parts.push(text.slice(last, i).trimEnd());
+        i += sep.length;
+        while (i < text.length && isWhitespaceChar(text[i])) i++;
         last = i;
         continue;
       }
@@ -119,6 +209,31 @@ export function splitTopLevel(text: string, sep: RegExp): string[] {
 }
 
 /**
+ * True when `text` contains a whole-identifier `of` or `in` at bracket
+ * depth 0, outside strings and comments — used to tell `for (... of ...)`
+ * and `for (... in ...)` headers apart from classic `for` loops.
+ */
+export function containsForOfIn(text: string): boolean {
+  let depth = 0;
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === '`') { i = skipString(text, i); continue; }
+    if (c === '/' && (text[i + 1] === '/' || text[i + 1] === '*')) { i = skipComment(text, i); continue; }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth > 0) depth--;
+    } else if (depth === 0 && (c === 'o' || c === 'i') && (text.slice(i, i + 2) === 'of' || text.slice(i, i + 2) === 'in')) {
+      const before = i === 0 ? ' ' : text[i - 1];
+      const after = i + 2 < text.length ? text[i + 2] : ' ';
+      if (!isIdentChar(before) && !isIdentChar(after)) return true;
+    }
+    i++;
+  }
+  return false;
+}
+
+/**
  * Extracts the argument text of a `track<...>(...)` call from an init
  * expression. Handles nested generics (`track<Map<string, number>>(...)`)
  * and balanced parens in the argument. Returns the inner expression text,
@@ -126,9 +241,8 @@ export function splitTopLevel(text: string, sep: RegExp): string[] {
  */
 export function unwrapTrackCall(init: string): string {
   const text = init.trim();
-  const m = /^track\b/.exec(text);
-  if (!m) return init;
-  let i = skipWhitespace(text, m[0].length);
+  if (!startsWithIdentifier(text, 'track')) return init;
+  let i = skipWhitespace(text, 5);
   if (text[i] === '<') {
     i = skipTrackGeneric(text, i);
     i = skipWhitespace(text, i);
@@ -146,15 +260,14 @@ export function unwrapTrackCall(init: string): string {
  */
 export function stripTrackGeneric(init: string): string {
   const text = init.trim();
-  const m = /^track\b/.exec(text);
-  if (!m) return init;
-  let i = skipWhitespace(text, m[0].length);
+  if (!startsWithIdentifier(text, 'track')) return init;
+  let i = skipWhitespace(text, 5);
   if (text[i] !== '<') return init;
   const end = skipTrackGeneric(text, i);
   return text.slice(0, i) + text.slice(end);
 }
 
-function skipTrackGeneric(text: string, open: number): number {
+export function skipTrackGeneric(text: string, open: number): number {
   let depth = 0;
   let j = open;
   while (j < text.length) {
@@ -229,6 +342,13 @@ export function htmlTagName(token: string): string | null {
   i++;
   if (token[i] === '/') i++;
   const start = i;
-  while (i < token.length && /[a-zA-Z0-9-]/.test(token[i])) i++;
+  while (i < token.length) {
+    const code = token.charCodeAt(i);
+    if (
+      (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 45
+    ) {
+      i++;
+    } else break;
+  }
   return i > start ? token.slice(start, i) : null;
 }

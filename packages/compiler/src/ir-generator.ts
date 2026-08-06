@@ -24,16 +24,22 @@ import {
 import type { IRNode } from '@vesk/compiler/src/ir';
 import { VeskError } from '@vesk/compiler/src/errors';
 import { createBaseParser } from '@vesk/compiler/src/parser';
-import { skipWhitespace, findBalancedEnd, splitTopLevel } from '@vesk/compiler/src/scan';
+import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, collapseNewlineWhitespace } from '@vesk/compiler/src/scan';
+import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { stripTypeImport } from '@vesk/compiler/src/vsk-imports';
+import { collectCalledIdentifiers, extractImportNames, importModuleTarget } from '@vesk/compiler/src/tokens';
 import type { VeskAnnotation } from '@vesk/compiler/src/parser';
 
 let __vskAnnotations: VeskAnnotation[] = [];
 
 function parseExprNode(text: string): ESTreeNode | null {
   try {
-    const parser = createBaseParser();
-    const ast = parser.parse(`(${text})`, { ecmaVersion: 'latest', sourceType: 'module' });
-    return ((ast as { body: Array<{ expression?: ESTreeNode }> }).body[0]?.expression as ESTreeNode) ?? null;
+    const ParserClass = createBaseParser();
+    const ast = (ParserClass as unknown as { parse(input: string, opts: unknown): { body: Array<{ expression?: ESTreeNode }> } }).parse(
+      `(${text})`,
+      { ecmaVersion: 'latest', sourceType: 'module' }
+    );
+    return (ast.body[0]?.expression as ESTreeNode) ?? null;
   } catch {
     return null;
   }
@@ -119,6 +125,42 @@ function getParamNames(params: Array<{ type: string; name?: string; properties?:
   }).flat();
 }
 
+export function getPropsType(params: Array<{ type: string; name?: string; left?: any; typeAnnotation?: any; properties?: any[] }> | undefined | null, source: string): string | null {
+  if (!params || params.length === 0) return null;
+  if (params.length === 1) {
+    const p = params[0];
+    const inner = p.typeAnnotation?.typeAnnotation;
+    if (inner) return source.slice(inner.start, inner.end).trim();
+    const left = p.type === 'AssignmentPattern' ? p.left : null;
+    const innerLeft = left?.typeAnnotation?.typeAnnotation;
+    if (innerLeft) return source.slice(innerLeft.start, innerLeft.end).trim();
+    return null;
+  }
+  const members: string[] = [];
+  for (const p of params) {
+    let name: string | null = null;
+    let optional = false;
+    let type = 'any';
+    if (p.type === 'Identifier') {
+      name = p.name ?? null;
+      const inner = p.typeAnnotation?.typeAnnotation;
+      if (inner) type = source.slice(inner.start, inner.end).trim();
+    } else if (p.type === 'AssignmentPattern') {
+      optional = true;
+      name = p.left?.name ?? null;
+      const inner = p.left?.typeAnnotation?.typeAnnotation;
+      if (inner) type = source.slice(inner.start, inner.end).trim();
+    } else if (p.type === 'ObjectPattern') {
+      const inner = p.typeAnnotation?.typeAnnotation;
+      if (inner) return source.slice(inner.start, inner.end).trim();
+      continue;
+    }
+    if (name) members.push(`${JSON.stringify(name)}${optional ? '?' : ''}: ${type}`);
+  }
+  if (members.length === 0) return null;
+  return `{ ${members.join('; ')} }`;
+}
+
 function getJSXTagName(nameNode: { type: string; name?: string; object?: any; property?: any }): string {
   if (nameNode.type === 'JSXIdentifier') return nameNode.name!;
   if (nameNode.type === 'JSXMemberExpression') {
@@ -158,12 +200,22 @@ function processAttribute(source: string, attr: any): { name: string; value: str
 }
 
 function extractForHeader(text: string): string | null {
-  const m = /^for\b/.exec(text);
-  if (!m) return null;
-  const i = skipWhitespace(text, m[0].length);
+  if (!startsWithIdentifier(text, 'for')) return null;
+  let i = skipWhitespace(text, 3);
   if (text[i] !== '(') return null;
   const end = findBalancedEnd(text, i);
   return text.slice(i + 1, end);
+}
+
+/**
+ * Returns the offset of the `for` keyword in a JSXText value (ignoring
+ * leading whitespace), or -1 when the value does not begin with a `for`.
+ */
+function hasForPrefix(text: string): number {
+  if (!startsWithIdentifier(text, 'for')) return -1;
+  let i = 0;
+  while (i < text.length && isWhitespaceChar(text[i])) i++;
+  return i;
 }
 
 function processJSXChildren(source: string, children: any[]): IRNode[] {
@@ -172,7 +224,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
   while (i < children.length) {
     const child = children[i];
     if (child.type === 'JSXText') {
-      const text = child.value.replace(/\n\s*/g, ' ');
+      const text = collapseNewlineWhitespace(child.value);
       const trimmed = text.trim();
       if (!trimmed || trimmed.startsWith('//')) { i++; continue; }
 
@@ -209,13 +261,13 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
           bodyNodes = processJSXElement(source, nextChild);
         }
 
-        const ofParts = splitTopLevel(decl, /\s+of\s+/);
+        const ofParts = splitTopLevel(decl, 'of');
         if (ofParts.length === 2) {
-          const itemVar = ofParts[0].trim().replace(/^(const|let|var)\s+/, '');
+          const itemVar = stripDeclKeyword(ofParts[0]).trim();
           const exprText = ofParts[1].trim();
           const arrExpr = new Expression(exprText, [], parseExprNode(exprText), null);
-          const rawFor = child.value.match(/^\s*for\s*\(/);
-          const ann = rawFor ? getForClauseAnnotation(child.start + rawFor[0].indexOf('for')) : null;
+          const rawFor = hasForPrefix(child.value);
+          const ann = rawFor ? getForClauseAnnotation(child.start + rawFor) : null;
           const keyExpr = ann?.keyRange ? new Expression(source.slice(ann.keyRange[0], ann.keyRange[1])) : null;
           const indexVar = ann?.indexName ?? null;
           let alternate: IRNode[] = [];
@@ -235,9 +287,9 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
           continue;
         }
 
-        const inParts = splitTopLevel(decl, /\s+in\s+/);
+        const inParts = splitTopLevel(decl, 'in');
         if (inParts.length === 2) {
-          const itemVar = inParts[0].trim().replace(/^(const|let|var)\s+/, '');
+          const itemVar = inParts[0].trim();
           const arrExpr = new Expression(inParts[1].trim());
           result.push(new ForLoop(itemVar, arrExpr, '', bodyNodes, 'for-in'));
           i += 2;
@@ -704,8 +756,12 @@ export function generateIR(ast: any, source: string): IRRoot {
 
   for (const node of ast.body) {
     if (node.type === 'ImportDeclaration') {
-      imports.push(getSource(source, node));
+      const raw = getSource(source, node);
+      const cleaned = stripTypeImport(raw);
+      if (cleaned === null) continue;
+      imports.push(cleaned);
       for (const spec of node.specifiers) {
+        if (spec.importKind === 'type') continue;
         if (spec.type === 'ImportSpecifier') {
           importedNames.add(spec.local.name);
         }
@@ -721,7 +777,7 @@ export function generateIR(ast: any, source: string): IRRoot {
           ? decl.declarations[0]?.id?.name
           : null;
       if (fnName === 'getStaticProps') {
-        staticProps = getSource(source, decl);
+        staticProps = stripCodeTypes(getSource(source, decl));
         continue;
       }
     }
@@ -734,7 +790,7 @@ export function generateIR(ast: any, source: string): IRRoot {
           ? decl.declarations[0]?.id?.name
           : null;
       if (fnName === 'load') {
-        loadFn = getSource(source, decl);
+        loadFn = stripCodeTypes(getSource(source, decl));
         continue;
       }
     }
@@ -766,6 +822,7 @@ export function generateIR(ast: any, source: string): IRRoot {
 
     const name = inner.id.name;
     const paramNames = getParamNames(inner.params, source);
+    const propsType = getPropsType(inner.params, source);
     const bodyStmts = inner.body.body;
     const isClientComp = !!inner.client;
 
@@ -773,7 +830,7 @@ export function generateIR(ast: any, source: string): IRRoot {
       const raw = processStatementModeBody(source, bodyStmts);
       const { body, css } = extractStyle(raw);
       validateBlocks(name, isClientComp, body);
-      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body) });
+      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
       comp.style = css;
       components.push(comp);
     } else {
@@ -812,7 +869,7 @@ export function generateIR(ast: any, source: string): IRRoot {
       const guardBody = buildGuardChain(source, guardClauses, mainReturn);
       const { body, css } = extractStyle([...preamble, ...guardBody]);
       validateBlocks(name, isClientComp, body);
-      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body) });
+      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
       comp.style = css;
       components.push(comp);
     }
@@ -820,27 +877,35 @@ export function generateIR(ast: any, source: string): IRRoot {
 
   const autoImportable = [
     'useFetch', 'useRouter', 'useParams', 'usePathname', 'useSearchParams', 'useNavigate',
-    'useHead', 'useTitle',
     'defineAction',
     'Form', 'Field', 'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom',
-    'Link', 'NavLink', 'Outlet',
+    'Link', 'NavLink', 'Outlet', 'Redirect',
     'Image', 'Portal',
     'Experiment',
+    'JsonLd', 'ArticleSchema', 'ProductSchema', 'FAQPageSchema', 'BreadcrumbListSchema',
+    'OrganizationSchema', 'LocalBusinessSchema', 'VideoSchema',
+    'effect', 'derived', 'untrack', 'peek', 'tick', 'flushSync', 'on_destroy',
+    'createContext',
+    'redirect', 'permanentRedirect', 'notFound', 'NotFoundError',
+    'createResource', 'getAction', 'validateActionInput', 'issuesToFieldMap', 'isFormAction',
   ];
   const usedFunctions = new Set<string>();
-
-  for (const code of topLevelCode) {
+  const addUsedFrom = (code: string): void => {
+    const called = collectCalledIdentifiers(code);
     for (const fn of autoImportable) {
-      if (code.includes(fn + '(')) usedFunctions.add(fn);
+      if (called.has(fn)) usedFunctions.add(fn);
     }
+  };
+
+  for (const code of topLevelCode) addUsedFrom(code);
+  for (const code of [loadFn, staticProps]) {
+    if (code) addUsedFrom(code);
   }
 
   function scanForAutoImport(nodes: IRNode[]): void {
     for (const node of nodes) {
       if (node instanceof RuntimeStatement && node.raw) {
-        for (const fn of autoImportable) {
-          if (node.raw.includes(fn + '(')) usedFunctions.add(fn);
-        }
+        addUsedFrom(node.raw);
       }
       if (node instanceof ComponentCall) {
         if (autoImportable.includes(node.componentName)) {
@@ -848,9 +913,7 @@ export function generateIR(ast: any, source: string): IRRoot {
         }
         for (const prop of node.props) {
           if (prop.value && prop.value.raw) {
-            for (const fn of autoImportable) {
-              if (prop.value.raw.includes(fn + '(')) usedFunctions.add(fn);
-            }
+            addUsedFrom(prop.value.raw);
           }
         }
         scanForAutoImport(node.children);
@@ -864,9 +927,7 @@ export function generateIR(ast: any, source: string): IRRoot {
         scanForAutoImport(node.alternateNodes);
       }
       if (node instanceof DynamicBinding && node.expression && node.expression.raw) {
-        for (const fn of autoImportable) {
-          if (node.expression.raw.includes(fn + '(')) usedFunctions.add(fn);
-        }
+        addUsedFrom(node.expression.raw);
       }
       if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) {
         scanForAutoImport(node.children);
@@ -878,10 +939,8 @@ export function generateIR(ast: any, source: string): IRRoot {
   if (usedFunctions.size > 0) {
     const existing = new Set<string>();
     for (const imp of imports) {
-      const match = imp.match(/import\s+\{([^}]+)\}\s+from\s+['"]@vesk\/runtime['"]/);
-      if (match) {
-        for (const n of match[1].split(',')) existing.add(n.trim().split(/\s+as\s+/).pop()!);
-      }
+      if (importModuleTarget(imp) !== '@vesk/runtime') continue;
+      for (const n of extractImportNames(imp)) existing.add(n);
     }
     const missing = [...usedFunctions].filter(f => !existing.has(f));
     if (missing.length > 0) {

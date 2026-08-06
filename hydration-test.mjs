@@ -421,7 +421,7 @@ async function main() {
     await page.goto(BASE, { waitUntil: 'networkidle0' });
 
     const titleBefore = await page.evaluate(() => document.title);
-    assert(titleBefore !== 'Async — load() + async components', 'title is not the async one yet: "' + titleBefore + '"');
+    assert(titleBefore !== 'Async — async components', 'title is not the async one yet: "' + titleBefore + '"');
 
     // No data request should fire for the initial SSR'd page (container already hydrated)
     assert(dataRequests.length === 0, `no X-Vesk-Data request on initial load (got ${dataRequests.length})`);
@@ -439,11 +439,11 @@ async function main() {
     assert(await page.evaluate(() => window.__spaFlag === true), '/async reached via SPA (no reload)');
 
     const finalTitle = await page.evaluate(() => document.title);
-    assert(finalTitle === 'Async — load() + async components', 'title swapped to fresh head: "' + finalTitle + '"');
+    assert(finalTitle === 'Async — async components', 'title swapped to fresh head: "' + finalTitle + '"');
 
     const bodyText = await page.evaluate(() => document.body.textContent);
-    assert(bodyText.includes('Posts from load()'), 'async page content rendered');
-    assert(bodyText.includes('Hello Vesk'), 'posts from load() props rendered: ' + (bodyText.match(/Hello Vesk/) ? 'yes' : 'no'));
+    assert(bodyText.includes('Posts fetched during SSR'), 'async page content rendered');
+    assert(bodyText.includes('Hello Vesk'), 'posts rendered via useFetch: ' + (bodyText.match(/Hello Vesk/) ? 'yes' : 'no'));
 
     const dataForAsync = dataRequests.filter(u => u.includes('/async'));
     assert(dataForAsync.length === 1, `exactly one X-Vesk-Data request for /async (got ${dataForAsync.length})`);

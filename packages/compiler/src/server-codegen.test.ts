@@ -3,7 +3,7 @@
  *
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
-import { render, renderPage } from '@vesk/compiler/src/server-codegen';
+import { render, renderPage, irNodeToJS } from '@vesk/compiler/src/server-codegen';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
@@ -50,6 +50,26 @@ describe('Static HTML Rendering', () => {
 	});
 	it('renders attributes', () => {
 		expect(render('component App { return <div class="c" id="i">X</div>; }', 'App')).toBe('<div class="c" id="i">X</div>');
+	});
+	it('renders dynamic attributes exactly once', () => {
+		expect(render('component App(props: { c: string }) { return <div class={props.c}>x</div>; }', 'App', { c: 'red' })).toBe('<div class="red">x</div>');
+	});
+	it('renders template-literal dynamic attributes once', () => {
+		expect(render('component App(props: { c: string }) { return <div class={`bg-${props.c}`}>x</div>; }', 'App', { c: 'red' })).toBe('<div class="bg-red">x</div>');
+	});
+	it('mixes static and dynamic attributes without duplication', () => {
+		expect(render('component App(props: { id: string }) { return <div class="a" id={props.id}>x</div>; }', 'App', { id: 'i1' })).toBe('<div class="a" id="i1">x</div>');
+	});
+	it('renders dynamic attributes once in statement mode', () => {
+		const html = render(`
+			component App(props: { c: string }) {
+				<div class={props.c} data-n="1">x</div>
+			}
+		`, 'App', { c: 'blue' });
+		expect(html).toContain('class="blue"');
+		expect(html).toContain('data-n="1"');
+		expect(html.match(/class=/g) || []).toHaveLength(1);
+		expect(html.match(/data-n=/g) || []).toHaveLength(1);
 	});
 	it('renders self-closing HTML tags', () => {
 		expect(render('component App { return <br />; }', 'App')).toBe('<br />');
@@ -357,14 +377,39 @@ describe('Statement Mode Server Rendering', () => {
 			}
 		`, 'App', { s: false })).toBe('<div>Off</div>');
 	});
- 	it('renders for-of at body level', () => {
-		const html = render(`
-			component App(props: { items: string[] }) {
-				for (const item of props.items) { <div>{item}</div> }
-			}
-		`, 'App', { items: ['A', 'B', 'C'] });
-		expect(html).toBe('<div>A</div><div>B</div><div>C</div>');
-	});
+  	it('renders for-of at body level', () => {
+ 		const html = render(`
+ 			component App(props: { items: string[] }) {
+ 				for (const item of props.items) { <div>{item}</div> }
+ 			}
+ 		`, 'App', { items: ['A', 'B', 'C'] });
+ 		expect(html).toBe('<div>A</div><div>B</div><div>C</div>');
+ 	});
+ 	it('for-of emits a const-declared loop variable', () => {
+ 		const src = `
+ 			component App(props: { items: string[] }) {
+ 				for (const item in props.items) { <div>{item}</div> }
+ 			}
+ 		`;
+ 		const ir = generateIR(parse(src), src);
+ 		function findLoop(nodes: any[]): ForLoop | null {
+ 			for (const n of nodes) {
+ 				if (n instanceof ForLoop) return n;
+ 				for (const key of ['body', 'bodyTemplate', 'children', 'alternateNodes']) {
+ 					if (Array.isArray((n as any)[key])) {
+ 						const r = findLoop((n as any)[key]);
+ 						if (r) return r;
+ 					}
+ 				}
+ 			}
+ 			return null;
+ 		}
+ 		const loop = findLoop(ir.components[0].body);
+ 		expect(loop).toBeTruthy();
+ 		const code = irNodeToJS(loop as any, new Map());
+ 		expect(code).toContain('for (const item of ');
+ 		expect(code).not.toContain('for (item of ');
+ 	});
 	it('renders keyed for-of with #empty state (items present)', () => {
 		const html = render(`
 			component App(props: { todos: { id: number, text: string }[] }) {
@@ -569,7 +614,7 @@ describe('Statement Mode Server Rendering', () => {
 						<div>Other</div>
 				}
 			}
-		`, 'App', { kind: 'a' })).toBe('<div>A</div><div>B</div><div>Other</div>');
+		`, 'App', { kind: 'a' })).toBe('<div>A</div>');
 		expect(render(`
 			component App(props: { kind: string }) {
 				switch (props.kind) {
@@ -581,7 +626,7 @@ describe('Statement Mode Server Rendering', () => {
 						<div>Other</div>
 				}
 			}
-		`, 'App', { kind: 'b' })).toBe('<div>B</div><div>Other</div>');
+		`, 'App', { kind: 'b' })).toBe('<div>B</div>');
 		expect(render(`
 			component App(props: { kind: string }) {
 				switch (props.kind) {

@@ -8,13 +8,13 @@ interface ResourceState<T> {
 	data: T | undefined;
 }
 
-interface ResourceAccessor<T> {
-	(): T | undefined;
+export interface Resource<T> extends PromiseLike<T> {
 	loading: boolean;
 	error: unknown;
+	data: T | undefined;
 	_state?: Tracked;
-	refresh?: () => void;
-	abort?: () => void;
+	refresh: () => void;
+	abort: () => void;
 }
 
 export interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> {
@@ -62,6 +62,8 @@ interface ResourceHandle<T> {
 	options: UseFetchOptions<T>;
 	block: ReturnType<typeof scope>;
 	controller: AbortController | null;
+	settled: Promise<void>;
+	settleNotify: () => void;
 }
 
 function getClientCache(): Map<string, CacheEntry> {
@@ -242,8 +244,10 @@ function settle<T>(handle: ResourceHandle<T>, data: T): void {
 	if (handle.block !== null && is_destroyed(handle.block)) return;
 	if (handle.into) setInto(handle.into, data);
 	const current = get(handle.state) as ResourceState<unknown>;
-	if (current.data === data && !current.loading && current.error === null) return;
-	set(handle.state, { loading: false, error: null, data });
+	if (!(current.data === data && !current.loading && current.error === null)) {
+		set(handle.state, { loading: false, error: null, data });
+	}
+	handle.settleNotify();
 }
 
 function settleError<T>(handle: ResourceHandle<T>, error: unknown): void {
@@ -252,10 +256,12 @@ function settleError<T>(handle: ResourceHandle<T>, error: unknown): void {
 		if (handle.controller !== null) return;
 		const current = get(handle.state) as ResourceState<unknown>;
 		if (current.loading) set(handle.state, { loading: false, error: null, data: current.data });
+		handle.settleNotify();
 		return;
 	}
 	const current = get(handle.state) as ResourceState<unknown>;
 	set(handle.state, { loading: false, error, data: current.data });
+	handle.settleNotify();
 }
 
 function markRefetching<T>(handle: ResourceHandle<T>): void {
@@ -407,18 +413,45 @@ export function mutate(key: string, data?: unknown): void {
 	}
 }
 
-function createResourceAccessor<T>(state: object): ResourceAccessor<T> {
-	function resource(): T | undefined {
-		return (get(state) as ResourceState<T>).data;
-	}
-	Object.defineProperty(resource, 'loading', {
-		get() { return (get(state) as ResourceState<T>).loading; }
+function createResourceAccessor<T>(handle: ResourceHandle<T>): Resource<T> {
+	const state = handle.state;
+	const accessor: Record<string, unknown> = {};
+
+	Object.defineProperty(accessor, 'loading', {
+		get() { return (get(state) as ResourceState<T>).loading; },
 	});
-	Object.defineProperty(resource, 'error', {
-		get() { return (get(state) as ResourceState<T>).error; }
+	Object.defineProperty(accessor, 'error', {
+		get() { return (get(state) as ResourceState<T>).error; },
 	});
-	(resource as unknown as Record<string, unknown>)._state = state;
-	return resource as unknown as ResourceAccessor<T>;
+	Object.defineProperty(accessor, 'data', {
+		get() { return (get(state) as ResourceState<T>).data; },
+	});
+	accessor._state = state;
+
+	const toData = async (): Promise<T> => {
+		for (;;) {
+			const s = get(state) as ResourceState<T>;
+			if (!s.loading) {
+				if (s.error) throw s.error;
+				return s.data as T;
+			}
+			await handle.settled;
+		}
+	};
+
+	accessor.then = (onFulfilled?: ((v: T) => unknown) | null, onRejected?: ((r: unknown) => unknown) | null): Promise<unknown> =>
+		toData().then(onFulfilled, onRejected);
+	accessor.catch = (onRejected?: ((r: unknown) => unknown) | null): Promise<unknown> =>
+		toData().catch(onRejected);
+	accessor.finally = (onFinally?: (() => void) | null): Promise<unknown> =>
+		toData().finally(onFinally);
+
+	accessor.refresh = () => revalidate(handle);
+	accessor.abort = () => {
+		if (!isServer()) handle.controller?.abort();
+	};
+
+	return accessor as unknown as Resource<T>;
 }
 
 export function createResource<T>(
@@ -426,8 +459,9 @@ export function createResource<T>(
 	key?: string,
 	into?: Tracked,
 	options: UseFetchOptions<T> = {},
-): ResourceAccessor<T> {
+): Resource<T> {
 	const resourceKey = key || options.key || (fn as unknown as Record<string, string>)._ssrKey || fn.toString().slice(0, 64);
+	let notify = () => {};
 	const handle: ResourceHandle<T> = {
 		key: resourceKey,
 		state: tracked({ loading: true, error: null, data: undefined }),
@@ -436,9 +470,14 @@ export function createResource<T>(
 		options,
 		block: scope(),
 		controller: null,
+		settled: new Promise<void>((res) => { notify = res; }),
+		settleNotify: () => {
+			notify();
+			handle.settled = new Promise<void>((res) => { notify = res; });
+		},
 	};
 
-	const accessor = createResourceAccessor<T>(handle.state);
+	const accessor = createResourceAccessor<T>(handle);
 	accessor.refresh = () => revalidate(handle);
 	accessor.abort = () => {
 		if (!isServer()) handle.controller?.abort();
@@ -479,7 +518,7 @@ export function createResource<T>(
 export function useFetch<T = unknown>(
 	urlOrFn: string | (() => Promise<T>),
 	options: UseFetchOptions<T> = {},
-): ResourceAccessor<T> {
+): Resource<T> {
 	const fetcher = typeof urlOrFn === 'function'
 		? urlOrFn
 		: createFetcher<T>(urlOrFn, options);
@@ -488,18 +527,18 @@ export function useFetch<T = unknown>(
 	return resource;
 }
 
-useFetch.text = <T = string>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): ResourceAccessor<T> =>
-	useFetch<T>(() => fetch(url, buildRequestInit(options ?? {})).then(r => r.text() as Promise<T>), {
+useFetch.text = <T = string>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T> =>
+	useFetch<T>(() => fetch(resolveFetchUrl(url), buildRequestInit(options ?? {})).then(r => r.text() as Promise<T>), {
 		...options,
 		key: options?.key ?? url,
 	});
-useFetch.json = <T = unknown>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): ResourceAccessor<T> =>
-	useFetch<T>(() => fetch(url, buildRequestInit(options ?? {})).then(r => r.json() as Promise<T>), {
+useFetch.json = <T = unknown>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T> =>
+	useFetch<T>(() => fetch(resolveFetchUrl(url), buildRequestInit(options ?? {})).then(r => r.json() as Promise<T>), {
 		...options,
 		key: options?.key ?? url,
 	});
-useFetch.arrayBuffer = <T = ArrayBuffer>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): ResourceAccessor<T> =>
-	useFetch<T>(() => fetch(url, buildRequestInit(options ?? {})).then(r => r.arrayBuffer() as Promise<T>), {
+useFetch.arrayBuffer = <T = ArrayBuffer>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T> =>
+	useFetch<T>(() => fetch(resolveFetchUrl(url), buildRequestInit(options ?? {})).then(r => r.arrayBuffer() as Promise<T>), {
 		...options,
 		key: options?.key ?? url,
 	});

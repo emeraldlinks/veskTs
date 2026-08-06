@@ -1,34 +1,32 @@
-export async function load() {
-	const base = globalThis.__vesk_ssr_base_url || 'http://localhost:3000'
-	const res = await fetch(`${base}/api/posts`)
-	const posts = await res.json()
-	return { props: { posts } }
+interface Post {
+	id: number
+	title: string
+	slug: string
+	excerpt: string
+	author: string
+	tags: string[]
+	date: string
 }
 
-component AsyncPage(props) {
+async component AsyncPage() {
 	<Head>
-		<title>Async — load() + async components</title>
+		<title>Async — async components</title>
 	</Head>
-	const now = Date.now()
+
+	const posts = await useFetch<Post[]>('/api/posts')
 
 	<h1 class="text-3xl font-bold mb-4">Async Demo</h1>
 	<p class="text-gray-500 mb-6">
-		Props were fetched by an <code>export async function load()</code> during SSR,
-		then awaited by this component.
+		This page is an <code>async component</code>. <code>await useFetch('/api/posts')</code> suspends
+		during SSR, the multi-pass renderer awaits it, and the page hydrates with the serialized
+		data — no client-side refetch.
 	</p>
 
-	<h2 class="text-xl font-semibold mt-6 mb-2">Posts from load()</h2>
-	if (props.posts && props.posts.length > 0) {
-		for (const post of props.posts) {
-			<div class="bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-100">
-				<h3 class="font-semibold">{post.title}</h3>
-				<p class="text-gray-500 text-sm">{post.excerpt}</p>
-			</div>
-		}
-	} else {
-		<p class="text-gray-400 text-sm">Loading posts…</p>
+	<h2 class="text-xl font-semibold mt-6 mb-2">Posts fetched during SSR</h2>
+	for (const post of posts) {
+		<div class="bg-white rounded-lg p-4 mb-3 shadow-sm border border-gray-100">
+			<h3 class="font-semibold">{post.title}</h3>
+			<p class="text-gray-500 text-sm">{post.excerpt}</p>
+		</div>
 	}
-
-	<h2 class="text-xl font-semibold mt-6 mb-2">async component with await</h2>
-	<p class="text-gray-400 text-sm">server timestamp: {now}</p>
 }

@@ -1,13 +1,21 @@
+interface User {
+	id: number
+	name: string
+	role: 'admin' | 'dev'
+}
+
+const users: User[] = [
+	{ id: 1, name: 'Ada', role: 'admin' },
+	{ id: 2, name: 'Grace', role: 'dev' },
+	{ id: 3, name: 'Alan', role: 'dev' },
+]
+
+const numbers: number[] = [1, 2, 3, 4, 5]
+
 component MapDemo {
 	<Head>
 		<title>Map — inline .map() in JSX</title>
 	</Head>
-	const users = [
-		{ id: 1, name: 'Ada', role: 'admin' },
-		{ id: 2, name: 'Grace', role: 'dev' },
-		{ id: 3, name: 'Alan', role: 'dev' },
-	]
-	const numbers = [1, 2, 3, 4, 5]
 
 	<h1 class="text-3xl font-bold mb-4">Inline .map() Demo</h1>
 

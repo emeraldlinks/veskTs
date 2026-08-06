@@ -2,6 +2,22 @@ import type { IRNode } from '@vesk/compiler/src/ir';
 import { StaticNode, TextNode, DynamicBinding, HeadBlock, RuntimeStatement } from '@vesk/compiler/src/ir';
 import type { ComponentIR } from '@vesk/compiler/src/ir';
 import { tryEvalExpr, escapeHtml } from '@vesk/compiler/src/server-utils';
+import { isWhitespaceChar } from '@vesk/compiler/src/scan';
+
+function isHtmlNameChar(ch: string): boolean {
+  const code = ch.charCodeAt(0);
+  return (
+    (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || ch === '-'
+  );
+}
+
+function isAttrBoundaryChar(ch: string): boolean {
+  return isWhitespaceChar(ch) || ch === '=' || ch === '/' || ch === '>';
+}
+
+function isValueBoundaryChar(ch: string): boolean {
+  return isWhitespaceChar(ch) || ch === '/' || ch === '>';
+}
 
 function evaluateLocals(comp: ComponentIR, props: Record<string, unknown>): Record<string, unknown> {
   const locals: Record<string, unknown> = {};
@@ -124,26 +140,26 @@ function scanHeadTag(html: string, lt: number): HeadTagEntry | null {
   let i = lt + 1;
   if (html[i] === '/') i++;
   const nameStart = i;
-  while (i < html.length && /[a-zA-Z0-9-]/.test(html[i])) i++;
+  while (i < html.length && isHtmlNameChar(html[i])) i++;
   const tag = html.slice(nameStart, i).toLowerCase();
   if (!tag) return null;
 
   const attrs = new Map<string, string>();
   let selfClosing = false;
   while (i < html.length) {
-    while (i < html.length && /\s/.test(html[i])) i++;
+    while (i < html.length && isWhitespaceChar(html[i])) i++;
     if (html[i] === '>') { i++; break; }
     if (html[i] === '/' && html[i + 1] === '>') { selfClosing = true; i += 2; break; }
     if (i >= html.length || html[i] === '>' || html[i] === '/') continue;
 
     const aStart = i;
-    while (i < html.length && !/[\s=/>]/.test(html[i])) i++;
+    while (i < html.length && !isAttrBoundaryChar(html[i])) i++;
     const aName = html.slice(aStart, i).toLowerCase();
-    while (i < html.length && /\s/.test(html[i])) i++;
+    while (i < html.length && isWhitespaceChar(html[i])) i++;
     let value = '';
     if (html[i] === '=') {
       i++;
-      while (i < html.length && /\s/.test(html[i])) i++;
+      while (i < html.length && isWhitespaceChar(html[i])) i++;
       const q = html[i];
       if (q === '"' || q === "'") {
         i++;
@@ -153,7 +169,7 @@ function scanHeadTag(html: string, lt: number): HeadTagEntry | null {
         if (i < html.length) i++;
       } else {
         const vStart = i;
-        while (i < html.length && !/[\s/>]/.test(html[i])) i++;
+        while (i < html.length && !isValueBoundaryChar(html[i])) i++;
         value = html.slice(vStart, i);
       }
     }

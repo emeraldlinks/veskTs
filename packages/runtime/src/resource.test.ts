@@ -89,6 +89,8 @@ function cleanupGlobals(): void {
   delete (globalThis as any).__vsk_fetch_inflight;
   delete (globalThis as any).__vsk_fetch_registry;
   delete (globalThis as any).__vsk_fetch_cache;
+  delete (globalThis as any).__vesk_ssr_base_url;
+  delete (globalThis as any).__vesk_request;
   clearSsrData();
 }
 
@@ -114,7 +116,7 @@ it('passes method, headers, JSON body, credentials to fetch', async () => {
   expect((init?.headers as Record<string, string>)['Content-Type']).toBe('application/json');
   expect((init?.headers as Record<string, string>)['X-Custom']).toBe('yes');
   expect(init?.body).toBe(JSON.stringify({ name: 'vesk' }));
-  expect(res()).toEqual({ ok: true });
+  expect(res.data).toEqual({ ok: true });
   mock.restore();
 });
 
@@ -162,7 +164,7 @@ it('retries transient failures with backoff, then succeeds', async () => {
   const res = useFetch<{ healed: boolean }>('/api/flaky', { retry: 2, retryDelay: 10 });
   await waitFor(() => !res.loading);
   expect(mock.calls.length).toBe(3);
-  expect(res()).toEqual({ healed: true });
+  expect(res.data).toEqual({ healed: true });
   mock.restore();
 });
 
@@ -201,8 +203,8 @@ it('shares one in-flight request for the same key', async () => {
   const b = useFetch('/api/shared');
   await waitFor(() => !a.loading && !b.loading);
   expect(mock.calls.length).toBe(1);
-  expect(a()).toEqual({ shared: true });
-  expect(b()).toEqual({ shared: true });
+  expect(a.data).toEqual({ shared: true });
+  expect(b.data).toEqual({ shared: true });
   mock.restore();
 });
 
@@ -229,7 +231,7 @@ it('reuses cached data within staleTime without refetching', async () => {
   expect(mock.calls.length).toBe(1);
   const b = useFetch('/api/cache1', { staleTime: 60000 });
   expect(mock.calls.length).toBe(1);
-  expect(b()).toEqual({ cached: true });
+  expect(b.data).toEqual({ cached: true });
   expect(b.loading).toBe(false);
   mock.restore();
 });
@@ -251,13 +253,13 @@ it('keepPreviousData keeps old data while revalidating', async () => {
   let value = 'v1';
   const mock = mockFetch(() => jsonResponse(value));
   const res = useFetch<string>('/api/kpd', { staleTime: 30000, keepPreviousData: true });
-  await waitFor(() => !res.loading && res() === 'v1');
+  await waitFor(() => !res.loading && res.data === 'v1');
   value = 'v2';
   res.refresh?.();
   expect(res.loading).toBe(true);
-  expect(res()).toBe('v1');
+  expect(res.data).toBe('v1');
   await waitFor(() => !res.loading);
-  expect(res()).toBe('v2');
+  expect(res.data).toBe('v2');
   mock.restore();
 });
 
@@ -272,7 +274,7 @@ it('mutate(key, data) updates live resources immediately', async () => {
   const res = useFetch('/api/mut1', { key: 'mut1' });
   await waitFor(() => !res.loading);
   mutate('mut1', { patched: true });
-  expect(res()).toEqual({ patched: true });
+  expect(res.data).toEqual({ patched: true });
   expect(mock.calls.length).toBe(1);
   mock.restore();
 });
@@ -285,7 +287,7 @@ it('mutate(key) revalidates with a fresh request', async () => {
   await waitFor(() => !res.loading);
   value = 'second';
   mutate('mut2');
-  await waitFor(() => res() === 'second');
+  await waitFor(() => res.data === 'second');
   expect(mock.calls.length).toBe(2);
   mock.restore();
 });
@@ -298,7 +300,7 @@ it('refresh() bypasses stale cache', async () => {
   await waitFor(() => !res.loading);
   value = 'b';
   res.refresh?.();
-  await waitFor(() => res() === 'b');
+  await waitFor(() => res.data === 'b');
   expect(mock.calls.length).toBe(2);
   mock.restore();
 });
@@ -309,7 +311,7 @@ it('enabled: false skips the fetch entirely', async () => {
   const res = useFetch('/api/disabled', { enabled: false });
   expect(mock.calls.length).toBe(0);
   expect(res.loading).toBe(false);
-  expect(res()).toBe(undefined);
+  expect(res.data).toBe(undefined);
   mock.restore();
 });
 
@@ -355,7 +357,7 @@ it('does not abort when the block re-runs (not destroyed)', async () => {
   resolveFetch(jsonResponse({ ok: 1 }));
   await waitFor(() => !res.loading);
   expect(mock.calls.length).toBe(1);
-  expect(res()).toEqual({ ok: 1 });
+  expect(res.data).toEqual({ ok: 1 });
   mock.restore();
 });
 
@@ -378,7 +380,7 @@ it('tracks promises token-scoped and writes __vsk_ssr_data', async () => {
   expect((globalThis as any).__vsk_ssr_data['/api/ssr']).toEqual({ fromServer: true });
   const res2 = useFetch('/api/ssr');
   expect(res2.loading).toBe(false);
-  expect(res2()).toEqual({ fromServer: true });
+  expect(res2.data).toEqual({ fromServer: true });
   expect(mock.calls.length).toBe(1);
   mock.restore();
   cleanupGlobals();
@@ -396,6 +398,92 @@ it('dedups concurrent SSR requests across components', async () => {
   expect(mock.calls.length).toBe(1);
   mock.restore();
   cleanupGlobals();
+});
+
+// ============================================================
+// Awaitable API (await useFetch() resolves to the data)
+// ============================================================
+console.log('\n=== useFetch — awaitable API ===');
+
+it('await useFetch() resolves to the raw response data', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({ hello: 'world' }));
+  const posts = await useFetch<{ hello: string }>('/api/await-json');
+  expect(posts).toEqual({ hello: 'world' });
+  expect(mock.calls.length).toBe(1);
+  mock.restore();
+});
+
+it('await useFetch() rejects with HttpError on HTTP failure', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({}, 500));
+  let thrown: unknown;
+  try {
+    await useFetch('/api/await-500');
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown instanceof HttpError).toBe(true);
+  expect((thrown as HttpError).status).toBe(500);
+  mock.restore();
+});
+
+it('await useFetch() rejects with the settle error when already failed', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({}, 404));
+  const res = useFetch('/api/await-404');
+  await waitFor(() => res.error !== null);
+  let thrown: unknown;
+  try {
+    await res;
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown instanceof HttpError).toBe(true);
+  mock.restore();
+});
+
+it('exposes sync data/loading/error getters and is not callable', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({ live: true }));
+  const res = useFetch<{ live: boolean }>('/api/await-live');
+  expect(res.loading).toBe(true);
+  expect(res.data).toBe(undefined);
+  expect(typeof (res as unknown as () => unknown)).toBe('object');
+  const data = await res;
+  expect(data).toEqual({ live: true });
+  expect(res.loading).toBe(false);
+  expect(res.data).toEqual({ live: true });
+  expect(res.error).toBe(null);
+  mock.restore();
+});
+
+it('await useFetch() waits for a slow request', async () => {
+  cleanupGlobals();
+  let resolveFetch: (r: Response) => void = () => {};
+  const mock = mockFetch(() => new Promise<Response>(r => { resolveFetch = r; }));
+  const pending = useFetch<string>('/api/await-slow');
+  let settled = false;
+  const awaited = (async () => { const d = await pending; settled = true; return d; })();
+  await sleep(30);
+  expect(settled).toBe(false);
+  expect(pending.loading).toBe(true);
+  resolveFetch(jsonResponse('finally'));
+  expect(await awaited).toBe('finally');
+  expect(pending.loading).toBe(false);
+  expect(pending.data).toBe('finally');
+  mock.restore();
+});
+
+it('useFetch.json resolves relative URLs and awaits cleanly', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vesk_ssr_base_url = 'http://localhost:4173';
+  const mock = mockFetch(() => jsonResponse({ rel: true }));
+  const data = await useFetch.json<{ rel: boolean }>('/api/rel');
+  expect(mock.calls[0].url).toBe('http://localhost:4173/api/rel');
+  expect(data).toEqual({ rel: true });
+  delete (globalThis as any).__vesk_ssr_base_url;
+  mock.restore();
 });
 
 // ============================================================

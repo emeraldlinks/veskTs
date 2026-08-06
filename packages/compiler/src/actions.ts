@@ -2,6 +2,7 @@ import { walk } from 'zimmerframe';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
 import { parse } from '@vesk/compiler/src/parser';
+import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement, stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 
 export interface ActionInfo {
   id: string;
@@ -62,13 +63,15 @@ function actionUrl(id: string): string {
  * Both modes derive the id from the raw call source, so the ids match.
  */
 export function rewriteTopLevelActions(code: string, mode: 'server' | 'client'): string {
-  if (!code.includes('defineAction')) return code;
+  if (!code.includes('defineAction')) return stripCodeTypes(code);
   let ast: any;
   try {
     ast = parse(code);
   } catch {
     return code;
   }
+
+  const hadTs = hasTsSyntax(ast);
 
   ast = walk(ast, null, {
     CallExpression(node: any, context: any) {
@@ -95,15 +98,29 @@ export function rewriteTopLevelActions(code: string, mode: 'server' | 'client'):
     },
   });
 
+  return printWithTypesStripped(ast, code, hadTs);
+}
+
+function printWithTypesStripped(ast: any, code: string, hadTs = hasTsSyntax(ast)): string {
+  if (!hadTs) return code;
+  const stripped = stripTsTypes(ast);
+  if (stripped.type === 'Program' && Array.isArray(stripped.body)) {
+    stripped.body = stripped.body.filter((n: any) => !isTypeOnlyStatement(n));
+  }
   try {
-    return print(ast, ts()).code;
+    return print(stripped, ts()).code;
   } catch {
     return code;
   }
 }
 
 export function transformTopLevelForActions(topLevelCode: string[], mode: 'server' | 'client'): string[] {
-  return topLevelCode.map((c) => rewriteTopLevelActions(c, mode));
+  const out: string[] = [];
+  for (const c of topLevelCode) {
+    const rewritten = rewriteTopLevelActions(c, mode);
+    if (rewritten !== '') out.push(rewritten);
+  }
+  return out;
 }
 
 /** Collect the stable action ids defined by a page source (for the manifest). */

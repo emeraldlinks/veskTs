@@ -1,6 +1,20 @@
-import { track } from '@vesk/runtime'
+import { track, useFetch } from '@vesk/runtime'
 
-component PostCard(props) {
+interface Post {
+	id: number
+	title: string
+	slug: string
+	excerpt: string
+	author: string
+	tags: string[]
+	date: string
+}
+
+interface PostCardProps {
+	post: Post
+}
+
+component PostCard(props: PostCardProps) {
 	<article class="bg-white rounded-lg p-6 mb-4 shadow-sm border border-gray-100">
 		<div class="flex items-center justify-between mb-2">
 			<h2 class="text-xl font-semibold">{props.post.title}</h2>
@@ -29,10 +43,10 @@ export default component Posts {
 	<Head>
 		<title>Posts — useFetch demo</title>
 	</Head>
-	let &[posts] = track<{ id: number; title: string; slug: string; excerpt: string; author: string; tags: string[]; date: string }[]>([])
+	let &[posts, postsCell] = track<Post[]>([])
 	const postsResource = useFetch('/api/posts', {
 		key: 'posts',
-		into: posts,
+		into: postsCell,
 		staleTime: 30000,
 		keepPreviousData: true,
 		retry: 2,
@@ -54,7 +68,7 @@ export default component Posts {
 	</div>
 	if (postsResource.error) {
 		<div class="bg-red-50 border border-red-200 text-red-700 rounded-lg p-4 mb-4">
-			<p class="mb-2">Failed to load posts: {postsResource.error.message}</p>
+			<p class="mb-2">Failed to load posts: {(postsResource.error as Error).message}</p>
 			<button onClick={() => postsResource.refresh()} class="bg-red-600 hover:bg-red-700 text-white text-sm px-4 py-2 rounded-lg">Retry</button>
 		</div>
 	}

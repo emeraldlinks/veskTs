@@ -1,4 +1,10 @@
-component StoreError(props) {
+interface StoreErrorProps {
+	error: string
+	stack: string
+	url: string
+}
+
+component StoreError(props: StoreErrorProps) {
 	<div class="max-w-2xl mx-auto my-12 p-8 bg-amber-50 border-l-4 border-amber-500 rounded-r-lg">
 		<h1 class="text-2xl font-bold text-amber-800 mb-2">Store Error Boundary</h1>
 		<p class="text-amber-700 mb-4">{props.error}</p>

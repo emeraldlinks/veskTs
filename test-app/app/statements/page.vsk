@@ -1,11 +1,17 @@
+interface DemoPost {
+	name: string
+	year: number
+	tags: string[]
+}
+
 component Statements {
 	<Head>
 		<title>Statements — every JS construct</title>
 	</Head>
-	const items = ['alpha', 'beta', 'gamma']
-	const obj = { name: 'Vesk', year: 2026, tags: ['fast', 'reactive'] }
-	const score = 7
-	let n = 0
+	const items: string[] = ['alpha', 'beta', 'gamma']
+	const obj: DemoPost = { name: 'Vesk', year: 2026, tags: ['fast', 'reactive'] }
+	const score: number = 7
+	let n: number = 0
 
 	<h1 class="text-3xl font-bold mb-4">JS Statement Demo</h1>
 
@@ -43,7 +49,7 @@ component Statements {
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">for-in (object keys)</h2>
 	for (const key in obj) {
-		<span class="mr-2">{key}:{obj[key]}</span>
+		<span class="mr-2">{key}:{obj[key as keyof DemoPost]}</span>
 	}
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">while</h2>
@@ -62,7 +68,7 @@ component Statements {
 	try {
 		throw new Error('Boom!')
 	} catch(e) {
-		<p class="text-red-600">Caught: {e.message}</p>
+		<p class="text-red-600">Caught: {(e as Error).message}</p>
 	}
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">labeled block</h2>
@@ -71,6 +77,6 @@ component Statements {
 	}
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">runtime statements</h2>
-	const total = items.length * 2
+	const total: number = items.length * 2
 	<p>items.length * 2 = {total}</p>
 }

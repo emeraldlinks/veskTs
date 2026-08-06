@@ -8,6 +8,11 @@ import {
   cssBlockEnd,
   htmlTagEnd,
   htmlTagName,
+  startsWithIdentifier,
+  stripDeclKeyword,
+  stripTrailingSemicolons,
+  containsForOfIn,
+  collapseNewlineWhitespace,
 } from '@vesk/compiler/src/scan';
 
 let passed = 0;
@@ -78,34 +83,92 @@ describe('scan — findBalancedEnd', () => {
 
 describe('scan — splitTopLevel', () => {
   it('splits on separator at depth 0 only', () => {
-    const parts = splitTopLevel('const [a, b] of arr.map(x => x of y)', /\s+of\s+/);
+    const parts = splitTopLevel('const [a, b] of arr.map(x => x of y)', 'of');
     expect(parts.length).toBe(2);
     expect(parts[0]).toBe('const [a, b]');
     expect(parts[1]).toBe('arr.map(x => x of y)');
   });
 
   it('does not split inside strings', () => {
-    const parts = splitTopLevel(`x of 'a of b'`, /\s+of\s+/);
+    const parts = splitTopLevel(`x of 'a of b'`, 'of');
     expect(parts.length).toBe(2);
     expect(parts[1]).toBe(`'a of b'`);
   });
 
   it('does not split inside comments', () => {
-    const parts = splitTopLevel('x of /* a of b */ y', /\s+of\s+/);
+    const parts = splitTopLevel('x of /* a of b */ y', 'of');
     expect(parts.length).toBe(2);
     expect(parts[1]).toBe('/* a of b */ y');
   });
 
   it('splits on in at depth 0', () => {
-    const parts = splitTopLevel('const k in obj.filter(x => x in y)', /\s+in\s+/);
+    const parts = splitTopLevel('const k in obj.filter(x => x in y)', 'in');
     expect(parts.length).toBe(2);
     expect(parts[1]).toBe('obj.filter(x => x in y)');
   });
 
+  it('does not split mid-identifier', () => {
+    expect(splitTopLevel('info oof xof', 'of').length).toBe(1);
+    expect(splitTopLevel('x of y', 'of').length).toBe(2);
+  });
+
+  it('splits when separator touches a bracket', () => {
+    const parts = splitTopLevel('const x of[a, b]', 'of');
+    expect(parts.length).toBe(2);
+    expect(parts[1]).toBe('[a, b]');
+  });
+
   it('returns whole text when no separator', () => {
-    const parts = splitTopLevel('abc def', /\s+of\s+/);
+    const parts = splitTopLevel('abc def', 'of');
     expect(parts.length).toBe(1);
     expect(parts[0]).toBe('abc def');
+  });
+});
+
+describe('scan — startsWithIdentifier / stripDeclKeyword', () => {
+  it('matches a leading whole identifier', () => {
+    expect(startsWithIdentifier('track(x)', 'track')).toBe(true);
+    expect(startsWithIdentifier('  for (x of y)', 'for')).toBe(true);
+    expect(startsWithIdentifier('forbidden', 'for')).toBe(false);
+    expect(startsWithIdentifier('x for', 'for')).toBe(false);
+  });
+
+  it('strips declaration keywords', () => {
+    expect(stripDeclKeyword('const items')).toBe('items');
+    expect(stripDeclKeyword(' let x')).toBe('x');
+    expect(stripDeclKeyword('var y')).toBe('y');
+    expect(stripDeclKeyword('constant')).toBe('constant');
+  });
+
+  it('strips trailing semicolons', () => {
+    expect(stripTrailingSemicolons('let x = 1;;')).toBe('let x = 1');
+    expect(stripTrailingSemicolons('a; b;')).toBe('a; b');
+  });
+});
+
+describe('scan — containsForOfIn', () => {
+  it('detects of/in at depth 0', () => {
+    expect(containsForOfIn('const x of y')).toBe(true);
+    expect(containsForOfIn('const k in obj')).toBe(true);
+    expect(containsForOfIn('const x of arr.map(a => a of b)')).toBe(true);
+    expect(containsForOfIn('let i = 0; i < 5; i++')).toBe(false);
+    expect(containsForOfIn('const x ofw = 1')).toBe(false);
+    expect(containsForOfIn('const info = 1')).toBe(false);
+  });
+
+  it('ignores strings and comments', () => {
+    expect(containsForOfIn(`x of 'in'`)).toBe(true);
+    expect(containsForOfIn(`'a of b'`)).toBe(false);
+    expect(containsForOfIn(`/* of */`)).toBe(false);
+  });
+});
+
+describe('scan — collapseNewlineWhitespace', () => {
+  it('collapses newline runs to a single space', () => {
+    expect(collapseNewlineWhitespace('a\n  b')).toBe('a b');
+    expect(collapseNewlineWhitespace('a\n\nb')).toBe('a b');
+    expect(collapseNewlineWhitespace('a\r\n b')).toBe('a\r b');
+    expect(collapseNewlineWhitespace('a b')).toBe('a b');
   });
 });
 

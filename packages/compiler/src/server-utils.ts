@@ -4,6 +4,7 @@ import * as __defaultRuntimeModule from '@vesk/runtime/src/index-server';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { htmlTagName, htmlTagEnd } from '@vesk/compiler/src/scan';
+import { importModuleTarget, extractImportNames } from '@vesk/compiler/src/tokens';
 
 const VOID_ELEMENTS = new Set([
   'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
@@ -598,10 +599,7 @@ export function extractTopLevelNames(topLevelCode: string[]): string[] {
           names.push(target.id.name);
         }
       }
-      continue;
     }
-    const match = code.match(/^(?:export\s+)?(?:const|let|var)\s+(\w+)/);
-    if (match) names.push(match[1]);
   }
   return names;
 }
@@ -641,12 +639,9 @@ export function extractRuntimeNames(importStrs: string[]): string[] {
       }
       continue;
     }
-    const match = imp.match(/import\s+\{([^}]+)\}\s+from\s+['"](?:@vesk\/runtime|@vesk\/reactivity)['"]/);
-    if (match) {
-      for (const part of match[1].split(',')) {
-        const name = part.trim().split(/\s+as\s+/).pop();
-        if (name && !/^(type|typeof)\s/.test(name)) names.push(name);
-      }
+    const target = importModuleTarget(imp);
+    if (target === '@vesk/runtime' || target === '@vesk/reactivity') {
+      for (const name of extractImportNames(imp)) names.push(name);
     }
   }
   return names;
@@ -749,34 +744,6 @@ export function evalTopLevelCode(topLevelCode: string[], __vesk: Record<string, 
         }
       }
       if (handled) continue;
-    }
-    const constMatch = code.match(/^(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(.+);?\s*$/s);
-    if (constMatch) {
-      try {
-        const keys = Object.keys(__vesk);
-        const params = [...keys, '__vesk', 'result'];
-        const body = `result.value = ${constMatch[2]};`;
-        const fn = new Function(...params, body);
-        const result = { value: undefined as unknown };
-        fn(...keys.map(k => __vesk[k]), __vesk, result);
-        __vesk[constMatch[1]] = result.value;
-      } catch {
-        // skip evaluation errors
-      }
-      continue;
-    }
-    const fnMatch = code.match(/^(?:export\s+)?(async\s+)?function\s+(\w+)\s*([\s\S]*)$/);
-    if (fnMatch) {
-      try {
-        const keys = Object.keys(__vesk);
-        const params = [...keys, '__vesk'];
-        const asyncKw = fnMatch[1] || '';
-        const body = `__vesk['${fnMatch[2]}'] = ${asyncKw}function ${fnMatch[2]}${fnMatch[3]};`;
-        const fn = new Function(...params, body);
-        fn(...keys.map(k => __vesk[k]), __vesk);
-      } catch {
-        // skip evaluation errors
-      }
     }
   }
 }
