@@ -232,6 +232,97 @@ describe('client keyword', () => {
 		expect(exp.declaration.client).toBe(true);
 	});
 
+	it('export default component tolerates arbitrary whitespace', () => {
+		const variants = [
+			'export default   component Name() { return <div/>; }',
+			'export  default   component Name() { return <div/>; }',
+			'export default\ncomponent Name() { return <div/>; }',
+			'export   default   component   Name()   { return <div/>; }',
+		];
+		for (const src of variants) {
+			const ast = parse(src);
+			const exp = ast.body[0];
+			expect(exp.type).toBe('ExportDefaultDeclaration');
+			expect(exp.declaration.id.name).toBe('Name');
+			expect(exp.declaration.async).toBe(false);
+		}
+	});
+
+	it('export default async component tolerates arbitrary whitespace', () => {
+		const variants = [
+			'export default async   component Name() { return <div/>; }',
+			'export default   async component Name() { return <div/>; }',
+			'export   default   async   component Name() { return <div/>; }',
+			'export default async\ncomponent Name() { return <div/>; }',
+		];
+		for (const src of variants) {
+			const ast = parse(src);
+			const exp = ast.body[0];
+			expect(exp.type).toBe('ExportDefaultDeclaration');
+			expect(exp.declaration.async).toBe(true);
+		}
+	});
+
+	it('export async component tolerates arbitrary whitespace', () => {
+		const variants = [
+			'export async   component Name() { return <div/>; }',
+			'export   async   component Name() { return <div/>; }',
+			'export async\ncomponent Name() { return <div/>; }',
+		];
+		for (const src of variants) {
+			const ast = parse(src);
+			const exp = ast.body[0];
+			expect(exp.type).toBe('ExportNamedDeclaration');
+			expect(exp.declaration.async).toBe(true);
+		}
+	});
+
+	it('async component tolerates arbitrary whitespace', () => {
+		const variants = [
+			'async   component Name() { return <div/>; }',
+			'async\ncomponent Name() { return <div/>; }',
+			'async component Name() { return <div/>; }',
+		];
+		for (const src of variants) {
+			const ast = parse(src);
+			expect(ast.body[0].type).toBe('ComponentDeclaration');
+			expect(ast.body[0].async).toBe(true);
+		}
+	});
+
+	it('async component followed by more components does not leak await state', () => {
+		const ast = parse(`
+			async component Child() {
+				const data = await Promise.resolve([1, 2])
+				<div>{data[0]}</div>
+			}
+			component Parent() {
+				<Child />
+			}
+			async component Other() {
+				const x = await Promise.resolve(1)
+				<p>{x}</p>
+			}
+			component Sync() {
+				<div>ok</div>
+			}
+		`);
+		const comps = ast.body;
+		expect(comps).toHaveLength(4);
+		expect(comps[0].async).toBe(true);
+		expect(comps[1].async).toBe(false);
+		expect(comps[2].async).toBe(true);
+		expect(comps[3].async).toBe(false);
+	});
+
+	it('keyword matching does not swallow identifiers that merely start with component', () => {
+		parse('export default componentName = 5;');
+		parse('export default componentWrapper;');
+		parse('const componentRef = 3;');
+		parse('export default { value: 1 };');
+		parse('const &[componentStore] = track(0);');
+	});
+
 	it('component without parameters with client keyword', () => {
 		const ast = parse('component App client { <div>Static</div> }');
 		expect(ast.body[0].client).toBe(true);
@@ -796,6 +887,74 @@ describe('Statement Mode (Default)', () => {
 		expect(tracks).toHaveLength(2);
 		expect(body[2].type).toBe('IfStatement');
 		expect(body[3].type).toBe('JSXElement');
+	});
+
+	it('parses bare expression statement (no semicolon) before JSX', () => {
+		const ast = parse(`
+			component App() {
+				console.log('x')
+				<div>hi</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[0].type).toBe('ExpressionStatement');
+		expect(body[1].type).toBe('JSXElement');
+	});
+
+	it('parses semicolon-less expression statements of every kind before JSX', () => {
+		const ast = parse(`
+			component App() {
+				foo()
+				foo(1, 2)
+				x = 5
+				x++
+				x--
+				--x
+				let &[count] = track(0)
+				count++
+				<div>{count}</div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(9);
+		expect(body[body.length - 1].type).toBe('JSXElement');
+	});
+
+	it('parses a trailing semicolon-less statement with no following JSX', () => {
+		const ast = parse(`
+			component App() {
+				<div>hi</div>
+				console.log('done')
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[1].type).toBe('ExpressionStatement');
+	});
+
+	it('still rejects adjacent JSX in a JSX expression container', () => {
+		let threw = false;
+		try {
+			parse(`
+				component App() {
+					return <div>{<a/><b/>}</div>
+				}
+			`);
+		} catch (e) {
+			threw = true;
+		}
+		expect(threw).toBe(true);
+	});
+
+	it('allows multiple JSX children inside a parent element', () => {
+		const ast = parse(`
+			component App() {
+				return <div><a/><b/></div>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(1);
 	});
 });
 

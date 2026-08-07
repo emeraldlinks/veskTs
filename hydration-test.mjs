@@ -702,6 +702,57 @@ async function main() {
     await page.close();
   }
 
+  // ── Test: Markdown (<Md content={...} />) ─────────────
+  console.log('\n=== TEST: Markdown ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE + '/md', { waitUntil: 'networkidle0' });
+
+    assert(errors.length === 0, 'Zero JS errors on /md (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    const md = await page.evaluate(() => {
+      const h1 = document.querySelector('main h1');
+      const divs = Array.from(document.querySelectorAll('main div'));
+      const mdDiv = divs.find(d => d.className.includes('md'));
+      const mdContent = mdDiv ? mdDiv.textContent : '';
+      return {
+        pageH1: h1 ? h1.textContent.trim() : '',
+        hasH1: mdContent.includes('Markdown in Vesk'),
+        hasLi: mdContent.includes('compiler-first'),
+        hasBlockquote: mdContent.includes('Content is escaped'),
+        hasCode: mdContent.includes('const md = track'),
+        hasOrdered: mdContent.includes('SSR and hydration'),
+        hasLink: mdContent.includes('Md content'),
+        hasRawScriptLeak: mdContent.includes('<script>'),
+      };
+    });
+    assert(md.pageH1 === 'Markdown Demo', 'page h1: ' + md.pageH1);
+    assert(md.hasH1, 'markdown h1 rendered');
+    assert(md.hasLi, 'markdown list item rendered');
+    assert(md.hasBlockquote, 'markdown blockquote rendered');
+    assert(md.hasCode, 'markdown code block rendered');
+    assert(md.hasOrdered, 'markdown ordered list rendered');
+    assert(md.hasLink, 'markdown inline formatting rendered');
+    assert(md.hasRawScriptLeak === false, 'no raw <script> leaked');
+
+    // SPA-navigate away and back — Md must re-render in client-only mode
+    await page.click('a[href="/about"]');
+    await new Promise(r => setTimeout(r, 300));
+    await page.click('a[href="/md"]');
+    await new Promise(r => setTimeout(r, 300));
+
+    const afterNav = await page.evaluate(() => {
+      const divs = Array.from(document.querySelectorAll('main div'));
+      const mdDiv = divs.find(d => d.className.includes('md'));
+      return mdDiv ? mdDiv.textContent.includes('Markdown in Vesk') : false;
+    });
+    assert(afterNav, 'Md re-renders after SPA navigation');
+
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${passed + failed} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

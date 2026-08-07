@@ -65,6 +65,44 @@ function getSource(source: string, node: { start: number; end: number }): string
   return source.slice(node.start, node.end);
 }
 
+function collectComponentCalls(nodes: IRNode[], out: Map<string, number>): void {
+  for (const n of nodes) {
+    if (n instanceof ComponentCall) {
+      out.set(n.componentName, n.start);
+      collectComponentCalls(n.children, out);
+    } else if (n instanceof StaticNode || n instanceof ServerBlock || n instanceof ClientBlock || n instanceof HeadBlock) {
+      collectComponentCalls(n.children, out);
+    } else if (n instanceof MapRegion) {
+      collectComponentCalls(n.bodyTemplate, out);
+      collectComponentCalls(n.alternateNodes, out);
+    } else if (n instanceof OpaqueDynamicRegion) {
+      collectComponentCalls(n.consequentNodes, out);
+      collectComponentCalls(n.alternateNodes, out);
+    } else if (n instanceof WhileLoop || n instanceof ForLoop) {
+      collectComponentCalls(n.bodyTemplate, out);
+    } else if (n instanceof TryCatch) {
+      collectComponentCalls(n.bodyTemplate, out);
+      collectComponentCalls(n.catchBody, out);
+    } else if (n instanceof SwitchBlock) {
+      for (const c of n.cases) collectComponentCalls(c.body, out);
+    }
+  }
+}
+
+function offsetToLineCol(source: string, offset: number): { line: number; column: number } {
+  let line = 1;
+  let column = 1;
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+  return { line, column };
+}
+
 function componentUsesFetch(nodes: IRNode[]): boolean {
   for (const node of nodes) {
     if (node instanceof ServerBlock || node instanceof ClientBlock) {
@@ -399,13 +437,13 @@ function processJSXElement(source: string, element: any): IRNode[] {
 
   if (!isHTMLTag(tagName) && selfClosing) {
     const { props, spreadProps } = extractProps(source, element);
-    return [new ComponentCall(tagName, props, [], spreadProps)];
+    return [new ComponentCall(tagName, props, [], spreadProps, element.start)];
   }
 
   if (!isHTMLTag(tagName)) {
     const { props, spreadProps } = extractProps(source, element);
     const children = processJSXChildren(source, element.children || []);
-    return [new ComponentCall(tagName, props, children, spreadProps)];
+    return [new ComponentCall(tagName, props, children, spreadProps, element.start)];
   }
 
   const attributes = element.openingElement.attributes
@@ -872,6 +910,18 @@ export function generateIR(ast: any, source: string): IRRoot {
       const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
       comp.style = css;
       components.push(comp);
+    }
+  }
+
+  const asyncNames = new Set(components.filter((c) => c.isAsync || c.ssrAwait).map((c) => c.name));
+  for (const comp of components) {
+    if (asyncNames.has(comp.name)) continue;
+    const called = new Map<string, number>();
+    collectComponentCalls(comp.body, called);
+    for (const [childName, start] of called) {
+      if (!asyncNames.has(childName)) continue;
+      const { line, column } = offsetToLineCol(source, start >= 0 ? start : 0);
+      throw VeskError.asyncChildInSyncParent(comp.name, childName, { line, column });
     }
   }
 

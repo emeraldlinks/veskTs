@@ -423,6 +423,52 @@ describe('Client Codegen — Statement Mode', () => {
 		expect(code).toContain('count.set(42)');
 		expect(code).toContain('get(count)');
 	});
+
+	bothModes('semicolon-less expression statement gets terminated', `
+		component App {
+			console.log('x')
+			<div>hi</div>
+		}
+	`, (code) => {
+		expect(code).toContain("console.log('x');");
+	});
+
+	bothModes('semicolon-less statements of every kind before JSX', `
+		component App {
+			foo()
+			foo(1, 2)
+			x = 5
+			x++
+			let &[count] = track(0)
+			count++
+			<div>{count}</div>
+		}
+	`, (code) => {
+		expect(code).toContain('foo();');
+		expect(code).toContain('foo(1, 2);');
+		expect(code).toContain('x = 5;');
+		expect(code).toContain('x++;');
+		expect(code).toContain('set(count, get(count) + 1);');
+	});
+
+	bothModes('already-terminated statements are not doubled', `
+		component App {
+			console.log('x');
+			<div>hi</div>
+		}
+	`, (code) => {
+		expect(code).toContain("console.log('x');");
+		expect(code).not.toContain("console.log('x');;");
+	});
+
+	bothModes('block-terminated statements keep their brace', `
+		component App(props: { s: boolean }) {
+			if (props.s) { foo() }
+			<div>hi</div>
+		}
+	`, (code) => {
+		expect(code).toContain('foo()');
+	});
 });
 
 describe('Client Codegen — Islands & Zero-JS Detection', () => {
@@ -798,6 +844,101 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	`, (code) => {
 		expect(code).toContain('switch (get(score)) {');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+});
+
+describe('Client Codegen — Async Components', () => {
+
+	it('[normal] async component body is an async function', () => {
+		const code = compileClient(`
+			async component Async() {
+				const data = await Promise.resolve([1, 2])
+				<div>{data[0]}</div>
+			}
+		`, null, { forceClient: true });
+		expect(code).toContain('async (props) => {');
+		expect(code).toContain('await Promise.resolve([1, 2])');
+	});
+
+	it('[normal] async parent calling async child awaits', () => {
+		const code = compileClient(`
+			async component Child() {
+				const data = await Promise.resolve('hi')
+				<div>{data}</div>
+			}
+			async component Parent() {
+				<Child />
+			}
+		`, null, { forceClient: true });
+		expect(code).toContain('async (props) => {');
+		expect(code).toContain('await __components["Child"]');
+	});
+
+	it('[hydrate] async parent calling async child awaits in hydrate mode', () => {
+		const code = compileClient(`
+			async component Child() {
+				const data = await Promise.resolve('hi')
+				<div>{data}</div>
+			}
+			async component Parent() {
+				<Child />
+			}
+		`, null, { hydrate: true, forceClient: true });
+		expect(code).toContain('async (props, __registry, __hydrate) => {');
+		expect(code).toContain('await __components["Child"]');
+	});
+
+	it('[normal] deeply nested async chain awaits at every level', () => {
+		const code = compileClient(`
+			async component Leaf() {
+				const data = await Promise.resolve(1)
+				<p>{data}</p>
+			}
+			async component Mid() {
+				<Leaf />
+			}
+			async component Root() {
+				<Mid />
+			}
+		`, null, { forceClient: true });
+		const parentSrc = code.slice(code.indexOf('__components["Root"]'), code.indexOf('function __cleanup'));
+		expect(parentSrc).toContain('async (props) => {');
+		expect(parentSrc).toContain('await __components["Mid"]');
+		const midSrc = code.slice(code.indexOf('__components["Mid"]'), code.indexOf('__components["Root"]'));
+		expect(midSrc).toContain('async (props) => {');
+		expect(midSrc).toContain('await __components["Leaf"]');
+	});
+
+	it('[normal] async component inside a dynamic region is awaited', () => {
+		const code = compileClient(`
+			async component Card() {
+				const data = await Promise.resolve(1)
+				<p>{data}</p>
+			}
+			async component App(props: { show: boolean }) {
+				if (props.show) { <Card /> }
+			}
+		`, null, { forceClient: true });
+		expect(code).toContain('await __components["Card"]');
+	});
+
+	it('sync parent calling async child is a compile error', () => {
+		try {
+			compileClient(`
+				async component Child() {
+					const data = await Promise.resolve('hi')
+					<div>{data}</div>
+				}
+				component Parent() {
+					<Child />
+				}
+			`, null, { forceClient: true });
+			throw new Error('expected compile error');
+		} catch (e) {
+			expect(e.constructor.name).toBe('VeskError');
+			expect(e.message).toContain('Parent');
+			expect(e.message).toContain('Child');
+		}
 	});
 });
 

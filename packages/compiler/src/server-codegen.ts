@@ -57,4 +57,5 @@ export {
   ssg,
   renderFullPage,
   renderPageStream,
+  buildDataScripts,
 } from '@vesk/compiler/src/server-render';

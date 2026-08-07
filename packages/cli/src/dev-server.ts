@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { transformSync } from 'esbuild';
-import { renderPage, renderFullPage, renderPageStream, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol } from '@vesk/compiler/src/server-codegen';
+import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol } from '@vesk/compiler/src/server-codegen';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
@@ -53,6 +53,16 @@ const LOG = {
     console.log(`  ${m} ${pathname} ${s}${t}`);
   },
 };
+
+type SsrDataPayload = { props?: Record<string, unknown>; ssrData?: Record<string, unknown> };
+const ssrDataStore = new Map<string, SsrDataPayload>();
+
+function storeDataScript(payload: SsrDataPayload): string | null {
+  if (!payload.props && !payload.ssrData) return null;
+  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  ssrDataStore.set(token, payload);
+  return '/_vesk/ssr-data.js?t=' + token;
+}
 
 function countPages(nodes: RouteNode[]): number {
   let n = 0;
@@ -447,6 +457,17 @@ export async function startDevServer(port: number, projectDir: string, config: R
       res.end(clientBundle);
       return;
     }
+    if (url.pathname === '/_vesk/ssr-data.js') {
+      const token = url.searchParams.get('t') || '';
+      const payload = ssrDataStore.get(token);
+      if (payload) ssrDataStore.delete(token);
+      const lines: string[] = [];
+      if (payload?.props) lines.push(`globalThis.__vesk_props = ${JSON.stringify(payload.props)};`);
+      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${JSON.stringify(payload.ssrData)};`);
+      res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
+      res.end(lines.join('\n') || '// no ssr data');
+      return;
+    }
     if (url.pathname === '/_vesk/static/global.css') {
       res.writeHead(200, { 'Content-Type': 'text/css' });
       res.end(devUserCssContent);
@@ -547,7 +568,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           try {
             const nfSrc = readFileSync(nfPath, 'utf-8');
             const nfCompName = extractCompName(nfSrc) || (rootNode.notFound as string);
-            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: nfPath });
+            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, externalDataScript: storeDataScript, sourcePath: nfPath });
           } catch {}
         }
       }
@@ -580,6 +601,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
       let body = '';
       let head = '';
       let props: Record<string, unknown> | undefined;
+      delete (globalThis as Record<string, unknown>).__vsk_ssr_data;
+      delete (globalThis as Record<string, unknown>).__vsk_ssr_promises;
 
       for (let i = chain.length - 1; i >= 0; i--) {
         const node = chain[i];
@@ -611,19 +634,22 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir as string, 'layout.vsk')));
       let html: string;
       if (hasLayout) {
+        const ssrData = (globalThis as Record<string, unknown>).__vsk_ssr_data as Record<string, unknown> | undefined;
+        const dataScripts = buildDataScripts(props, ssrData || {}, storeDataScript);
+        const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
         let secMeta = '';
         if (security) {
           if (security.referrerPolicy !== false) secMeta += `\t<meta name="referrer" content="${(security.referrerPolicy as string) || 'strict-origin-when-cross-origin'}" />\n`;
           if (security.contentSecurityPolicy !== false) secMeta += `\t<meta http-equiv="Content-Security-Policy" content="${((security.contentSecurityPolicy as string) || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
           if (security.autoEscape !== false) secMeta += '\t<!-- vesk: auto-escape enabled -->\n';
         }
-        html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+        html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>${dataScriptBlock}\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
       } else {
         const leaf = chain.find(n => n.page);
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
+          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
           html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
         } else {
           throw new Error('No page or layout matched');
@@ -641,7 +667,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
+          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
         } else {
           throw new Error('No page or layout matched');
         }
@@ -650,6 +676,9 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
       let body = '';
       let head = '';
+      let props: Record<string, unknown> | undefined;
+      delete (globalThis as Record<string, unknown>).__vsk_ssr_data;
+      delete (globalThis as Record<string, unknown>).__vsk_ssr_promises;
 
       for (let i = chain.length - 1; i >= 0; i--) {
         const node = chain[i];
@@ -662,6 +691,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           const result = await renderPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, sourcePath: pageFilePath });
           body = result.body;
           head = result.head || '';
+          props = result.props;
         }
 
         if (node.layout && existsSync(layoutFilePath)) {
@@ -682,7 +712,11 @@ export async function startDevServer(port: number, projectDir: string, config: R
       if (head) yield '\t' + head.split('\n').join('\n\t') + '\n';
       yield '</head>\n<body>\n<div id="root">\n';
       yield prettifyHtml(body);
-      yield '\n</div>\n</body>\n</html>';
+      yield '\n</div>\n';
+      const ssrData = (globalThis as Record<string, unknown>).__vsk_ssr_data as Record<string, unknown> | undefined;
+      const dataScripts = buildDataScripts(props, ssrData || {}, storeDataScript);
+      if (dataScripts.length > 0) yield dataScripts.join('\n') + '\n';
+      yield '</body>\n</html>';
     }
 
     let mwLocals: Record<string, unknown> = {};
@@ -765,7 +799,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 try {
                   const nfSrc = readFileSync(nfPath, 'utf-8');
                   const nfCompName = extractCompName(nfSrc) || (node.notFound as string);
-                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: nfPath });
+                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, externalDataScript: storeDataScript, sourcePath: nfPath });
                   notFoundHtml = html.replace('</body>',
                     `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch {}
@@ -789,7 +823,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                   const errSrc = readFileSync(errPath, 'utf-8');
                   const errCompName = extractCompName(errSrc) || (node.error as string);
                   const errProps = { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname };
-                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, sourcePath: errPath });
+                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, externalDataScript: storeDataScript, sourcePath: errPath });
                   errorHtml = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch (e2) {
                   LOG.err(`error page render failed:`, (e2 as Error).message);

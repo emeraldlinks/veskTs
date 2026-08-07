@@ -116,6 +116,7 @@ export function generateSsrFunction(
   const paramsCode = `function __paramsFor(pathname) {\n  const urlParts = pathname.split('/').filter(Boolean);\n  return { ${paramExprs.join(', ')} };\n}\n`;
 
   const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
+  const dataScriptOption = ', externalDataScript: storeDataScriptGlobal';
 
   let registryCode = '';
   const compRegEntries: string[] = [];
@@ -136,7 +137,7 @@ export function generateSsrFunction(
     htmlFnCode = [
       'async function __renderHtml(params) {',
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
       '}',
       '',
@@ -144,7 +145,7 @@ export function generateSsrFunction(
   } else {
     htmlFnCode = [
       'async function __renderHtml(params) {',
-      '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', sourcePath: _srcPath });',
+      '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',
@@ -308,7 +309,7 @@ export function generateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, parseCookies, getAction, validateActionInput, issuesToFieldMap } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

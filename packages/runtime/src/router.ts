@@ -542,9 +542,11 @@ async function hydrateInitial(
 	setIsHydrating(true);
 
 	// Keep the hydration chain synchronous so every track()/effect() created by
-	// the layout and page hydrators runs inside the root() block context below.
-	// Awaiting between layers would resume with a null active block, orphaning
-	// cells and effect blocks (counters would render but never update).
+	// the layout and page hydrators runs inside the active block below. Unlike a
+	// bare root() block, runInBlockWindow keeps that block active across `await`
+	// suspensions, so an async page resuming from `await useFetch(...)` still
+	// attaches its track()/effect() blocks to the root instead of orphaning them
+	// (orphaned effects never flush — async pages would hydrate with empty lists).
 	function renderLayoutChain(index: number): unknown {
 		if (index >= layoutNodes.length) {
 			return (subWalker: HydrateWalker) => {
@@ -568,13 +570,7 @@ async function hydrateInitial(
 	}
 
 	const walker = createHydrateWalker(container);
-	let pending: unknown;
-	root(() => {
-		pending = renderLayoutChain(0);
-	});
-	if (pending !== null && pending !== undefined && typeof (pending as { then?: unknown }).then === 'function') {
-		await (pending as Promise<unknown>);
-	}
+	await runInBlockWindow(() => renderLayoutChain(0));
 	setIsHydrating(false);
 }
 

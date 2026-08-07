@@ -5,7 +5,7 @@ import {
   TrackDecl, RuntimeStatement, ComponentRef, ComponentCall,
   ServerBlock, ClientBlock, HeadBlock, SlotNode,
 } from '@vesk/compiler/src/ir';
-import { isStaticIR, collectTrackedNames, transformTracked, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
+import { isStaticIR, collectTrackedNames, transformTracked, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
 import { unwrapTrackCall, skipWhitespace, findBalancedEnd, startsWithIdentifier } from '@vesk/compiler/src/scan';
@@ -17,17 +17,17 @@ import {
 
 export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isAsync: boolean = false, tracked?: Map<string, TrackedInfo>): string {
   importedNames = importedNames || __vskImportedNames;
-  if (node instanceof StaticNode) return staticNodeToJS(node, tracked);
+  if (node instanceof StaticNode) return staticNodeToJS(node, isAsync, tracked);
   if (node instanceof TextNode) {
     if (!node.value) return '';
     return `__out.push(${JSON.stringify(node.value)});`;
   }
   if (node instanceof DynamicBinding) return dynamicBindingToJS(node, tracked);
-  if (node instanceof OpaqueDynamicRegion) return opaqueRegionToJS(node, tracked);
-  if (node instanceof MapRegion) return mapRegionToJS(node, tracked);
-  if (node instanceof WhileLoop) return whileLoopToJS(node, tracked);
-  if (node instanceof SwitchBlock) return switchBlockToJS(node, tracked);
-  if (node instanceof TryCatch) return tryCatchToJS(node, tracked);
+  if (node instanceof OpaqueDynamicRegion) return opaqueRegionToJS(node, isAsync, tracked);
+  if (node instanceof MapRegion) return mapRegionToJS(node, isAsync, tracked);
+  if (node instanceof WhileLoop) return whileLoopToJS(node, isAsync, tracked);
+  if (node instanceof SwitchBlock) return switchBlockToJS(node, isAsync, tracked);
+  if (node instanceof TryCatch) return tryCatchToJS(node, isAsync, tracked);
   if (node instanceof ComponentRef) return '';
   if (node instanceof ComponentCall) return componentCallToJS(node, importedNames, isAsync, tracked);
   if (node instanceof ServerBlock) {
@@ -40,7 +40,7 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
   }
   if (node instanceof ClientBlock) return '';
   if (node instanceof HeadBlock) return '';
-  if (node instanceof ForLoop) return forLoopToJS(node, tracked);
+  if (node instanceof ForLoop) return forLoopToJS(node, isAsync, tracked);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
     const inner = unwrapTrackCall(node.init);
@@ -57,7 +57,7 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
       `})();`,
     ].join('\n');
   }
-  if (node instanceof RuntimeStatement) return transformTracked(node as any, tracked || new Map());
+  if (node instanceof RuntimeStatement) return semicolonizeStatement(transformTracked(node as any, tracked || new Map()));
   if (node instanceof SlotNode) return `__out.push(props.children || '');`;
   return '';
 }
@@ -76,7 +76,7 @@ function exprJSX(node: { raw: string; ast: ESTreeNode | null }, tracked?: Map<st
   return exprJS(transformTracked(node as any, tracked || new Map()));
 }
 
-function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): string {
+function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
 
   const dynAttrTargets = new Set<string>();
@@ -145,7 +145,7 @@ function staticNodeToJS(node: StaticNode, tracked?: Map<string, TrackedInfo>): s
   }
 
   for (const child of childNodes) {
-    const code = irNodeToJS(child, null, false, tracked);
+    const code = irNodeToJS(child, null, isAsync, tracked);
     if (code) lines.push(code);
   }
 
@@ -177,18 +177,18 @@ function dynamicBindingToJS(node: DynamicBinding, tracked?: Map<string, TrackedI
   return `{ const __v = ${exprJSX(node.expression, tracked)}; if (__v != null) __out.push(typeof __v === 'boolean' ? (__v ? 'true' : '') : __escape(String(__v))); }`;
 }
 
-function opaqueRegionToJS(node: OpaqueDynamicRegion, tracked?: Map<string, TrackedInfo>): string {
+function opaqueRegionToJS(node: OpaqueDynamicRegion, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   const cond = exprJSX(node.condition, tracked);
   lines.push(`if (${cond}) {`);
   for (const n of node.consequentNodes) {
-    const code = irNodeToJS(n, null, false, tracked);
+    const code = irNodeToJS(n, null, isAsync, tracked);
     if (code) lines.push(indent(code));
   }
   if (node.alternateNodes.length > 0) {
     lines.push(`} else {`);
     for (const n of node.alternateNodes) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
   }
@@ -196,7 +196,7 @@ function opaqueRegionToJS(node: OpaqueDynamicRegion, tracked?: Map<string, Track
   return lines.join('\n');
 }
 
-function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): string {
+function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   const arr = exprJSX(node.expression, tracked);
   const item = node.itemVariable;
@@ -209,7 +209,7 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
     lines.push(`if (${arrVar} == null || ${arrVar}.length === 0) {`);
     for (const n of node.alternateNodes) {
       setVskForceClaim(true);
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     setVskForceClaim(false);
@@ -222,7 +222,7 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
     lines.push(`for (const ${item} of ${loopArr}) {`);
     lines.push(indent(`const ${node.indexVariable} = __i;`));
     for (const n of node.bodyTemplate) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     lines.push(indent('__i++;'));
@@ -230,7 +230,7 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
   } else {
     lines.push(`for (const ${item} of ${loopArr}) {`);
     for (const n of node.bodyTemplate) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     lines.push(`}`);
@@ -242,19 +242,19 @@ function mapRegionToJS(node: MapRegion, tracked?: Map<string, TrackedInfo>): str
   return lines.join('\n');
 }
 
-function whileLoopToJS(node: WhileLoop, tracked?: Map<string, TrackedInfo>): string {
+function whileLoopToJS(node: WhileLoop, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   if (node.isDoWhile) {
     lines.push(`do {`);
     for (const n of node.bodyTemplate) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     lines.push(`} while (${exprJSX(node.condition, tracked)});`);
   } else {
     lines.push(`while (${exprJSX(node.condition, tracked)}) {`);
     for (const n of node.bodyTemplate) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     lines.push(`}`);
@@ -262,7 +262,7 @@ function whileLoopToJS(node: WhileLoop, tracked?: Map<string, TrackedInfo>): str
   return lines.join('\n');
 }
 
-function switchBlockToJS(node: SwitchBlock, tracked?: Map<string, TrackedInfo>): string {
+function switchBlockToJS(node: SwitchBlock, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   lines.push(`switch (${exprJSX(node.discriminant, tracked)}) {`);
   for (const c of node.cases) {
@@ -272,7 +272,7 @@ function switchBlockToJS(node: SwitchBlock, tracked?: Map<string, TrackedInfo>):
       lines.push(`default:`);
     }
     for (const n of c.body) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code, 2));
     }
     lines.push(indent('break;', 2));
@@ -281,18 +281,18 @@ function switchBlockToJS(node: SwitchBlock, tracked?: Map<string, TrackedInfo>):
   return lines.join('\n');
 }
 
-function tryCatchToJS(node: TryCatch, tracked?: Map<string, TrackedInfo>): string {
+function tryCatchToJS(node: TryCatch, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   const catchParam = node.catchParamName || '__e';
   lines.push(`try {`);
   for (const n of node.bodyTemplate) {
-    const code = irNodeToJS(n, null, false, tracked);
+    const code = irNodeToJS(n, null, isAsync, tracked);
     if (code) lines.push(indent(code));
   }
   if (node.catchBody.length > 0) {
     lines.push(`} catch (${catchParam}) {`);
     for (const n of node.catchBody) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
   }
@@ -300,13 +300,13 @@ function tryCatchToJS(node: TryCatch, tracked?: Map<string, TrackedInfo>): strin
   return lines.join('\n');
 }
 
-function forLoopToJS(node: ForLoop, tracked?: Map<string, TrackedInfo>): string {
+function forLoopToJS(node: ForLoop, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   if (node.kind === 'for-in') {
     const arr = exprJSX(node.condition, tracked);
     lines.push(`for (${node.init} of (Array.isArray(${arr}) ? ${arr} : (${arr} == null ? [] : Object.keys(${arr})))) {`);
     for (const n of node.bodyTemplate) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     lines.push(`}`);
@@ -314,7 +314,7 @@ function forLoopToJS(node: ForLoop, tracked?: Map<string, TrackedInfo>): string 
     if (node.init) lines.push(`${node.init}`);
     lines.push(`while (${exprJSX(node.condition, tracked)}) {`);
     for (const n of node.bodyTemplate) {
-      const code = irNodeToJS(n, null, false, tracked);
+      const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
     if (node.update) lines.push(indent(`${node.update}`));

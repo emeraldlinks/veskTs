@@ -190,6 +190,24 @@ export class VeskError extends Error {
     });
   }
 
+  static asyncChildInSyncParent(parentName: string, childName: string, context: VeskErrorOptions = {}): VeskError {
+    return new VeskError(
+      `Component "${parentName}" renders "<${childName} />", but "<${childName} />" is async and "${parentName}" is not declared async.`,
+      {
+        ...context,
+        suggestions: [
+          `Declare the parent async: \`async component ${parentName} ...\``,
+        ],
+        nextSteps: [
+          `Change \`component ${parentName} ...\` to \`async component ${parentName} ...\`.`,
+          `Every component that renders "<${childName} />" (directly or transitively) must itself be \`async component\`.`,
+          `Layouts are exempt — a layout that renders {props.children} does not need \`async\`.`,
+        ],
+        tip: `A component that renders an async component must itself be async so the renderer can await it before serializing the HTML. Async components also include components that call \`useFetch\`.`,
+      },
+    );
+  }
+
   toString(): string {
     let out = `[vesk] ${this.message}`;
     if (this.file) out += `\n  File: ${this.file}${this.line ? `:${this.line}` : ''}`;

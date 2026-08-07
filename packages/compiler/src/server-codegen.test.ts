@@ -15,9 +15,24 @@ import {
 
 let passed = 0;
 let failed = 0;
+let asyncChain: Promise<void> = Promise.resolve();
 
 function describe(name, fn) { console.log(`\n${name}`); fn(); }
 function it(name, fn) {
+	if (fn.constructor.name === 'AsyncFunction') {
+		asyncChain = asyncChain.then(async () => {
+			try {
+				await fn();
+				passed++;
+				console.log(`  ✓ ${name}`);
+			} catch (e) {
+				failed++;
+				console.log(`  ✗ ${name}`);
+				console.log(`    ${e.message}`);
+			}
+		});
+		return;
+	}
 	try { fn(); passed++; console.log(`  ✓ ${name}`); }
 	catch (e) { failed++; console.log(`  ✗ ${name}`); console.log(`    ${e.message}`); }
 }
@@ -686,6 +701,196 @@ describe('Statement Mode Server Rendering', () => {
 			}
 		`, 'App', { flag: true })).toBe('<div>Labeled</div>');
 	});
+	it('renders semicolon-less expression statements before JSX', () => {
+		expect(render(`
+			component App(props: { x: number }) {
+				console.log('side effect')
+				const y = props.x * 2
+				<div>{y}</div>
+			}
+		`, 'App', { x: 5 })).toBe('<div>10</div>');
+	});
+	it('renders semicolon-less statements after JSX', () => {
+		expect(render(`
+			component App {
+				<div>hi</div>
+				console.log('done')
+			}
+		`, 'App')).toBe('<div>hi</div>');
+ 	});
+ });
+
+// ============================================================
+// Async Components & Async Discipline
+// ============================================================
+describe('Async Components', () => {
+	it('renders an async component with await', async () => {
+		expect(await render(`
+			async component Async() {
+				const data = await Promise.resolve('hi')
+				<div>{data}</div>
+			}
+		`, 'Async')).toBe('<div>hi</div>');
+	});
+
+	it('async parent renders an async child', async () => {
+		expect(await render(`
+			async component Child() {
+				const data = await Promise.resolve('hello')
+				<div>{data}</div>
+			}
+			async component Parent() {
+				<Child />
+			}
+		`, 'Parent')).toBe('<div>hello</div>');
+	});
+
+	it('deeply nested chain requires explicit async at every level', async () => {
+		expect(await render(`
+			async component Leaf() {
+				const data = await Promise.resolve(42)
+				<p>{data}</p>
+			}
+			async component Mid() {
+				<Leaf />
+			}
+			async component Root() {
+				<Mid />
+			}
+		`, 'Root')).toBe('<p>42</p>');
+	});
+
+	it('awaits async children inside conditionals on SSR', async () => {
+		expect(await render(`
+			async component Card() {
+				const data = await Promise.resolve('card')
+				<p>{data}</p>
+			}
+			async component App(props: { show: boolean }) {
+				if (props.show) {
+					<Card />
+				}
+			}
+		`, 'App', { show: true })).toBe('<p>card</p>');
+	});
+});
+
+describe('Async Discipline', () => {
+	const mustError = (source: string, componentName: string, parentName: string, childName: string): any => {
+		try {
+			render(source, componentName);
+			throw new Error(`Expected compile error for "${componentName}" -> "${childName}"`);
+		} catch (e: any) {
+			expect(e.constructor.name).toBe('VeskError');
+			expect(e.message).toContain(parentName);
+			expect(e.message).toContain(childName);
+			expect(e.message).toContain('async');
+			return e;
+		}
+	};
+
+	it('sync parent calling async child is a compile error (statement mode)', () => {
+		const e = mustError(`
+			async component Child() {
+				const data = await Promise.resolve('hi')
+				<div>{data}</div>
+			}
+			component Parent() {
+				<Child />
+			}
+		`, 'Parent', 'Parent', 'Child');
+		expect(e.line).toBe(7);
+		expect(e.column).toBe(5);
+	});
+
+	it('sync parent calling async child is a compile error (expression mode)', () => {
+		mustError(`
+			async component Child() {
+				const data = await Promise.resolve('hi')
+				return <div>{data}</div>
+			}
+			component Parent() {
+				return <Child />
+			}
+		`, 'Parent', 'Parent', 'Child');
+	});
+
+	it('a sync link anywhere in the chain is a compile error', () => {
+		mustError(`
+			async component Leaf() {
+				const data = await Promise.resolve(42)
+				return <p>{data}</p>
+			}
+			component Mid() {
+				return <Leaf />
+			}
+			async component Root() {
+				return <Mid />
+			}
+		`, 'Root', 'Mid', 'Leaf');
+	});
+
+	it('async children inside a conditional still require an async parent', () => {
+		mustError(`
+			async component Card() {
+				const data = await Promise.resolve('card')
+				return <p>{data}</p>
+			}
+			component App(props: { show: boolean }) {
+				if (props.show) {
+					<Card />
+				}
+			}
+		`, 'App', 'App', 'Card');
+	});
+
+	it('useFetch child from sync parent is a compile error', () => {
+		mustError(`
+			component Fetcher() {
+				const data = useFetch('/api/x')
+				<p>{data.loading ? '…' : 'ok'}</p>
+			}
+			component Parent() {
+				<Fetcher />
+			}
+		`, 'Parent', 'Parent', 'Fetcher');
+	});
+
+	it('useFetch parent may render a useFetch child without declared async', async () => {
+		const savedFetch = globalThis.fetch;
+		globalThis.fetch = () => Promise.resolve({
+			ok: true,
+			json: () => Promise.resolve('yay'),
+		}) as any;
+		try {
+			const html = await render(`
+				component Fetcher() {
+					const data = useFetch('/api/x')
+					<p>{data.data}</p>
+				}
+				component Parent() {
+					const own = useFetch('/api/y')
+					<Fetcher />
+				}
+			`, 'Parent');
+			expect(html).toBe('<p>yay</p>');
+		} finally {
+			globalThis.fetch = savedFetch;
+		}
+	});
+
+	it('layout rendering a slot does not need async', async () => {
+		const html = await render(`
+			async component Page() {
+				const data = await Promise.resolve('page')
+				<h1>{data}</h1>
+			}
+			component Layout(props: { children: unknown }) {
+				<main>{props.children}</main>
+			}
+		`, 'Layout', { children: 'slot' });
+		expect(html).toBe('<main>slot</main>');
+	});
 });
 
 // ============================================================
@@ -867,6 +1072,8 @@ describe('Root Event Delegation', () => {
 });
 
 console.log(`\n${'='.repeat(50)}`);
-console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-if (failed > 0) process.exit(1);
-else console.log('All tests passed!');
+asyncChain.then(() => {
+	console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+	if (failed > 0) process.exit(1);
+	else console.log('All tests passed!');
+});

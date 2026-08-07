@@ -18,6 +18,7 @@ const navItems: NavItem[] = [
 	{ label: 'Async', href: '/async' },
 	{ label: 'Map', href: '/map' },
 	{ label: 'Empty', href: '/empty' },
+	{ label: 'Md', href: '/md' },
 ]
 
 component Layout(props: LayoutProps) {

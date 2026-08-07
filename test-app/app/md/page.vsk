@@ -1,0 +1,31 @@
+import { Md } from '@vesk/runtime';
+
+const markdownDoc = `# Markdown in Vesk
+
+Use **<Md content={...} />** to render markdown — headings, lists, links and code blocks.
+
+- compiler-first
+- fine-grained reactivity
+- tokenizer-based parsing
+
+> Content is escaped, so raw HTML never leaks through.
+
+\`\`\`ts
+const md = track('# hello');
+\`\`\`
+
+## Feature matrix
+
+1. SSR and hydration
+2. SPA navigation
+3. zero-JS pages
+`;
+
+component MdPage {
+	<h1 class="text-3xl font-bold mb-4">Markdown Demo</h1>
+	<Md content={markdownDoc} class="md prose" />
+	<div class="mt-8 border-t border-gray-200 pt-4">
+		<p class="text-gray-600">Dynamic content:</p>
+		<Md content="# Dynamic heading from a cell" />
+	</div>
+}

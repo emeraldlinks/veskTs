@@ -5,7 +5,7 @@ import { MapRegion } from '@vesk/compiler/src/ir';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { compileClient, isStaticIR } from '@vesk/compiler/src/client-codegen';
-import type { CompileFileResult, RenderPageResult, SSGResult, FullPageOptions } from '@vesk/compiler/src/types';
+import type { CompileFileResult, RenderPageResult, SSGResult, FullPageOptions, DataScriptPayload, ExternalDataScript } from '@vesk/compiler/src/types';
 import {
   isStatic, prettifyHtml, resetVskState,
   loadRuntimeImports, evalTopLevelCode,
@@ -60,12 +60,32 @@ export function render(
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
   const fullRegistry = new Map([...registry, ...componentMap]);
   const __vesk = (options.__vesk as Record<string, unknown>) || compiled.__vesk;
-  const result = renderFn(props, fullRegistry, __vesk);
   const targetComp = compiled.ir.components.find((c) => c.name === componentName);
-  if (targetComp?.isAsync) {
-    return (result as Promise<string>).then ? result as Promise<string> : Promise.resolve(result as string);
+  const isAsyncComp = !!(targetComp && (targetComp.isAsync || targetComp.ssrAwait));
+
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
+  const renderToken = (globalThis as any).__vsk_ssr_token;
+  if (isAsyncComp) {
+    return (async () => {
+      let bodyHtml: string;
+      try {
+        bodyHtml = await renderFn(props, fullRegistry, __vesk);
+      } finally {
+        delete (globalThis as any).__vsk_ssr;
+        clearSsrCells(renderToken);
+      }
+      return bodyHtml;
+    })();
   }
-  return result as string;
+  let bodyHtml: unknown;
+  try {
+    bodyHtml = renderFn(props, fullRegistry, __vesk);
+  } finally {
+    delete (globalThis as any).__vsk_ssr;
+    clearSsrCells(renderToken);
+  }
+  return bodyHtml as string;
 }
 
 export function renderPage(
@@ -220,6 +240,27 @@ ${bodyHtml}${scriptBlock}</body>
   return { html, body: bodyHtml, head: headHtml, props: serializedProps, clientCode, static: !hasClient, staticLists };
 }
 
+export function buildDataScripts(
+  ssrProps: Record<string, unknown> | null | undefined,
+  ssrData: Record<string, unknown>,
+  external?: ExternalDataScript | null
+): string[] {
+  const hasProps = ssrProps !== undefined && ssrProps !== null && Object.keys(ssrProps).length > 0;
+  const hasData = Object.keys(ssrData).length > 0;
+  if (!hasProps && !hasData) return [];
+  const payload: DataScriptPayload = {};
+  if (hasProps) payload.props = ssrProps as Record<string, unknown>;
+  if (hasData) payload.ssrData = ssrData;
+  if (external) {
+    const src = external(payload);
+    if (src) return [`\t<script src="${src}"></script>`];
+  }
+  const scripts: string[] = [];
+  if (hasProps) scripts.push(`\t<script>const __vesk_props = ${JSON.stringify(ssrProps)};</script>`);
+  if (hasData) scripts.push(`\t<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+  return scripts;
+}
+
 export async function renderFullPage(
   source: string,
   componentName: string,
@@ -271,10 +312,7 @@ export async function renderFullPage(
       ? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
       : '';
 
-    const dataScripts: string[] = [];
-    if (serializedProps) dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
-    const ssrDataKeys = Object.keys(ssrData);
-    if (ssrDataKeys.length > 0) dataScripts.push(`<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+    const dataScripts = buildDataScripts(ssrProps, ssrData, options.externalDataScript);
     const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
 
     const headLines = ['\t<meta charset="utf-8" />', '\t<meta name="viewport" content="width=device-width, initial-scale=1" />'];
@@ -382,10 +420,7 @@ export async function* renderPageStream(
   }
   delete (globalThis as any).__vsk_ssr_promises;
 
-  const dataScripts: string[] = [];
-  if (serializedProps) dataScripts.push(`<script>const __vesk_props = ${serializedProps};</script>`);
-  const ssrDataKeys = Object.keys(ssrData);
-  if (ssrDataKeys.length > 0) dataScripts.push(`<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+  const dataScripts = buildDataScripts(ssrProps, ssrData, options.externalDataScript);
   const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') : '';
   yield `\n</div>${dataScriptBlock}</body>\n</html>\n`;
 }

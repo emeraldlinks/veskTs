@@ -240,6 +240,19 @@ export async function startProdServer(outDir: string, options?: { port?: number 
       return;
     }
 
+    if (url.pathname === '/ssr-data.js') {
+      const token = url.searchParams.get('t') || '';
+      const store = (globalThis as Record<string, unknown>).__vsk_ssr_data_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
+      const payload = store?.[token];
+      if (payload) delete store[token];
+      const lines: string[] = [];
+      if (payload?.props) lines.push(`globalThis.__vesk_props = ${JSON.stringify(payload.props)};`);
+      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${JSON.stringify(payload.ssrData)};`);
+      res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
+      res.end(lines.join('\n') || '// no ssr data');
+      return;
+    }
+
     if (url.pathname === '/_vesk/runtime.js') {
       const clientPath = resolve(staticDir, 'client.js');
       if (existsSync(clientPath)) {

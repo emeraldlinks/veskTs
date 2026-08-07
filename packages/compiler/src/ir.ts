@@ -164,17 +164,20 @@ export class ComponentCall {
   props: { name: string; value: Expression }[];
   spreadProps: Expression[];
   children: IRNode[];
+  start: number;
 
   constructor(
     componentName: string,
     props: { name: string; value: Expression }[],
     children: IRNode[] = [],
-    spreadProps: Expression[] = []
+    spreadProps: Expression[] = [],
+    start = -1
   ) {
     this.componentName = componentName;
     this.props = props;
     this.children = children;
     this.spreadProps = spreadProps;
+    this.start = start;
   }
 }
 

@@ -10,4 +10,5 @@ export { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSche
 export { Image } from '@vesk/runtime/src/image';
 export { Experiment } from '@vesk/runtime/src/experiment';
 export { Form, Field, required, email, minLength, maxLength, pattern, custom } from '@vesk/runtime/src/form';
+export { Md } from '@vesk/runtime/src/md';
 export { defineAction, getAction, clearActions, validateActionInput, issuesToFieldMap, isFormAction } from '@vesk/runtime/src/action';

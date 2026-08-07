@@ -4,6 +4,7 @@ import type { RouteNode } from '@vesk/compiler/src/types';
 import { parse } from '@vesk/compiler/src/parser';
 import { tokenizeCode } from '@vesk/compiler/src/tokens';
 import { skipWhitespace, findBalancedEnd } from '@vesk/compiler/src/scan';
+import { hasTsSyntax, stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 
 export interface ScanOptions {
   layoutCompName?: string;
@@ -25,21 +26,36 @@ export interface MatchResult {
  */
 export function extractMiddlewareParts(src: string): { params: string; body: string } | null {
   try {
-    const ast = parse(src, { filename: 'middleware.ts' });
-    for (const stmt of (ast as any).body) {
-      const target = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
-      if (!target || target.type !== 'FunctionDeclaration') continue;
-      if (!(target.id && target.id.name === 'middleware')) continue;
-      const params = target.params.length
-        ? src.slice(target.params[0].start, target.params[target.params.length - 1].end)
-        : '';
-      const body = src.slice(target.body.start + 1, target.body.end - 1);
-      return { params, body: body.trim() };
+    let ast = parse(src, { filename: 'middleware.ts' });
+    let target = findMiddlewareFn(ast);
+    if (!target) return null;
+    if (hasTsSyntax(ast)) {
+      const stripped = stripCodeTypes(src);
+      if (stripped !== src) {
+        src = stripped;
+        ast = parse(src, { filename: 'middleware.ts' });
+        target = findMiddlewareFn(ast);
+        if (!target) return null;
+      }
     }
-    return null;
+    const params = target.params.length
+      ? src.slice(target.params[0].start, target.params[target.params.length - 1].end)
+      : '';
+    const body = src.slice(target.body.start + 1, target.body.end - 1);
+    return { params, body: body.trim() };
   } catch {
     return fallbackExtractMiddleware(src);
   }
+}
+
+function findMiddlewareFn(ast: any): any {
+  for (const stmt of ast.body) {
+    const target = stmt.type === 'ExportNamedDeclaration' ? stmt.declaration : stmt;
+    if (!target || target.type !== 'FunctionDeclaration') continue;
+    if (!(target.id && target.id.name === 'middleware')) continue;
+    return target;
+  }
+  return null;
 }
 
 /**

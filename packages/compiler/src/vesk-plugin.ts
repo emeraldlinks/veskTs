@@ -61,6 +61,23 @@ function isStyleBoundary(code: number): boolean {
   return isWsChar(code) || code === 62 || code === 47 || code === 123;
 }
 
+function matchKeywordSequence(input: string, words: string[]): boolean {
+  let p = 0;
+  while (p < input.length && isWsChar(input.charCodeAt(p))) p++;
+  if (!input.startsWith(words[0], p)) return false;
+  p += words[0].length;
+  for (let i = 1; i < words.length; i++) {
+    const wsStart = p;
+    while (p < input.length && isWsChar(input.charCodeAt(p))) p++;
+    if (p === wsStart) return false;
+    if (!input.startsWith(words[i], p)) return false;
+    p += words[i].length;
+  }
+  if (p >= input.length) return true;
+  const c = input.charCodeAt(p);
+  return isWsChar(c) || c === 123;
+}
+
 export function VeskParserPlugin(config: VeskPluginConfig = {}) {
   return (Parser: typeof acorn.Parser): typeof acorn.Parser => {
     const tt = (Parser as any).tokTypes || acorn.tokTypes;
@@ -69,6 +86,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
     class VeskParser extends Parser {
       #componentDepth = 0;
       #closeTagName: string | null = null;
+      #jsxStartsStatement = false;
 
       constructor(options: Options, input: string) {
         super(options, input);
@@ -94,6 +112,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
             };
             if (inType) {
               if (startsNewStatement) {
+                this.#jsxStartsStatement = true;
                 ++this.pos;
                 return this.finishToken(tstt.jsxTagStart);
               }
@@ -104,10 +123,14 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
                 prev === tt.bracketR || prev === tt.backQuote || prev === tt.template ||
                 prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
                 prev === tt._null || prev === tt.jsxTagEnd;
-              if (!canEndExpr || startsNewStatement) return forceJsx();
+              if (!canEndExpr || startsNewStatement) {
+                this.#jsxStartsStatement = true;
+                return forceJsx();
+              }
             }
           }
         }
+        this.#jsxStartsStatement = false;
         return super.readToken(code);
       }
 
@@ -141,7 +164,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
 
       parseExpression(noIn: boolean, refDestructuringErrors: any): any {
         const expr = super.parseExpression(noIn, refDestructuringErrors);
-        if (tstt && this.type === tstt.jsxTagStart) {
+        if (tstt && this.type === tstt.jsxTagStart && !this.#jsxStartsStatement) {
           this.raise(this.start, "Adjacent JSX elements must be wrapped in an enclosing tag. Wrap them in a fragment: <><Comp1 /><Comp2 /></> or a single parent element.");
         }
         return expr;
@@ -150,7 +173,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
       parseStatement(context: any, ...args: any[]): any {
         if (this.type === tt.name && this.value === 'async') {
           const afterAsync = this.input.slice(this.end).trimStart();
-          if (afterAsync.startsWith('component') && (afterAsync.length === 9 || ' \t\r\n{'.includes(afterAsync[9]))) {
+          if (matchKeywordSequence(afterAsync, ['component'])) {
             this.next();
             const node = this.parseComponentDeclaration(true);
             return node;
@@ -163,20 +186,20 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
 
         if (this.type === tt._export) {
           const rest = this.input.slice(this.pos).trimStart();
-          if (rest.startsWith('default async component') && (rest.length === 23 || ' \t\r\n{'.includes(rest[23]))) {
+          if (matchKeywordSequence(rest, ['default', 'async', 'component'])) {
             this.next(); this.next(); this.next();
             const node = this.startNode();
             node.declaration = this.parseComponentDeclaration(true);
             (node as any).default = true;
             return this.finishNode(node, 'ExportDefaultDeclaration');
           }
-          if (rest.startsWith('async component') && (rest.length === 15 || ' \t\r\n{'.includes(rest[15]))) {
+          if (matchKeywordSequence(rest, ['async', 'component'])) {
             this.next(); this.next();
             const node = this.startNode();
             node.declaration = this.parseComponentDeclaration(true);
             return this.finishNode(node, 'ExportNamedDeclaration');
           }
-          if (rest.startsWith('default component') && (rest.length === 17 || ' \t\r\n{'.includes(rest[17]))) {
+          if (matchKeywordSequence(rest, ['default', 'component'])) {
             const node = this.startNode();
             this.next();
             this.next();
@@ -184,7 +207,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
             (node as any).default = true;
             return this.finishNode(node, 'ExportDefaultDeclaration');
           }
-          if (rest.startsWith('component') && (rest.length === 9 || ' \t\r\n{'.includes(rest[9]))) {
+          if (matchKeywordSequence(rest, ['component'])) {
             const node = this.startNode();
             this.next();
             node.declaration = this.parseComponentDeclaration(false);
@@ -364,6 +387,19 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           const typeParameters = (this as any).tsTryParseTypeParameters((this as any).tsParseConstModifier);
           if (typeParameters) (node as any).typeParameters = typeParameters;
         }
+
+        // Mirror acorn's parseFunction: clear await/yield bookkeeping so a
+        // later component declaration doesn't trip checkYieldAwaitInDefaultParams
+        // on stale positions from a previous async component body.
+        const savedYield = (this as any).yieldPos;
+        const savedAwait = (this as any).awaitPos;
+        const savedAwaitIdent = (this as any).awaitIdentPos;
+        const savedMaybeInArrow = (this as any).maybeInArrowParameters;
+        (this as any).yieldPos = 0;
+        (this as any).awaitPos = 0;
+        (this as any).awaitIdentPos = 0;
+        (this as any).maybeInArrowParameters = false;
+
         this.enterScope(2 | (isAsync ? 4 : 0));
 
         (node as any).client = (this.type === tt.name || this.type === tt.privateId) && this.value === 'client' ? (this.next(), true) : false;
@@ -384,6 +420,10 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         this.#componentDepth--;
 
         this.exitScope();
+        (this as any).yieldPos = savedYield;
+        (this as any).awaitPos = savedAwait;
+        (this as any).awaitIdentPos = savedAwaitIdent;
+        (this as any).maybeInArrowParameters = savedMaybeInArrow;
         this.finishNode(node, 'ComponentDeclaration');
         return node;
       }

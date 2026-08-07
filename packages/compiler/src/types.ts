@@ -117,6 +117,22 @@ export interface SSGResult {
   staticLists: boolean;
 }
 
+export interface DataScriptPayload {
+  props?: Record<string, unknown>;
+  ssrData?: Record<string, unknown>;
+}
+
+/**
+ * When provided, hydration data (serialized props + useFetch SSR data) is
+ * served as an external classic script (`<script src="...">`) instead of an
+ * inline `<script>globalThis.__vsk_ssr_data = ...</script>`. Inline data
+ * scripts are blocked by strict Content-Security-Policy headers
+ * (`script-src 'self'` without `'unsafe-inline'`), so servers must deliver
+ * the payload through an origin-served file. The callback stores the payload
+ * server-side and returns the script src URL (or null to fall back to inline).
+ */
+export type ExternalDataScript = (payload: DataScriptPayload) => string | null;
+
 export interface FullPageOptions {
   cssUrl?: string;
   cssUrls?: string[];
@@ -126,6 +142,7 @@ export interface FullPageOptions {
   __vesk?: Record<string, unknown>;
   hydrate?: boolean;
   sourcePath?: string;
+  externalDataScript?: ExternalDataScript;
 }
 
 export const VESK_BUILTINS = [

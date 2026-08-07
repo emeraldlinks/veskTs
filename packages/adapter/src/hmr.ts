@@ -148,6 +148,7 @@ function regenerateSsrFunction(
   const pageComp = extractCompName(pageSrc) || 'Page';
 
   const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
+  const dataScriptOption = ', externalDataScript: storeDataScriptGlobal';
 
   let src = '';
   if (hasLayout) {
@@ -193,18 +194,18 @@ function regenerateSsrFunction(
   if (hasLayout) {
     renderCode = [
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
     ].join('\n');
   } else if (hasAncestorLayout) {
     renderCode = [
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
     ].join('\n');
   } else {
     renderCode = [
-      "  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + ", sourcePath: _srcPath });",
+      "  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });",
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',
@@ -218,7 +219,7 @@ function regenerateSsrFunction(
   }
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, storeDataScriptGlobal } from '../runtime.js';",
     '', registryCode, src, '',
     'export async function handle(request) {',
     '  const url = new URL(request.url);',

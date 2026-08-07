@@ -593,15 +593,67 @@ it('load function provides data to SSR renderFullPage', async () => {
 });
 
 it('async load function provides data to SSR renderFullPage', async () => {
-  const source = `component App(props) {
-    <h1>{props.title}</h1>
-  }
-  export async function load() {
-    return { props: { title: 'Async SSR' } };
-  }`;
-  const html = await renderFullPage(source, 'App', {});
-  show('  html', html.slice(0, 600));
-  assert(html.includes('Async SSR'), `async load title: ${html.slice(300, 600)}`);
+   const source = `component App(props) {
+     <h1>{props.title}</h1>
+   }
+   export async function load() {
+     return { props: { title: 'Async SSR' } };
+   }`;
+   const html = await renderFullPage(source, 'App', {});
+   show('  html', html.slice(0, 600));
+   assert(html.includes('Async SSR'), `async load title: ${html.slice(300, 600)}`);
+});
+
+it('async parent renders an async child through renderFullPage', async () => {
+   const source = `
+     async component Child() {
+       const data = await Promise.resolve('hello')
+       <div>{data}</div>
+     }
+     async component Parent() {
+       <Child />
+     }`;
+   const html = await renderFullPage(source, 'Parent', {});
+   show('  html', html.slice(0, 600));
+   assert(html.includes('hello'), `async child SSR: ${html.slice(300, 600)}`);
+   assert(html.includes('<div id="root">'), `root container present: ${html.slice(300, 600)}`);
+});
+
+it('sync parent calling async child is a compile error', async () => {
+   const source = `
+     async component Child() {
+       const data = await Promise.resolve('hello')
+       <div>{data}</div>
+     }
+     component Parent() {
+       <Child />
+     }`;
+   let threw = false;
+   try {
+     await renderFullPage(source, 'Parent', {});
+   } catch (e: any) {
+     threw = true;
+     show('  error', e.message);
+     assert(e.constructor.name === 'VeskError', `expected VeskError, got ${e.constructor.name}`);
+     assert(e.message.includes('Parent'), `error names parent: ${e.message}`);
+     assert(e.message.includes('Child'), `error names child: ${e.message}`);
+   }
+   assert(threw, 'sync parent calling async child must throw at compile time');
+});
+
+it('async parent of async child compiles to awaited hydrate call', async () => {
+   const source = `
+     async component Child() {
+       const data = await Promise.resolve('hello')
+       <div>{data}</div>
+     }
+     async component Parent() {
+       <Child />
+     }`;
+   const code = compileClient(source, null, { hydrate: true, forceClient: true });
+   show('  client', code.slice(0, 600));
+   assert(code.includes('async (props, __registry, __hydrate) => {'), 'parent hydrate fn is async');
+   assert(code.includes('await __components["Child"]'), 'child call is awaited');
 });
 
 it('load function receives params from props', async () => {
@@ -1130,6 +1182,121 @@ it('[island] {#client} block in non-island component throws', () => {
     threw = /client island/.test(String(e.message));
   }
   assert(threw, `expected client-island error, got no error`);
+});
+
+// =============================================================
+// Md — markdown component (must be explicitly imported, never auto-imported)
+// =============================================================
+console.log('\n=== Md — Markdown Component ===');
+
+it('[md][expr] renders markdown to HTML on the server', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  return <Md content="# Title
+
+A **bold** [link](https://vesk.dev) here" class="prose" />;
+}`;
+  const html = show('html', render(source, 'App'));
+  assert(html.includes('<div class="prose">'), `wrapper class missing: ${html}`);
+  assert(html.includes('<h1>Title</h1>'), `heading missing: ${html}`);
+  assert(html.includes('<strong>bold</strong>'), `bold missing: ${html}`);
+  assert(html.includes('<a href="https://vesk.dev">link</a>'), `link missing: ${html}`);
+});
+
+it('[md][expr] escapes raw html in markdown content', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  return <Md content="<script>alert(1)</script>" />;
+}`;
+  const html = render(source, 'App');
+  assert(!html.includes('<script>'), `raw html leaked: ${html}`);
+  assert(html.includes('&lt;script&gt;'), `content not escaped: ${html}`);
+});
+
+it('[md][expr] renderPage hydrate path wraps component in marker', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  return <Md content="### Hi" />;
+}`;
+  const r = renderPage(source, 'App', {}, new Map(), { hydrate: true }) as { body: string };
+  assert(r.body.startsWith('<!--vsk--><div><div>'), `hydrate wrapper missing: ${r.body}`);
+  assert(r.body.includes('<h3>Hi</h3>'), `markdown missing in hydrate output: ${r.body}`);
+});
+
+it('[md][expr] client code keeps explicit Md import and passes walker', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  return <Md content="# Hi" />;
+}`;
+  const code = compileClient(source, 'App', { hydrate: true });
+  assert(code.includes(`import { Md } from '@vesk/runtime'`), `Md import dropped: ${code.slice(0, 400)}`);
+  assert(code.includes('Md({'), `Md not called: ${code.slice(0, 600)}`);
+  assert(code.includes('subWalker('), `hydrate walker not passed to Md: ${code.slice(0, 600)}`);
+});
+
+it('[md][expr] dynamic content from a track cell renders', () => {
+  const source = `import { track } from '@vesk/runtime';
+import { Md } from '@vesk/runtime';
+component App {
+  const &[md] = track('# dynamic');
+  return <Md content={md} />;
+}`;
+  const html = render(source, 'App');
+  assert(html.includes('<h1>dynamic</h1>'), `dynamic markdown missing: ${html}`);
+});
+
+it('[md][stmt] bare JSX statement renders markdown', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  const md = '**statement** mode';
+  <Md content={md} />
+}`;
+  const html = render(source, 'App');
+  assert(html.includes('<strong>statement</strong>'), `stmt markdown missing: ${html}`);
+});
+
+it('[md][stmt] for loop over markdown array renders each item', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  const docs = ['# one', '## two', '### three'];
+  for (const doc of docs) {
+    <Md content={doc} />
+  }
+}`;
+  const html = render(source, 'App');
+  assert(html.includes('<h1>one</h1>'), `first item missing: ${html}`);
+  assert(html.includes('<h2>two</h2>'), `second item missing: ${html}`);
+  assert(html.includes('<h3>three</h3>'), `third item missing: ${html}`);
+});
+
+it('[md][stmt] guard-clause early return works with Md', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App(props) {
+  if (!props.show) return <div>empty</div>;
+  return <Md content="# visible" />;
+}`;
+  assert(render(source, 'App', {}) === '<div>empty</div>', `guard return failed`);
+  const html = render(source, 'App', { show: true });
+  assert(html.includes('<h1>visible</h1>'), `markdown missing after guard: ${html}`);
+});
+
+it('[md] Md is never auto-imported', () => {
+  const source = `component App {
+    return <Md content="x" />;
+  }`;
+  const ir = generateIR(parse(source), source);
+  const autoImports = ir.imports.filter(i => i.includes('Md'));
+  assert(autoImports.length === 0, `Md was auto-imported: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[md] explicit import is not duplicated', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  return <Md content="x" />;
+}`;
+  const ir = generateIR(parse(source), source);
+  const count = ir.imports.filter(i => i.includes('Md')).length;
+  assert(count === 1, `expected exactly 1 Md import, got ${count}: ${JSON.stringify(ir.imports)}`);
 });
 
 // Summary

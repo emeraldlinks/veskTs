@@ -64,6 +64,12 @@ export interface TrackedInfo {
   kind: 'virtual' | 'cell';
 }
 
+export function semicolonizeStatement(code: string): string {
+  const trimmed = code.trimEnd();
+  if (!trimmed || trimmed.endsWith(';') || trimmed.endsWith('}')) return code;
+  return code + ';';
+}
+
 export function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
   const ast = (irNode as any).ast;
   if (!ast) return (irNode as any).raw;
@@ -213,6 +219,8 @@ class Ctx {
   inTryBody = false;
   claimStatic = false;
   walker = '__hydrate';
+  asyncComps = new Set<string>();
+  isAsyncScope = false;
 
   push(...args: (string | null | undefined | false)[]): void {
     for (const a of args) if (a) this.lines.push(a as string);
@@ -276,7 +284,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     return null;
   }
   if (node instanceof RuntimeStatement) {
-    ctx.push(transformTracked(node as any, tracked));
+    ctx.push(semicolonizeStatement(transformTracked(node as any, tracked)));
     return null;
   }
   if (node instanceof SlotNode) {
@@ -498,6 +506,7 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
 
   const propsObj = `{ ${propsEntries.join(', ')} }`;
   const v = ctx.n();
+  const awaitKw = ctx.asyncComps.has(node.componentName) ? 'await ' : '';
   if (ctx.hydrate) {
     const access = ctx.importedNames.has(node.componentName)
       ? node.componentName
@@ -523,10 +532,10 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       ctx.walker = savedWalker;
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
-      ctx.push(`const ${v} = ${access}({ ${propsEntries.join(', ')} }, __registry, ${walkerVar});`);
+      ctx.push(`const ${v} = ${awaitKw}${access}({ ${propsEntries.join(', ')} }, __registry, ${walkerVar});`);
       return v;
     }
-    ctx.push(`const ${v} = ${access}(${propsObj}, __registry, ${subScope()});`);
+    ctx.push(`const ${v} = ${awaitKw}${access}(${propsObj}, __registry, ${subScope()});`);
     return v;
   } else {
     if (node.children.length > 0) {
@@ -544,9 +553,9 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       propsEntries.push(`children: ${frag}`);
     }
     if (ctx.importedNames.has(node.componentName)) {
-      ctx.push(`const ${v} = ${node.componentName}({ ${propsEntries.join(', ')} });`);
+      ctx.push(`const ${v} = ${awaitKw}${node.componentName}({ ${propsEntries.join(', ')} });`);
     } else {
-      ctx.push(`const ${v} = ${compPrefix}[${JSON.stringify(node.componentName)}]({ ${propsEntries.join(', ')} });`);
+      ctx.push(`const ${v} = ${awaitKw}${compPrefix}[${JSON.stringify(node.componentName)}]({ ${propsEntries.join(', ')} });`);
     }
   }
   return v;
@@ -564,6 +573,8 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   ctx.push(`let ${effArr} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('try-end');`);
 
+  const asyncKw = ctx.isAsyncScope ? 'await ' : '';
+
   function emitRenderFunc(name: string, isCatch: boolean, hydMode: boolean, compPrefix = '__components'): void {
     const savedHydrate = ctx.hydrate;
     const savedInTryBody = ctx.inTryBody;
@@ -571,7 +582,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
     if (hydMode && !isCatch) {
       ctx.inTryBody = true;
     }
-    ctx.push(`const ${name} = ${isCatch ? `(${catchParam}) =>` : '() =>'} {`);
+    ctx.push(`const ${name} = ${isCatch ? (ctx.isAsyncScope ? `async (${catchParam}) => {` : `(${catchParam}) => {`) : (ctx.isAsyncScope ? `async () => {` : `() => {`)}`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const savedEffects = ctx.effects;
     ctx.effects = [];
@@ -605,9 +616,9 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   ctx.push(`${parent}.appendChild(${endAnchor});`);
 
   if (hasCatch) {
-    ctx.push(`try { ${tryRender}(); } catch(${catchParam}) { ${catchRender}(${catchParam}); }`);
+    ctx.push(`try { ${asyncKw}${tryRender}(); } catch(${catchParam}) { ${asyncKw}${catchRender}(${catchParam}); }`);
   } else {
-    ctx.push(`${tryRender}();`);
+    ctx.push(`${asyncKw}${tryRender}();`);
   }
 
   const tryRenderComp = ctx.n();
@@ -620,11 +631,11 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   }
 
   ctx.effects.push(`{
-    effect(() => {
+    effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
       for (const e of ${effArr}) destroy_block(e);
       ${effArr}.length = 0;
       __cleanup(${anchor}, ${endAnchor});
-      try { ${tryRenderComp}(); } catch(${catchParam}) { ${hasCatch ? `${catchRenderComp}(${catchParam});` : 'throw ${catchParam};'} }
+      try { ${asyncKw}${tryRenderComp}(); } catch(${catchParam}) { ${hasCatch ? `${asyncKw}${catchRenderComp}(${catchParam});` : 'throw ${catchParam};'} }
     });
   }`);
 
@@ -643,8 +654,11 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('if-end');`);
 
+  const asyncKw = ctx.isAsyncScope ? 'await ' : '';
+  const fnOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
+
   const conRenderName = ctx.n();
-  ctx.push(`const ${conRenderName} = () => {`);
+  ctx.push(`const ${conRenderName} = ${fnOpen}`);
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   const conFrag = ctx.n();
   ctx.push(indent(`const ${conFrag} = document.createDocumentFragment();`));
@@ -658,7 +672,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   let altRenderName: string | null = null;
   if (hasElse) {
     altRenderName = ctx.n();
-    ctx.push(`const ${altRenderName} = () => {`);
+    ctx.push(`const ${altRenderName} = ${fnOpen}`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const altFrag = ctx.n();
     ctx.push(indent(`const ${altFrag} = document.createDocumentFragment();`));
@@ -675,18 +689,18 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   if (ctx.hydrate) {
     // During hydration, SSR content is already in the DOM.
   } else {
-    ctx.push(`if (${condExpr}) { ${conRenderName}(); }` + (hasElse ? ` else { ${altRenderName}(); }` : ''));
+    ctx.push(`if (${condExpr}) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : ''));
   }
 
   ctx.effects.push(`{
     let __iv = ${ctx.hydrate ? `!(${condExpr})` : 'true'};
-    effect(() => {
+    effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
       const __nv = ${condExpr};
       if (__nv !== __iv) {
         for (const e of ${effectsVar}) destroy_block(e);
         ${effectsVar}.length = 0;
         __cleanup(${anchor}, ${endAnchor});
-        if (__nv) { ${conRenderName}(); }` + (hasElse ? ` else { ${altRenderName}(); }` : '') + `
+        if (__nv) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : '') + `
         __iv = __nv;
       }
     });
@@ -707,7 +721,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   ctx.push(`const ${endAnchor} = document.createComment('while-end');`);
 
   const renderLoop = ctx.n();
-  ctx.push(`const ${renderLoop} = () => {`);
+  ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   if (node.isDoWhile) {
     ctx.push(indent(`do {`));
@@ -731,13 +745,13 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   if (ctx.hydrate) {
     // During hydration, SSR content is already in the DOM.
   } else {
-    ctx.push(`${renderLoop}();`);
+    ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();`);
   }
 
   ctx.effects.push(`{
   let __busy = false;
   let __iv = ${ctx.hydrate ? `!(${condExpr})` : `(${condExpr})`};
-  effect(() => {
+  effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
     if (__busy) return;
     const __nv = (${condExpr});
     if (__nv !== __iv) {
@@ -745,7 +759,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
       ${effectsVar}.length = 0;
       __cleanup(${anchor}, ${endAnchor});
       __busy = true;
-      ${renderLoop}();
+      ${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();
       __busy = false;
       __iv = (${condExpr});
     }
@@ -766,7 +780,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   ctx.push(`const ${endAnchor} = document.createComment('for-end');`);
 
   const renderLoop = ctx.n();
-  ctx.push(`const ${renderLoop} = () => {`);
+  ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   if (node.kind === 'for-in') {
     const srcExpr = transformTracked(node.condition as any, tracked);
@@ -794,7 +808,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   if (ctx.hydrate) {
     // During hydration, SSR content is already in the DOM.
   } else {
-    ctx.push(`${renderLoop}();`);
+    ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();`);
   }
 
   if (node.kind === 'for-in') {
@@ -802,7 +816,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     ctx.effects.push(`{
   let __busy = false;
   let __iv = undefined;
-  effect(() => {
+  effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
     if (__busy) return;
     const __nv = (${srcExpr});
     if (__nv !== __iv) {
@@ -810,7 +824,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
       ${effectsVar}.length = 0;
       __cleanup(${anchor}, ${endAnchor});
       __busy = true;
-      ${renderLoop}();
+      ${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();
       __busy = false;
       __iv = (${srcExpr});
     }
@@ -837,7 +851,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   ctx.push(`const ${endAnchor} = document.createComment('switch-end');`);
 
   const renderSwitch = ctx.n();
-  ctx.push(`const ${renderSwitch} = () => {`);
+  ctx.push(`const ${renderSwitch} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   ctx.push(indent(`switch (${discExpr}) {`));
   for (const c of node.cases) {
@@ -860,13 +874,13 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   if (ctx.hydrate) {
     // During hydration, SSR content is already in the DOM.
   } else {
-    ctx.push(`${renderSwitch}();`);
+    ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderSwitch}();`);
   }
 
   ctx.effects.push(`{
   let __busy = false;
   let __iv = ${ctx.hydrate ? `!(${discExpr})` : `(${discExpr})`};
-  effect(() => {
+  effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
     if (__busy) return;
     const __nv = (${discExpr});
     if (__nv !== __iv) {
@@ -874,7 +888,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
       ${effectsVar}.length = 0;
       __cleanup(${anchor}, ${endAnchor});
       __busy = true;
-      ${renderSwitch}();
+      ${ctx.isAsyncScope ? 'await ' : ''}${renderSwitch}();
       __busy = false;
       __iv = (${discExpr});
     }
@@ -890,6 +904,8 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
+  const aw = ctx.isAsyncScope ? 'await ' : '';
+  const effOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
 
   ctx.push(`const ${anchor} = document.createComment('map');`);
   ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
@@ -898,7 +914,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
 
   const renderItem = ctx.n();
   const indexParam = node.indexVariable ? ', __i' : '';
-  ctx.push(`const ${renderItem} = (${itemVar}${indexParam}, __e, __r) => {`);
+  ctx.push(`const ${renderItem} = ${ctx.isAsyncScope ? 'async ' : ''}(${itemVar}${indexParam}, __e, __r) => {`);
   ctx.push(indent(`__r = __r || ${endAnchor};`));
   if (node.indexVariable) ctx.push(indent(`const ${node.indexVariable} = __i;`));
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
@@ -911,7 +927,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   let emptyRenderName: string | null = null;
   if (node.alternateNodes.length > 0) {
     emptyRenderName = ctx.n();
-    ctx.push(`const ${emptyRenderName} = () => {`);
+    ctx.push(`const ${emptyRenderName} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const frag = ctx.n();
     ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
@@ -941,10 +957,10 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
     if (emptyRenderName) {
       const isEmptyVar = ctx.n();
       ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
-      ctx.push(`if (!${isEmptyVar}) { ${initList}(); } else { ${emptyRenderName}(); }`);
+      ctx.push(`if (!${isEmptyVar}) { ${initList}(); } else { ${aw}${emptyRenderName}(); }`);
       ctx.effects.push(`{
   let __first = true;
-  effect(() => {
+  effect(${effOpen}
     const __new = ${hasItems}();
     if (__first) { __first = false; return; }
     if (__new !== ${isEmptyVar}) {
@@ -955,7 +971,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
     for (const e of ${effectsVar}) destroy_block(e);
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
-    if (__new) { ${initList}(); } else { ${emptyRenderName}(); }
+    if (__new) { ${initList}(); } else { ${aw}${emptyRenderName}(); }
   });
 }`);
     } else {
@@ -975,12 +991,12 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
       if (node.indexVariable) {
         lines.push(`${ind}let __i = 0;`);
         lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
-        lines.push(`${ind}\t${renderItem}(${itemVar}, __i, ${effectsVar});`);
+        lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, __i, ${effectsVar});`);
         lines.push(`${ind}\t__i++;`);
         lines.push(`${ind}}`);
       } else {
         lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
-        lines.push(`${ind}\t${renderItem}(${itemVar}, ${effectsVar});`);
+        lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, ${effectsVar});`);
         lines.push(`${ind}}`);
       }
       return lines.join('\n');
@@ -991,10 +1007,10 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
       ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
       ctx.push(`if (!${isEmptyVar}) {`);
       ctx.push(indent(renderAllItems('')));
-      ctx.push(indent(`} else { ${emptyRenderName}(); }`));
+      ctx.push(indent(`} else { ${aw}${emptyRenderName}(); }`));
       ctx.effects.push(`{
   let __first = true;
-  effect(() => {
+  effect(${effOpen}
     const __new = ${hasItems}();
     if (__first) { __first = false; return; }
     if (__new !== ${isEmptyVar}) {
@@ -1012,14 +1028,14 @@ ${renderAllItems('        ')}
     __cleanup(${anchor}, ${endAnchor});
     if (__new) {
 ${renderAllItems('      ')}
-    } else { ${emptyRenderName}(); }
+    } else { ${aw}${emptyRenderName}(); }
   });
 }`);
     } else {
       ctx.push(renderAllItems(''));
       ctx.effects.push(`{
   let __first = true;
-  effect(() => {
+  effect(${effOpen}
     const __nv = ${arrExpr};
     if (__first) { __first = false; return; }
     for (const e of ${effectsVar}) destroy_block(e);
@@ -1034,13 +1050,19 @@ ${renderAllItems('    ')}
   return null;
 }
 
-function generateComponent(comp: ComponentIR, importedNames: Set<string> = new Set(), hydrate = false): string {
+function computeAsyncComponents(comps: ComponentIR[]): Set<string> {
+  return new Set(comps.filter((c) => c.isAsync).map((c) => c.name));
+}
+
+function generateComponent(comp: ComponentIR, importedNames: Set<string> = new Set(), hydrate = false, asyncComps: Set<string> = new Set()): string {
   const tracked = collectTrackedNames(comp.body);
   const ctx = new Ctx();
   ctx.importedNames = importedNames;
   ctx.hydrate = hydrate;
+  ctx.asyncComps = asyncComps;
+  ctx.isAsyncScope = comp.isAsync || asyncComps.has(comp.name);
 
-  ctx.push(hydrate ? (comp.isAsync ? 'async (props, __registry, __hydrate) => {' : '(props, __registry, __hydrate) => {') : (comp.isAsync ? 'async (props) => {' : '(props) => {'));
+  ctx.push(hydrate ? (ctx.isAsyncScope ? 'async (props, __registry, __hydrate) => {' : '(props, __registry, __hydrate) => {') : (ctx.isAsyncScope ? 'async (props) => {' : '(props) => {'));
   ctx.push(indent(`props = reactiveProps(props);`));
   ctx.push(indent(`const __prev = getActiveComponent();`));
   ctx.push(indent(`setActiveComponent({ c: null, p: __prev });`));
@@ -1097,6 +1119,7 @@ function buildParamInit(paramNames: string[]): string {
 function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
   const mapLines: string[] = [];
   mapLines.push(`const __components = {};`);
+  const asyncComps = computeAsyncComponents(irRoot.components);
 
   for (const comp of irRoot.components) {
     if (hydrate && isStaticComponent(comp)) {
@@ -1104,7 +1127,7 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
       mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
-    const code = generateComponent(comp, new Set(extractRuntimeNames(irRoot.imports)), hydrate);
+    const code = generateComponent(comp, new Set(extractRuntimeNames(irRoot.imports)), hydrate, asyncComps);
     mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
   }
 

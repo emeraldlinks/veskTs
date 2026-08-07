@@ -28,6 +28,7 @@ function expect(actual) {
 		toBeGreaterThanOrEqual(expected) { if (actual < expected) throw new Error(`expected ${actual} >= ${expected}`); },
 		not: {
 			toBeNull() { if (actual === null) throw new Error(`expected not null`); },
+			toContain(expected) { if (actual.includes(expected)) throw new Error(`expected not to contain ${expected}`); },
 		}
 	};
 }
@@ -250,6 +251,26 @@ test('extracts simple middleware', () => {
 		const out = extractMiddleware(join(tmp, 'app/middleware.ts'));
 		expect(out).toContain('async function middleware(ctx)');
 		expect(out).toContain("ctx.set('x', '1')");
+	} finally { cleanup(tmp); }
+});
+
+test('strips TS annotations from middleware params when emitting JS', () => {
+	const tmp = createFixture({
+		'app/middleware.ts': [
+			"import type { MiddlewareContext } from '@vesk/compiler';",
+			'export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {',
+			"  ctx.set('user', { id: 1 });",
+			'  return next();',
+			'}',
+		].join('\n'),
+	});
+	try {
+		const out = extractMiddleware(join(tmp, 'app/middleware.ts'));
+		expect(out).toContain('async function middleware(ctx, next)');
+		expect(out).not.toContain('MiddlewareContext');
+		expect(out).not.toContain('Promise<void>');
+		expect(out).toContain("ctx.set('user', { id: 1 })");
+		expect(out).toContain('return next()');
 	} finally { cleanup(tmp); }
 });
 
