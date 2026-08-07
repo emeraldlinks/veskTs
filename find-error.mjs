@@ -1,0 +1,12 @@
+import puppeteer from 'puppeteer-core';
+const CHROME = '/tmp/opencode/chrome/chrome-headless-shell/linux-151.0.7922.76/chrome-headless-shell-linux64/chrome-headless-shell';
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: true, args: ['--no-sandbox','--disable-setuid-sandbox','--disable-gpu','--disable-dev-shm-usage'] });
+const page = await browser.newPage();
+page.on('console', m => console.log('[console]', m.type(), m.text()));
+page.on('pageerror', e => console.log('[pageerror]', e.message, '\n  at', e.stack?.split('\n').slice(1,6).join('\n  at ')));
+await page.goto('http://localhost:3000', { waitUntil: 'networkidle0' });
+await new Promise(r=>setTimeout(r,1000));
+console.log('--- scripts loaded ---');
+const urls = await page.evaluate(() => Array.from(document.scripts).map(s=>s.src));
+console.log(urls);
+await browser.close();
