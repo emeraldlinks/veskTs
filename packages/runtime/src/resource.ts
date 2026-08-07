@@ -49,6 +49,19 @@ export class TimeoutError extends Error {
 const g = (): Record<string, unknown> => globalThis as Record<string, unknown>;
 const isServer = (): boolean => !!g().__vsk_ssr;
 
+export interface SsrDataSink {
+	set(key: string, value: unknown): void;
+	get(key: string): unknown | undefined;
+	snapshot(): Record<string, unknown>;
+	clear(): void;
+}
+
+let ssrSink: SsrDataSink | null = null;
+
+export function setSsrSink(sink: SsrDataSink | null): void {
+	ssrSink = sink;
+}
+
 interface CacheEntry {
 	data: unknown;
 	fetchedAt: number;
@@ -91,17 +104,29 @@ function getRegistry(): Map<string, Set<ResourceHandle<unknown>>> {
 }
 
 function getSsrData(key: string): unknown {
+	const sink = ssrSink;
+	if (sink) return sink.get(key);
 	const store = g().__vsk_ssr_data as Record<string, unknown> | undefined;
 	if (!store) return undefined;
 	return store[key];
 }
 
 export function setSsrData(key: string, value: unknown): void {
+	const sink = ssrSink;
+	if (sink) {
+		sink.set(key, value);
+		return;
+	}
 	if (!g().__vsk_ssr_data) g().__vsk_ssr_data = {};
 	(g().__vsk_ssr_data as Record<string, unknown>)[key] = value;
 }
 
 export function clearSsrData(): void {
+	const sink = ssrSink;
+	if (sink) {
+		sink.clear();
+		return;
+	}
 	delete g().__vsk_ssr_data;
 }
 
@@ -544,6 +569,8 @@ useFetch.arrayBuffer = <T = ArrayBuffer>(url: string, options?: Omit<UseFetchOpt
 	});
 
 export async function resolveSsrResources(): Promise<Record<string, unknown>> {
+	const sink = ssrSink;
+	if (sink) return { ...sink.snapshot() };
 	const promises = (g().__vsk_ssr_promises || []) as Promise<unknown>[];
 	if (promises.length === 0) return {};
 	await Promise.allSettled(promises);

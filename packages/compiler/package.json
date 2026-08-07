@@ -1,6 +1,6 @@
 {
   "name": "@vesk/compiler",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "type": "module",
   "description": "Vesk compiler — lexer, parser, semantic analysis, IR, codegen",
   "main": "./dist/index.js",

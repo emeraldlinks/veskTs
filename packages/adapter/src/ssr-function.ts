@@ -136,15 +136,18 @@ export function generateSsrFunction(
   if (hasLayout || hasAncestorLayout) {
     htmlFnCode = [
       'async function __renderHtml(params) {',
+      '  return withSsrStore(async () => {',
       '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
       '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
+      '  });',
       '}',
       '',
     ].join('\n');
   } else {
     htmlFnCode = [
       'async function __renderHtml(params) {',
+      '  return withSsrStore(async () => {',
       '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
@@ -153,6 +156,7 @@ export function generateSsrFunction(
       '      controller.close();',
       '    },',
       "  }), { headers: { 'Content-Type': 'text/html' } });",
+      '  });',
       '}',
       '',
     ].join('\n');
@@ -309,7 +313,7 @@ export function generateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

@@ -292,7 +292,8 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     if (ctx.hydrate) {
       ctx.push(`if (props.children !== undefined && props.children !== null) {`);
       ctx.push(`  if (typeof props.children === 'function') {`);
-      ctx.push(`    props.children(${ctx.walker}.subWalker(${parentVar}));`);
+      ctx.push(`    const __child = props.children(${ctx.walker}.subWalker(${parentVar}));`);
+      ctx.push(`    if (__child && typeof __child.then === 'function') __pendingChild = __child.then(() => $root);`);
       ctx.push(`  } else {`);
       ctx.push(`    ${parentVar}.appendChild(props.children);`);
       ctx.push(`  }`);
@@ -1080,6 +1081,7 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
   } else {
     ctx.push(indent(`const $root = document.createDocumentFragment();`));
   }
+  ctx.push(indent(`let __pendingChild = null;`));
 
   const paramInit = buildParamInit(comp.paramNames);
   if (paramInit) ctx.push(indent(paramInit));
@@ -1101,7 +1103,7 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
   const delCode = ctx.emitDelegates();
   if (delCode) ctx.push(indent(delCode.trim()));
 
-  ctx.push(indent(`return $root;`));
+  ctx.push(indent(`return __pendingChild || $root;`));
   ctx.push(indent(`} finally {`));
   ctx.push(indent(`\tsetActiveComponent(__prev);`));
   ctx.push(indent(`}`));

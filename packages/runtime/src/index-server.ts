@@ -1,7 +1,7 @@
 export { track, get, set, untrack, peek_tracked as peek, derived, flush_sync as flushSync, tick, active_block, set_active_block, set_active_component, create_component_ctx, push_component, pop_component, with_block, with_scope, scope, safe_scope, on_destroy } from '@vesk/runtime/src/ripple-runtime';
 export { effect, user_effect, block, branch, root, render, pre_effect, destroy_block, destroy_block_children, pause_block, resume_block, is_destroyed, unlink_block, create_try_block, boundary_fn_running_block } from '@vesk/runtime/src/ripple-blocks';
 export { createContext, Context, getActiveComponent, setActiveComponent } from '@vesk/runtime/src/context';
-export { createResource, setSsrData, resolveSsrResources, useFetch } from '@vesk/runtime/src/resource';
+export { createResource, setSsrData, clearSsrData, setSsrSink, resolveSsrResources, useFetch, type SsrDataSink } from '@vesk/runtime/src/resource';
 export { Portal } from '@vesk/runtime/src/portal';
 export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams as routerParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound, NotFoundError } from '@vesk/runtime/src/router';
 export { cookies, headers, locals, ServerResponse, ServerRequest, VeskRequest, VeskResponse, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook, signCookie, unsignCookie, setSignedCookie, readSignedCookie, applyRequestSecurity } from '@vesk/runtime/src/request';

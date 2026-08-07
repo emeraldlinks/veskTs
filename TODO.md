@@ -4,7 +4,7 @@
 
 **Current phase:** 5 (CLI + Dev Tooling)
 
-**Total tests:** compiler 685 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 22 + parser 79 + server-codegen 86 + integration 98 + client-codegen 134 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 111
+**Total tests:** compiler 725 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 22 + parser 79 + server-codegen 99 + integration 111 + client-codegen 148 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 121
 **Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
 
 ---
@@ -84,11 +84,11 @@
 - [x] **Dev server / HMR** — `vesk dev` with file watching, incremental HMR, WebSocket broadcast, floating dev menu, surgical component-update (eval + applyPageUpdate for page/component, full navigate for layout)
 - [x] **Production demo** — `vesk build` + `vesk start` serving SSR with hydration, global CSS, static files, dynamic routes, API routes, 404
 - [x] **CSS pipeline** — global.css detection, build copy to static/, `<link>` tag in SSR HTML, dev server CSS watching + rebuild
-- [ ] **npm packaging** — publish `@vesk/compiler` and `@vesk/runtime`
+- [x] **npm packaging** — publish `@vesk/compiler` and `@vesk/runtime` (tarballs via `npm pack` + `create-vesk` scaffolder + local `file:` installs)
 - [ ] **Suspense / async resources** — async data loading with fallback states (needs compiler-level `SuspenseBlock` IR node; `if (loading)` + OpaqueDynamicRegion works today)
 - [ ] **Transitions / animations** — built-in transition directives on element mount/unmount
 - [x] **Portal** — `Portal` runtime component moves DOM nodes to `props.target`. Requires `{#client}` blocks for SSR-free content. 56 tests passing.
-- [ ] **Form actions** — progressive enhancement form handling (like SvelteKit/Solid)
+- [x] **Form actions** — progressive enhancement form handling (server actions via `defineAction` + `Form`, client validation, `vsk-success`/`vsk-error` round-trips; hydration-test Test 15)
 - [ ] **Headless component primitives** — Show, For, Switch/Match as components
 
 ### Considering (need research)
@@ -115,7 +115,7 @@
 ## Current Session Work
 
 ### Focus: async components + error isolation + hydration error reporting
-- [ ] **Async component breaks hydration silently** — making a component (`posts/page.vsk` → `PostsSummary`) `async` renders fine on SSR but the client **never hydrates with no error message**. Root cause: async-child propagation in client codegen (sync parent calling an async child needs `async` parent scope + `await`, and the resolved fragment must be appended; SSR must `await` async children too). End-to-end fix + tests.
+- [x] **Async component breaks hydration silently** — fixed. Async-child propagation in client codegen (`async` parent scope + `await`, resolved fragment appended) + SSR awaits async children; `/async` full-page-reload hydration verified (data persists, markers claimed, zero errors) via hydration-test 12/13 + browser probes.
 - [ ] **A broken component cascades to other components/pages** — e.g. a broken `posts` component also breaks layouts; and a broken component on one page should NOT break navigation to other routes. Need per-page/route error isolation (broken page errors itself only; layout/router continues). Also investigate *why* one component error currently corrupts unrelated render (shared scope? single hydration pass aborting everything?).
 - [ ] **Unhelpful hydration failure reporting** — when SSR renders correctly but client hydration fails, the user gets no message or a cryptic one. Need: clear error surfaced on the client (component path, expected node vs found, which step failed), plus a dev-server/console channel, and make it easy to reproduce.
 - [ ] **SSR vs client-only operations (`window`, `document`, timers, listeners)** — audit how SSR handles client-only code in components. Today: top-level `window` access in a component body would crash SSR (or be silently guarded?). Document/enforce the intended path (`effect()` bodies, `{#client}` blocks, `import.meta.env.SSR`, or a runtime `browser` guard) and add tests.
@@ -150,7 +150,7 @@
 ### SSR correctness
 - [x] **Event handlers excluded from SSR HTML** — `on*` dynamic attributes no longer evaluated server-side (was executing mutations / crashing); skipped like static handlers.
 - [x] **Dynamic attribute placeholder bug** — `class={x}` etc. never rendered server-side (replace never matched); placeholders now appended to openTag.
-- [ ] **Async page 500** — server-only issue, undiagnosed.
+- [x] **Async page 500** — fixed. Root cause was cross-request SSR data via `globalThis.__vsk_ssr_data`; replaced with per-request `AsyncLocalStorage` store (`ssr-store.ts` + runtime `SsrDataSink`, no globalThis). `/async` returns 200 with data that persists through hydration (prod + dev).
 
 ### Full TypeScript support in .vsk (tsc-in-.vsk)
 - [x] **Runtime TS-stripping for emitted JS** — new `strip-ts.ts`: removes annotations, `as`/`satisfies`/`!`/`<T>expr`/generic-call wrappers, type arguments, and drops type-only statements (interfaces/type aliases/enums/declare) from both server and client bundles; raw text preserved when no TS syntax present (`hasTsSyntax` fast path). Top-level `evalTopLevelCode` regex fallbacks removed (AST-only). **Fix: TS-wrapper stripping is now recursive** (`context.visit(node.expression)` for TSAsExpression/TSSatisfiesExpression/TSNonNullExpression/TSTypeAssertion/TSInstantiationExpression) — nested `as unknown as`, `as const as`, `!`+`satisfies` chains strip fully.
@@ -187,7 +187,7 @@
 Phase 6 is docs + examples; the items below should be closed first (blockers / in-progress milestones).
 
 ### Blockers (bugs)
-- [ ] **Async page 500** — server-only issue, undiagnosed.
+- [x] **Async page 500** — fixed. Root cause was cross-request SSR data via `globalThis.__vsk_ssr_data`; replaced with per-request `AsyncLocalStorage` store (`ssr-store.ts` + runtime `SsrDataSink`, no globalThis). `/async` returns 200 with data that persists through hydration (prod + dev).
 - [ ] **Hydrate-mode loop claiming** — initial claim of SSR-present loop content not implemented yet (flip-effect only on condition change); leftover SSR markers inside loop bodies may confuse subsequent claiming. Blocks the original statements-page browser bug from being fully fixed in hydrate mode.
 
 ### In-progress milestone: tsc-in-.vsk
@@ -201,10 +201,10 @@ Phase 6 is docs + examples; the items below should be closed first (blockers / i
 - [ ] Write `/docu/cli/commands.md`
 
 ### Phase 4 open items (optional before Phase 6)
-- [ ] npm packaging (`@vesk/compiler`, `@vesk/runtime`)
+- [x] npm packaging (`@vesk/compiler`, `@vesk/runtime`)
 - [ ] Suspense / async resources (compiler-level `SuspenseBlock` IR node)
 - [ ] Transitions / animations
-- [ ] Form actions (progressive enhancement)
+- [x] Form actions (progressive enhancement)
 - [ ] Headless component primitives (Show/For/Switch/Match)
 
 ---

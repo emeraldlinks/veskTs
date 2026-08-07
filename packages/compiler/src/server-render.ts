@@ -16,6 +16,7 @@ import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { collectVskImportPaths } from '@vesk/compiler/src/vsk-imports';
+import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 
 
 export function compileFile(source: string, options?: { sourcePath?: string }): CompileFileResult {
@@ -67,7 +68,7 @@ export function render(
   (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
   const renderToken = (globalThis as any).__vsk_ssr_token;
   if (isAsyncComp) {
-    return (async () => {
+    return withSsrStore(() => (async () => {
       let bodyHtml: string;
       try {
         bodyHtml = await renderFn(props, fullRegistry, __vesk);
@@ -76,11 +77,11 @@ export function render(
         clearSsrCells(renderToken);
       }
       return bodyHtml;
-    })();
+    })());
   }
   let bodyHtml: unknown;
   try {
-    bodyHtml = renderFn(props, fullRegistry, __vesk);
+    bodyHtml = withSsrStore(() => renderFn(props, fullRegistry, __vesk));
   } finally {
     delete (globalThis as any).__vsk_ssr;
     clearSsrCells(renderToken);
@@ -119,7 +120,7 @@ export function renderPage(
     (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
     const renderToken = (globalThis as any).__vsk_ssr_token;
     if (targetComp && (targetComp.isAsync || targetComp.ssrAwait)) {
-      return (async () => {
+      return withSsrStore(() => (async () => {
         let bodyHtml: string;
         try {
           bodyHtml = await renderFn(ssrProps, fullRegistry, __vesk);
@@ -132,11 +133,11 @@ export function renderPage(
           head: renderHeadHtml(targetComp, ssrProps),
           props: ssrProps
         };
-      })();
+      })());
     }
     let bodyHtml: unknown;
     try {
-      bodyHtml = renderFn(ssrProps, fullRegistry, __vesk);
+      bodyHtml = withSsrStore(() => renderFn(ssrProps, fullRegistry, __vesk));
     } finally {
       delete (globalThis as any).__vsk_ssr;
       clearSsrCells(renderToken);
@@ -147,7 +148,7 @@ export function renderPage(
 
   if (ir.loadFn) {
     const loadFn = ir.loadFn;
-    return (async () => {
+    return withSsrStore(() => (async () => {
       const loadResult = await callLoadFunction(loadFn, props, __vesk);
       let ssrProps = { ...props };
       if (loadResult && typeof loadResult === 'object') {
@@ -156,9 +157,9 @@ export function renderPage(
         else ssrProps = { ...ssrProps, ...result };
       }
       return doRender(ssrProps);
-    })();
+    })());
   }
-  return doRender(props);
+  return withSsrStore(() => doRender(props));
 }
 
 function clearSsrCells(token: string | undefined): void {
@@ -245,18 +246,26 @@ export function buildDataScripts(
   ssrData: Record<string, unknown>,
   external?: ExternalDataScript | null
 ): string[] {
-  const hasProps = ssrProps !== undefined && ssrProps !== null && Object.keys(ssrProps).length > 0;
+  const meaningfulKeys =
+    ssrProps !== undefined && ssrProps !== null
+      ? Object.keys(ssrProps).filter((k) => k !== 'children' && k !== 'params')
+      : [];
+  const hasProps = meaningfulKeys.length > 0;
   const hasData = Object.keys(ssrData).length > 0;
   if (!hasProps && !hasData) return [];
   const payload: DataScriptPayload = {};
-  if (hasProps) payload.props = ssrProps as Record<string, unknown>;
+  if (hasProps) {
+    const cleanProps: Record<string, unknown> = {};
+    for (const k of meaningfulKeys) cleanProps[k] = (ssrProps as Record<string, unknown>)[k];
+    payload.props = cleanProps;
+  }
   if (hasData) payload.ssrData = ssrData;
   if (external) {
     const src = external(payload);
     if (src) return [`\t<script src="${src}"></script>`];
   }
   const scripts: string[] = [];
-  if (hasProps) scripts.push(`\t<script>const __vesk_props = ${JSON.stringify(ssrProps)};</script>`);
+  if (hasProps) scripts.push(`\t<script>const __vesk_props = ${JSON.stringify(payload.props)};</script>`);
   if (hasData) scripts.push(`\t<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
   return scripts;
 }
@@ -268,6 +277,7 @@ export async function renderFullPage(
   registry: Map<string, Function> = new Map(),
   options: FullPageOptions = {}
 ): Promise<string> {
+  return withSsrStore(async () => {
   (globalThis as any).__vsk_ssr = true;
   try {
     let ssrProps = { ...props };
@@ -286,13 +296,7 @@ export async function renderFullPage(
     }
     const rendered = await renderPage(source, componentName, ssrProps, registry, { ...options, __vesk: options.__vesk }) as RenderPageResult;
 
-    const ssrData: Record<string, unknown> = (globalThis as any).__vsk_ssr_data || {};
-    if ((globalThis as any).__vsk_ssr_promises?.length > 0) {
-      await Promise.allSettled((globalThis as any).__vsk_ssr_promises);
-      const collectedData: Record<string, unknown> = (globalThis as any).__vsk_ssr_data || {};
-      Object.assign(ssrData, collectedData);
-    }
-    delete (globalThis as any).__vsk_ssr_promises;
+    const ssrData: Record<string, unknown> = { ...ssrSink.snapshot() };
 
     let headHtml = rendered.head;
     if (options.pageHead) {
@@ -339,15 +343,17 @@ ${dataScriptBlock}${clientScript}</body>
   } finally {
     delete (globalThis as any).__vsk_ssr;
   }
+  });
 }
 
-export async function* renderPageStream(
+export function renderPageStream(
   source: string,
   componentName: string,
   props: Record<string, unknown> = {},
   registry: Map<string, Function> = new Map(),
   options: FullPageOptions = {}
 ): AsyncGenerator<string> {
+  async function* raw(): AsyncGenerator<string> {
   const ast = parse(source);
   const ir = generateIR(ast, source);
 
@@ -412,15 +418,20 @@ export async function* renderPageStream(
 
   yield bodyHtml;
 
-  const ssrData: Record<string, unknown> = (globalThis as any).__vsk_ssr_data || {};
-  if ((globalThis as any).__vsk_ssr_promises?.length > 0) {
-    await Promise.allSettled((globalThis as any).__vsk_ssr_promises);
-    const collectedData: Record<string, unknown> = (globalThis as any).__vsk_ssr_data || {};
-    Object.assign(ssrData, collectedData);
-  }
-  delete (globalThis as any).__vsk_ssr_promises;
+  const ssrData: Record<string, unknown> = { ...ssrSink.snapshot() };
 
   const dataScripts = buildDataScripts(ssrProps, ssrData, options.externalDataScript);
   const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') : '';
   yield `\n</div>${dataScriptBlock}</body>\n</html>\n`;
+  }
+
+  const gen = raw();
+  async function* scoped(): AsyncGenerator<string> {
+    let result: IteratorResult<string, void>;
+    do {
+      result = (await withSsrStore(() => gen.next())) as IteratorResult<string, void>;
+      if (!result.done) yield result.value;
+    } while (!result.done);
+  }
+  return scoped();
 }

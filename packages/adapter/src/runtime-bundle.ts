@@ -82,6 +82,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     '}',
     '',
     'export { renderPage, renderFullPage, renderPageStream, compileFile, parseCookies };',
+    'export { withSsrStore } from "@vesk/compiler/src/ssr-store";',
     '',
     '// Deliver hydration data as an origin-served script so strict CSP (no unsafe-inline)',
     '// does not block it. The prod server serves /ssr-data.js from the global store.',
@@ -114,7 +115,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
       format: 'esm',
       minify: true,
       outfile: resolve(outDir, 'server', 'runtime.js'),
-      external: ['fs', 'node:fs', 'path', 'node:path'],
+      external: ['fs', 'node:fs', 'path', 'node:path', 'node:async_hooks'],
       target: ['es2022'],
       treeShaking: true,
     });

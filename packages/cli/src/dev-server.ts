@@ -6,6 +6,7 @@ import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { transformSync } from 'esbuild';
 import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol } from '@vesk/compiler/src/server-codegen';
+import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
@@ -597,12 +598,11 @@ export async function startDevServer(port: number, projectDir: string, config: R
     const forData = req.headers['x-vesk-data'] === '1';
 
     async function renderSSR() {
+      return withSsrStore(async () => {
       const chain = cleanChain;
       let body = '';
       let head = '';
       let props: Record<string, unknown> | undefined;
-      delete (globalThis as Record<string, unknown>).__vsk_ssr_data;
-      delete (globalThis as Record<string, unknown>).__vsk_ssr_promises;
 
       for (let i = chain.length - 1; i >= 0; i--) {
         const node = chain[i];
@@ -634,7 +634,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir as string, 'layout.vsk')));
       let html: string;
       if (hasLayout) {
-        const ssrData = (globalThis as Record<string, unknown>).__vsk_ssr_data as Record<string, unknown> | undefined;
+        const ssrData = ssrSink.snapshot();
         const dataScripts = buildDataScripts(props, ssrData || {}, storeDataScript);
         const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') + '\n' : '';
         let secMeta = '';
@@ -656,9 +656,11 @@ export async function startDevServer(port: number, projectDir: string, config: R
         }
       }
       return { html, props: props || { params: matched.params }, head };
+      });
     }
 
-    async function* renderSSRStream() {
+    function renderSSRStream() {
+      async function* raw() {
       const chain = cleanChain;
       const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir as string, 'layout.vsk')));
 
@@ -677,8 +679,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
       let body = '';
       let head = '';
       let props: Record<string, unknown> | undefined;
-      delete (globalThis as Record<string, unknown>).__vsk_ssr_data;
-      delete (globalThis as Record<string, unknown>).__vsk_ssr_promises;
 
       for (let i = chain.length - 1; i >= 0; i--) {
         const node = chain[i];
@@ -713,10 +713,21 @@ export async function startDevServer(port: number, projectDir: string, config: R
       yield '</head>\n<body>\n<div id="root">\n';
       yield prettifyHtml(body);
       yield '\n</div>\n';
-      const ssrData = (globalThis as Record<string, unknown>).__vsk_ssr_data as Record<string, unknown> | undefined;
+      const ssrData = ssrSink.snapshot();
       const dataScripts = buildDataScripts(props, ssrData || {}, storeDataScript);
       if (dataScripts.length > 0) yield dataScripts.join('\n') + '\n';
       yield '</body>\n</html>';
+      }
+
+      const gen = raw();
+      async function* scoped() {
+        let result: IteratorResult<string, void>;
+        do {
+          result = (await withSsrStore(() => gen.next())) as IteratorResult<string, void>;
+          if (!result.done) yield result.value;
+        } while (!result.done);
+      }
+      return scoped();
     }
 
     let mwLocals: Record<string, unknown> = {};
