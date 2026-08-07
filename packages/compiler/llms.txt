@@ -1,0 +1,197 @@
+# llms.txt — @vesk/compiler
+
+> Machine-oriented reference for LLM agents working in this package. Unusually comprehensive:
+> full export inventory with real signatures, IR shape, data flow, conventions, edge cases, and
+> cross-module coupling. All items verified against source at commit 5b94b66 (Aug 2026); anything
+> that could not be verified is tagged **[UNVERIFIED]**.
+
+## Package identity
+
+- `name`: `@vesk/compiler`, `version`: 0.1.6, ESM, `type: module`, Node >= 20.
+- `exports`: `.` → `./dist/index.js` (+ `.d.ts`), `./src/*` → `./dist/*.js`, `./package.json`.
+  **`./src/*` is load-bearing** — monorepo tooling imports compiler source via
+  `@vesk/compiler/src/<file>` and the adapter's `resolveCompilerApi` maps those to `src/*.ts`
+  directly when in the monorepo.
+- Deps: `@sveltejs/acorn-typescript`, `acorn`, `esrap`, `is-reference`, `source-map`, `zimmerframe`.
+
+## Non-negotiable conventions (enforced)
+
+1. **No regex in the compiler or codegen.** All source manipulation & syntax analysis goes through
+   `acorn` + `acorn-ts-plugin` + `vesk-plugin`. `scan.ts` and `tokens.ts` provide the char/token
+   scanners used instead. Remaining regexes in `src` are NON-syntax (HTML entity escaping,
+   secret redaction, Base64 strip) or path normalization — do not treat those as violations.
+2. **Statement mode is first-class.** Any feature/fix touching component bodies, and any test suite
+   exercising them, must pass in BOTH expression mode (`return <jsx>`) and statement mode (bare JSX,
+   if/for/while/switch/try, guard returns).
+3. **Every job ships with tests**, including the production-hydration path via `/root/vesk/hydration-test.mjs` (`node hydration-test.mjs`).
+4. After every `src` edit: `npx tsx packages/cli/src/build-packages.ts`; run individual compiler
+   tests with `npx tsx packages/compiler/src/<file>.test.ts`.
+
+## Public API (index.ts re-exports)
+
+| Export | Kind | Signature / notes |
+|---|---|---|
+| `parse` | fn | `(source, options?: ParseOptions) => Program` (ESTree). Runs `preprocessForClauses` then the extended Acorn parser. |
+| `createBaseParser` | fn | `() => typeof acorn.Parser` — `acorn.Parser.extend(tsPlugin, VeskParserPlugin)`. |
+| `VeskParserPlugin` | fn | `(config?: VeskPluginConfig) => acorn plugin`. |
+| `generateIR` | fn | `(ast: any, source: string) => IRRoot`. |
+| `render` | fn | `(source, componentName, props?, registry?, options?) => string \| Promise<string>`. Async comps return a Promise. |
+| `compileFile` | fn | `(source, options?: { sourcePath?: string }) => CompileFileResult` (`{ ir, componentMap, __vesk }`). |
+| `compileClient`, `compile` | fn | `(source, _componentName: string\|null, { forceClient?, hydrate?, includeTopLevel? }) => string`. |
+| IR classes | class | `IRRoot, ComponentIR, StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion, MapRegion, ComponentCall, Expression`; `type IRNode`. |
+| types | type | `VeskPlugin, MiddlewareContext, VeskConfig, VeskSecurity, VeskCors, VeskRateLimit`. |
+| config | fn | `defineConfig, validateConfig, preset, definePlugin` (see config.ts section). |
+| router | fn | `scanRoutes(appDir, options?), scanComponents(dir), collectSources(tree), matchUrl(tree, pathname)`. |
+
+## IR classes (ir.ts) — full shape
+
+- `Expression` { `raw: string; deps: string[]; ast: ESTreeNode\|null; source: string\|null` }
+- `IRRoot` { `components: ComponentIR[]; imports: string[]; importedNames: Set<string>; staticProps: string\|null; loadFn: string\|null; topLevelCode: string[]` }
+- `ComponentIR` { `name; paramNames: string[]; propsType: string\|null; isClient: boolean; isAsync: boolean; ssrAwait: boolean; mode: 'expression'\|'statement'; body: IRNode[]; style: string\|null; exported: boolean; defaultExport: boolean` }
+- `StaticNode` { `tag; attributes: {name,value}[]; children: IRNode[]; selfClosing; keyExpr: Expression\|null` }
+- `TextNode` { `value: string` }
+- `DynamicBinding` { `kind: 'text'\|'attribute'; target: string\|null; expression: Expression` }
+- `OpaqueDynamicRegion` { `condition: Expression; consequentNodes; alternateNodes` }
+- `MapRegion` { `iterable; renderFn; itemVariable; indexVariable: string\|null; keyExpr; bodyTemplate: IRNode[]` } — `indexVariable` added for index-param `.map((item, index))`.
+- `ComponentCall` { `componentName; props: {name, value: Expression}[]; spreadProps; children; start` }
+- `ComponentRef`, `SlotNode`, `WhileLoop` { `condition; bodyTemplate; isDoWhile` }, `SwitchBlock` { `discriminant; cases` }, `TryCatch` { `bodyTemplate; catchBody; catchParamName` }, `ForLoop` { `init; condition; update; bodyTemplate; kind` }, `TrackDecl` { `name; rawName; init` }, `RuntimeStatement` { `raw; ast; source` }, `ServerBlock`/`ClientBlock`/`HeadBlock` { `children` }.
+- `IRNode` union = all of the above.
+
+## Parser internals
+
+- `preprocessForClauses(source)` → `{ code, annotations }`. Hand scans for `for (~; key X)` /
+  `for (~; index i)` and **blanks the clause with spaces** (offsets preserved) so plain JS parses;
+  returns `VeskAnnotation[]` (`{ kind:'for-clause', forStart, clauseStart, clauseEnd, keyRange?, indexName? }`)
+  attached as `ast.__vskAnnotations`. No regex by design.
+- `parse` sets `ecmaVersion: 'latest'`, `sourceType: 'module'`, `locations: true`, `ranges: true`.
+
+## scanner utility inventory (scan.ts) — the no-regex toolkit
+
+`isWhitespaceChar`, `isIdentStartCode`, `isIdentCharCode`, `isIdentStart`, `isIdentChar`,
+`startsWithIdentifier`, `stripDeclKeyword`, `stripTrailingSemicolons`, `skipWhitespace`,
+`collapseNewlineWhitespace`, `skipString`, `skipComment`, `findBalancedEnd`, `splitTopLevel`,
+`containsForOfIn`, `unwrapTrackCall`, `stripTrackGeneric`, `skipTrackGeneric`, `cssBlockEnd`,
+`htmlTagEnd`, `htmlTagName`.
+
+## tokenizer analysis (tokens.ts)
+
+Tokenizer built on the Vesk parser's acorn tokenizer, with char-scan fallback when input can't
+tokenize (mid-edit/partial content) so callers never crash. Exports:
+`CodeToken {label,value,start,end}`, `tokenizeCode(code) => CodeToken[]|null`,
+`collectCalledIdentifiers(code) => Set<string>` (id immediately before `(` or `<`; skips `.`/`?.`
+members), `containsIdentifier(code,name) => boolean`, `isIdentifierImported(code,name)`,
+`extractImportNames(importText) => string[]` (handles `type`/`typeof`, `as` aliases, `* as ns`,
+default), `importModuleTarget(importText) => string|null`.
+
+## TS stripping (strip-ts.ts) — AST-based, used by actions/codegen
+
+`hasTsSyntax(ast)`, `isTypeOnlyStatement(node)`, `stripTsTypes(ast) => new tree` (zimmerframe walks
+are immutable — use the return value), `stripCodeTypes(code) => string` (byte-identical fast path
+when no TS syntax). Handles `as`/`satisfies`/`!`/`<T>expr`/generic-call wrappers → inner expr; drops
+interfaces/aliases/declare/enum/type-param decls; nulls annotations/return types/type params.
+
+## Server actions (actions.ts)
+
+`ACTION_PREFIX = '/_vesk/action/'`; `hashString(str) => base36 12-char FNV-like id`;
+`rewriteTopLevelActions(code, 'server'|'client')` — server injects id arg `defineAction(id, {...})`;
+client replaces call with `{ __veskAction:true, id, url }` stub (execute handler stripped);
+`transformTopLevelForActions`, `collectActionIds(source)`.
+
+
+## Server codegen exports
+
+- `server-jsgen.ts`: `irNodeToJS(node, importedNames?, isAsync?, tracked?) => string`,
+  `generateFunctionBody(comp, importedNames) => string` (async multi-pass `__vsk_ssr_promises_<token>`
+  retry loop), `buildComponentMap(irRoot, useSharedScope) => Map<string,Function>` (uses
+  `new Function('props','__registry','__vesk', ...)`).
+- `server-render.ts`: `compileFile`, `render`, `renderPage`, `ssg`, `renderFullPage`,
+  `renderPageStream`. Renders set `globalThis.__vsk_ssr` and `__vsk_ssr_token`; `clearSsrCells(token)`
+  cleans `__vsk_ssr_promises_<token>` and `__vsk_ssr_cells` entries.
+- `server-utils.ts`: `resetVskState`, `setVskImportedNames`, `setVskForceClaim`/`takeVskForceClaim`,
+  `nextVskId`, `prettifyHtml`, `isStatic`, `escapeHtml`, `redactLog`/`setRedactLogging`, `raw`,
+  `csrfToken`/`verifyCsrfToken`/`csrfGuard`, `signCookie`/`unsignCookie`/`setSignedCookie`/
+  `readSignedCookie`, `securityHeaders`, `corsHeaders`/`corsPreflight`/`CorsResponse`, `securityComment`,
+  `createRateLimiter`, `getClientIp`, `getClientProtocol`, `applyTrustProxy`, `exprJS`, `indent`,
+  `tryEvalExpr`, `extractTopLevelNames`, `extractRuntimeNames`, `resolveComponentName` (precedence:
+  **defaultExport → first component → exported**), `buildParamInit`, `loadRuntimeImports`,
+  `evalTopLevelCode`, `callStaticProps`, `callLoadFunction`, `__vskHydrate`, `__vskId`,
+  `__vskImportedNames`.
+- `server-head.ts`: `renderHeadHtml(comp, props) => string`, `mergeHeadHtml(pageHead, layoutHead) => {html, conflicts}`.
+
+## Client codegen exports (client-codegen.ts)
+
+`TrackedInfo {name, rawName}`, `semicolonizeStatement(code)`,
+`transformTracked(irNode, tracked) => string` (AST tracked-var rewrite),
+`collectTrackedNames(body) => Map<string, TrackedInfo>`, `escapeHtml`,
+`compileClient(source, name, opts) => string` (emits `export default __components["Name"]` /
+`export const Name = ...`), `isStaticIR`.
+
+## Router / API / middleware
+
+- `router.ts`: `ScanOptions`, `MatchResult`, `extractMiddlewareParts(src)`, `extractMiddleware(sourcePath)`,
+  `scanRoutes(appDir, options?)`, `scanComponents(dir)`, `collectSources(tree)`,
+  `generateRouteManifest(tree, options?)`, `matchUrl(tree, pathname)`. Route-file conventions:
+  `page.vsk`, `layout.vsk`, `loading.vsk`, `error.vsk`, `not-found.vsk`; dynamic `[slug]`, catch-all
+  `[...path]`, route groups `(group)`.
+- `api-routes.ts`: `scanApiRoutes(apiDir)`, `matchApiUrl(tree, pathname)`, `parseCookies(str)`,
+  `buildWebRequest(...)`, `executeApiRoute(...)`.
+- `middleware.ts`: `collectMiddlewareChain(tree, url, appDir)`, `loadMiddleware(sourcePath)`,
+  `executeMiddlewareChain(...)` (onion model).
+
+## config (config.ts)
+
+`definePlugin(plugin)` (requires `name`), `defineConfig(config)` (resolves security preset strings/
+fns, defaults autoEscape+csrf=true, xFrameOptions=DENY, CSP, redactLogs), `validateConfig`,
+`preset(name, overrides?)`.
+
+## errors (errors.ts)
+
+`VeskError extends Error` with `levenshtein`/`didYouMean`; static factories: `notFound`,
+`noHandlerFound`, `clientBlockOutsideIsland`, `componentNotFound`, `configError`,
+`asyncChildInSyncParent`. `.toString()` renders `[vesk] msg`, file:line, code, suggestions,
+next steps, tip; `.toJSON()`.
+
+## typecheck (typecheck.ts)
+
+`TypecheckOptions {strict?, appDir?}`, `TypecheckError {file,line,column,code,message}`,
+`typecheckProject(projectRoot, opts?) => {errors, warnings}`, `formatTypecheckErrors/Warnings`.
+Walks project (skip `node_modules,.vesk,.git,dist,tarballs,.next`), parses every `.vsk`, generates
+a virtual `__vesk_ambient.d.ts` + `__vesk_runtime_override.d.ts`, builds a TS `Program` with a
+custom host mapping `.vsk` → generated `.d.ts`, and re-maps diagnostics back to source.
+
+## vsk-tsx (vsk-tsx.ts)
+
+`vskToTsx(source) => string` (`.vsk` → `.tsx`; rewrites `&[...] = track<T>(...)` into typed `let`,
+component keyword → function, strips styles), `generateVskDts(source) => string` (emits `ExportNameProps`
+types + `export declare/export default function` signatures).
+
+## Cross-module coupling
+
+- `@vesk/adapter` imports compiler via `@vesk/compiler/src/*` and `resolveCompilerApi` (monorepo path first).
+- `@vesk/runtime` is the runtime `__vesk` object the generated server/client code calls.
+- `packages/cli` dev-server imports `compileClient`/`renderPage` etc. and must strip `export default`
+  from client bundles (duplicate-default bug fired here historically).
+- Runtime reactivity must remain in sync with `TrackDecl`/tracked-rewrite semantics in `client-codegen`.
+
+## Edge cases & gotchas
+
+- Async components render via a multi-pass loop (up to 3 passes) pumping `__vsk_ssr_promises_<token>`;
+  changing this protocol breaks streaming/async SSR.
+- `resolveComponentName` precedence matters — see server-utils note.
+- Imported child components resolve through `__registry`, not static imports.
+- The `./src/*` exports alias means `dist` must be rebuilt after source edits or tests use stale code.
+
+## Modification checklists
+
+- **New IR node** → `server-jsgen.irNodeToJS`, `client-codegen`, `isStaticIR`, and a test in `integration.test.ts`/`client-codegen.test.ts` in both statement & expression mode.
+- **Parser change** → `parser.test.ts` + `parser` suites; regenerate via `build-packages.ts`.
+- **Reactivity/tracked change** → `track-codegen.test.ts`, `client-codegen.test.ts`, AND `node hydration-test.mjs`.
+- **Action rewrite change** → `actions.ts` + `action-handler.ts` (cli) + manifest (`collectActionIds`).
+
+## Test inventory
+
+Suites & counts (approx, ~685 total): api-routes 13, cli 14, components-scan 6, config 14,
+head-merge 14, scan 31, server-utils 90, ssg 8, track-codegen 8, vsk-imports 15, vsk-tsx 22,
+parser 79, server-codegen 86, integration 98, client-codegen 134, ir-generator 9, router 19,
+ts-support 25. Each prints `Results: N passed, M failed`.
+

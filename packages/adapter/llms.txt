@@ -1,0 +1,470 @@
+# @vesk/adapter — Machine-Readable Reference (llms.txt)
+
+Source-verified inventory of `packages/adapter/src/*.ts`. All signatures below
+were read from the actual source. Anything unverifiable is tagged `[UNVERIFIED]`.
+ESM + TypeScript monorepo package; `"type": "module"`; entry `dist/index.js`.
+
+Package: `@vesk/adapter` v0.1.6 — builds deployable `.vesk/` output for Node and
+serverless platforms. Public exports from `src/index.ts`: `build`,
+`startProdServer` (re-exported).
+
+---
+
+## 1. Function / export inventory (per file)
+
+### `src/index.ts`
+- `build(appDir: string, options?: BuildOptions): Promise<BuildResult | undefined>` — full pipeline.
+- re-export `export { startProdServer } from '@vesk/adapter/src/prod-server'`.
+- internal `resolveCompilerApi<T>(name: string): Promise<T>` — dynamic import of
+  `@vesk/compiler/src/<name>` preferring the monorepo `../../compiler/src` when it exists.
+
+### `src/types.ts` (data types only — no functions)
+Interfaces: `VeskPlugin`, `VeskSecurity`, `RouteNode`, `ApiRouteNode`,
+`MiddlewareChainItem`, `AncestorLayout`, `BuildOptions`, `DevServerOptions`,
+`ProdServerOptions`, `SsrFunctionOptions`, `ApiFunctionOptions`,
+`ClientBundleOptions`, `ChunkEntry`, `ClientBundleResult`, `ManifestRouteEntry`,
+`ManifestActionEntry`, `ManifestPrerenderedEntry`, `Manifest`, `SsgRouteResult`,
+`BuildResult`, `ImageRef`, `ImageResult`, `MiddlewareExtractResult`,
+`SeoCheckIssue`, `SeoAuditResult`, `CombinedPageInfo`, `SecurityConfig`,
+`MonolithicBundleParts`.
+
+Key shapes:
+```
+BuildOptions { outDir?, publicDir?, plugins?, seo?, strictSeo?, siteUrl?, ssg?, codeSplit?, hmr?, target?: 'node'|'edge', platform?: 'node'|'vercel'|'netlify'|'cloudflare'|'deno'|'aws'|'edge'|'coxmos' }
+BuildResult { routeTree: RouteNode[]; apiTree: ApiRouteNode[]; ssrRoutes: RouteNode[]; apiRoutes: ApiRouteNode[]; manifest: Manifest }
+ClientBundleResult { main: string; chunks: ChunkEntry[] }   // ChunkEntry { name; code }
+Manifest { version: number; middleware: boolean; routes: ManifestRouteEntry[]; prerendered: ManifestPrerenderedEntry[]; static: { prefix; dir }; actions?: ManifestActionEntry[] }
+RouteNode { path; fullPath; isGroup; isDynamic; isCatchAll; page; layout; loading; error; notFound; hasMiddleware; children; sourceDir; segmentCount; _revalidate?; _isrTags?; _pageName?; _layoutName?; chunk? }
+ApiRouteNode { path; fullPath; isDynamic; isCatchAll; filePath; children }
+SsgRouteResult { path; html; static; params? }
+VeskPlugin { name; onBuildStart?; onBuildEnd?; onCSS?; [key: string]: unknown }
+```
+
+### `src/runtime-bundle.ts`
+- `bundleRuntime(appDir: string, outDir: string): Promise<string>` — writes
+  `server/runtime.js`, returns its absolute path.
+- internal: `findCompilerSrc`, `findRuntimeSrc`, module-level `buildId`.
+- The bundle re-exports: `cookies`, `headers`, `locals`, `renderPage`,
+  `renderFullPage`, `renderPageStream`, `compileFile`, `parseCookies`,
+  `VeskRequest`, `VeskResponse`, `defineAction`, `getAction`, `clearActions`,
+  `validateActionInput`, `issuesToFieldMap`.
+
+### `src/ssr-function.ts`
+- `generateSsrFunction(routeNode: RouteNode, appDir: string, outDir: string, componentMap?: Map<string,string>, options?: SsrFunctionOptions): { funcPath: string; funcCode: string; name: string }`
+  (`SsrFunctionOptions { ancestorLayouts?: AncestorLayout[]; middlewareCode?: string | null }`)
+- internal (module-scope, not exported): `escapeSource`, `routeName`,
+  `extractCompName` (wraps compiler `resolveComponentName`), `buildParamExtraction`.
+- Generated modules define `export async function handle(request)`, and when
+  actions are present `registerActions`, `__paramsFor`, `__renderHtml`, and a
+  `handleAction` path (lines ~254-308).
+
+### `src/api-function.ts`
+- `generateApiFunction(apiNode: ApiRouteNode, _apiDir: string, outDir: string, options?: ApiFunctionOptions): { funcPath: string; funcCode: string; name: string }`
+  (`ApiFunctionOptions { middlewareCode?: string | null }`)
+- internal: `apiRouteName`.
+- Generated modules rewrite `@vesk/runtime` imports to `../runtime.js`, strip TS
+  via esbuild `transformSync`, and define `export async function handle(request)`.
+
+### `src/client-bundle.ts`
+- `generateClientBundle(routeTree: RouteNode[], appDir: string, componentMap?: Map<string,string>, options?: ClientBundleOptions): Promise<ClientBundleResult>`
+  (`ClientBundleOptions { codeSplit?; hmr?; importRuntime? }`)
+- `buildRuntimeCode(runtimeDir: string): string` — LEGACY concatenated runtime
+  (file-by-file glue with `// --- <file> ---` markers). Not the modern path.
+- `runtimeExportNames(runtimeDir: string): Set<string>` — names exported by
+  `runtime/index-client.js`.
+- `buildTreeShakenRuntime(runtimeDir: string, usedNames: string[]): Promise<string>`
+  — esbuild IIFE with `globalName: '__veskRuntime'` + explicit
+  `export { ... };`; falls back to `buildRuntimeCode` on any missing name.
+- internal: `findRuntimeSrc`, `collectRuntimeImports`, `stripRuntimeImport`,
+  `stripVskImports`, `resolveVskImports`, `stripExports`, `compileFile`,
+  `buildChunkName`, `compileFileMono`, `walkSplit`, `walkMono`, `stripTypes`,
+  `appendHmrGlobals`, `buildMainBundle` (private), module `runtimeEntryId`.
+
+### `src/middleware.ts`
+- `compileMiddleware(mwChain: MiddlewareChainItem[], _appDir: string): string | null`
+  — emits a standalone chain exporting `execute(ctx)`.
+- `compileMiddlewareCode(mwSourceTexts: string[]): string | null` — INLINE
+  variant (`__mwChain` + `__executeMw`) used inside SSR/API functions.
+- internal: `extractMiddlewareBody` (wraps compiler `extractMiddlewareParts`).
+
+### `src/static.ts`
+- `copyStaticAssets(publicDir: string, outDir: string): void`
+- `generateSsgRoutes(routeTree: RouteNode[], appDir: string, outDir: string): Promise<SsgRouteResult[]>`
+- `generateSitemap(_routeTree: RouteNode[], ssrRoutes: RouteNode[], prerenderedRoutes: SsgRouteResult[], { siteUrl = 'http://localhost:3000' }?: { siteUrl?: string }): string`
+- `generateRobotsTxt(siteUrl = 'http://localhost:3000'): string`
+- internal: `evaluateExport` (uses `new Function`, regex extraction).
+
+### `src/manifest.ts`
+- `generateManifest(routes: RouteNode[], ssrRoutes: RouteNode[], apiRoutes: ApiRouteNode[], staticRoutes: SsgRouteResult[], middlewareEnabled: boolean, actionMap?: Record<string,string>): Manifest`
+
+### `src/image-pipeline.ts`
+- `optimizeImages(appDir: string, outDir: string): Promise<ImageResult[]>`
+- internal: `processImage`, `collectImageRefs`, module `sharpFn`, consts
+  `SUPPORTED`, `OUTPUT_WIDTHS = [640,768,1024,1280,1536]`, `FORMATS = ['webp','avif']`.
+- Sharp is optional; without it originals are copied to `-<width>w` files.
+
+### `src/seo-audit.ts`
+- `runSeoAudit(appDir: string, _options?: Record<string, unknown>): SeoAuditResult`
+  (`SeoAuditResult { passed; errors; warnings }`)
+- internal: `walkFiles`, `collectCombinedSource`, `SEO_CHECKS` (h1, altText,
+  imageAlt, metaDescription, ogTags, langAttr, title, headingOrder), const `SEVERITY`.
+
+
+### `src/platform.ts`
+- export type `Platform = 'node' | 'vercel' | 'netlify' | 'cloudflare' | 'deno' | 'aws' | 'edge' | 'coxmos'`
+- `detectPlatform(args: string[] = [], env: PlatformEnv = process.env as PlatformEnv): Platform`
+- `platformLabel(platform: Platform): string`
+- internal const `VALID`.
+
+### `src/platform-output.ts`
+- export const `MIME: Record<string,string>` — extension → content-type map.
+- `ensureCleanDir(dir: string): void`
+- `copyDirContents(srcDir: string, destDir: string): void`
+- `writeFile(path: string, content: string | Buffer): void`
+- `writePlatformStatic(buildStaticDir: string, platformStaticDir: string): void`
+  (maps `/_vesk/static/*` ← `.vesk/static/*`, `/_vesk/runtime.js` ←
+  `client.js`, `/*` ← `static/public/*`)
+- `writePrerenderedStatic(prerenderedRoutes: SsgRouteResult[], platformStaticDir: string): void`
+- `listStaticDir(dir: string): Array<{ rel: string; buffer: Buffer }>`
+- `mimeFor(path: string): string`
+
+### `src/platform-handler.ts`
+- `routeName(segments: string[]): string`
+- `apiRouteName(fullPath: string): string`
+- `toId(s: string): string`
+- `generatePlatformHandlerSource(input: PlatformHandlerInput): string`
+  (`PlatformHandlerInput { ssrRoutes; apiRoutes; prerenderedPaths: string[]; hasMiddleware: boolean }`)
+  — emits import-based universal handler with `handleRequest(request)`,
+  `__matchPath`, `__routes`, `__isrCache`, prerendered 308 redirect.
+- `bundlePlatformHandler(options: BundlePlatformOptions): Promise<void>`
+  (`BundlePlatformOptions { nodeBuiltins?: boolean; outfile: string; entry: string }`)
+- types: `PlatformHandlerInput`, `BundlePlatformOptions`, `PlatformBuildContext`.
+- internal: `findCompilerSrc`.
+
+### `src/platform-deploy.ts`
+- `emitPlatformOutput(platform: Platform, ctx: DeployContext): Promise<string | null>`
+  — returns `null` for `'node'`, an artifact path otherwise. (`DeployContext =
+  PlatformBuildContext & { prerenderedRoutes: SsgRouteResult[] }`)
+- internal: `Shell` interface; `shellFor(platform)`, `vercelConfigJson`,
+  `__relsSource`, `__mimeSource`, `denoStaticSource`, `nodeStaticSource`,
+  `inlineStaticSource`.
+
+### `src/prod-server.ts`
+- `startProdServer(outDir: string, options?: { port?: number }): Promise<Server>`
+- internal: `readBody`, `makeWebRequest`, `MIME`, `matchPath`,
+  `getClientIpFromReq`, interfaces `ExtendedRequest`, `BuildConfig`,
+  `BuildConfigRoute`, `MatchPathResult`.
+
+
+### `src/hmr.ts`
+- `createHmrServer(httpServer: Server, appDir: string, devDir: string, componentMap?: Map<string,string>): { broadcast: (type: string, data?: Record<string,unknown>) => void; handleFileChange: (filename: string | null, doFullBuild: () => Promise<void>, routeTree: RouteNode[]) => Promise<void> }`
+- internal: `findRouteForSource`, `collectAncestorLayouts`,
+  `extractComponentAssignments`, `extractSourceDir`, `escapeSource`,
+  `extractCompName`, `routeName`, `buildParamExtraction`, `regenerateSsrFunction`.
+
+### `src/dev-server.ts`
+- `startDevServer(appDir: string, options?: DevServerOptions): Promise<Server | void>`
+  (`DevServerOptions { port?; publicDir?; block? }`)
+- internal: `readBody`, `makeWebRequest`, `MIME`, `matchPath`, `ExtendedRequest`,
+  and inner `doBuild()` that calls `build(appDir, { outDir: devDir, hmr: true })`.
+
+---
+
+## 2. `build()` step-by-step flow (what each sub-function does)
+
+Call: `build(appDir, options)`. Returns `BuildResult | undefined`.
+
+1. `resolve(appDir)`; `outDir = options.outDir ?? resolve(appDir,'..','.vesk')`;
+   `publicDir = options.publicDir ?? resolve(appDir,'..','public')`;
+   `plugins = options.plugins ?? []`.
+2. Run every `plugin.onBuildStart()` (awaited).
+3. `mkdirSync` (`recursive`) for: `server/functions`, `server/api`,
+   `static/public`, `prerendered`.
+4. `resolveCompilerApi` loads compiler fns: `scanRoutes`, `scanComponents` from
+   `router.js`; `scanApiRoutes` from `api-routes.js`; `collectMiddlewareChain`
+   from `middleware.js`.
+5. `scanRoutes(appDir)` → `routeTree`. If empty → warn + `return undefined`.
+6. `projectRoot = resolve(appDir,'..')`; `scanComponents(<project>/components)`
+   → `componentMap`.
+7. `scanApiRoutes(<project>/app/api)` (only if it exists) → `apiTree`.
+8. `bundleRuntime(appDir, outDir)` → `server/runtime.js` (shared by all fns).
+9. **SSR pass** — `walk(nodes, ancestorLayouts)`: for each node with `page`:
+   - `collectMiddlewareChain(routeTree, node.fullPath, appDir)` → chain;
+     read each source; inline via `compileMiddlewareCode(sources)` → `mwCode`.
+   - `generateSsrFunction(node, appDir, outDir, componentMap,
+     { ancestorLayouts, middlewareCode: mwCode })` → write to
+     `server/functions/<name>.js`.
+   - `collectActionIds(pageSrc)` (+ layout + ancestor-layout sources) →
+     populate `actionMap[id] = 'server/functions/<name>.js'`.
+   - parse `export const revalidate = <n>` → `node._revalidate`; parse
+     `export const isrTags = [...]` → `node._isrTags`.
+   - push node to `ssrRoutes`.
+10. **API pass** — `walkApi`: for each node with `filePath`,
+    `generateApiFunction(node, apiDir, outDir)` → `server/api/<name>.js`.
+11. **Root middleware** — `collectMiddlewareChain(routeTree,'/')` → if any,
+    `compileMiddleware(chain, appDir)` writes `server/middleware.js`;
+    `middlewareEnabled = true`.
+12. `generateClientBundle(routeTree, appDir, componentMap, { codeSplit?, hmr? })`
+    → `{ main, chunks }`; write `main` → `static/client.js`; write each chunk →
+    `static/<name>.js`.
+13. `copyStaticAssets(publicDir, outDir)` → `static/public/`.
+14. **CSS** — read `src/global.css` else `src/app.css`; `stripTailwindDirectives`
+    (uses compiler `cssBlockEnd`) → `static/global.css`; run `plugin.onCSS`
+    chain on the raw css → `static/_tailwind.css`.
+15. If `options.ssg` → `generateSsgRoutes(routeTree, appDir, outDir)` →
+    `prerendered/*.html`, collect `prerenderedRoutes`.
+16. `optimizeImages(appDir, outDir)` → `static/images/*` (currently invoked
+    twice — see §6).
+17. If `options.seo` → `runSeoAudit(appDir)`; if `options.strictSeo` and
+    `audit.errors > 0` → `throw`.
+18. Sitemap/robots: `generateSitemap(routeTree, ssrRoutes, prerenderedRoutes,
+    { siteUrl: options.siteUrl })` → `static/public/sitemap.xml`;
+    `generateRobotsTxt(siteUrl)` → `static/public/robots.txt` — both skipped if
+    a user file already exists at the target.
+19. `generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes,
+    middlewareEnabled, actionMap)` → write `config.json`.
+20. **Platform** — `detectPlatform(options.platform ? ['--platform', options.platform] : [], process.env)`;
+    if `'node'` and `options.target === 'edge'` → `'edge'`. If result ≠ `'node'`:
+    `emitPlatformOutput(platform, { outDir, ssrRoutes, apiRoutes,
+    prerenderedPaths, prerenderedRoutes, hasMiddleware: middlewareEnabled })`.
+    For `vercel` also creates `.vercel/output` symlink (inside `emitPlatformOutput`).
+21. Run every `plugin.onBuildEnd()` (awaited).
+22. Return `{ routeTree, apiTree, ssrRoutes, apiRoutes, manifest }`.
+
+**Server runtime exports produced by `bundleRuntime`** (used by generated
+functions): `cookies`, `headers`, `locals`, `renderPage`, `renderFullPage`,
+`renderPageStream`, `compileFile`, `parseCookies`, `VeskRequest`,
+`VeskResponse`, `defineAction`, `getAction`, `clearActions`,
+`validateActionInput`, `issuesToFieldMap`.
+
+
+---
+
+## 3. Client-bundle algorithms
+
+### Code-split flow (`options.codeSplit === true`) — `generateClientBundle`
+1. `walkSplit(routeTree, [])` — per route node, if the file exists, `compileFile`
+   each of `page.vsk`, `layout.vsk`, `error.vsk`, `not-found.vsk`,
+   `loading.vsk` into one chunk. Chunk name = `page-<slug>.js` where `<slug>` =
+   `relative(appDir, sourceDir)` joined by `-` (empty → `index`), `[]`→`_`.
+2. `compileFile(path, resolvedName, out)`:
+   - recursively resolve `.vsk` imports via `resolveVskImports` →
+     `collectVskImportPaths(vskImportLines(src), filePath)` then
+     `resolveComponentName` on each imported file; recurse `compileFile`.
+   - `compileClient(src, null, { forceClient: true })` → collect runtime
+     imports (`collectRuntimeImports`), then strip runtime import lines
+     (`stripRuntimeImport`), `.vsk` imports (`stripVskImports`), and export
+     lines (`stripExports`).
+   - `compileClient(src, null, { hydrate: true, forceClient: true,
+     includeTopLevel: false })` → same, but `__components` →
+     `__hydrators` (hydrator code).
+   - if resolved name ≠ actual component name, emit `Object.defineProperty`
+     aliases for both `__components` and `__hydrators`.
+3. Shared `components/` map → `compileFile` each into a `shared.js` chunk
+   (appended last).
+4. Wrap each chunk in an IIFE that grabs `globalThis.__components` /
+   `globalThis.__hydrators`.
+5. Annotate `routeTree` nodes with `node.chunk = '/_vesk/static/page-<slug>.js'`
+   when a non-empty chunk was emitted.
+6. `buildMainBundle` (codeSplit variant) emits the `createFileRouter` bootstrap,
+   a `__resolveNames` that records `_chunk`, `_pageName`, `_layoutName`,
+   `_errorName`, `_notFoundName`, and a `__pendChunks` list derived from
+   `matchRoute(__routeTree, location.pathname)`; then `Promise.all(
+   __pendChunks.map(ensureChunk)).then(__startRouter)` (or start immediately).
+   Router start calls `__updateComponents(__routeTree)` then
+   `createFileRouter(...).start()`.
+
+### Monolithic flow (`codeSplit` falsy)
+`walkMono` compiles every route file (no per-route chunk split) into four arrays
+(`componentLines`, `hydratorLines`, `aliasLines`, `hydratorAliasLines`), joined
+into a single `main` bundle. `chunks` is empty.
+
+### Tree-shaken runtime
+- Base runtime names always required by `buildMainBundle`:
+  `createFileRouter, get, set, effect, track, destroy_block, getActiveComponent,
+  setActiveComponent, NavLink, Link, reactiveProps`.
+- Additional names are collected from each compiled chunk's
+  `import {...} from '@vesk/runtime'` (`collectRuntimeImports`).
+
+- `buildTreeShakenRuntime(runtimeDir, usedNames)`:
+  1. `unique = dedupe(usedNames)`; `available = runtimeExportNames(runtimeDir)`
+     (parses `index-client.js` `export { ... } from`).
+  2. If any requested name is missing → log + **fall back to
+     `buildRuntimeCode`** (legacy concatenation; emits `// --- <file> ---`
+     markers). Missing-name detection is what the tree-shake test exercises.
+  3. Else write a temp entry re-exporting the names, `esbuild.build` as a
+     browser IIFE `{ globalName: '__veskRuntime', treeShaking: true,
+     minify: true }`, then append:
+     `const { <names> } = __veskRuntime; export { <names> };`
+  4. The IIFE's scope is closed → its internals can never collide with page
+     code; only the explicitly re-exported names are ESM-visible.
+- `importRuntime: true` bypasses inlining: `buildMainBundle` emits
+  `import { <names> } from '/_vesk/runtime.js'` and sets `runtimeCode = ''`.
+- HMR helper: `appendHmrGlobals` adds `globalThis.__vesk_hmr_eval = (code) =>
+  eval(code)`.
+
+
+---
+
+## 4. Platform detection / emit
+
+### Detection (`detectPlatform(args, env)`) — precedence
+1. `--platform <name>` in `args` (lowercased, must be in `VALID`).
+2. Env vars:
+   - vercel: `VERCEL` | `VERCEL_ENV` | `NOW_REGION` | `VERCEL_GIT_COMMIT_SHA`
+   - netlify: `NETLIFY` | `NETLIFY_BUILD_CONTEXT` | `NETLIFY_LOCAL` | `NETLIFY_EDGE`
+   - cloudflare: `CF_PAGES` | `CF_PAGES_BRANCH` | `CF_PAGES_URL` |
+     `CLOUDFLARE_WORKERS` | `WORKERS_NAME`
+   - deno: `DENO_DEPLOYMENT_ID` | `DENO_REGION` | `DENO_DEPLOY_URL`
+   - aws: `AWS_LAMBDA_FUNCTION_NAME` | `AWS_LAMBDA_FUNCTION_VERSION` |
+     `LAMBDA_TASK_ROOT` | `LAMBDA_RUNTIME_DIR`
+   - coxmos: `COXMOS` | `COXMOS_DEPLOYMENT_ID` | `COXMOS_ENV` | `VESK_DEPLOY` |
+     `VESK_PLATFORM === 'coxmos'`
+3. Default `'node'`.
+
+### Emission (`emitPlatformOutput(platform, ctx)`)
+Returns `null` for `'node'`. Steps:
+1. `generatePlatformHandlerSource({ ssrRoutes, apiRoutes, prerenderedPaths,
+   hasMiddleware })` — universal handler; each SSR/API fn imported from
+   `./server/functions/<name>.js` / `./server/api/<name>.js` as
+   `import { handle as __ssr_<id> }`. Includes `__prerendered` Set,
+   `__isrCache` Map, `__matchPath`, `__routes`, ISR revalidation, 404 fallback,
+   and prerendered 308 redirects.
+2. `shellFor(platform)` — per-platform shell (see map below).
+3. `writePlatformStatic` + `writePrerenderedStatic` → platform `static/`.
+4. Compose entry: `handler` + optional `imports` + optional embedded-statics
+   source (`denoStaticSource` / `nodeStaticSource` / `inlineStaticSource`) +
+   `bootstrap`.
+5. `bundlePlatformHandler({ entry, outfile, nodeBuiltins })` — esbuild ESM
+   bundle; when `nodeBuiltins` is false, a plugin replaces node builtins with
+   an empty Proxy shim.
+6. Write `.vc-config.json` (vercel), `config.json` (vercel routes),
+   `manifest.json` (always), and `extraFiles`.
+7. Vercel: create `.vercel/output` symlink → `.vesk/vercel`.
+
+Platform → shell map (`shellFor`):
+| platform | root | nodeBuiltins | staticMode | staticServe | bundle out |
+|----------|------|--------------|------------|-------------|------------|
+| vercel | `.vesk/vercel` | true | platform | – | `functions/__index.func/index.js` |
+| netlify | `.vesk/netlify` | true | platform | – | `functions/__index.js` |
+| cloudflare | `.vesk/cloudflare` | false | platform | – | `_worker.js` |
+| deno | `.vesk/deno` | false | embedded | disk-deno | `index.js` |
+| coxmos | `.vesk/coxmos` | false | embedded | disk-deno | `index.js` |
+| aws | `.vesk/aws` | true | embedded | disk-node | `index.mjs` (+ `template.yaml`) |
+| edge | `.vesk/edge` | false | embedded | inline | `index.js` |
+| (node) | – | – | – | – | none (returns null) |
+
+Static layout mapping (`writePlatformStatic`):
+- `/_vesk/static/*`  ←  `.vesk/static/*`
+- `/_vesk/runtime.js` ← `.vesk/static/client.js` (alias copy)
+- `/*` (public)      ←  `.vesk/static/public/*`
+
+
+---
+
+## 5. Cross-module dependencies
+
+- **`@vesk/compiler`** (imported across many files):
+  - `scan.ts` → `cssBlockEnd` (index.ts CSS stripping)
+  - `router.js` → `scanRoutes`, `scanComponents` (index.ts, dev-server.ts);
+    `extractMiddlewareParts` (middleware.ts)
+  - `api-routes.js` → `scanApiRoutes` (index.ts)
+  - `middleware.js` → `collectMiddlewareChain` (index.ts)
+  - `actions.js` → `collectActionIds` (index.ts)
+  - `client-codegen.js` → `compileClient` (client-bundle.ts, hmr.ts)
+  - `server-codegen.js` → `resolveComponentName` (ssr-function.ts,
+    client-bundle.ts, hmr.ts, prod-server.ts), `createRateLimiter` (prod-server.ts)
+  - `vsk-imports.js` → `collectVskImportPaths`, `vskImportLines` (client-bundle.ts)
+  - `server-render.js` → `ssg` (static.ts)
+  - `server-cookies.js` → `parseCookies` (bundled by runtime-bundle.ts,
+    platform-handler.ts)
+  - `server-utils.js` → `securityHeaders`, `getClientProtocol` (prod-server.ts)
+- **`@vesk/runtime`** — server: `src/index-server.js` (runtime-bundle,
+  prod-server, CLI); client: `dist/index-client.js` + module files
+  (client-bundle, dev-server, hmr tests). `client-bundle` bundles runtime `.js`
+  sources from `runtime/dist` (searched via `findRuntimeSrc`).
+- **Third-party**: `esbuild` (bundling/transform), `sharp` (images, optional),
+  `ws` (`WebSocketServer`, hmr), `typescript` (dev-only `transpile`),
+  `node:fs`, `node:path`, `node:http`, `node:module`, `node:url`.
+- **CLI integration** (`packages/cli/src/index.ts`): imports `build,
+  startProdServer` from `@vesk/adapter/src/index`, `runSeoAudit` from
+  `@vesk/adapter/src/seo-audit`; and `packages/cli/src/dev-server.ts` imports
+  `generateClientBundle, buildTreeShakenRuntime, runtimeExportNames` from
+  `@vesk/adapter/src/client-bundle`. So changing those signatures breaks the CLI.
+
+
+---
+
+## 6. Test inventory
+
+All tests live in `src/*.test.ts` (plain scripts, no framework; they print a
+tally and `process.exit(failed ? 1 : 0)`).
+
+| Test file | Coverage | Requires browser? |
+|-----------|----------|-------------------|
+| `seo-audit.test.ts` | `runSeoAudit` result counts; validates h1, alt, Image alt, OG, heading-order, layout-contributed head props. | No |
+| `tree-shake.test.ts` | `buildTreeShakenRuntime` + `runtimeExportNames`: IIFE present, explicit `export {};` emitted, unused modules dropped, clean ESM import with exactly the requested exports, >100-name dev set, legacy concat fallback on missing name. | No |
+| `hmr.test.ts` | `startDevServer` + WebSocket at `/_vesk/hmr`: `compiling`/`update`/`error` messages, `fnSources`, standalone component create/update, client + hmr-client content. Uses `test/fixtures/hmr-app` and a live dev server. | Dev server only |
+| `hydration.test.ts` | `build` + `startProdServer` + puppeteer-core: initial render, reactivity, dynamic route, no JS errors, hydration strategy exports on `/_vesk/runtime.js` (hydrateViewport/idle/onInteraction/collectVskMarkers/createHydrateWalker), all markers claimed. | Yes (puppeteer-core) |
+| `code-split.test.ts` | `build(..., { codeSplit: true })` + `startProdServer` + puppeteer-core: main bundle loads, `page-about` script injected on nav, direct nav, slug route, chunk caching on SPA revisit, lazy registration, no JS errors. | Yes (puppeteer-core) |
+
+Env gates: `VESK_E2E` (skip the build/server-start phase and reuse a running
+server), `VESK_E2E_PROD_PORT` (default `3099`), `VESK_E2E_DEV_PORT` (default
+`3002`). Puppeteer uses hardcoded Chromium
+`/data/data/com.termux/files/usr/bin/chromium-browser`.
+
+**Run commands:**
+- `npx tsx packages/adapter/src/seo-audit.test.ts`
+- `npx tsx packages/adapter/src/tree-shake.test.ts`
+- `npx tsx packages/adapter/src/hmr.test.ts`
+- `npx tsx packages/adapter/src/hydration.test.ts`
+- `npx tsx packages/adapter/src/code-split.test.ts`
+- Precondition for E2E: `npx tsx packages/cli/src/build-packages.ts` (builds
+  `compiler/dist` + `runtime/dist`).
+- Typecheck: `npm run typecheck`; build: `npm run build`.
+
+
+---
+
+## 7. "If modifying X, update Y" checklist
+
+- **SSR function output shape / `server/functions/*.js`** (`ssr-function.ts`,
+  `hmr.ts:regenerateSsrFunction`) → keep `export async function handle(request)`;
+  prod-server (`loadFunction` → `mod.handle`) and platform-handler
+  (`import { handle }`) both depend on it.
+- **API function output shape / `server/api/*.js`** (`api-function.ts`) → keep
+  `export async function handle(request)` (prod-server + platform-handler use
+  it). `@vesk/runtime` import rewrite must keep resolving to `../runtime.js`.
+- **`server/runtime.js` exports** (`runtime-bundle.ts`) → prod-server,
+  ssr-function, api-function, and generated fn code import from it; add any new
+  export here if generated code should use it.
+- **Client runtime names** (`client-bundle.ts:buildTreeShakenRuntime` /
+  `buildMainBundle` base list) → if you add a runtime export your components
+  can use, add it to the base list + `collectRuntimeImports` must pick it up;
+  update `tree-shake.test.ts`; the CLI (`packages/cli/src/dev-server.ts`)
+  imports `buildTreeShakenRuntime`/`runtimeExportNames`.
+- **Code-split chunk naming** (`buildChunkName` → `page-<slug>.js`) → update
+  `code-split.test.ts` assertions (`page-about` etc.).
+- **`config.json` schema** (`manifest.ts` + `types.ts Manifest`) → update
+  `prod-server.ts` (`BuildConfig` parse) and `dev-server.ts` route lookups.
+- **Middleware chain** (`middleware.ts`) → both variants
+  (`compileMiddleware` export `execute`, `compileMiddlewareCode` inline
+  `__executeMw`) must stay in sync; prod-server imports `server/middleware.js`
+  `execute`; platform-handler imports `./server/middleware.js` `execute`.
+- **Platform detection** (`platform.ts`) → a new platform must be added to the
+  `Platform` union (types.ts `BuildOptions.platform`), `VALID`, `detectPlatform`
+  env branch, AND `shellFor` in `platform-deploy.ts`, else it throws
+  `Unsupported platform`.
+- **Platform static layout** (`platform-output.ts`) → `writePlatformStatic` /
+  `writePrerenderedStatic` map URLs that both the SSR output and each
+  `staticServe` (disk-deno/node/inline) rely on; keep the `/_vesk/static/*`
+  scheme in sync.
+- **SEO checks** (`seo-audit.ts` `SEO_CHECKS`) → update `seo-audit.test.ts`
+  expectations if you add/remove a check's severity.
+- **build() stage order / flags** (`index.ts`) → keep `BuildOptions` + the CLI
+  opts (`packages/cli/src/index.ts`) in sync (`seo`, `strictSeo`, `codeSplit`,
+  `platform`, `target`, `ssg`).
+- **Image pipeline** (`image-pipeline.ts`) → `ImageResult`/`ImageRef` types in
+  types.ts must match; the `optimizeImages` double-call in index.ts is a known
+  observation — if you move it, keep both call sites or document the change.
+

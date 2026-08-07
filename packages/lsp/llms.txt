@@ -1,0 +1,117 @@
+# llms.txt — @vesk/lsp
+
+> Machine reference for the Vesk LSP server. Verified against `packages/lsp/src/server.ts` at commit 5b94b66.
+
+## Package identity
+
+- `name`: `@vesk/lsp`, `version`: 0.1.0, ESM, `type: module`, Node >= 20.
+- `main`: `./dist/server.js`, `bin`: `vesk-lsp` → `./dist/server.js`.
+- Deps: `@vesk/compiler ^0.1.0`, `vscode-languageserver ^9.0.0`, `vscode-languageserver-textdocument ^1.0.0`.
+
+## Project index (in-memory)
+
+```ts
+interface ProjectFile {
+  uri: string;
+  path: string;
+  exports: ExportInfo[];
+  components: ComponentInfo[];
+  declarations: DeclInfo[];
+  lastModified: number;
+}
+interface ProjectIndex {
+  workspaceRoot: string;
+  appDir: string | null;
+  baseUrl: string;
+  pathAliases: PathAlias[];
+  files: Map<string, ProjectFile>;
+  componentSources: Map<string, string>;
+  tailwindClasses: Set<string>;
+}
+```
+
+Built on `initialize` via `scanProject(workspaceRoot)` (uses compiler `scanRoutes`, `scanComponents`, `collectSources`). Incrementally updated via `onDidChangeWatchedFiles` (create/delete only; changes trigger `validateDocument` through `onDidChangeContent`).
+
+## Full capability inventory (from `onInitialize`)
+
+```ts
+{
+  textDocumentSync: TextDocumentSyncKind.Incremental,
+  completionProvider: {
+    triggerCharacters: ['<','{','/','.',' ','"',"'",'`','c','e','i','l','f','w','t','s','&',':','-'],
+    resolveProvider: true,
+  },
+  hoverProvider: true,
+  documentSymbolProvider: true,
+  workspaceSymbolProvider: true,
+  semanticTokensProvider: {
+    legend: {
+      tokenTypes: ['component','reactive','keyword','function','variable','property','type','event'],
+      tokenModifiers: ['declaration','definition','readonly','async'],
+    },
+    full: true,
+  },
+  foldingRangeProvider: true,
+  definitionProvider: true,
+  referencesProvider: true,
+  renameProvider: { prepareProvider: true },
+  documentHighlightProvider: true,
+  signatureHelpProvider: { triggerCharacters: ['(', ','] },
+  documentFormattingProvider: true,
+  documentRangeFormattingProvider: true,
+  documentOnTypeFormattingProvider: {
+    firstTriggerCharacter: '>',
+    moreTriggerCharacter: ['/', '\n'],
+  },
+  colorProvider: true,
+  documentLinkProvider: { resolveProvider: false },
+  codeActionProvider: { codeActionKinds: [CodeActionKind.QuickFix] },
+  workspace: {
+    fileOperations: {
+      didCreate: { filters: [{ pattern: { glob: '**/*.{vsk,ts,tsx,js,jsx}' } }] },
+      didDelete: { filters: [{ pattern: { glob: '**/*.{vsk,ts,tsx,js,jsx}' } }] },
+    },
+  },
+}
+```
+
+## Handler inventory
+
+| Handler | Registration | Notes |
+|---|---|---|
+| `onInitialize` | `connection.onInitialize` | Scans workspace; returns capabilities. |
+| `onDidChangeWatchedFiles` | `connection.onDidChangeWatchedFiles` | Re-indexes created/deleted files. |
+| `onDidChangeContent` | `documents.onDidChangeContent` | Calls `validateDocument` → parse errors + Vesk diagnostics. |
+| `onCompletion` | `connection.onCompletion` | Context-aware: imports, components, props, keywords, Tailwind classes. |
+| `onCompletionResolve` | `connection.onCompletionResolve` | Adds detail/kind to completion items. |
+| `onHover` | `connection.onHover` | Hover for components, tracked vars, imports. |
+| `onDefinition` | `connection.onDefinition` | Go-to-def for components, imports, exports. |
+| `onReferences` | `connection.onReferences` | Find references. |
+| `onDocumentHighlight` | `connection.onDocumentHighlight` | Highlights occurrences. |
+| `onPrepareRename` | `connection.onPrepareRename` | Validates rename range. |
+| `onRenameRequest` | `connection.onRenameRequest` | Renames across project. |
+| `onDocumentSymbol` | `connection.onDocumentSymbol` | Document symbols. |
+| `onWorkspaceSymbol` | `connection.onWorkspaceSymbol` | Workspace symbol search. |
+| `onFoldingRanges` | `connection.onFoldingRanges` | Folding ranges. |
+| `onDocumentLinks` | `connection.onDocumentLinks` | Import path links. |
+| `onSignatureHelp` | `connection.onSignatureHelp` | Signature help for calls + component props. |
+| `onCodeAction` | `connection.onCodeAction` | Quick fixes (parse errors, undefined components). |
+| `onDocumentFormatting` | `connection.onDocumentFormatting` | Formatting. |
+| `onDocumentRangeFormatting` | `connection.onDocumentRangeFormatting` | Range formatting. |
+| `onDocumentColor` | `connection.onDocumentColor` | Colors in `<style>` blocks (hex, rgb, rgba, hsl, named). |
+| `onColorPresentation` | `connection.onColorPresentation` | Color format conversions. |
+| `onDocumentOnTypeFormatting` | `connection.onDocumentOnTypeFormatting` | Auto-close JSX tags on `>`. |
+| `semanticTokens.on` | `(connection.languages as any).semanticTokens.on` | Semantic token highlighting. |
+
+## Cross-module coupling
+
+- Depends on `@vesk/compiler` for parsing (`parse`), route/component scanning (`scanRoutes`, `scanComponents`, `collectSources`).
+- Does not depend on `@vesk/runtime` directly (LSP is a build/editor tool).
+- The bundled server (`scripts/build-lsp.js`) is consumed by `extension/vsk-vscode` and `extension/vsk-neovim`.
+
+## Modification checklist
+
+- **New LSP capability** → declare in `onInitialize` capabilities, implement handler, update `docs.md` and this file.
+- **New Vesk syntax** → update `validateDocument`, `getVskComponents`, `parseExports`, `parseDeclarations` to recognize it; add completion/hover/definition support.
+- **Bundle path change** → update `scripts/build-lsp.js` input path (currently hardcoded absolute path).
+- **Editor extension consumer** → verify the bundled output still works with the VS Code / Neovim clients.

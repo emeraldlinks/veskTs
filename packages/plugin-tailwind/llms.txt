@@ -1,0 +1,64 @@
+# llms.txt — @vesk/plugin-tailwind
+
+> Verified against `packages/plugin-tailwind/src/index.ts` at commit 5b94b66.
+
+## Package identity
+
+- `name`: `@vesk/plugin-tailwind`, `version`: 0.1.3, ESM, Node >= 20.
+- `exports`.`: `./dist/index.js` (+ `.d.ts`).
+- Deps: `@tailwindcss/node ^4.0.0`, `@tailwindcss/oxide ^4.0.0`.
+
+## Public API
+
+```ts
+export interface TailwindOptions {
+  entry?: string;    // default 'src/global.css'
+  appDir?: string;   // default 'app'
+}
+
+export default function tailwindcss(options?: TailwindOptions): TailwindPlugin;
+
+interface TailwindPlugin {
+  name: string;                                    // '@vesk/plugin-tailwind'
+  dependencies: Set<string>;
+  onBuildStart(): Promise<void>;
+  onCSS(content: string, filePath: string): Promise<string | null>;
+  onFileWatch(filePath: string): Promise<{ handled: boolean }>;
+}
+
+export function extractTailwindDirectives(css: string): { directives: string; userCSS: string };
+```
+
+## Internal helpers
+
+- `CLASS_RE = /class(?:\w+)?=["']([^"']*)["']/g` — scans class attributes.
+- `SCAN_EXT = /\.(vsk|js|ts|jsx|tsx)$/` — file filter for candidate scanning.
+- `walkFiles(dir)` — recursive directory walker (skips `node_modules`, `dist`, `.vesk`, `.vercel`, `.git`).
+- `scanCandidates(dir)` — walks files, extracts class names via `CLASS_RE`.
+- `loadFallbackStylesheet(id, base)` / `loadFallbackModule(id, base)` — fallback loaders for non-`@tailwindcss/node` environments.
+- `extractTailwindDirectives(css)` — splits CSS into Tailwind directive block and user CSS using brace counting with string/comment awareness.
+
+## Data flow
+
+```
+onCSS(content, filePath)
+  → if not entry file → return null
+  → extractTailwindDirectives(content) → { directives, userCSS }
+  → @tailwindcss/node compile(directives, opts) OR tailwindcss compile
+      opts.onDependency(path) → this.dependencies.add(path)
+      opts.loadStylesheet / loadModule (fallback only)
+  → scanCandidates(baseDir) → string[]
+  → result.build(candidates) → final CSS string
+```
+
+## Cross-module coupling
+
+- Consumed by `packages/cli/src/dev-server.ts` (calls `plugin.onCSS` for CSS files, `plugin.onFileWatch` for file changes).
+- Consumed by `packages/adapter/src/index.ts` build pipeline (iterates `plugins` calling `onCSS`/`onBuildStart`/`onBuildEnd`).
+- No dependency on `@vesk/runtime` or `@vesk/compiler` directly (it's a pure CSS plugin).
+
+## Modification checklist
+
+- **Change candidate scanning** → update `CLASS_RE` or `scanCandidates`; add a test in `src/index.test.ts`.
+- **Change directive extraction** → update `extractTailwindDirectives`; add a test in `src/index.test.ts`.
+- **Change plugin hook shape** → update `TailwindPlugin` interface, `index.d.ts`, and the `VeskPlugin` consumer in `packages/compiler/src/config.ts` if needed.

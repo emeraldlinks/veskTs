@@ -1,0 +1,34 @@
+# llms.txt — extension/
+
+> Verified against `extension/vsk-vscode` and `extension/vsk-neovim` at commit 5b94b66.
+
+## vsk-vscode
+
+- `package.json` contributes:
+  - `languages`: id `vsk`, aliases `["vesk"]`, extensions `[".vsk"]`, filenames `[]`, configuration `./language-configuration.json`.
+  - `grammars`: `vsk` → `./syntaxes/vsk.tmLanguage.json`, scope `source.vsk`, injectedLanguages `[]`.
+  - `configuration`: `language-configuration.json` (brackets, comments, etc.).
+- `src/extension.ts`: activates `vscode.lspclient` pointing at `lsp-server/index.mjs`.
+- `lsp-server/index.mjs`: prebuilt ESM client for the VS Code LSP API; includes the bundled `vesk-lsp` server or spawns it as a child process.
+- `.vscodeignore`: excludes `node_modules`, `src`, `.vscode`, `*.ts`, etc.
+- `vesk-vscode-0.1.0.vsix`: prebuilt package.
+
+## vsk-neovim
+
+- `ftdetect/vsk.vim`: `au BufRead,BufNewFile *.vsk set filetype=vsk`.
+- `ftplugin/vsk.lua`: LSP client setup, keymaps (neovim Lua).
+- `plugin/vsk.vim`: global commands and autocmds for LSP attach.
+- `syntax/vsk.vim`: Vim syntax definitions for `.vsk`.
+- `lsp-server/index.mjs`: Neovim LSP bridge — spawns `vesk-lsp` and speaks LSP over stdio.
+- `scripts/build-lsp.cjs`: CJS wrapper to rebuild the bundled LSP server.
+
+## Cross-module coupling
+
+- Both extensions consume the `@vesk/lsp` server (either bundled or via `vesk-lsp` binary).
+- The bundled server is built by `scripts/build-lsp.js` (rollup).
+- The LSP server itself depends on `@vesk/compiler` for parsing/scanning.
+
+## Modification checklist
+
+- **New editor capability** → update `vsk.tmLanguage.json` (VS Code) and/or `syntax/vsk.vim` (Neovim), plus the LSP server `onInitialize` capabilities.
+- **LSP bundle update** → run `node scripts/build-lsp.js`, then copy the output into both `extension/vsk-vscode/lsp-server/index.mjs` and `extension/vsk-neovim/lsp-server/index.mjs`.

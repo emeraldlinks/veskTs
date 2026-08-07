@@ -1,0 +1,602 @@
+# @vesk/runtime — llms.txt (machine-focused reference)
+
+Package: `@vesk/runtime` v0.1.6 · ESM + TypeScript · source `/root/vesk/packages/runtime/src`
+Companion docs: `docs.md` (human), `AGENTS.md` (agent rules).
+Every signature below was verified against source. Unverifiable items are
+marked `[UNVERIFIED]`.
+
+## Package / entry points (package.json)
+
+```json
+"exports": {
+  ".":        { "types": "./dist/index-client.d.ts",  "default": "./dist/index-client.js"  },
+  "./client": { "types": "./dist/index-client.d.ts",  "default": "./dist/index-client.js"  },
+  "./server": { "types": "./dist/index-server.d.ts",  "default": "./dist/index-server.js"  },
+  "./src/*":  "./dist/*.js",
+  "./package.json": "./package.json"
+}
+```
+- `type: module`, `engines.node >= 20`, dependency `@vesk/compiler ^0.1.0`.
+- Main/types point at the **client** entry.
+- Server-only APIs are NOT reachable from the `.`/`client` entries.
+
+---
+
+## 1. Full export inventory — index-client.ts
+
+### 1a. From `ripple-runtime.ts` (live values are `export let`)
+```ts
+track(v: unknown, b?: Block, get?: (value: unknown) => unknown, set?: (next: unknown, prev: unknown) => unknown): Tracked | Derived
+get(t: unknown): unknown
+set(tracked: Tracked | Derived, value: unknown): void
+untrack<T>(fn: () => T): T
+peek  /* = peek_tracked */
+peek_tracked(tracked: unknown): unknown
+derived(fn: () => unknown, block?: Block, get?: (value: unknown) => unknown, set?: (next: unknown, prev: unknown) => unknown): Derived
+flushSync  /* = flush_sync */
+flush_sync<T>(fn?: () => T): T | undefined
+tick(): Promise<void>
+schedule_update(block: Block | null): void
+queue_microtask(fn?: () => void): void
+active_block: Block | null                      // exported let
+set_active_block(block: Block | null): void
+set_active_component(component: Component | null): void
+is_mutating_allowed: boolean                    // exported let
+tracking: boolean                               // exported let
+teardown: boolean                               // exported let
+run_block(block: Block): void
+run_teardown(block: Block): void
+create_component_ctx(): Component
+push_component(): void
+pop_component(): void
+with_block<T>(block: Block, fn: () => T): T
+with_scope<T>(block: Block, fn: () => T): T
+scope(): Block | null
+safe_scope(err?: string): Block                 // default 'Cannot access outside of a component context'
+set_tracking(value: boolean): void
+set_active_reaction(reaction: Block | Derived | null): void
+is_block_dirty(block: Block): boolean
+destroy_non_branch_children(parent: Block, remove_dom?: boolean): void
+disable_scoped_flush: boolean                   // exported let
+on_destroy(fn: () => void): void
+```
+Interfaces exported from this module (not in index, but public to module
+users): `Block`, `Tracked`, `Derived`, `Dependency`, `Component`,
+`ComponentEffect`. Additional module-level exports NOT re-exported by the
+index (internal utilities): `tracked`, `get_derived`, `get_tracked`,
+`is_tracked_pending`, `spread_props`, `proxy_props`, `computed_property`,
+`call_property`, `get_property`, `set_property`, `update`, `increment`,
+`decrement`, `update_pre`, `update_property`, `update_pre_property`,
+`exclude_from_object`, `queue_post_block_flush_callback`, `active_reaction`,
+`active_scope`, `active_namespace`.
+
+### 1b. From `ripple-blocks.ts`
+```ts
+effect(fn: () => void): Block
+user_effect(fn: () => void): Block | void
+block(flags: number, fn: (state: unknown) => unknown, state?: unknown, co?: Component): Block
+branch(fn: (state: unknown) => unknown, flags?: number, state?: unknown): Block
+root(fn: () => void | (() => void)): Block
+render(fn: (state: unknown) => unknown, state?: unknown, flags?: number): Block
+pre_effect(fn: () => void): Block
+destroy_block(block: Block, remove_dom?: boolean): void
+destroy_block_children(parent: Block, remove_dom?: boolean): void
+pause_block(block: Block): void
+resume_block(block: Block): void
+is_destroyed(target_block: Block): boolean
+unlink_block(block: Block): void
+create_try_block(fn: (state: unknown) => unknown, state?: unknown): Block
+
+### 1c. From `hydrate.ts`
+```ts
+hydrate(container: HTMLElement, componentFn: (props: Record<string, unknown>, registry: Map<string, unknown>, walker: HydrateWalker) => unknown, props?: Record<string, unknown>): unknown
+hydrateViewport(container: HTMLElement, componentFn: ..., props?: Record<string, unknown>, rootMargin?: number /*=500*/): Promise<void>
+hydrateIdle(container: HTMLElement, componentFn: ..., props?: Record<string, unknown>, options?: { chunkSize?: number /*=10*/; timeout?: number /*=3000*/ }): HydrateCancelBase   // { cancel(): void }
+hydrateOnInteraction(container: HTMLElement, componentFn: ..., props?: Record<string, unknown>, options?: { events?: string[] }): HydrateCancel  // { cancel(): void; hydrateNow(): void }
+needsHydration(container: HTMLElement): boolean
+hydrationCount(container: HTMLElement): number
+createHydrateWalker(container: HTMLElement | null, markerList?: Comment[]): HydrateWalker
+collectVskMarkers(container: HTMLElement): Comment[]
+reactiveProps<T extends Record<string, unknown>>(props: T): T
+```
+```ts
+interface HydrateWalker { root: HTMLElement | null; done(): boolean; nextElement(tag?: string): Element; subWalker(rootEl: HTMLElement): HydrateWalker }
+```
+Non-index module exports: `createHydrateChildWalker`, `_FILTER_ACCEPT`,
+`_FILTER_SKIP`.
+
+### 1d. From `router.ts` (and re-exports)
+```ts
+createRouter(routes: RouteNode[] | Record<string, Function>, options?: RouterOptions): RouterInstance
+createFileRouter(routeTree: RouteNode[], options?: FileRouterOptions): FileRouterInstance
+defineRoute(path: string, config: Record<string, unknown>): RouteNode
+buildRouteTree(definitions: RouteNode[]): RouteNode[]
+ensureChunk(chunkUrl: string): Promise<void>
+/* re-exported from router-components.ts: */
+Outlet(props?: { children?: unknown }): Node
+Link(props: LinkProps, registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+NavLink(props: NavLinkProps, registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+useNavigate(): (path: string, opts?: { replace?: boolean }) => void
+useParams(): Record<string, string>
+usePathname(): string
+useSearchParams(): [URLSearchParams, (next: Record<string, string> | string) => void]
+useRouter(): { push: (href: string) => void; replace: (href: string) => void; back: () => void; forward: () => void; refresh: () => void; prefetch: (href: string) => void }
+class Redirect extends Error
+redirect(url: string, status?: number /*=302*/): never
+permanentRedirect(url: string): never
+class NotFoundError extends Error
+notFound(): never
+matchRoute(tree: RouteNode[], pathname: string): RouteMatch | null   // from router-match.ts
+RouterOptions: { container?: HTMLElement; prefetch?: boolean; hydrate?: 'full' | 'viewport' | 'idle' | 'interaction'; [k: string]: unknown }
+```
+`NavLinkProps extends LinkProps { activeClass?: string; ariaCurrent?: boolean | string }`
+`LinkProps: { href: string; children?: unknown; class?: string; style?: string; target?: string; rel?: string; [k: string]: unknown }`
+
+### 1e. From `bindings.ts` (client-only)
+```ts
+bindValue(maybe_tracked: unknown, set_func?: (value: unknown) => void): (node: HTMLElement) => () => void
+bindChecked(maybe_tracked: unknown, set_func?: (value: unknown) => void): (input: HTMLInputElement) => () => void
+bindGroup(maybe_tracked: unknown, set_func?: (value: unknown) => void): (input: HTMLInputElement) => () => void
+```
+`maybe_tracked` may be a ripple object OR a getter function (then `set_func`
+is required). Errors: `TypeError` (not a tracked object / missing set fn).
+
+### 1f. From `context.ts`
+```ts
+createContext<T>(value: T): Context<T>
+class Context<T> { _v: T; constructor(value: T); get(): T; set(value: T): void }
+getActiveComponent(): Component | null
+setActiveComponent(value: Component | null): void
+```
+Context `set` throws `'No active component found, cannot set context'` when
+no component is active. `get` walks `component.p` chain then falls back to
+default `_v`.
+
+boundary_fn_running_block(fn: (state: unknown) => unknown, flags?: number, state?: unknown): Block
+```
+
+
+### 1g. From `resource.ts`
+```ts
+createResource<T>(fn: () => Promise<T>, key?: string, into?: Tracked, options?: UseFetchOptions<T> = {}): Resource<T>
+setSsrData(key: string, value: unknown): void
+clearSsrData(): void
+resolveSsrResources(): Promise<Record<string, unknown>>
+useFetch<T = unknown>(urlOrFn: string | (() => Promise<T>), options?: UseFetchOptions<T> = {}): Resource<T>
+useFetch.text<T = string>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T>
+useFetch.json<T = unknown>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T>
+useFetch.arrayBuffer<T = ArrayBuffer>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T>
+interface Resource<T> extends PromiseLike<T> { loading: boolean; error: unknown; data: T | undefined; _state?: Tracked; refresh: () => void; abort: () => void }
+interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> { key?: string; into?: Tracked; body?: unknown; staleTime?: number; keepPreviousData?: boolean; retry?: number; retryDelay?: number; timeout?: number; enabled?: boolean; dedupe?: boolean }
+```
+Non-index module exports: `class HttpError extends Error` (`.status: number`),
+`class TimeoutError extends Error`, `mutate(key, data?)` [not in index].
+
+### 1h. Components/helpers from other modules
+```ts
+Portal(props: PortalProps, _registry?: Map<string, unknown>, _ctx?: unknown): Node | string   // PortalProps: { target: string | HTMLElement; children?: Node | ((frag: DocumentFragment) => void); [k: string]: unknown }
+reconcile<T>(anchor: Node, endAnchor: Node, items: T[], keyFn: (item: T) => string, createItem: (item: T, index: number, effs: Block[]) => void): (newItems: T[]) => void
+JsonLd(props: JsonLdProps): string | null
+ArticleSchema(article: ArticleData): Record<string, unknown>
+ProductSchema(product: ProductData): Record<string, unknown>
+FAQPageSchema(faqs: FAQItem[]): Record<string, unknown>
+BreadcrumbListSchema(items: BreadcrumbItem[]): Record<string, unknown>
+OrganizationSchema(org: OrganizationData): Record<string, unknown>
+LocalBusinessSchema(biz: LocalBusinessData): Record<string, unknown>
+VideoSchema(video: VideoData): Record<string, unknown>
+Image(props: ImageProps): Node | string
+Experiment(props: ExperimentProps): unknown
+Form(props: FormProps, registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+Field(props: FieldProps, registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+required(msg?: string): ValidationRule
+email(msg?: string): ValidationRule
+minLength(n: number, msg?: string): ValidationRule
+maxLength(n: number, msg?: string): ValidationRule
+pattern(re: RegExp, msg?: string): ValidationRule
+custom(fn: (v: unknown) => boolean, msg?: string): ValidationRule
+Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+defineAction(config: ActionConfig | string, config2?: ActionConfig): ActionDefinition
+getAction(id: string): ActionConfig | null
+clearActions(): void
+validateActionInput(def: ActionConfig, input: Record<string, unknown>): ActionIssue[]
+issuesToFieldMap(issues: ActionIssue[]): Record<string, string>
+isFormAction(action: unknown): action is ActionDefinition | ActionStub
+```
+
+---
+
+## 2. Full export inventory — index-server.ts
+
+Same core exports as the client entry (runtime subset + blocks + context +
+resource + portal + router + seo + image + experiment + form + md + action),
+with these **differences**:
+
+- **Server does NOT export**: any `hydrate*`, `needsHydration`,
+  `hydrationCount`, `createHydrateWalker`, `collectVskMarkers`, `reactiveProps`,
+  `bindValue`/`bindChecked`/`bindGroup`, `reconcile`, and the client-only
+  ripple-runtime extras (`schedule_update`, `queue_microtask`,
+  `is_mutating_allowed`, `tracking`, `teardown`, `run_block`, `run_teardown`,
+  `set_tracking`, `set_active_reaction`, `is_block_dirty`,
+  `destroy_non_branch_children`, `disable_scoped_flush`).
+- **`useParams` from router is aliased**: `useParams as routerParams` to avoid
+  clashing with `request.ts`'s `useParams`.
+- **Adds the request module**:
+```ts
+cookies(): CookieStore           // Proxy over a cookie jar; .get(name), .getAll(), .toString()
+headers(): Record<string, string | Function | undefined>   // Proxy; .get(name), .has(name), .entries()
+locals(): Record<string, unknown>
+class ServerRequest extends Request { get/set cookies: CookieStore; get/set params: Record<string,string>; get/set locals: Record<string,unknown> }
+class ServerResponse extends Response { static json(body, init?); static redirect(url, status=307); static rewrite(url); static next() }
+class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown> }
+VeskResponse  // Proxy over an internal _VeskResponse Response subclass
+withValidation(request: Request, schema: { safeParse: (data) => { success: boolean; error?: { issues: {path:(string|number)[];message:string}[] }; data?: unknown } }, opts?: { jsonOnly?: boolean }): Promise<unknown | Response>
+useBody(): Promise<unknown>
+useParams(): Record<string, string>       // request params (NOT router)
+useRequest(): RequestContext | null
+cors(options?: CorsOptions): CorsMiddleware
+defineHook(name: string, fn: Function): void
+removeHook(name: string, fn: Function): void
+runHooks(name: string, ...args: unknown[]): Promise<Response | undefined>
+webhook(options: WebhookOptions): (request: Request) => Promise<Response>
+signCookie(name, value, host?): Promise<string>
+unsignCookie(name, signedValue, host?): Promise<string | null>
+setSignedCookie(name, value, options?, host?): Promise<string>
+readSignedCookie(name, cookieString, host?): Promise<string | null>
+applyRequestSecurity(request: VeskRequest, response: VeskResponseInstance): void
+```
+- **Adds the ISR module**:
+```ts
+isr(key: string, fetcher: () => Promise<unknown>, opts?: { tags?: string[]; revalidate?: number }): Promise<{ data: unknown; stale: boolean }>
+revalidatePath(path: string): Promise<void>
+revalidateTag(tag: string): Promise<void>
+clearIsrCache(): void
+revalidateComponent(key: string): void
+pageIsr(path: string, renderFn: () => Promise<{ html: string; headers?: Record<string,string> }>, opts?): Promise<{ html: string; headers: Record<string,string>; stale: boolean }>
+componentIsr(key: string, renderFn: () => string | Promise<string>, opts?): Promise<string>
+isrConfigToRevalidate(config: unknown): number   // number or { revalidate } -> TTL, else 0
+```
+- `VeskResponseInstance` (interface, in request.ts) exposes:
+`setStatus(code)`, `build()`, `text()`, `json()`, `setCookie(name, value, opts?)`,
+`clearCookie(name, opts?)`, `setCsp(policy)`, `setSecurityHeader(name, value)`,
+`cache(ttlSeconds)`, `noCache()`, `cors(opts?)`, `_flushSecurityHeaders()`, `readonly status`.
+
+---
+
+## 3. Key internal modules (not re-exported through the index)
+
+### `ripple-constants.ts`
+```ts
+ROOT_BLOCK=1<<1, RENDER_BLOCK=1<<2, EFFECT_BLOCK=1<<3, BRANCH_BLOCK=1<<4,
+FOR_BLOCK=1<<5, TRY_BLOCK=1<<6, IF_BLOCK=1<<7, SWITCH_BLOCK=1<<8,
+COMPOSITE_BLOCK=1<<9, ASYNC_BLOCK=1<<10, HEAD_BLOCK=1<<11, PRE_EFFECT_BLOCK=1<<12,
+DIRECT_CHILD_BLOCK=1<<13, CONTAINS_UPDATE=1<<14, CONTAINS_TEARDOWN=1<<15,
+BLOCK_HAS_RUN=1<<16, TRACKED=1<<17, DERIVED=1<<18, DEFERRED=1<<19, PAUSED=1<<20,
+DESTROYED=1<<21, UPDATE_SOURCE=1<<22
+CONTROL_FLOW_BLOCK = FOR_BLOCK | IF_BLOCK | SWITCH_BLOCK | TRY_BLOCK | COMPOSITE_BLOCK
+const UNINITIALIZED: unique symbol; TRACKED_ARRAY; TRACKED_OBJECT; COMPUTED_PROPERTY; HMR; ARRAY_SET_INDEX_AT; TRACKED_UPDATED; SUSPENSE_PENDING; SUSPENSE_REJECTED; ASYNC_DERIVED_READ_THROWN
+REF_PROP = 'ref'; MAX_ARRAY_LENGTH = 2**32-1; DEFAULT_NAMESPACE = 'html'
+NAMESPACE_URI = { html, svg, mathml }  // w3.org URIs
+```
+
+### `ripple-utils.ts`
+```ts
+is_ripple_object(v: unknown): v is { f: number }   // typeof v.f === 'number'
+define_property = Object.defineProperty
+get_descriptor = Object.getOwnPropertyDescriptor
+is_array = Array.isArray
+object_keys = Object.keys
+get_own_property_symbols(obj): symbol[]
+```
+
+### `router-match.ts`
+```ts
+interface RouteNode { path: string; fullPath?: string; isGroup?: boolean; isDynamic?: boolean; isCatchAll?: boolean; page?: Function | null; layout?: Function | null; loading?: Function | null; error?: Function | null; notFound?: Function | null; children?: RouteNode[]; segmentCount?: number; _matchChain?: RouteNode[]; loader?: Function; props?: Record<string, unknown>; _head?: string; [k: string]: unknown }
+interface RouteMatch { matchChain: RouteNode[]; params: Record<string, string>; pathname?: string }
+compileRoutePattern(fullPath: string): { regex: RegExp; paramNames: string[] }
+collectLayouts(nodes, pathParts): { layout: Function; node: RouteNode }[]
+matchRouteNode(node, pathParts): boolean
+extractParams(node, pathParts): Record<string, string>
+flattenLayoutChain(tree, pathParts, result?): RouteNode[]
+matchRoute(tree, pathname): RouteMatch | null
+buildTreeFromMap(routes: Record<string, Function>, _options?): RouteNode[]
+```
+Note: `compileRoutePattern` builds a `RegExp` via string construction — this
+is the router, NOT the compiler; the no-regex rule applies to
+`packages/compiler/src` only.
+
+### `router-components.ts` (extra exports)
+`RouterCtx = createContext<Router | null>(null)`, `__isHydrating`,
+`setIsHydrating(v)`, `_state` (tracked path/params/search), `_scrollPositions`
+(Map), `_isPopStateNavigation`, `setIsPopStateNavigation(v)`, `setCurrentRouter(r)`,
+`getCurrentRouter()`, `findLoadingComponent(chain)`, `findErrorComponent(chain)`,
+`findNotFoundComponent(chain)`, `showLoadingInContainer(container, loadingFn, params)`,
+`handleScroll(pathname, isReplace?)`, `applyHead(headHtml)`, `_state`, `_outletId`.
+
+### `suspense.ts`
+No exports. Placeholder only (comments describe compiler-level Suspense as
+future work). Gate: use `if (loading)` + `createResource`.
+
+### `hmr-client.ts`
+IIFE (no module exports) — injected as a script by tooling; connects to
+`/{proto}://host/_vesk/hmr`, handles `update`/`reload`/`error`/`css-update`/
+`compiling` messages, calls `router.hmrUpdate()`, renders a dev dot + error
+overlay. Not part of the public API.
+
+
+### `track.ts` — LEGACY module (do not import)
+A deprecated, **unused** reactivity module with its OWN distinct API. It is
+NOT re-exported by `index-client.ts`/`index-server.ts` and is not imported by
+any runtime/compiler/cli source (verified by grep). It only survives in
+`dist/` because it is compiled alongside the active modules. **This is NOT the
+runtime's reactivity system** — the active one is `ripple-runtime.ts` +
+`ripple-blocks.ts`. Do not use these APIs:
+```ts
+class Cell<T> { get(): T; peek(): T; set(newValue: T): boolean; update(fn: (current: T) => T): boolean; unsubscribe(effect: Effect): void }
+class Effect { run(): void; destroy(): void }
+track<T>(initialValue: T): Cell<T>
+effect(fn: () => void): Effect
+derived<T>(fn: () => T): Cell<T>
+batch<T>(fn: () => T): T        // legacy batching — the active runtime has NO batch
+```
+This is the only place a `batch` symbol exists in `@vesk/runtime/src`; the
+active barrels/modules export no `batch`. Treat it as dead code pending
+removal; never import/emit `batch` (matches repo AGENTS.md rule).
+
+
+
+---
+
+## 4. Data flow
+
+### 4.1 SSR resource handoff (`resource.ts`)
+1. SSR flag: `isServer() === !!globalThis.__vsk_ssr`.
+2. Server render calls `createResource(fn, key)` → `startRequest(handle)`.
+3. `startRequest` (server branch): dedupe by key via `__vsk_fetch_inflight`;
+   run `runFetcher` (handles `retry`/`retryDelay` exponential backoff and
+   `timeout` via `Promise.race`); then `setSsrData(key, data)` →
+   `globalThis.__vsk_ssr_data[key]`; also `trackSsrPromise(prom)` pushes into
+   `__vsk_ssr_promises` (or `__vsk_ssr_promises_${__vsk_ssr_token}`).
+4. After render: server calls `resolveSsrResources()` →
+   `Promise.allSettled(__vsk_ssr_promises)`, returns `__vsk_ssr_data`, deletes
+   `__vsk_ssr_promises`. The object is serialized into the page.
+5. Client bootstrap injects that object as `globalThis.__vsk_ssr_data`.
+6. Client `createResource` → `getSsrData(resourceKey)`; if defined,
+   `settle(handle, ssrData)` immediately and `writeCache` — **no refetch**.
+7. Otherwise client `startRequest`: honors `staleTime` client cache
+   (`__vsk_fetch_cache`), dedupes via `__vsk_fetch_inflight`, and on resolve
+   writes cache + `settle`. `refresh()`/`revalidate` aborts inflight and
+   re-fetches all registry handles for the key.
+
+### 4.2 Hydration claiming (`hydrate.ts`)
+- SSR emits `<!--vsk-->` comments at reactive boundaries.
+- `hydrate(container, fn, props)` builds a `createHydrateWalker`, then calls
+  `componentFn(props, new Map(), walker)`.
+- `walker.nextElement(tag?)` advances marker index; for each marker it reads
+  `marker.nextElementSibling` (the claimed element), `marker.remove()`, strips
+  trailing/leading text nodes, and returns the existing element (or creates a
+  fresh one when absent / tag mismatch).
+- `hydrateViewport` splits markers into in-viewport vs deferred; deferred are
+  relabeled `<!--vsk-hold-->` and hydrated lazily by `IntersectionObserver`
+  (converting the hold back to `vsk`).
+- `hydrateIdle` chunks markers (`chunkSize=10`, `timeout=3000`) via
+  `requestIdleCallback`.
+- `hydrateOnInteraction` waits for the first of `['click','touchstart',
+  'focus','mouseenter']` (configurable via `options.events`), returning
+  `{ cancel, hydrateNow }`.
+
+### 4.3 Router navigation (`router.ts` / `router-components.ts`)
+- `createRouter(...).start()` sets currentRouter, disables native
+  scroll-restoration, and renders the initial match.
+- `Link` click (no modifier keys, not `_blank`) → `preventDefault` →
+  `useNavigate()(href)` → `router.navigate(path)` → `window.history.pushState`,
+  `set` path/params/search tracked state, fetch route data (with `_dataPromises`
+  dedupe), `ensureChunk` for code-split pages, render match chain into
+  `Outlet` placeholders, `handleScroll`.
+- `applyHead(headHtml)` replaces `<head>` content from route data.
+- `NavLink` computes active state from `usePathname()` and adds `activeClass`
+  (default `'active'`) + `aria-current="page"`.
+- Guards: throwing `Redirect`/`NotFoundError` during load short-circuits to a
+  redirect / 404 response (server) or navigation (client).
+
+### 4.4 Form / action submit (`form.ts` + `action.ts`)
+- SSR: `Form` renders `<form action=… method=… novalidate>` with `<Field>`
+  error slots (`data-vsk-field` / `data-vsk-error`). Server field errors read
+  from `globalThis.__vesk_action_errors`.
+- Client hydration: `bindFormSubmit` attaches a submit handler → reads fields,
+  client-validates `rules` per Field; on success `fetch(resolvedAction,
+  {method, body:data})`.
+- Action post is routed to `/_vesk/action/<id>`; server runs
+  `validateActionInput`; on `{ ok:false, issues }` it maps issues back to
+  fields, toggles error `<div>`s, dispatches `vsk-error`; on non-OK response
+  throws; on success dispatches `vsk-success` and calls `onSuccess`.
+- Always toggles `vsk-submitting`/`vsk-loading` and re-enables the submit
+  button.
+
+---
+
+## 5. Conventions & idioms
+
+- **snake_case internals, camelCase public**: internals are `flush_sync`,
+  `peek_tracked`, `schedule_update`, `on_destroy`, `create_component_ctx`,
+  `with_block`, `queue_microtask`; the public exports alias them to
+  `flushSync`, `peek`, `on_destroy` (kept snake), etc.
+- **`set`-prefix for writers**: `set`, `set_active_block`,
+  `set_active_component`, `set_active_reaction`, `set_tracking`,
+  `setSsrData`, `setCookie` (response), `setCsp`, `setSecurityHeader`.
+- **`flush`/`create`/`resume`/`pause`/`destroy` verbs**: `flush_sync`,
+  `flush_updates`, `createResource`, `createRouter`, `createContext`,
+  `createHydrateWalker`, `pause_block`, `resume_block`, `destroy_block`,
+  `destroy_block_children`.
+- **No `batch` in the active runtime**: never import/emit `batch`. The barrels
+  and `ripple-runtime`/`ripple-blocks` have no `batch`. Use `flushSync`. The
+  only `batch` symbol in `src/` is inside the deprecated, unused `track.ts`
+  (see section) — treat it as dead code.
+- **Scoped flushing**: `schedule_update` sets `UPDATE_SOURCE` on the target
+  and `CONTAINS_UPDATE` up the tree; `flush_updates` runs only on-path blocks
+  under the `scope_root`. If a foreign dependency is registered,
+  `disable_scoped_flush` global flips to `true` → full-root flush.
+- **Effects run in three passes** in `flush_updates`: `pre_effect` blocks →
+  other render/update blocks → `effect` blocks.
+- **Circular static imports are normal** between `ripple-runtime` and
+  `ripple-blocks` (ESM handles it); keep function use deferred/inside
+  closures where needed.
+- **Component functions are triple-arg**: `(props, registry, hydrateWalker)`
+  across Form/Field/Md/Link/NavLink/Portal — SSR returns strings, hydration
+  claims via walker, SPA returns DOM nodes.
+- **SSR detection**: `typeof document === 'undefined'` (component helpers) or
+  `!!globalThis.__vsk_ssr` (resource module). Don't mix.
+- **Global namespaces** used (read/write `globalThis`): `__vsk_ssr`,
+  `__vsk_ssr_data`, `__vsk_ssr_promises[_token]`, `__vsk_ssr_token`,
+  `__vsk_ssr_base_url`, `__vsk_fetch_cache`, `__vsk_fetch_inflight`,
+  `__vsk_fetch_registry`, `__vesk_request`, `__vesk_hooks`,
+  `__vesk_actions`, `__vesk_action_errors`, `__vesk_ctx`, `__vesk_router`,
+  `__updatedComponents`, `__vsk_experiments`, `__vesk_hmr_eval`.
+
+
+---
+
+## 6. Edge cases & gotchas
+
+- `set()` no-ops when the new value `===` the old value (by `!==` check).
+- `set()` throws inside derived evaluation (`is_mutating_allowed === false`).
+- `get_tracked`/`get_derived` **throw** `ASYNC_DERIVED_READ_THROWN` when the
+  value is `SUSPENSE_PENDING`/`SUSPENSE_REJECTED`; `peek` does NOT throw and
+  returns the raw `__v`.
+- `flush_microtasks` throws *"Maximum update depth exceeded…"* after 1001
+  flush cycles (effect read/write same state loop).
+- `flush_sync` recursion: while in sync mode it flushes queued root blocks
+  recursively until quiescent; `flush_count` is reset to 0 on exit.
+- `tick()` uses `requestAnimationFrame`; in non-browser environments this
+  needs a polyfill / jsdom.
+- `user_effect` returns `void` (deferred) if the component isn't mounted yet;
+  `effect` always returns a `Block`.
+- `Tracked.__v` read via `peek_tracked` may be a raw value or the
+  `UNINITIALIZED` symbol for deriveds before first read.
+- `queue_microtask` batches ALL queued callbacks into a single
+  `queueMicrotask`; `queue_microtask()` with no fn still queues an empty
+  flush (used to schedule the scheduler).
+- Hydration walker strips text nodes only on claimed elements; a missing / SSR
+  mismatch falls back to `document.createElement(tag || 'div')`.
+- `reactiveProps` only unwraps ripple objects (`typeof val.f === 'number'`).
+- ISR caches are **in-memory** and shared per-process; `revalidate<=0`
+  bypasses caching entirely; revalidation failures keep the stale entry.
+- Signed-cookie helpers lazily `await import('@vesk/compiler/src/server-utils')`
+  and throw if `@vesk/compiler` is unavailable.
+- `VeskResponse` is a Proxy over an internal class — `new VeskResponse(...)`
+  works like a `Response`; fluent builders return the instance.
+- CORS `cors()` returns a middleware that can preflight (returns Response) or
+  apply headers to an existing response (`applyCors`).
+- `Experiment` on SSR seeds by name; on client includes a `sessionStorage`
+  user id and (sticky) a cookie; writes to `window.__vsk_experiments` when
+  `track` is true.
+- `Image` generates `srcset` from `${base}-${w}w${ext}` (i.e. it assumes
+  pre-generated responsive files named `name-640w.jpg` etc.).
+- `Md`/`JsonLd` escape everything — no raw HTML pass-through; `</script>` is
+  escaped in JSON-LD.
+- Server `useParams` (request) vs client `useParams` (router): different
+  semantics; on server the router variant is `routerParams`.
+
+---
+
+## 7. Cross-module dependencies
+
+- `@vesk/runtime` depends on **`@vesk/compiler ^0.1.0`** (package.json).
+  Runtime only dynamically imports compiler internals for signed cookies
+  (`@vesk/compiler/src/server-utils`, then `@vesk/compiler` fallback) —
+  optional at runtime.
+- Internal runtime module graph (all resolved through `@vesk/runtime/src/*`):
+  - `ripple-runtime` ⇄ `ripple-blocks` (mutual import); both →
+    `ripple-constants` + `ripple-utils`.
+  - `hydrate` → `ripple-runtime` (`get`).
+  - `resource` → `ripple-runtime` (tracked/get/set/scope/on_destroy) +
+    `ripple-blocks` (is_destroyed).
+  - `router` → `ripple-runtime` (track/get/set/scope/set_active_block) +
+    `ripple-blocks` (root) + `hydrate` (walkers) + `router-match` +
+    `router-components`.
+  - `router-components` → `context` (createContext) + `ripple-runtime`
+    (get/_state).
+  - `bindings` → `ripple-blocks` (effect/render) + `ripple-runtime`
+    (get/set) + `ripple-utils`.
+  - `reconcile` → `ripple-blocks` (destroy_block).
+  - `form`, `md`, `router` use the `HydrateWalker` type from `hydrate`.
+  - `action` → `form` (ValidationRule type).
+- `@vesk/runtime` re-exports are consumed by `packages/compiler` codegen and
+  `packages/cli` build tooling; keep the barrel files (`index-*.ts`) in sync
+  with any new module export.
+
+---
+
+## 8. Test inventory
+
+Self-contained scripts (custom `describe`/`it`/`expect`), run with
+`npx tsx packages/runtime/src/<file>.test.ts` from the runtime package (or
+repo) root. Case counts via `grep -cE '^\s*(it|test)\('`:
+
+| File | Count | Covers |
+|------|------:|--------|
+| `track.test.ts` | 14 | track/get/set, effect re-runs, derived chains, DOM-like updates |
+| `hydrate.test.ts` | 13 | walker, full/viewport/idle, reactiveProps |
+| `router.test.ts` | 32 | matching, params, nav, guards |
+| `resource.test.ts` | 27 | SSR handoff, cache, retry, dedupe |
+| `request.test.ts` | 90 | ServerRequest/Response, cookies, validation, cors, signed cookies |
+| `form.test.ts` | 34 | Form/Field, rules, submit flow, action integration |
+| `isr.test.ts` | 14 | isr/pageIsr/componentIsr, revalidate |
+| `seo.test.ts` | 14 | JsonLd + schemas |
+| `image.test.ts` | 12 | Image SSR/attrs/srcset |
+| `md.test.ts` | 35 | tokenizer/parser, blocks, escaping |
+| `experiment.test.ts` | 10 | variant selection, sticky, tracking |
+| **Total** | **~295** | 11 test files |
+
+No standalone `action.test.ts` — action APIs are exercised via `form.test.ts`
+[verified by filename inventory]. No `bindings`/`reconcile`/`portal` test
+files present.
+
+
+---
+
+## 9. If modifying X, update Y (checklist)
+
+- **Add a new export in any module** → update both `index-client.ts` and
+  `index-server.ts` barrels (decide client-only vs server-only vs shared), and
+  add it to the matching section of `docs.md` + `llms.txt` export inventory.
+- **Change a reactivity primitive** (`track`/`get`/`set`/`derived`/
+  `flush_sync`/`schedule_update`) → update `track.test.ts` AND run the root
+  production-hydration check `node hydration-test.mjs` (reactivity changes
+  must be validated on the hydration path, per repo AGENTS.md).
+- **Change scheduler/flush behavior** (`flush_updates`, `flush_sync`,
+  `queue_microtask`, `is_block_dirty`) → re-run `track.test.ts` and
+  `hydrate.test.ts`; verify both expression-mode and statement-mode component
+  bodies still work.
+- **Change hydration** (`hydrate.ts`) → update `hydrate.test.ts`, add a
+  production-hydration test in the root `hydration-test.mjs`, and keep the
+  `<!--vsk-->` / `<!--vsk-hold-->` marker contract in sync with
+  `packages/compiler` (compiler emits the markers).
+- **Change resources** (`resource.ts`) → update `resource.test.ts`; keep the
+  SSR handoff globals (`__vsk_ssr_data`/`__vsk_ssr_promises`) and
+  `resolveSsrResources` contract in sync with the server renderer that calls
+  it.
+- **Change router** (`router.ts`/`router-components.ts`/`router-match.ts`) →
+  update `router.test.ts`; keep `index-server.ts`'s `useParams as routerParams`
+  alias and the `RouteNode`/`RouteMatch` shapes in sync with
+  `packages/compiler` route-tree generation and `packages/cli` file-router
+  build.
+- **Change request/server classes** (`request.ts`) → update `request.test.ts`;
+  keep `VeskRequest`/`VeskResponse` + security flows in sync with the server
+  integration code that constructs them.
+- **Change ISR** (`isr.ts`) → update `isr.test.ts`; keep the in-memory
+  cache/tag semantics documented (process-local).
+- **Change shared component helpers** (`Form`/`Field`/`Md`/`Link`/`NavLink`/
+  `Portal`/`Image`) → keep the triple-arg `(props, registry, hydrateWalker)`
+  signature; update the corresponding test file.
+- **Change `@vesk/runtime/src/*` internal import paths** → regenerate
+  `dist/` (`npm run build` or repo `build-packages.ts`) because the exports
+  map (`./src/*` → `dist/*.js`) resolves them.
+- **Change tests directory / add a test file** → update the test inventory
+  table in this file and the "How to run the tests" section of `docs.md`.
+- **Never add `batch` to the active runtime** — if a new batching API is
+  proposed, name it per convention (e.g. `flushSync`) and update the "no
+  batch" rules in `docs.md`, `llms.txt`, and `AGENTS.md`. Remove/deprecate the
+  legacy `track.ts` module (`Cell`/`Effect`/`batch`) rather than wiring it in:
+  it is unused, and adding it to a barrel would introduce a second, conflicting
+  reactivity API.
+

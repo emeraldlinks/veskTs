@@ -1,0 +1,34 @@
+# llms.txt — scripts/
+
+> Machine reference for `/root/vesk/scripts/`.
+
+## test.js
+
+- Builds packages via `execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inherit' })`.
+- Phase 1: runs non-E2E `.test.ts` files in `packages/compiler/src`, `packages/runtime/src`, `packages/adapter/src`, `packages/plugin-tailwind/src`. Skips `code-split.test.ts`, `hmr.test.ts`, `hydration.test.ts`.
+- Phase 2: spawns `npx tsx scripts/e2e-setup.js` as a child process; waits for `E2E_SERVERS_READY` on stdout (60s timeout). Then runs the three E2E test files + `production-hydration-test.mjs` + `edge-test.mjs`.
+- Output parsing: matches `/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/` to accumulate totals. Non-matching output prints `OK (no Results line, checking output)`.
+- Final summary: `Files: N | Passed: N | Failed: N | Total: N`. Exits `totalFailed > 0 ? 1 : 0`.
+
+## e2e-setup.js
+
+- Imports `build`, `startProdServer` from `@vesk/adapter/src/`, `startDevServer` from `@vesk/adapter/src/dev-server.ts`.
+- Ports: `PROD_PORT=3099`, `DEV_PORT=3002` (env-overridable).
+- Kills stale processes on those ports via `lsof -ti:PORT | xargs -r kill`.
+- Builds `test-app/` with `codeSplit: true` to `test-app/.vesk/e2e/`.
+- Starts prod + dev servers; waits for each port via `connect()` polling (200ms interval, 15s timeout).
+- Prints `E2E_SERVERS_READY`; handles SIGTERM to close servers.
+
+## build-lsp.js
+
+- Uses `@rollup/wasm-node` with plugins: `node-resolve` (preferBuiltins), `commonjs`, `json`, `typescript` (target ES2022, module ESNext, bundler resolution, strict, noEmit, sourceMap).
+- Input: hardcoded `/home/joe/vesk/packages/lsp/src/server.ts` (note: absolute path — may need adjustment if run elsewhere).
+
+## release.mjs
+
+- Bumps every `packages/*/package.json` version to `<version>` (semver validated by `SEMVER` regex).
+- Bumps internal dependency refs (`@vesk/*`, `vesk`) to `^<version>` in `dependencies`/`devDependencies`/`peerDependencies`/`optionalDependencies`.
+- Patches `packages/create-vesk/src/index.js` replacing `^0.1.0` with `^<version>`.
+- Runs `npm run build` per package in `PUBLISH_ORDER`: compiler → runtime → plugin-tailwind → adapter → lsp → vesk → create-vesk.
+- `--dry-run`: prints publish commands but does not run them.
+- Real publish: `npm publish --access public` per package.

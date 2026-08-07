@@ -1,0 +1,74 @@
+# llms.txt — test-app/
+
+> Verified against `test-app/` directory listing and config at commit 5b94b66.
+
+## Package identity
+
+- Not a publishable package — `name: test-app`, `private: true`.
+- Dependencies pinned to local tarballs: `@vesk/compiler@0.1.6`, `@vesk/runtime@0.1.6`, `vesk@0.1.6`, `@vesk/adapter@0.1.6`, `@vesk/plugin-tailwind@0.1.3`.
+- Dev deps: `tailwindcss ^4.0.0`, `typescript ^5.8.0`, `@types/node ^26.1.2`.
+
+## Route inventory (from `app/` directory scan)
+
+| Path | Source file | Kind |
+|---|---|---|
+| `/` | `app/page.vsk` | page |
+| `/about` | `app/about/page.vsk` | page |
+| `/blog` | `app/blog/page.vsk` | page |
+| `/blog/:slug` | `app/blog/[slug]/page.vsk` | page (dynamic) |
+| `/posts` | `app/posts/page.vsk` | page |
+| `/statements` | `app/statements/page.vsk` | page |
+| `/async` | `app/async/page.vsk` | page |
+| `/map` | `app/map/page.vsk` | page |
+| `/md` | `app/md/page.vsk` | page |
+| `/store` | `app/store/page.vsk` | page |
+| `/store/:item` | `app/store/[item]/page.vsk` | page (dynamic) |
+| `/empty` | `app/empty/page.vsk` | page |
+| `/actions` | `app/actions/page.vsk` | page |
+| `/comp-test` | `app/comp-test/page.vsk` | page |
+| `/typed` | `app/typed/page.vsk` | page |
+| `/not-found` | `app/not-found.vsk` | global not-found |
+| `/error` | `app/error.vsk` | global error boundary |
+| `/api/bench` | `app/api/bench/route.ts` | api |
+| `/api/hello` | `app/api/hello/route.ts` | api |
+| `/api/protected` | `app/api/protected/route.ts` | api |
+| `/api/echo/:msg` | `app/api/echo/[msg]/route.ts` | api (dynamic) |
+| `/api/posts` | `app/api/posts/route.ts` | api |
+| `/store/not-found` | `app/store/not-found.vsk` | route-level not-found |
+| `/store/error` | `app/store/error.vsk` | route-level error boundary |
+
+Middleware: `app/middleware.ts` (root), `app/admin/middleware.ts`, `app/blog/middleware.ts`.
+
+## Config (from `vesk.config.ts`)
+
+```ts
+export default defineConfig({
+  appDir: './app',
+  outDir: './dist',
+  publicDir: './public',
+  security: preset('production', {
+    trustProxy: true,
+    cors: { origin: ['http://localhost:3002'] },
+  }),
+  plugins: [
+    tailwindcss({ entry: 'src/global.css', appDir: 'app' }),
+    definePlugin({
+      name: 'test-services',
+      provides: { serviceName: () => 'provided-by-plugin' },
+      onRequest: async (ctx) => { ctx.set('pluginValue', 'injected-by-onRequest'); },
+    }),
+  ],
+  ssg: {},
+});
+```
+
+## Cross-module coupling
+
+- Consumes `@vesk/compiler`, `@vesk/runtime`, `vesk` (CLI), `@vesk/adapter`, `@vesk/plugin-tailwind` — all from local `tarballs/`.
+- The `.vesk/` build output is the input for `scripts/e2e-setup.js` and the production hydration tests.
+
+## Modification checklist
+
+- **Add a new demo page** → create `.vsk` under `app/`, add `NavLink` in `layout.vsk`, update the route inventory in this file.
+- **Change config** → update `vesk.config.ts`; verify dev + prod E2E still pass.
+- **Update dependency versions** → regenerate tarballs and update `package.json` deps.

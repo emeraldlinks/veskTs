@@ -1,0 +1,87 @@
+# llms.txt — vesk CLI (`packages/cli`)
+
+> Machine-oriented reference for LLM agents. Verified against source at commit 5b94b66.
+
+## Package identity
+
+- `name`: `vesk` (the CLI binary), `version`: 0.1.6, ESM, `type: module`, Node >= 20.
+- `bin`: `./dist/cli.js`.
+- Deps: `@vesk/adapter`, `@vesk/compiler`, `@vesk/plugin-tailwind`, `@vesk/runtime`, `esbuild`, `esrap`, `sharp`, `typescript`, `ws`, `zimmerframe`.
+
+## Entry points
+
+- `packages/cli/src/index.ts` — CLI entry. Parses `process.argv`, dispatches to `build`/`start`/`dev`/`seo`.
+- `packages/cli/src/dev-server.ts` — `startDevServer(port, projectDir, config)`.
+- `packages/cli/src/action-handler.ts` — server action routing.
+- `packages/cli/src/build-packages.ts` — monorepo incremental build (`buildPackages(force)`).
+
+## CLI command dispatch (index.ts)
+
+```
+args[0] == 'build'  → loadConfig → build(appDirPath, opts)
+args[0] == 'start'  → startProdServer(outDir, { port })
+args[0] == 'dev'    → setRuntimeModule(__veskRuntime) → startDevServer(port, projectDir, config)
+args[0] == 'seo'    → runSeoAudit(appDirPath)
+else / --help        → usage()
+```
+
+`parsePortArg(args, def=3000)` handles `-p`, `--port`, `--port=NNNN`.
+
+## Config loading algorithm (loadConfig)
+
+1. `loadEnvFiles(projectDir)` reads `.env` then `.env.local` (simple `KEY=VAL`, strips quotes, does not override existing env).
+2. Prefer `vesk.config.js` over `vesk.config.ts`.
+3. For `.ts`:
+   - `typescript.transpileModule(src)`
+   - **Strip** `import { ... } from '@vesk/compiler'` via regex replacement (this is a compile-time-inert tooling regex, not source parsing — allowed per AGENTS.md).
+   - Prepend `const { defineConfig, definePlugin, preset } = globalThis.__vesk_inject;`
+   - Write to `.vesk/config.tmp.js`
+   - Set `globalThis.__vesk_inject = { defineConfig, definePlugin, preset }`
+   - `await import(tmpFile).default`
+   - Delete `globalThis.__vesk_inject`
+4. For `.js`: `await import(configPath).default`.
+5. Wrap with `defineConfig` if it's a function; `validateConfig(config)`.
+6. If `config.security.redactLogs !== false`, call `setRedactLogging(true)`.
+
+## Dev server request flow (dev-server.ts)
+
+```
+HTTP request
+  → resolve runtimeDir (node_modules/@vesk/runtime)
+  → scanRoutes + matchUrl + collectSources
+  → collectMiddlewareChain + executeMiddlewareChain
+  → if /api/* → executeApiRoute / handleActionRequest
+  → else page:
+      compileFile(source) → IR + componentMap
+      compileClient(source) → client JS
+      generateClientBundle(...) → mono or split bundle (strips duplicate export default)
+      renderFullPage / renderPage / renderPageStream → HTML
+      inject HMR client script, __vesk_ssr_base_url
+  → WebSocket upgrade → HMR push channel
+```
+
+Key exports from dev-server: `startDevServer(port, projectDir, config)`.
+
+## build-packages.ts
+
+Incremental monorepo build for runtime/compiler/adapter:
+
+- `PACKAGES` map: `runtime` (client+server), `compiler` (entry `index`, copies `acorn-ts-plugin`), `adapter` (entry `index`).
+- `distStale(pkgDir, entry)`: compares newest `.ts` mtime in `src/` against `dist/<entry>.js` mtime.
+- `buildPackages(force)`: runs `tsc -p tsconfig.build.json` per stale package, copies assets, writes a minimal `dist/package.json` with the correct `exports` map.
+- `ensurePackagesBuilt()` → `buildPackages(false)`.
+- CLI entry: `npx tsx packages/cli/src/build-packages.ts` (or `--force`).
+
+## Cross-module coupling
+
+- Imports `@vesk/compiler/src/server-codegen`, `client-codegen`, `router`, `api-routes`, `middleware`, `types`, `config`, `server-utils`.
+- Imports `@vesk/adapter/src/client-bundle`, `index`, `seo-audit`, `prod-server`.
+- Imports `@vesk/runtime/src/index-server` as the runtime module injected via `setRuntimeModule`.
+- The dev server is the only place that must strip duplicate `export default` from client bundles (historical bug).
+
+## Modification checklists
+
+- **New CLI command** → update `usage()`, add dispatch branch in `index.ts`, document in `docs.md`.
+- **Dev server behavior change** → update `dev-server.ts`; verify with `tests/dev-test.mjs` and `tests/prod-test.mjs`.
+- **Config loading change** → update `loadConfig` in `index.ts`; verify `.js` and `.ts` paths.
+- **Build pipeline change** → update `build-packages.ts` `PACKAGES` map; verify incremental stale detection.

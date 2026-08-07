@@ -1,0 +1,33 @@
+# llms.txt — create-vesk
+
+> Verified against `packages/create-vesk/src/index.js` and `package.json` at commit 5b94b66.
+
+## Package identity
+
+- `name`: `create-vesk`, `version`: 0.1.0, ESM, `type: module`, Node >= 20.
+- `bin`: `create-vesk` → `./src/index.js`.
+- Deps: none.
+
+## CLI entry
+
+`src/index.js` — reads `process.argv[2]` as `<project-name>`. Exits non-zero if missing, starts with `-`, or the target directory already exists.
+
+## Scaffold algorithm
+
+1. Creates directories: `app/`, `app/about/`, `app/blog/`, `app/blog/[slug]/`, `app/posts/`, `app/statements/`, `app/api/posts/`, `app/api/hello/`, `app/api/echo/[msg]/`, `src/`, `public/`.
+2. Writes `package.json` (scripts: `dev`, `build`, `start`, `typecheck`; deps: `@vesk/compiler`, `@vesk/runtime`, `vesk`, `@vesk/adapter`, `@vesk/plugin-tailwind`; devDeps: `tailwindcss`, `typescript`).
+3. Writes `vesk.config.ts` (defineConfig + tailwind plugin + security preset).
+4. Writes `tsconfig.json` (strict, bundler resolution, `jsxImportSource: '@vesk/compiler'`, path aliases `@/*` and `@app/*`).
+5. Writes `src/global.css` (`@import 'tailwindcss'` + base layer).
+6. Writes demo `.vsk` pages (layout, page, about, blog, posts, statements, not-found, error, middleware, API routes).
+7. Writes `public/favicon.svg`, `.env.example`, `.gitignore`, `README.md`.
+8. Prints success message with next steps.
+
+## Hardcoded versions
+
+The scaffold hardcodes dependency versions as `^0.1.0`. `scripts/release.mjs` patches `packages/create-vesk/src/index.js` replacing `^0.1.0` with `^<newVersion>` during releases.
+
+## Modification checklist
+
+- **Add a new scaffolded file** → write it in `src/index.js`; ensure the template strings are syntactically valid JS/TS/Vesk.
+- **Change dependency versions** → update the `package.json` template AND the `^0.1.0` replacement in `scripts/release.mjs`.
