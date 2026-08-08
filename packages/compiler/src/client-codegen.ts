@@ -475,10 +475,61 @@ function emitClientHead(ctx: Ctx, node: HeadBlock, tracked: Map<string, TrackedI
   }
 }
 
+function isReactiveExpression(node: any, tracked: Map<string, TrackedInfo>): boolean {
+  const ast = node && (node.ast || node);
+  if (!ast) return false;
+  let reactive = false;
+  walk(ast, tracked, {
+    Identifier(n: any, context: any) {
+      if (reactive) return;
+      const parent = context.path.at(-1);
+      if (parent) {
+        if (
+          parent.type === 'AssignmentExpression' &&
+          parent.left === n
+        )
+          return;
+        if (
+          parent.type === 'UpdateExpression' &&
+          parent.argument === n
+        )
+          return;
+        if (
+          parent.type === 'Property' &&
+          parent.value === n &&
+          parent.key &&
+          parent.key.type === 'Identifier' &&
+          parent.key.name === 'into'
+        )
+          return;
+        if (
+          parent.type === 'MemberExpression' &&
+          !parent.computed &&
+          parent.property === n
+        )
+          return;
+        if (
+          parent.type === 'Property' &&
+          parent.key === n &&
+          !parent.shorthand
+        )
+          return;
+      }
+      const info = context.state.get(n.name);
+      if (n.name === 'props' || (info && info.kind === 'virtual')) reactive = true;
+    },
+  });
+  return reactive;
+}
+
 function emitDynamicBinding(ctx: Ctx, node: DynamicBinding, tracked: Map<string, TrackedInfo>, effectsVar: string | null): string | null {
   if (node.kind === 'attribute') return null;
   const expr = transformTracked(node.expression as any, tracked);
   const v = ctx.n();
+  if (!isReactiveExpression(node.expression, tracked)) {
+    ctx.push(`const ${v} = document.createTextNode(String(${expr}));`);
+    return v;
+  }
   ctx.push(`const ${v} = document.createTextNode('');`);
   const eff = `effect(() => { ${v}.data = String(${expr}); })`;
   if (effectsVar) {
@@ -570,7 +621,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   const parent = parentVar || '$root';
 
   ctx.push(`const ${anchor} = document.createComment('try');`);
-  ctx.push(`${parent}.appendChild(${anchor});`);
+  if (!ctx.hydrate) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effArr} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('try-end');`);
 
@@ -588,14 +639,18 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
     const savedEffects = ctx.effects;
     ctx.effects = [];
     const body = isCatch ? node.catchBody : node.bodyTemplate;
-    let parentOverride: string | undefined;
-    if (hydMode && !isCatch) {
-      parentOverride = ctx.n();
-      ctx.push(`const ${parentOverride} = document.createDocumentFragment();`);
+    if (hydMode) {
+      ctx.push(indent(`const __cl = [];`));
     }
     for (const child of body) {
-      const childVar = emitNode(ctx, child, tracked, isCatch ? null : effArr, parentOverride, compPrefix);
-      if (childVar) ctx.push(indent(`__p.insertBefore(${childVar}, ${endAnchor});`));
+      const childVar = emitNode(ctx, child, tracked, isCatch ? null : effArr, undefined, compPrefix);
+      if (childVar) {
+        if (hydMode) ctx.push(indent(`__cl.push(${childVar});`));
+        else ctx.push(indent(`__p.insertBefore(${childVar}, ${endAnchor});`));
+      }
+    }
+    if (hydMode) {
+      ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
     }
     for (const eff of ctx.effects) ctx.push(indent(eff));
     ctx.effects = savedEffects;
@@ -614,7 +669,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
     emitRenderFunc(catchRender, true, ctx.hydrate);
   }
 
-  ctx.push(`${parent}.appendChild(${endAnchor});`);
+  if (!ctx.hydrate) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
   if (hasCatch) {
     ctx.push(`try { ${asyncKw}${tryRender}(); } catch(${catchParam}) { ${asyncKw}${catchRender}(${catchParam}); }`);
@@ -649,9 +704,11 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
+  const hyd = ctx.hydrate;
+  const parent = parentVar || '$root';
 
   ctx.push(`const ${anchor} = document.createComment('if');`);
-  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('if-end');`);
 
@@ -660,42 +717,50 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
 
   const conRenderName = ctx.n();
   ctx.push(`const ${conRenderName} = ${fnOpen}`);
-  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   const conFrag = ctx.n();
-  ctx.push(indent(`const ${conFrag} = document.createDocumentFragment();`));
+  if (!hyd) ctx.push(indent(`const ${conFrag} = document.createDocumentFragment();`));
+  if (hyd) ctx.push(indent(`const __cl = [];`));
   for (const n of node.consequentNodes) {
-    const v = emitNode(ctx, n, tracked, effectsVar, conFrag);
-    if (v) ctx.push(indent(`${conFrag}.appendChild(${v});`));
+    const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : conFrag);
+    if (v) {
+      if (hyd) ctx.push(indent(`__cl.push(${v});`));
+      else ctx.push(indent(`${conFrag}.appendChild(${v});`));
+    }
   }
-  ctx.push(indent(`__p.insertBefore(${conFrag}, ${endAnchor});`));
+  if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
+  else ctx.push(indent(`__p.insertBefore(${conFrag}, ${endAnchor});`));
   ctx.push(`};`);
 
   let altRenderName: string | null = null;
   if (hasElse) {
     altRenderName = ctx.n();
     ctx.push(`const ${altRenderName} = ${fnOpen}`);
-    ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+    if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const altFrag = ctx.n();
-    ctx.push(indent(`const ${altFrag} = document.createDocumentFragment();`));
+    if (!hyd) ctx.push(indent(`const ${altFrag} = document.createDocumentFragment();`));
+    if (hyd) ctx.push(indent(`const __cl = [];`));
     for (const n of node.alternateNodes) {
-      const v = emitNode(ctx, n, tracked, effectsVar, altFrag);
-      if (v) ctx.push(indent(`${altFrag}.appendChild(${v});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : altFrag);
+      if (v) {
+        if (hyd) ctx.push(indent(`__cl.push(${v});`));
+        else ctx.push(indent(`${altFrag}.appendChild(${v});`));
+      }
     }
-    ctx.push(indent(`__p.insertBefore(${altFrag}, ${endAnchor});`));
+    if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
+    else ctx.push(indent(`__p.insertBefore(${altFrag}, ${endAnchor});`));
     ctx.push(`};`);
   }
 
-  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
-  if (ctx.hydrate) {
-    // During hydration, SSR content is already in the DOM.
-  } else {
-    ctx.push(`if (${condExpr}) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : ''));
-  }
+  ctx.push(`if (${condExpr}) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : ''));
 
   ctx.effects.push(`{
-    let __iv = ${ctx.hydrate ? `!(${condExpr})` : 'true'};
+    let __iv = ${condExpr};
+    let __first = true;
     effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
+      if (__first) { __first = false; return; }
       const __nv = ${condExpr};
       if (__nv !== __iv) {
         for (const e of ${effectsVar}) destroy_block(e);
@@ -715,44 +780,52 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
+  const hyd = ctx.hydrate;
+  const parent = parentVar || '$root';
 
   ctx.push(`const ${anchor} = document.createComment('while');`);
-  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('while-end');`);
 
   const renderLoop = ctx.n();
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
-  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (hyd) ctx.push(indent(`const __cl = [];`));
   if (node.isDoWhile) {
     ctx.push(indent(`do {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar);
-      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : undefined);
+      if (v) {
+        if (hyd) ctx.push(indent(`__cl.push(${v});`));
+        else ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      }
     }
     ctx.push(indent(`} while (${condExpr});`));
   } else {
     ctx.push(indent(`while (${condExpr}) {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar);
-      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : undefined);
+      if (v) {
+        if (hyd) ctx.push(indent(`__cl.push(${v});`));
+        else ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      }
     }
     ctx.push(indent(`}`));
   }
+  if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
   ctx.push(`};`);
 
-  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
-  if (ctx.hydrate) {
-    // During hydration, SSR content is already in the DOM.
-  } else {
-    ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();`);
-  }
+  ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();`);
 
   ctx.effects.push(`{
   let __busy = false;
-  let __iv = ${ctx.hydrate ? `!(${condExpr})` : `(${condExpr})`};
+  let __iv = (${condExpr});
+  let __first = true;
   effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
+    if (__first) { __first = false; return; }
     if (__busy) return;
     const __nv = (${condExpr});
     if (__nv !== __iv) {
@@ -774,21 +847,27 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
+  const hyd = ctx.hydrate;
+  const parent = parentVar || '$root';
 
   ctx.push(`const ${anchor} = document.createComment('for');`);
-  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('for-end');`);
 
   const renderLoop = ctx.n();
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
-  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (hyd) ctx.push(indent(`const __cl = [];`));
   if (node.kind === 'for-in') {
     const srcExpr = transformTracked(node.condition as any, tracked);
     ctx.push(indent(`for (${node.init} of (Array.isArray(${srcExpr}) ? ${srcExpr} : (${srcExpr} == null ? [] : Object.keys(${srcExpr})))) {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar);
-      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : undefined);
+      if (v) {
+        if (hyd) ctx.push(indent(`__cl.push(${v});`));
+        else ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      }
     }
     ctx.push(indent(`}`));
   } else {
@@ -796,28 +875,30 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     if (node.init) ctx.push(indent(`${node.init}`));
     ctx.push(indent(`while (${condExpr}) {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar);
-      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : undefined);
+      if (v) {
+        if (hyd) ctx.push(indent(`__cl.push(${v});`));
+        else ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      }
     }
     if (node.update) ctx.push(indent(`${node.update}`));
     ctx.push(indent(`}`));
   }
+  if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
   ctx.push(`};`);
 
-  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
-  if (ctx.hydrate) {
-    // During hydration, SSR content is already in the DOM.
-  } else {
-    ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();`);
-  }
+  ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();`);
 
   if (node.kind === 'for-in') {
     const srcExpr = transformTracked(node.condition as any, tracked);
     ctx.effects.push(`{
   let __busy = false;
   let __iv = undefined;
+  let __first = true;
   effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
+    if (__first) { __first = false; return; }
     if (__busy) return;
     const __nv = (${srcExpr});
     if (__nv !== __iv) {
@@ -845,15 +926,18 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
+  const hyd = ctx.hydrate;
+  const parent = parentVar || '$root';
 
   ctx.push(`const ${anchor} = document.createComment('switch');`);
-  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('switch-end');`);
 
   const renderSwitch = ctx.n();
   ctx.push(`const ${renderSwitch} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
-  ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
+  if (hyd) ctx.push(indent(`const __cl = [];`));
   ctx.push(indent(`switch (${discExpr}) {`));
   for (const c of node.cases) {
     if (c.test) {
@@ -862,26 +946,28 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
       ctx.push(indent(`default:`));
     }
     for (const n of c.body) {
-      const v = emitNode(ctx, n, tracked, effectsVar);
-      if (v) ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : undefined);
+      if (v) {
+        if (hyd) ctx.push(indent(`__cl.push(${v});`));
+        else ctx.push(indent(`__p.insertBefore(${v}, ${endAnchor});`));
+      }
     }
     ctx.push(indent(`break;`));
   }
   ctx.push(indent(`}`));
+  if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
   ctx.push(`};`);
 
-  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
-  if (ctx.hydrate) {
-    // During hydration, SSR content is already in the DOM.
-  } else {
-    ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderSwitch}();`);
-  }
+  ctx.push(`${ctx.isAsyncScope ? 'await ' : ''}${renderSwitch}();`);
 
   ctx.effects.push(`{
   let __busy = false;
-  let __iv = ${ctx.hydrate ? `!(${discExpr})` : `(${discExpr})`};
+  let __iv = (${discExpr});
+  let __first = true;
   effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
+    if (__first) { __first = false; return; }
     if (__busy) return;
     const __nv = (${discExpr});
     if (__nv !== __iv) {
@@ -907,43 +993,55 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   const effectsVar = ctx.n();
   const aw = ctx.isAsyncScope ? 'await ' : '';
   const effOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
+  const keyed = !!node.keyExpr;
+  const hyd = ctx.hydrate && !keyed;
+  const parent = parentVar || '$root';
 
   ctx.push(`const ${anchor} = document.createComment('map');`);
-  ctx.push(`${parentVar || '$root'}.appendChild(${anchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('map-end');`);
 
   const renderItem = ctx.n();
   const indexParam = node.indexVariable ? ', __i' : '';
-  ctx.push(`const ${renderItem} = ${ctx.isAsyncScope ? 'async ' : ''}(${itemVar}${indexParam}, __e, __r) => {`);
+  ctx.push(`const ${renderItem} = ${ctx.isAsyncScope ? 'async ' : ''}(${itemVar}${indexParam}, __e, __r${hyd ? ', __cl' : ''}) => {`);
   ctx.push(indent(`__r = __r || ${endAnchor};`));
   if (node.indexVariable) ctx.push(indent(`const ${node.indexVariable} = __i;`));
   ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   for (const n of node.bodyTemplate) {
     const v = emitNode(ctx, n, tracked, '__e');
-    if (v) ctx.push(indent(`__p.insertBefore(${v}, __r);`));
+    if (v) {
+      if (hyd) ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, __r);`));
+      else ctx.push(indent(`__p.insertBefore(${v}, __r);`));
+    }
   }
   ctx.push(`};`);
 
   let emptyRenderName: string | null = null;
   if (node.alternateNodes.length > 0) {
     emptyRenderName = ctx.n();
-    ctx.push(`const ${emptyRenderName} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
+    const emptySig = hyd
+      ? (ctx.isAsyncScope ? 'async (__cl) => {' : '(__cl) => {')
+      : (ctx.isAsyncScope ? 'async () => {' : '() => {');
+    ctx.push(`const ${emptyRenderName} = ${emptySig}`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const frag = ctx.n();
-    ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
+    if (!hyd) ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
     const savedClaim = ctx.claimStatic;
     for (const n of node.alternateNodes) {
       ctx.claimStatic = true;
-      const v = emitNode(ctx, n, tracked, effectsVar, frag);
-      if (v) ctx.push(indent(`${frag}.appendChild(${v});`));
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? undefined : frag);
+      if (v) {
+        if (hyd) ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, ${endAnchor});`));
+        else ctx.push(indent(`${frag}.appendChild(${v});`));
+      }
     }
     ctx.claimStatic = savedClaim;
-    ctx.push(indent(`__p.insertBefore(${frag}, ${endAnchor});`));
+    if (!hyd) ctx.push(indent(`__p.insertBefore(${frag}, ${endAnchor});`));
     ctx.push(`};`);
   }
 
-  ctx.push(`${parentVar || '$root'}.appendChild(${endAnchor});`);
+  if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
   const hasItems = ctx.n();
   ctx.push(`const ${hasItems} = () => { const __l = ${arrExpr}; return __l != null && __l.length > 0; };`);
@@ -987,28 +1085,31 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
 }`);
     }
   } else {
-    const renderAllItems = (ind: string): string => {
+    const renderAllItems = (ind: string, collect: string | null): string => {
       const lines: string[] = [];
       if (node.indexVariable) {
         lines.push(`${ind}let __i = 0;`);
         lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
-        lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, __i, ${effectsVar});`);
+        lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, __i, ${effectsVar}${collect ? `, null, ${collect}` : ''});`);
         lines.push(`${ind}\t__i++;`);
         lines.push(`${ind}}`);
       } else {
         lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
-        lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, ${effectsVar});`);
+        lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, ${effectsVar}${collect ? `, null, ${collect}` : ''});`);
         lines.push(`${ind}}`);
       }
       return lines.join('\n');
     };
 
     if (emptyRenderName) {
+      const collectVar = hyd ? ctx.n() : null;
       const isEmptyVar = ctx.n();
       ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
+      if (collectVar) ctx.push(`const ${collectVar} = [];`);
       ctx.push(`if (!${isEmptyVar}) {`);
-      ctx.push(indent(renderAllItems('')));
-      ctx.push(indent(`} else { ${aw}${emptyRenderName}(); }`));
+      ctx.push(indent(renderAllItems('', collectVar)));
+      ctx.push(indent(`} else { ${aw}${emptyRenderName}(${collectVar ? collectVar : ''}); }`));
+      if (collectVar) ctx.push(`__place(${anchor}, ${endAnchor}, ${collectVar}, ${parent});`);
       ctx.effects.push(`{
   let __first = true;
   effect(${effOpen}
@@ -1019,7 +1120,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
         for (const e of ${effectsVar}) destroy_block(e);
         ${effectsVar}.length = 0;
         __cleanup(${anchor}, ${endAnchor});
-${renderAllItems('        ')}
+${renderAllItems('        ', null)}
       }
       return;
     }
@@ -1028,12 +1129,15 @@ ${renderAllItems('        ')}
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
     if (__new) {
-${renderAllItems('      ')}
-    } else { ${aw}${emptyRenderName}(); }
+${renderAllItems('      ', null)}
+    } else { ${aw}${emptyRenderName}(${collectVar ? collectVar : ''}); }
   });
 }`);
     } else {
-      ctx.push(renderAllItems(''));
+      const collectVar = hyd ? ctx.n() : null;
+      if (collectVar) ctx.push(`const ${collectVar} = [];`);
+      ctx.push(renderAllItems('', collectVar));
+      if (collectVar) ctx.push(`__place(${anchor}, ${endAnchor}, ${collectVar}, ${parent});`);
       ctx.effects.push(`{
   let __first = true;
   effect(${effOpen}
@@ -1042,7 +1146,7 @@ ${renderAllItems('      ')}
     for (const e of ${effectsVar}) destroy_block(e);
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
-${renderAllItems('    ')}
+${renderAllItems('    ', false)}
   });
 }`);
     }
@@ -1140,6 +1244,22 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
   mapLines.push(`\t\tn.remove();`);
   mapLines.push(`\t\tn = next;`);
   mapLines.push(`\t}`);
+  mapLines.push(`}`);
+  mapLines.push(`function __place(start, end, nodes, fallback) {`);
+  mapLines.push(`\tif (start.parentNode !== null) {`);
+  mapLines.push(`\t\tconst p = start.parentNode;`);
+  mapLines.push(`\t\tfor (let i = 0; i < nodes.length; i++) p.insertBefore(nodes[i], end);`);
+  mapLines.push(`\t\treturn;`);
+  mapLines.push(`\t}`);
+  mapLines.push(`\tif (nodes.length > 0 && nodes[0].parentNode) {`);
+  mapLines.push(`\t\tconst p = nodes[0].parentNode;`);
+  mapLines.push(`\t\tp.insertBefore(start, nodes[0]);`);
+  mapLines.push(`\t\tp.insertBefore(end, nodes[nodes.length - 1].nextSibling);`);
+  mapLines.push(`\t\treturn;`);
+  mapLines.push(`\t}`);
+  mapLines.push(`\tfallback.appendChild(start);`);
+  mapLines.push(`\tfallback.appendChild(end);`);
+  mapLines.push(`\tfor (let i = 0; i < nodes.length; i++) fallback.insertBefore(nodes[i], end);`);
   mapLines.push(`}`);
 
   return mapLines.join('\n\n');

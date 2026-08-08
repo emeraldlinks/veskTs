@@ -50,7 +50,8 @@ export async function generateClientBundle(
   function stripRuntimeImport(code: string): string {
     return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, '')
                .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '')
-               .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '');
+               .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '')
+               .replace(/^function __place\(start, end, nodes, fallback\) \{[\s\S]*?\n\}\s*\n?/gm, '');
   }
 
   function stripVskImports(code: string): string {
@@ -373,6 +374,23 @@ async function buildMainBundle(
 
   const cleanupFn = 'function __cleanup(start, end) {\n\tlet n = start.nextSibling;\n\twhile (n && n !== end) {\n\t\tconst next = n.nextSibling;\n\t\tn.remove();\n\t\tn = next;\n\t}\n}\n';
 
+  const placeFn = 'function __place(start, end, nodes, fallback) {\n' +
+    '\tif (start.parentNode !== null) {\n' +
+    '\t\tconst p = start.parentNode;\n' +
+    '\t\tfor (let i = 0; i < nodes.length; i++) p.insertBefore(nodes[i], end);\n' +
+    '\t\treturn;\n' +
+    '\t}\n' +
+    '\tif (nodes.length > 0 && nodes[0].parentNode) {\n' +
+    '\t\tconst p = nodes[0].parentNode;\n' +
+    '\t\tp.insertBefore(start, nodes[0]);\n' +
+    '\t\tp.insertBefore(end, nodes[nodes.length - 1].nextSibling);\n' +
+    '\t\treturn;\n' +
+    '\t}\n' +
+    '\tfallback.appendChild(start);\n' +
+    '\tfallback.appendChild(end);\n' +
+    '\tfor (let i = 0; i < nodes.length; i++) fallback.insertBefore(nodes[i], end);\n' +
+    '}\n';
+
   const updateComponentsFn = 'function __updateComponents(nodes) {\n' +
     '  for (const n of nodes) {\n' +
     "    if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName];\n" +
@@ -444,7 +462,8 @@ async function buildMainBundle(
       'globalThis.hydrateOnInteraction = hydrateOnInteraction;\n' +
       'globalThis.collectVskMarkers = collectVskMarkers;\n' +
       'globalThis.__runtime_comps = __runtime_comps;\n' +
-      'globalThis.__cleanup = __cleanup;\n\n';
+       'globalThis.__cleanup = __cleanup;\n' +
+       'globalThis.__place = __place;\n\n';
 
     const extraGlobals = [...(runtimeImportNames || [])]
       .filter(n => n && n !== 'default')
@@ -457,6 +476,7 @@ async function buildMainBundle(
       'const __runtime_comps = __components;\n\n' +
       runtimeGlobals + extraGlobals +
       cleanupFn +
+      placeFn +
       'globalThis.__components = __components;\n' +
       resolveNamesFn +
       updateComponentsFn +
@@ -484,6 +504,7 @@ async function buildMainBundle(
     hydratorLines.join('\n\n') + '\n' +
     hydratorAliasCode +
     cleanupFn +
+    placeFn +
     'globalThis.__components = __components;\n' +
     'function __resolveNames(nodes) {\n' +
     '  for (const n of nodes) {\n' +

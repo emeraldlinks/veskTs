@@ -4,7 +4,7 @@
 
 **Current phase:** 5 (CLI + Dev Tooling)
 
-**Total tests:** compiler 725 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 22 + parser 79 + server-codegen 99 + integration 111 + client-codegen 148 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 121
+**Total tests:** compiler 739 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 24 + parser 79 + server-codegen 99 + integration 111 + client-codegen 160 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 121
 **Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
 
 ---
@@ -145,7 +145,11 @@
 ### Loops + switch on client (statements page fix)
 - [x] **`WhileLoop` / `ForLoop` / `SwitchBlock` client emission** — anchor comments + render function + flip-effect re-render (`destroy_block` + `__cleanup`), wired into `emitNode`.
 - [x] **Switch SSR fall-through fixed** — `break;` emitted per case (server + client); old test updated to matching-case-only semantics.
-- [ ] **Hydrate-mode loop claiming** — initial claim of SSR-present loop content not implemented yet (flip-effect only on condition change); leftover SSR markers inside loop bodies may still confuse subsequent claiming. **Blocks the original statements-page browser bug from being fully fixed in hydrate mode.**
+- [x] **Hydrate-mode region claiming** — all region emitters (`OpaqueDynamicRegion` if/else, `while`/`do-while`, classic `for`, `switch`, non-keyed `map`, `try/catch`) now run their hydrate render fns **during body execution** (claim order == SSR order) instead of deferring to effect-flush; anchors are held detached until render, then placed **in place** via `__place(start, end, claimedNodes, parent)` (places in existing parent, or falls back to fragment); re-render effects carry `let __first = true; if (__first) { __first = false; return; }` guard so reactivation never re-places. Zero leftover markers, zero JS errors — `/statements` hydrates in place on prod, all 121 hydration tests green. 8 new/updated regression tests.
+- [x] **Hydrate map body-exec arg-order bug** — `renderItem(item, arr, __cl)` passed the collect array in the `__r` slot → `TypeError: Cannot read properties of null (reading 'insertBefore')` in Layout. Now `renderItem(item, arr, null, __cl)`; `renderItem` does `if (__cl) __cl.push(v); else __p.insertBefore(v, __r);`.
+- [x] **`__place` per-chunk redeclaration fixed** — every compiled file emitted `function __place(...)`; concatenated chunks threw `Identifier '__place' has already been declared`. Adapter `stripRuntimeImport` now strips per-chunk copies, defines one canonical `placeFn` (next to `cleanupFn`), appends it in both codeSplit and mono bundle paths, and exposes `globalThis.__place` for dynamic chunk use.
+- [x] **`const __cl` collision fixed** — multiple top-level maps in one component body emitted `const __cl = [];` in the same scope → `Identifier '__cl' has already been declared` (broke `/map`, `/async` SPA nav). `emitMap` hydrate body-exec now allocates a **unique collect array per region** via `ctx.n()` (`const $n13 = []; … __place($n3, $n4, $n13, $root)`); render-fn-scoped `__cl` in other emitters is unaffected.
+- [x] **Static text bindings are snapshots, not effects** — `effect()` blocks only run at microtask flush, so effects reading loop-local plain vars rendered final values (`i=3i=3i=3`, `while 555`). New `isReactiveExpression()` walks the expression AST (same visitor shape as `transformTracked`; `props` refs and tracked virtual ids are reactive) and `emitDynamicBinding` emits `document.createTextNode(String(expr))` for non-reactive text (snapshot at creation) — reactive text still gets `effect()`. Fixes per-iteration loop text in all modes.
 
 ### SSR correctness
 - [x] **Event handlers excluded from SSR HTML** — `on*` dynamic attributes no longer evaluated server-side (was executing mutations / crashing); skipped like static handlers.
@@ -175,7 +179,8 @@
 
 ### Session status
 - Compiler test files run individually via `npx tsx packages/compiler/src/<file>.test.ts` (rebuild first: `npx tsx packages/cli/src/build-packages.ts`).
-- 18 compiler test files: all passing individually. Compiler 685, runtime 257, hydration 111. Server codegen: 86 passed. Client codegen: 134 passed. Integration: 98 passed. ts-support: 25 passed. vsk-imports: 15 passed.
+- 18 compiler test files: all passing individually. Compiler 739, runtime 257, hydration 121. Server codegen: 99 passed. Client codegen: 160 passed. Integration: 111 passed. ts-support: 25 passed. vsk-imports: 15 passed. vsk-tsx: 24 passed. track-codegen: 8 passed. typecheck: 6 passed. Hydration suite (`node hydration-test.mjs`): 121 passed. Crawl (`node crawl.mjs`): 18 routes passed.
+- Active work: hydrate-mode region claiming is complete and green. Remaining from the `__place`/`__cl` dedup fixes: version bump (0.1.12/0.1.9/0.1.10/0.1.9) + tarball rotation + commit/push still pending.
 - Hard rule (AGENTS.md): **never use regex in the compiler/codegen** — all source manipulation through tokenizer/AST parser. Replace remaining regexes in `packages/compiler/src` (e.g. `vsk-tsx.ts` TRACK_RE/header transforms) with AST-based equivalents.
 - Hard rule (AGENTS.md): **every job completes with tests**, including the production-hydration path via `hydration-test.mjs` (`node hydration-test.mjs`). Rigorous use of the features/fixes made.
 - Hard rule (AGENTS.md): **statement mode is first-class** — every body-level feature/fix and every test suite exercising component bodies must cover both expression and statement mode.
@@ -188,7 +193,7 @@ Phase 6 is docs + examples; the items below should be closed first (blockers / i
 
 ### Blockers (bugs)
 - [x] **Async page 500** — fixed. Root cause was cross-request SSR data via `globalThis.__vsk_ssr_data`; replaced with per-request `AsyncLocalStorage` store (`ssr-store.ts` + runtime `SsrDataSink`, no globalThis). `/async` returns 200 with data that persists through hydration (prod + dev).
-- [ ] **Hydrate-mode loop claiming** — initial claim of SSR-present loop content not implemented yet (flip-effect only on condition change); leftover SSR markers inside loop bodies may confuse subsequent claiming. Blocks the original statements-page browser bug from being fully fixed in hydrate mode.
+- [x] **Hydrate-mode loop claiming** — fixed. Region render fns claim SSR content during body execution and place it in place via `__place`; markers 0, zero JS errors on `/statements` and all routes (121 hydration tests green). See "Loops + switch on client" section.
 
 ### In-progress milestone: tsc-in-.vsk
 - [ ] `tsc` typechecks `.vsk` via `vskToTsx` + `generateVskDts`; `vesk typecheck` CLI command.

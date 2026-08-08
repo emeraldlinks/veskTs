@@ -241,7 +241,7 @@ describe('Client Codegen — Control Flow', () => {
 	// Dynamic text child of a component call must scope its effect next to the
 	// text node (inside the children fragment), not at the parent component level.
 	bothModes('dynamic text child of component call scopes effect in fragment', `
-		component Demo { const name = 'Vesk'; <Link href="/">{name}</Link> }
+		component Demo { let &[name] = track('Vesk'); <Link href="/">{name}</Link> }
 	`, (code) => {
 		const iText = code.indexOf('document.createTextNode');
 		const iEffect = code.indexOf('effect(() => { $n');
@@ -253,14 +253,54 @@ describe('Client Codegen — Control Flow', () => {
 		expect(iEffect > iText).toBe(true);
 	});
 
+	// Non-tracked text child of a component call is a one-time snapshot created
+	// inside the children fragment (no deferred effect reading a later value).
+	bothModes('static text child of component call is created in fragment', `
+		component Demo { const name = 'Vesk'; <Link href="/">{name}</Link> }
+	`, (code) => {
+		expect(code).toContain('document.createTextNode(String(name))');
+		expect(code).not.toContain('effect(() => { $n');
+		const iText = code.indexOf('document.createTextNode');
+		const iFragEnd = code.indexOf('return $f; })();');
+		expect(iText >= 0).toBe(true);
+		expect(iFragEnd >= 0).toBe(true);
+		expect(iText < iFragEnd).toBe(true);
+	});
+
 	// Dynamic text child of a component call inside a keyed-map block must push
 	// its effect into the block's per-item effects array (in the block's scope).
 	bothModes('dynamic text child of component call in loop pushes effect into item array', `
 		component Demo {
-			for (const item of items) { <Link href={item.href}>{item.label}</Link> }
+			let &[suffix] = track('!');
+			for (const item of items) { <Link href={item.href}>{item.label}{suffix}</Link> }
 		}
 	`, (code) => {
 		expect(code).toContain('__e.push(effect(() => { $n');
+	});
+
+	// Non-tracked text inside a loop body is snapshotted per iteration at
+	// creation time — not via a deferred effect that would read the final value.
+	bothModes('static loop text renders per-iteration snapshot', `
+		component Demo {
+			for (const item of items) { <span>{item.label}</span> }
+		}
+	`, (code) => {
+		expect(code).toContain('document.createTextNode(String(item.label))');
+		expect(code).not.toContain('effect(() => { $n');
+	});
+
+	bothModes('while-loop text binding snapshots non-tracked value per iteration', `
+		component App {
+			let n = 0;
+			while (n < 3) { <span>{n}</span>; n = n + 1 }
+		}
+	`, (code, mode) => {
+		expect(code).toContain('document.createTextNode(String(n))');
+		expect(code).not.toContain('effect(() => { $n');
+		if (mode === 'hydrate') {
+			expect(code).toContain('__hydrate.nextElement("span")');
+			expect(code).toContain('__cl.push(');
+		}
 	});
 
 });
@@ -797,6 +837,8 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	// The if/else empty-state marker must parenthesize the negated condition so a
 	// compound condition (`props.x && props.x.length > 0`) does not throw when
 	// props.x is undefined.
+	// The if/else region must render its branch during body execution (so SSR
+	// claims happen in DOM order) and guard the mount-time effect with __first.
 	bothModes('if/else negated condition is parenthesized', `
 		component App(props: { posts?: { title: string }[] }) {
 			if (props.posts && props.posts.length > 0) {
@@ -806,9 +848,11 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			}
 		}
 	`, (code, mode) => {
-		if (mode === 'hydrate') {
-			expect(code).toContain('let __iv = !(props.posts && props.posts.length > 0);');
-		}
+		expect(code).toContain('if (props.posts && props.posts.length > 0) { ');
+		expect(code).toContain('} else { ');
+		expect(code).toContain('let __first = true;');
+		expect(code).toContain('if (__first) { __first = false; return; }');
+		expect(code).not.toContain('let __iv = !(props.posts && props.posts.length > 0);');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 
@@ -843,6 +887,58 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		}
 	`, (code) => {
 		expect(code).toContain('switch (get(score)) {');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('every region collects claimed nodes and places anchors in place', `
+		component App() {
+			if (cond) { <p>a</p> }
+			while (n < 3) { <span>{n}</span>; n = n + 1 }
+			for (const item of items) { <span>{item}</span> }
+			switch (score) { case 1: <p>One</p> }
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('__cl.push(');
+			expect(code).toContain('const __cl = [];');
+			expect(code).not.toContain('document.createDocumentFragment();');
+		} else {
+			expect(code).toContain('document.createDocumentFragment();');
+			expect(code).not.toContain('__cl.push(');
+		}
+		expect(code).toContain('__place(');
+		expect(code).toContain('if (__first) { __first = false; return; }');
+		expect(code).toContain('__cleanup(');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// Classic `for` loops are non-reactive: in hydrate mode they still must run
+	// during body execution so their SSR content gets claimed in DOM order.
+	bothModes('classic for renders during body execution', `
+		component App() {
+			for (let i = 0; i < 3; i++) { <span>{i}</span> }
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('__cl.push(');
+			expect(code).toContain('__place(');
+			expect(code).not.toContain('const __nv = (i < 3)');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// The switch `Seven`/`Other` paragraphs are fully static (no SSR marker), so
+	// they must NOT be claimed — otherwise the walker would skip forward and steal
+	// a later region's marker. Anchors still get placed via __place.
+	bothModes('static-only switch case content is not claimed', `
+		component App() {
+			switch (7) { case 7: <p>Seven</p> }
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).not.toContain('nextElement("p")');
+			expect(code).toContain('__place(');
+		}
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 });
