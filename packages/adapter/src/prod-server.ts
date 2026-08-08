@@ -362,6 +362,19 @@ export async function startProdServer(outDir: string, options?: { port?: number 
       }
     }
 
+    const appDir = resolve(projectDir, 'app');
+    const nfPath = resolve(appDir, 'not-found.vsk');
+    let notFoundHtml: string | null = null;
+    if (existsSync(nfPath)) {
+      try {
+        const runtimePath = resolve(outDir, 'server', 'runtime.js');
+        const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
+        const src = readFileSync(nfPath, 'utf-8');
+        const compName = resolveComponentName(src) || 'NotFound';
+        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: nfPath });
+      } catch {}
+    }
+
     for (const route of buildConfig.routes) {
       if (route.type === 'ssr') {
         const params = matchPath(route.path, url.pathname);
@@ -387,10 +400,8 @@ export async function startProdServer(outDir: string, options?: { port?: number 
               }
 
               const response = await mod.handle(webRequest);
-              const contentType = response.headers.get('content-type') || 'text/html';
-              const contentLength = response.headers.get('content-length');
-              const headers: Record<string, string | number> = { 'Content-Type': contentType };
-              if (contentLength) headers['Content-Length'] = contentLength;
+              const headers: Record<string, string | number> = Object.fromEntries(response.headers);
+              if (!headers['content-type'] && !headers['Content-Type']) headers['Content-Type'] = 'text/html';
 
               if (response.body && typeof response.body.getReader === 'function') {
                 res.writeHead(response.status, headers);
@@ -410,8 +421,13 @@ export async function startProdServer(outDir: string, options?: { port?: number 
               }
               return;
             } catch (e) {
-              console.error('vesk ssr error:', e instanceof Error ? e.message : String(e));
-              const appDir = resolve(projectDir, 'app');
+              const err = e instanceof Error ? e : new Error(String(e));
+              if (err.name === 'NotFoundError') {
+                res.writeHead(404, { 'Content-Type': 'text/html' });
+                res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
+                return;
+              }
+              console.error('vesk ssr error:', err.message);
               const errPath = resolve(appDir, 'error.vsk');
               let errorHtml: string | null = null;
               if (existsSync(errPath)) {
@@ -420,7 +436,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
                   const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
                   const src = readFileSync(errPath, 'utf-8');
                   const compName = resolveComponentName(src) || 'Error';
-                  errorHtml = await renderFullPage(src, compName, { error: (e instanceof Error ? e.message : String(e)), stack: (e instanceof Error ? e.stack : ''), statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: errPath });
+                  errorHtml = await renderFullPage(src, compName, { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: errPath });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });
@@ -432,18 +448,6 @@ export async function startProdServer(outDir: string, options?: { port?: number 
       }
     }
 
-    const appDir = resolve(projectDir, 'app');
-    const nfPath = resolve(appDir, 'not-found.vsk');
-    let notFoundHtml: string | null = null;
-    if (existsSync(nfPath)) {
-      try {
-        const runtimePath = resolve(outDir, 'server', 'runtime.js');
-        const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
-        const src = readFileSync(nfPath, 'utf-8');
-        const compName = resolveComponentName(src) || 'NotFound';
-        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: nfPath });
-      } catch {}
-    }
     res.writeHead(404, { 'Content-Type': 'text/html' });
     res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
   });

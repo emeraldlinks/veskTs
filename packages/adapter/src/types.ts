@@ -72,6 +72,8 @@ export interface BuildOptions {
   hmr?: boolean;
   target?: 'node' | 'edge';
   platform?: 'node' | 'vercel' | 'netlify' | 'cloudflare' | 'deno' | 'aws' | 'edge' | 'coxmos';
+  /** Client router route-data freshness TTL (ms). Default 0 = always refetch. */
+  routeDataCache?: number;
 }
 
 export interface DevServerOptions {
@@ -97,6 +99,7 @@ export interface ClientBundleOptions {
   codeSplit?: boolean;
   hmr?: boolean;
   importRuntime?: boolean;
+  routeDataCache?: number;
 }
 
 export interface ChunkEntry {

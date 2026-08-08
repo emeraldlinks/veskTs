@@ -24,11 +24,13 @@ const ROUTES = [
   { route: '/empty' },
   { route: '/map' },
   { route: '/statements' },
+  { route: '/broken', expectStatus: 200 },
   { route: '/store' },
   { route: '/store/widget' },
   { route: '/typed' },
   { route: '/store/missing', expectStatus: 404, expectErrors: ['Not Found'] },
   { route: '/store/boom', expectStatus: 500, expectErrors: ['Store exploded'] },
+  { route: '/dataerror', expectStatus: 500, expectErrors: ['Data layer unavailable during SSR'] },
   { route: '/does-not-exist', expectStatus: 404 },
 ];
 

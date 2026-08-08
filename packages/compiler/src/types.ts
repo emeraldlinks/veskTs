@@ -83,6 +83,10 @@ export interface VeskConfig {
   ssg?: { getStaticPaths?: () => Promise<{ paths: Array<{ params: Record<string, string> }> }> };
   plugins?: VeskPlugin[];
   security?: VeskSecurity | VeskSecurityPreset | false | ((preset: (name: string, overrides?: VeskSecurity) => VeskSecurity) => VeskSecurity);
+  /** Client router route-data freshness TTL in milliseconds. The SPA router
+   * refetches a route's server data when it is older than this. Default 0 =
+   * always fetch fresh data on every SPA visit. */
+  routeDataCache?: number;
 }
 
 export interface MiddlewareEntry {

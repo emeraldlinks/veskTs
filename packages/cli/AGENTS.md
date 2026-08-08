@@ -21,6 +21,7 @@ npx tsx packages/cli/src/build-packages.ts
 node packages/cli/dist/cli.js build --platform vercel --seo
 node packages/cli/dist/cli.js dev -p 3002
 node packages/cli/dist/cli.js start -p 3000
+node packages/cli/dist/cli.js typecheck       # tsc-in-.vsk over app/ (.vsk + .ts)
 node packages/cli/dist/cli.js seo --strict
 
 # dev / prod E2E (slow)

@@ -60,6 +60,10 @@ const ssrDataStore = new Map<string, SsrDataPayload>();
 
 function storeDataScript(payload: SsrDataPayload): string | null {
   if (!payload.props && !payload.ssrData) return null;
+  if (ssrDataStore.size >= 100) {
+    const oldest = ssrDataStore.keys().next().value as string | undefined;
+    if (oldest) ssrDataStore.delete(oldest);
+  }
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
   ssrDataStore.set(token, payload);
   return '/_vesk/ssr-data.js?t=' + token;
@@ -159,6 +163,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const { main } = await generateClientBundle(routeTree, appDirPath, new Map(), {
         importRuntime: true,
         hmr: true,
+        ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
       clientBundle = main;
     } catch (e) {
@@ -744,12 +749,20 @@ export async function startDevServer(port: number, projectDir: string, config: R
             const prev = (globalThis as Record<string, unknown>).__vesk_request;
             (globalThis as Record<string, unknown>).__vesk_request = ctx;
             try {
-              const rendered = await renderSSR();
-              const secHeaders = security ? securityHeaders({ security }) : {};
-              if (forData) {
-                return new Response(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }), { headers: { 'Content-Type': 'application/json', ...secHeaders } });
+              try {
+                const rendered = await renderSSR();
+                const secHeaders = security ? securityHeaders({ security }) : {};
+                if (forData) {
+                  return new Response(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data', ...secHeaders } });
+                }
+                return new Response(rendered.html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
+              } catch (e) {
+                const msg = e instanceof Error ? e.message : String(e);
+                if (forData) {
+                  return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });
+                }
+                throw e;
               }
-              return new Response(rendered.html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
             } finally {
               (globalThis as Record<string, unknown>).__vesk_request = prev;
             }
@@ -770,10 +783,17 @@ export async function startDevServer(port: number, projectDir: string, config: R
         try {
           const secHeaders = security ? securityHeaders({ security }) : {};
           if (forData) {
-            const rendered = await renderSSR();
-            logRequest(200);
-            res.writeHead(200, { 'Content-Type': 'application/json', ...secHeaders });
-            res.end(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }));
+            try {
+              const rendered = await renderSSR();
+              logRequest(200);
+              res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data', ...secHeaders });
+              res.end(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }));
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              logRequest(500);
+              res.writeHead(500, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data', ...secHeaders });
+              res.end(JSON.stringify({ error: msg }));
+            }
             return;
           }
           const stream = renderSSRStream();

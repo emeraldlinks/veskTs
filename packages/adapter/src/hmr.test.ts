@@ -36,7 +36,18 @@ const originalLayoutSrc = readFileSync(layoutPath, 'utf-8');
 
 if (!process.env.VESK_E2E) {
   startDevServer(appDir, { port: PORT, publicDir });
-  await new Promise(r => setTimeout(r, 4000));
+  // The initial build (SSR functions + esbuild client bundle) can take several
+  // seconds. Poll for the client bundle instead of sleeping a fixed amount so
+  // the assertions below don't race the build.
+  const deadline = Date.now() + 30000;
+  while (!existsSync(clientBundlePath)) {
+    if (Date.now() > deadline) {
+      console.log('  \u2717 timed out waiting for dev-server client bundle');
+      failed++;
+      process.exit(1);
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
 }
 
 try {

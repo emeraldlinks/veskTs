@@ -102,6 +102,27 @@ It also exposes `startDevServer` from `src/dev-server.ts` (not re-exported from
 16. **Teardown** — runs each `plugin.onBuildEnd()` hook; logs "done"; returns
     `{ routeTree, apiTree, ssrRoutes, apiRoutes, manifest }`.
 
+### SPA route data (`routeDataCache`)
+
+On SPA navigation the client router requests each route's server-rendered data
+via an `X-Vesk-Data: 1` fetch (`fetchRouteData` in `@vesk/runtime` router) and
+renders it with the page component. `routeDataCache` controls how long that
+data is reused before the router refetches:
+
+- **`routeDataCache: 0` (default)** — the router always fetches fresh server
+  data on every SPA visit; the previous "fetch once, reuse up to 5 minutes"
+  cache is disabled.
+- **`routeDataCache: <ms>`** — data fetched for a route is reused for revisits
+  within the TTL, then refetched on expiry.
+
+When `routeDataCache` is positive it is emitted into the client bundle as
+`createFileRouter(__routeTree, { routeDataCache: <ms> })`; the default 0
+emits a bare `createFileRouter(__routeTree)`.
+
+If the `X-Vesk-Data` response is a 500 `{ "error": message }` JSON payload
+(data-phase server throw), the router renders the route's `error.vsk`
+component from that payload instead of falling back to a full HTML fetch.
+
 
 ## The `.vesk/` output structure
 
@@ -160,6 +181,7 @@ const result = await build('/path/to/project/app', {
   siteUrl: 'https://example.com',
   ssg: true,
   codeSplit: true,
+  routeDataCache: 0,   // SPA route-data freshness TTL (ms); 0 = always refetch
   platform: 'vercel',   // or auto-detect
   target: 'node',       // or 'edge'
 });

@@ -10,6 +10,7 @@
 | `vesk build` | `--platform <name>` `--target <node|edge>` `--seo` `--strict` `--skip-split` | Builds `app/` into `.vesk/` via `@vesk/adapter/build()`. Auto-detects platform from CI env if `--platform` omitted. |
 | `vesk start` | `-p <port>` `--port <port>` | Starts the production server (`startProdServer`) against `.vesk/`. |
 | `vesk dev` | `-p <port>` `--port <port>` | Starts the HMR dev server (`startDevServer`). |
+| `vesk typecheck` | `--no-strict` | Typechecks `.vsk`/`.ts` via tsc-in-.vsk (`typecheckProject`, strict by default). Exits non-zero on errors. |
 | `vesk seo` | `--strict` | Runs `runSeoAudit(appDir)` and exits non-zero if strict + errors found. |
 | `vesk --help` | | Prints usage and exits. |
 
@@ -34,6 +35,7 @@ Scaffolding is separate: `npx create-vesk@latest <project-name>`.
 - Watches `app/` + `public/` for changes; recompiles affected routes.
 - Serves API routes under `/api/*`, middleware via `collectMiddlewareChain` + `executeMiddlewareChain`, actions via `handleActionRequest`.
 - On each page request: `scanRoutes`, `matchUrl`, collect middleware, compile the page (with `compileClient` + `generateClientBundle` for JS, `renderFullPage`/`renderPage` for HTML), inject HMR client script, set `__vesk_ssr_base_url` for `load()`.
+- `X-Vesk-Data: 1` requests render the page data phase and respond `application/json`. If the page throws server-side during a data request, the dev server returns `{ "error": <message> }` with status 500 (matching the production adapter's SSR function) so the SPA router renders the route error component.
 - HMR: WebSocket server (`ws`) pushes `{ type:'reload'|'hmr', path }` to connected clients.
 
 ## Common mistakes + fixes

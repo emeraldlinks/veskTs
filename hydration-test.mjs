@@ -485,16 +485,17 @@ async function main() {
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
     }
 
-    // Third SPA nav to /async: data already fresh for this page session, no refetch
+    // Third SPA nav to /async: routeDataCache defaults to 0, so every visit
+    // issues a fresh X-Vesk-Data request and renders the fresh props.
     await page.evaluate(() => { window.__spaFlag = true; });
     await page.click('a[href="/async"]');
     await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
     const bodyText = await page.evaluate(() => document.body.textContent);
-    assert(bodyText.includes('Hello Vesk'), 'async renders from cached fresh props without refetch');
+    assert(bodyText.includes('Hello Vesk'), 'async renders fresh props on third visit');
 
-    // First /async visit fetched fresh data; revisits (and the reuse nav) hit the
-    // session cache — exactly one X-Vesk-Data request for /async total.
-    assert(asyncDataRequests === 1, `async fresh data fetched once, reused on revisits (got ${asyncDataRequests})`);
+    // Default routeDataCache = 0: one fresh data request per visit, never a
+    // stale session cache hit.
+    assert(asyncDataRequests === 3, `async fresh data fetched on every visit (got ${asyncDataRequests})`);
     assert(errors.length === 0, 'zero JS errors during repeated data navs (got ' + errors.length + ')');
 
     await page.close();
@@ -751,6 +752,297 @@ async function main() {
     assert(afterNav, 'Md re-renders after SPA navigation');
 
     await page.close();
+  }
+
+  // ── Test 17: Error isolation (layout nav survives a broken page) ──
+  console.log('\n=== TEST 17: Error isolation ===');
+  {
+    // 17a: Full load of a client-throwing page. SSR is clean (200), hydration
+    // fails, and the error component must replace only the page slot inside
+    // the layout chain — nav + footer survive, zero uncaught page errors.
+    {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', err => errors.push(err.message));
+      const response = await page.goto(BASE + '/broken', { waitUntil: 'networkidle0' });
+      assert(response.status() === 200, '/broken SSR is 200 (got ' + response.status() + ')');
+      await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 });
+
+      const state = await page.evaluate(() => {
+        const nav = document.querySelector('nav');
+        const footer = document.querySelector('footer');
+        const root = document.getElementById('root');
+        return {
+          url: window.location.pathname,
+          navText: nav ? nav.textContent.replace(/\s+/g, ' ').trim() : '',
+          footer: footer ? footer.textContent : '',
+          body: root ? root.textContent.replace(/\s+/g, ' ').trim() : '',
+          markerCount: (() => {
+            const walker = document.createTreeWalker(root, 128, { acceptNode: (n) => n.textContent === 'vesk-ssr-error' ? 1 : 2 });
+            let c = 0; while (walker.nextNode()) c++;
+            return c;
+          })(),
+        };
+      });
+      assert(state.url === '/broken', 'stays on /broken after hydrate-failure re-render');
+      assert(state.navText.includes('Home') && state.navText.includes('About') && state.navText.includes('Broken'),
+        'nav survives on error page: ' + state.navText);
+      assert(state.footer.includes('Powered by Vesk'), 'footer survives on error page');
+      assert(state.body.includes('BrokenComp exploded'), 'error message rendered in page slot');
+      assert(state.markerCount === 0, 'ssr-error marker consumed after error render');
+      assert(errors.length === 0, 'zero uncaught page errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+      // Nav still works after the error page render.
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/statements"]');
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('JS Statement Demo'), { timeout: 8000 });
+      assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from error page to /statements (no reload)');
+      await page.close();
+    }
+
+    // 17b: Full load of a server-throwing route (SSR 500 + marker). Client
+    // re-renders the route error component in the layout chain.
+    {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', err => errors.push(err.message));
+      await page.goto(BASE + '/store/boom', { waitUntil: 'networkidle0' });
+
+      const state = await page.evaluate(() => {
+        const nav = document.querySelector('nav');
+        const footer = document.querySelector('footer');
+        const root = document.getElementById('root');
+        return {
+          navText: nav ? nav.textContent.replace(/\s+/g, ' ').trim() : '',
+          footer: footer ? footer.textContent : '',
+          body: root ? root.textContent.replace(/\s+/g, ' ').trim() : '',
+        };
+      });
+      assert(state.body.includes('Store Error Boundary'), 'route-level error component rendered');
+      assert(state.body.includes('Store exploded'), 'store error message rendered');
+      assert(state.navText.includes('Home') && state.navText.includes('Broken'), 'nav survives on server-error page');
+      assert(state.footer.includes('Powered by Vesk'), 'footer survives on server-error page');
+      assert(errors.length === 0, 'zero uncaught page errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/"]');
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('Welcome to Vesk'), { timeout: 8000 });
+      assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from server-error page to / (no reload)');
+      await page.close();
+    }
+
+    // 17c: SPA nav TO a broken page. The page throws client-side; the error
+    // component renders in the layout chain and nav keeps working.
+    {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', err => errors.push(err.message));
+      await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/broken"]');
+      await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 });
+
+      const state = await page.evaluate(() => {
+        const nav = document.querySelector('nav');
+        const footer = document.querySelector('footer');
+        return {
+          url: window.location.pathname,
+          navText: nav ? nav.textContent.replace(/\s+/g, ' ').trim() : '',
+          footer: footer ? footer.textContent : '',
+          body: document.getElementById('root') ? document.getElementById('root').textContent.replace(/\s+/g, ' ').trim() : '',
+        };
+      });
+      assert(state.url === '/broken', 'SPA nav landed on /broken');
+      assert(state.body.includes('Error 500') || state.body.includes('BrokenComp exploded'), 'client error rendered in page slot');
+      assert(state.navText.includes('Home') && state.navText.includes('Broken'), 'nav survives SPA-nav error page');
+      assert(state.footer.includes('Powered by Vesk'), 'footer survives SPA-nav error page');
+      assert(errors.length === 0, 'zero uncaught page errors during SPA error nav (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+      // And navigation out of the error page still works.
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/about"]');
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from SPA-error page to /about (no reload)');
+      await page.close();
+    }
+
+    // 17d: SPA nav TO a route whose data fetch fails server-side. The page
+    // renders optimistically on the client, then the X-Vesk-Data response is a
+    // 500 `{ error }` JSON payload. The router must render the route error
+    // component from that payload instead of falling back to an HTML fetch.
+    {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', err => errors.push(err.message));
+      await page.goto(BASE, { waitUntil: 'networkidle0' });
+
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.evaluate(() => {
+        const router = window.__vesk_router;
+        if (router && typeof router.navigate === 'function') router.navigate('/dataerror');
+      });
+      await page.waitForFunction(() => document.body.textContent.includes('Data layer unavailable during SSR'), { timeout: 8000 });
+
+      const state = await page.evaluate(() => {
+        const nav = document.querySelector('nav');
+        const footer = document.querySelector('footer');
+        return {
+          url: window.location.pathname,
+          navText: nav ? nav.textContent.replace(/\s+/g, ' ').trim() : '',
+          footer: footer ? footer.textContent : '',
+          body: document.getElementById('root') ? document.getElementById('root').textContent.replace(/\s+/g, ' ').trim() : '',
+        };
+      });
+      assert(state.url === '/dataerror', 'SPA nav landed on /dataerror');
+      assert(state.body.includes('Data layer unavailable during SSR'), 'server data error message rendered from the X-Vesk-Data payload');
+      assert(state.navText.includes('Home') && state.navText.includes('About'), 'nav survives SPA data-error page');
+      assert(state.footer.includes('Powered by Vesk'), 'footer survives SPA data-error page');
+      assert(errors.length === 0, 'zero uncaught page errors during SPA data-error nav (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+      // Navigation out of the error page still works.
+      await page.evaluate(() => { window.__spaFlag = true; });
+      await page.click('a[href="/about"]');
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from data-error page to /about (no reload)');
+      await page.close();
+    }
+  }
+
+  // ── Test 18: SSR data integrity across all routes ──
+  console.log('\n=== TEST 18: SSR data integrity across all routes ===');
+  const DATA_ROUTES = new Set(['/async', '/posts']);
+  const FULL_ROUTES = [
+    '/', '/about', '/blog', '/blog/hello-world', '/async', '/comp-test',
+    '/actions', '/posts', '/empty', '/map', '/statements', '/broken',
+    '/store', '/store/widget', '/typed',
+  ];
+  const SPA_TEXT = {
+    '/': 'Welcome to Vesk',
+    '/about': 'About Vesk',
+    '/blog': 'Blog',
+    '/blog/hello-world': 'Back to blog',
+    '/async': 'Async Demo',
+    '/comp-test': 'Component import test',
+    '/actions': 'Server actions',
+    '/posts': 'Posts',
+    '/empty': 'Empty-',
+    '/map': 'Inline .map() Demo',
+    '/statements': 'JS Statement Demo',
+    '/broken': 'BrokenComp exploded',
+    '/store': 'Store',
+    '/store/widget': 'Item: widget',
+    '/typed': 'Total likes',
+  };
+
+  {
+    // 18a: Fresh full load of every route. The response must be HTML, the
+    // status 200, and the ssr-data script must appear ONLY on data-fetching
+    // routes (regression: data payloads/scripts leaking into other pages).
+    console.log('  18a: fresh SSR per route — html + data-script isolation');
+    const leakChecks = [];
+    for (const route of FULL_ROUTES) {
+      const page = await browser.newPage();
+      const errors = [];
+      page.on('pageerror', err => errors.push(err.message));
+      try {
+        const resp = await page.goto(BASE + route, { waitUntil: 'networkidle0', timeout: 15000 });
+        const ct = resp ? (resp.headers()['content-type'] || '') : '';
+        assert(resp && resp.status() === 200, `${route} full load is HTTP 200 (got ${resp?.status()})`);
+        assert(ct.includes('text/html'), `${route} serves HTML not JSON (content-type: ${ct})`);
+        const scriptCount = await page.evaluate(() => (document.documentElement.outerHTML.match(/ssr-data\.js/g) || []).length);
+        const expected = DATA_ROUTES.has(route) ? 1 : 0;
+        assert(scriptCount === expected, `${route} has ${scriptCount} ssr-data script ref(s) (expected ${expected})`);
+        if (scriptCount !== expected) leakChecks.push(route + ':' + scriptCount);
+        if (route === '/broken') {
+          await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 }).catch(() => {});
+        }
+        const text = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').trim());
+        assert(text.includes(SPA_TEXT[route]), `${route} rendered real content (${SPA_TEXT[route]})`);
+        assert(errors.length === 0, `${route} zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+      } catch (e) {
+        assert(false, `${route} load failed: ${(e.message || e).slice(0, 80)}`);
+      }
+      await page.close();
+    }
+    assert(leakChecks.length === 0, 'no ssr-data script leaked into non-data routes' + (leakChecks.length ? ' — ' + leakChecks.join(', ') : ''));
+  }
+
+  {
+    // 18b: One session, load a data route, then SPA-navigate across ALL routes.
+    // Asserts every nav renders the right content, stays client-side, and
+    // produces zero page errors — the full route graph exercised via the router.
+    console.log('  18b: SPA navigation across all routes (starting from a data route)');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await page.goto(BASE + '/async', { waitUntil: 'networkidle0' });
+
+    const chain = Object.keys(SPA_TEXT).filter(r => r !== '/async');
+    for (const route of chain) {
+      await page.evaluate((href) => {
+        window.__spaFlag = true;
+        const router = window.__vesk_router;
+        if (router && typeof router.navigate === 'function') {
+          try {
+            router.navigate(href);
+          } catch (e) {
+            window.__navError = String(e && e.message || e);
+          }
+        } else {
+          window.__navError = 'router not available';
+        }
+      }, route);
+      const deadline = 15000;
+      const t0 = Date.now();
+      let ok = false;
+      while (Date.now() - t0 < deadline) {
+        const cur = await page.evaluate(() => ({
+          path: window.location.pathname,
+          text: (document.getElementById('root') || document.body).textContent.replace(/\s+/g, ' '),
+        }));
+        if (cur.path === route && cur.text.includes(SPA_TEXT[route])) { ok = true; break; }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      assert(ok, `SPA nav to ${route} rendered ${SPA_TEXT[route]} (url ${await page.evaluate(() => window.location.pathname)})`);
+      const isSpa = await page.evaluate(() => window.__spaFlag === true);
+      assert(isSpa, `SPA nav to ${route} did not reload the page`);
+      assert(errors.length === 0, `SPA nav to ${route} zero pageerrors (got ${errors.length})`);
+    }
+    assert(errors.length === 0, 'whole SPA chain zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    // 18c: Full reloads after the data-heavy session. The browser has fetched
+    // x-vesk-data JSON for /async and /posts during SPA nav; a plain reload
+    // must return HTML again (regression: cached JSON poisoning the document).
+    console.log('  18c: full reloads after SPA data fetches must stay HTML');
+    for (const route of ['/async', '/posts', '/about', '/map']) {
+      const resp = await page.goto(BASE + route, { waitUntil: 'networkidle0' });
+      const ct = resp ? (resp.headers()['content-type'] || '') : '';
+      assert(resp && resp.status() === 200 && ct.includes('text/html'),
+        `reload of ${route} is HTML 200 (status ${resp?.status()}, content-type ${ct})`);
+      const ok = await page.evaluate((needle) => {
+        const t = (document.getElementById('root') || document.body).textContent;
+        return t.includes(needle);
+      }, SPA_TEXT[route]);
+      assert(ok, `reload of ${route} shows real content (${SPA_TEXT[route]})`);
+    }
+    assert(errors.length === 0, 'reloads after data fetches zero pageerrors (got ' + errors.length + ')');
+    await page.close();
+  }
+
+  {
+    // 18d: View-source integrity — the fresh document of a non-data route must
+    // never reference the ssr-data script; data routes must reference it exactly
+    // once. Mirrors the reported "script leaks into other pages' view-source".
+    console.log('  18d: fresh-document data-script isolation');
+    for (const [route, expected] of [['/about', 0], ['/async', 1], ['/posts', 1], ['/map', 0]]) {
+      const page = await browser.newPage();
+      await page.goto(BASE + route, { waitUntil: 'networkidle0' });
+      const html = await page.content();
+      const count = (html.match(/ssr-data\.js/g) || []).length;
+      assert(count === expected, `${route} view-source has ${count} ssr-data refs (expected ${expected})`);
+      await page.close();
+    }
   }
 
   // ── Results ────────────────────────────────────────

@@ -156,9 +156,10 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
 
   console.error('vesk build: bundling client runtime...');
-  const bundleOpts: { codeSplit?: boolean; hmr?: boolean } = {};
+  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number } = {};
   if (options?.codeSplit) bundleOpts.codeSplit = true;
   if (options?.hmr) bundleOpts.hmr = true;
+  if (options?.routeDataCache !== undefined) bundleOpts.routeDataCache = options.routeDataCache;
   const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);
   writeFileSync(resolve(outDir, 'static', 'client.js'), main, 'utf-8');
   const mode = chunks.length > 0 ? 'code-split' : 'monolithic';

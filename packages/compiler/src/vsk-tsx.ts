@@ -44,7 +44,9 @@ function collectTrackDeclEdits(wrapped: string, ast: any, prefixLen: number): Ed
     for (const stmt of stmts) {
       if (!stmt) continue;
       if (stmt.type === 'VariableDeclaration') {
-        for (const decl of stmt.declarations) {
+        const decls = stmt.declarations || [];
+        for (let di = 0; di < decls.length; di++) {
+          const decl = decls[di];
           const id = decl.id;
           if (!id || id.type !== 'ArrayPattern' || id.lazy !== true) continue;
           if (!decl.init) continue;
@@ -52,8 +54,16 @@ function collectTrackDeclEdits(wrapped: string, ast: any, prefixLen: number): Ed
             .map((el: any) => (el ? el.name : null))
             .filter((n: any): n is string => typeof n === 'string');
           const initText = wrapped.slice(decl.init.start, decl.init.end);
+          // The first declarator's replacement must also absorb the statement's
+          // `const`/`let`/`var` keyword, which starts at `stmt.start`, not at
+          // the declarator's start.
+          const start = di === 0 ? stmt.start : decl.start;
+          const end = decl.end;
+          // Don't duplicate the statement terminator already present after the
+          // declaration (avoids `let x = ...;;`).
+          const terminator = wrapped[end] === ';' ? '' : ';';
           if (names.length === 0) {
-            edits.push({ start: decl.start - prefixLen, end: decl.end - prefixLen, text: `let _ = ${initText};` });
+            edits.push({ start: start - prefixLen, end: end - prefixLen, text: `let _ = ${initText}${terminator}` });
             continue;
           }
           const annotation = id.typeAnnotation?.typeAnnotation
@@ -71,7 +81,10 @@ function collectTrackDeclEdits(wrapped: string, ast: any, prefixLen: number): Ed
           for (let n = 1; n < names.length; n++) {
             replacement += ` let ${names[n]}: any = ${first};`;
           }
-          edits.push({ start: decl.start - prefixLen, end: decl.end - prefixLen, text: replacement });
+          // The last emitted statement sits directly before `end`; drop its
+          // terminator when the source already provides one (avoids `;;`).
+          if (wrapped[end] === ';') replacement = replacement.slice(0, -1);
+          edits.push({ start: start - prefixLen, end: end - prefixLen, text: replacement });
         }
         continue;
       }

@@ -1,0 +1,5 @@
+component DataError {
+	if (typeof window === 'undefined') throw new Error('Data layer unavailable during SSR')
+	<h1 class="text-3xl font-bold mb-4">Data Error Demo</h1>
+	<p class="text-gray-600">This page throws only during the server data phase (SSR).</p>
+}

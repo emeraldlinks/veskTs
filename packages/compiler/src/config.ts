@@ -67,6 +67,7 @@ export function defineConfig(config: VeskConfig): VeskConfig {
   if (sec.contentSecurityPolicy === undefined) sec.contentSecurityPolicy =
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
   if (sec.redactLogs !== false) sec.redactLogs = true;
+  if (config.routeDataCache === undefined) config.routeDataCache = 0;
   return config;
 }
 

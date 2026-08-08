@@ -207,6 +207,7 @@ export default defineConfig({
   appDir: './app',
   security: preset('production', { trustProxy: true }),
   plugins: [definePlugin({ name: 'x', onCSS: (css) => css })],
+  routeDataCache: 0,   // SPA route-data freshness TTL (ms). 0 = refetch on every SPA visit.
 });
 ```
 

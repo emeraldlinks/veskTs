@@ -29,6 +29,7 @@
 | `/typed` | `app/typed/page.vsk` | page |
 | `/not-found` | `app/not-found.vsk` | global not-found |
 | `/error` | `app/error.vsk` | global error boundary |
+| `/broken` | `app/broken/page.vsk` | page (client-throwing child component) |
 | `/api/bench` | `app/api/bench/route.ts` | api |
 | `/api/hello` | `app/api/hello/route.ts` | api |
 | `/api/protected` | `app/api/protected/route.ts` | api |

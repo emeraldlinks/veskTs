@@ -74,6 +74,20 @@ test('track decl rewritten to typed aliases', () => {
   has(single, 'let n: any = track(5)', 'single-name track');
 });
 
+test('const track decl absorbs the const keyword (no "const let")', () => {
+  const tsx = vskToTsx(`component C { const &[count] = track<number>(10); <p>{count}</p> }`);
+  has(tsx, 'let count: number = (track<number>(10) as unknown as number);', 'const keyword absorbed');
+  notHas(tsx, 'const let', 'no duplicated keyword');
+  notHas(tsx, ';;', 'no doubled semicolon');
+});
+
+test('multi-name const track decl keeps a single statement terminator', () => {
+  const tsx = vskToTsx(`component C { const &[posts, cell] = track<number[]>([]); <p>{posts}</p> }`);
+  has(tsx, 'let posts: number[] = (track<number[]>([]) as unknown as number[]); let cell: any = posts', 'multi-name rewrite');
+  notHas(tsx, 'const let', 'no duplicated keyword');
+  notHas(tsx, ';;', 'no doubled semicolon');
+});
+
 test('typed track decl keeps annotation', () => {
   const tsx = vskToTsx(`component C { let &[count]: number = track(0); <p>{count}</p> }`);
   has(tsx, 'let count: number = (track(0) as unknown as number);', 'annotation preserved');

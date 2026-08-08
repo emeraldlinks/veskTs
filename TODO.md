@@ -114,6 +114,11 @@
 
 ## Current Session Work
 
+### Focus: SPA route-data freshness + data-error rendering + `vesk typecheck`
+- [x] **`routeDataCache` config option** — new `VeskConfig.routeDataCache` (ms), default **0 = always fetch fresh server data on every SPA visit** (old session cache reused data up to 5 min). Positive TTL emits `createFileRouter(__routeTree, { routeDataCache: <ms> })` in the client bundle via `buildRouterOpts()`; default 0 emits a bare call. Wired compiler → adapter `build()` → CLI build/dev (`buildClientBundle`).
+- [x] **SPA data-error rendering** — when the `X-Vesk-Data` response is a 500 `{ error }` JSON payload, the router renders the route error component (nav + footer survive) instead of silently falling back to an HTML fetch. `fetchRouteData` parses the payload into `{ error, statusCode }`; `applyRouteData` converts it to an `Error` and calls `renderErrorPage`. Dev server data branches now return `{ error }` JSON 500 on render throws, matching the prod adapter. New fixture `test-app/app/dataerror/`; hydration-test Test 17d + crawl `/dataerror` (500 expected). 279 hydration tests green.
+- [x] **`vesk typecheck` CLI command** — `vesk typecheck [--no-strict]` runs `typecheckProject` over `.vsk` + `.ts`, prints formatted diagnostics, exits 1 on errors. Fixed `vskToTsx` track-decl rewrite `const let` + `;;` bug (test-app dropped 12 → 0 errors); extended typecheck `AMBIENT` with auto-imported runtime names. 26 vsk-tsx + 8 typecheck tests.
+
 ### Focus: async components + error isolation + hydration error reporting
 - [x] **Async component breaks hydration silently** — fixed. Async-child propagation in client codegen (`async` parent scope + `await`, resolved fragment appended) + SSR awaits async children; `/async` full-page-reload hydration verified (data persists, markers claimed, zero errors) via hydration-test 12/13 + browser probes.
 - [ ] **A broken component cascades to other components/pages** — e.g. a broken `posts` component also breaks layouts; and a broken component on one page should NOT break navigation to other routes. Need per-page/route error isolation (broken page errors itself only; layout/router continues). Also investigate *why* one component error currently corrupts unrelated render (shared scope? single hydration pass aborting everything?).
@@ -162,7 +167,7 @@
 - [x] **Type-only imports** — `import type { X }` and inline `import { type A }` from `.ts`/`.vsk` are dropped from IR imports and both bundles (via `isTypeOnlyImport`/`stripTypeImport` in `vsk-imports.ts`, using esrap `print`), never resolved as `.vsk` component imports by `collectVskImportPaths`, but kept intact by `vskToTsx` for tsc. 15 vsk-imports tests.
 - [x] **Server codegen: dynamic attributes rendered exactly once** — `class={x}` / `` class={`bg-${x}`} `` rendered once in both modes (was duplicated `class="" class="bg-red"` when a static attr preceded the dynamic one); dynamic attrs skipped in the static loop via `dynAttrTargets`.
 - [ ] **Every TS operation works in .vsk** — interfaces, type aliases, casts (`as` chains), assertions (`!`, `satisfies`), generics, union/intersection/mapped/conditional types, utility types, keyof typeof, template literal types, enums, optional chaining, destructuring, statement-mode casts — all tested (25 ts-support tests). **Known tokenizer limits (same as TSX, JSX-before-generic ambiguity):** angle-bracket assertions `<number>expr` and generic arrows `<T,>` fail to parse.
-- [ ] **`tsc` typechecks .vsk files** — via `vskToTsx` transform + generated `.d.ts` (`generateVskDts`); `vesk typecheck` CLI command (in-memory `ts.LanguageServiceHost` — no tsx on disk, like `vue-tsc`/Volar).
+- [x] **`tsc` typechecks .vsk files** — via `vskToTsx` transform + generated `.d.ts` (`generateVskDts`); `vesk typecheck` CLI command (in-memory `ts.LanguageServiceHost` — no tsx on disk, like `vue-tsc`/Volar). CLI command added to `packages/cli/src/index.ts` (`vesk typecheck [--no-strict]`, exit 1 on errors); whole test-app typechecks clean. Fixed `vskToTsx` track-decl rewrite emitting `const let` (declarator start missed the `const` keyword) + doubled `;;` terminators; extended typecheck `AMBIENT` with the auto-importable runtime surface (`useFetch`, router hooks, `Link`/`NavLink`/`Outlet`, `Form`/`Field`/validators, SEO schemas, action helpers, `redirect`/`notFound`/`NotFoundError`).
 - [x] `vskToTsx` — statement mode header transform (`component → function` + `()` synthesis), track decl rewrite (`&[a, b]` → typed aliases), style blocks stripped, `client` keyword stripped.
 - [x] `generateVskDts` — typed/untyped props aliases (`AppProps = any`), collision inlining, destructured params from annotations, imports/type decls preserved. 22 tests.
 - [ ] `propsType` on ComponentIR — wire through + tests.
@@ -196,8 +201,8 @@ Phase 6 is docs + examples; the items below should be closed first (blockers / i
 - [x] **Hydrate-mode loop claiming** — fixed. Region render fns claim SSR content during body execution and place it in place via `__place`; markers 0, zero JS errors on `/statements` and all routes (121 hydration tests green). See "Loops + switch on client" section.
 
 ### In-progress milestone: tsc-in-.vsk
-- [ ] `tsc` typechecks `.vsk` via `vskToTsx` + `generateVskDts`; `vesk typecheck` CLI command.
-- [ ] `propsType` on ComponentIR — wire through + tests.
+- [x] `tsc` typechecks `.vsk` via `vskToTsx` + `generateVskDts`; `vesk typecheck` CLI command.
+- [ ] `propsType` on ComponentIR — wire through + tests (already wired in `ir.ts`/`ir-generator.ts`/`vsk-tsx.ts`; remaining: dedicated `propsType` tests).
 - [ ] Angle-bracket assertions `<T>expr` + generic arrows `<T,>` (JSX/tokenizer ambiguity, likely needs doc'd limitation + `vskToTsx`-side handling).
 
 ### Phase 5 open items

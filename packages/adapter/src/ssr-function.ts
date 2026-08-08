@@ -1,5 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, relative, join } from 'node:path';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
@@ -8,6 +8,18 @@ function escapeSource(src: string): string {
     .replace(/\\/g, '\\\\')
     .replace(/`/g, '\\`')
     .replace(/\$/g, '\\$');
+}
+
+// Finds the nearest error.vsk walking up from the route's own directory to the
+// app root, mirroring the router's findErrorComponent chain semantics.
+export function resolveErrorFile(sourceDir: string, appDir: string): string | null {
+  const rel = relative(appDir, sourceDir).split('/').filter(Boolean);
+  for (let depth = rel.length; depth >= 0; depth--) {
+    const dir = depth === 0 ? appDir : join(appDir, ...rel.slice(0, depth));
+    const p = join(dir, 'error.vsk');
+    if (existsSync(p)) return p;
+  }
+  return null;
 }
 
 function routeName(segments: string[]): string {
@@ -89,6 +101,13 @@ export function generateSsrFunction(
   const pageSrc = readFileSync(pagePath, 'utf-8');
   const pageComp = extractCompName(pageSrc) || 'Page';
 
+  const errorPath = resolveErrorFile(routeNode.sourceDir, appDir);
+  const errorSrc = errorPath ? readFileSync(errorPath, 'utf-8') : null;
+  const errorComp = errorPath ? (extractCompName(errorSrc as string) || 'Error') : null;
+  const errorVars = errorPath
+    ? `const _errorSrc = \`${escapeSource(errorSrc as string)}\`;\nconst _errorComp = ${JSON.stringify(errorComp)};\nconst _errorPath = ${JSON.stringify(errorPath)};\n`
+    : 'const _errorSrc = null;\nconst _errorComp = null;\nconst _errorPath = null;\n';
+
   let src = '';
   if (hasLayout) {
     const layoutSrc = readFileSync(layoutPath, 'utf-8');
@@ -96,6 +115,7 @@ export function generateSsrFunction(
     src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
     src += `const _layoutPath = ${JSON.stringify(layoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
+    src += errorVars;
   } else if (hasAncestorLayout) {
     const outerLayout = ancestorLayouts[0];
     const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
@@ -106,9 +126,11 @@ export function generateSsrFunction(
     src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
     src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
     src += `const _layoutPath = ${JSON.stringify(outerLayoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
+    src += errorVars;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
     src += `const _srcPath = ${JSON.stringify(pagePath)};\n`;
+    src += errorVars;
   }
 
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
@@ -135,27 +157,72 @@ export function generateSsrFunction(
   let htmlFnCode: string;
   if (hasLayout || hasAncestorLayout) {
     htmlFnCode = [
-      'async function __renderHtml(params) {',
+      'async function __renderErrorBody(props) {',
+      '  if (!_errorSrc) throw props.error || new Error("Internal Server Error");',
+      '  try {',
+      '    const result = await renderPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, sourcePath: _errorPath });',
+      '    return result.body;',
+      '  } catch {',
+      '    return \'<h1>500 \\u2014 Internal Server Error</h1>\';',
+      '  }',
+      '}',
+      '',
+      'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
-      '  const page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
-      "  return new Response(html, { headers: { 'Content-Type': 'text/html' } });",
+      '  let page;',
+      '  let caughtError = null;',
+      '  try {',
+      '    page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      '  } catch (err) {',
+      '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
+      '    caughtError = err;',
+      '    const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
+      '    const stack = err && typeof err === \'object\' && \'stack\' in err ? String(err.stack) : \'\';',
+      '    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: requestUrl || \'\' }), head: \'\' };',
+      '  }',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',
       '',
     ].join('\n');
   } else {
     htmlFnCode = [
-      'async function __renderHtml(params) {',
+      'async function __renderErrorFullPage(params, requestUrl, err) {',
+      '  if (!_errorSrc) throw err;',
+      '  const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
+      '  const stack = err && typeof err === \'object\' && \'stack\' in err ? String(err.stack) : \'\';',
+      '  const props = { params, statusCode: 500, error: message, stack, url: requestUrl || \'\' };',
+      '  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
+      '}',
+      '',
+      'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
-      '  const stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
+      '  let stream;',
+      '  try {',
+      '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
+      '  } catch (err) {',
+      '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
+      '    const html = await __renderErrorFullPage(params, requestUrl, err);',
+      "    return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: 500 });",
+      '  }',
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',
-      "      for await (const chunk of stream) { controller.enqueue(enc.encode(chunk)); }",
+      '      try {',
+      '        for await (const chunk of stream) {',
+      '          controller.enqueue(enc.encode(chunk));',
+      '        }',
+      '      } catch (err) {',
+      '        if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
+      '        try {',
+      '          const html = await __renderErrorFullPage(params, requestUrl, err);',
+      '          controller.enqueue(enc.encode(html));',
+      '        } catch {}',
+      '      }',
       '      controller.close();',
       '    },',
-      "  }), { headers: { 'Content-Type': 'text/html' } });",
+      "  }), { headers: { 'Content-Type': 'text/html' }, status: 200 });",
       '  });',
       '}',
       '',
@@ -166,23 +233,37 @@ export function generateSsrFunction(
   if (hasLayout || hasAncestorLayout) {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
-      '    const dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      '    let dataPage;',
+      '    try {',
+      '      dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });',
+      '    } catch (err) {',
+      '      if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
+      '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
+      "      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });",
+      '    }',
       "    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true, sourcePath: _layoutPath });",
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
-      "      headers: { 'Content-Type': 'application/json' },",
+      "      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },",
       '    });',
       '  }',
-      '  return __renderHtml(params);',
+      '  return __renderHtml(params, url.href);',
     ].join('\n');
   } else {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
-      '    const dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true, sourcePath: _srcPath });',
+      '    let dataPage;',
+      '    try {',
+      '      dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true, sourcePath: _srcPath });',
+      '    } catch (err) {',
+      '      if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
+      '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
+      "      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });",
+      '    }',
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: dataPage.head || '' }), {",
-      "      headers: { 'Content-Type': 'application/json' },",
+      "      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },",
       '    });',
       '  }',
-      '  return __renderHtml(params);',
+      '  return __renderHtml(params, url.href);',
     ].join('\n');
   }
 
@@ -270,7 +351,7 @@ export function generateSsrFunction(
     '    const prevReq = globalThis.__vesk_request;',
     '    globalThis.__vesk_action_errors = issuesToFieldMap(issues);',
     '    try {',
-    '      return await __renderHtml(params);',
+    '      return await __renderHtml(params, pageUrl.href);',
     '    } finally {',
     '      globalThis.__vesk_action_errors = undefined;',
     '      globalThis.__vesk_request = prevReq;',

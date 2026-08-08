@@ -9,6 +9,14 @@ import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, Mo
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
+function buildRouterOpts(options?: ClientBundleOptions): string {
+  const ttl = options?.routeDataCache;
+  if (typeof ttl === 'number' && ttl > 0) {
+    return `, { routeDataCache: ${ttl} }`;
+  }
+  return '';
+}
+
 function findRuntimeSrc(appDir: string): string {
   const monorepoRoot = resolve(__dirname, '..', '..', '..');
   const candidates = [
@@ -178,7 +186,7 @@ export async function generateClientBundle(
     }
     annotate(routeTree);
 
-    const main = await buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
+    const main = await buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
     return { main, chunks };
   } else {
     let componentLines: string[] = [];
@@ -239,7 +247,7 @@ export async function generateClientBundle(
 
     const main = await buildMainBundle(routeTree, runtimeDir, false, {
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
-    }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames);
+    }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
     return { main, chunks: [] };
   }
 }
@@ -354,6 +362,7 @@ async function buildMainBundle(
   hmr?: boolean,
   importRuntime?: boolean,
   runtimeImportNames?: Set<string>,
+  routeDataCache?: number,
 ): Promise<string> {
   const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps'];
   const allRuntimeImports = runtimeImportNames && runtimeImportNames.size > 0
@@ -427,10 +436,12 @@ async function buildMainBundle(
       '  }\n' +
       '}\n';
 
+    const routerOpts = buildRouterOpts({ routeDataCache });
+
     const startRouterCode =
       'const __startRouter = function() {\n' +
       '  __updateComponents(__routeTree);\n' +
-      '  const __router = createFileRouter(__routeTree);\n' +
+      `  const __router = createFileRouter(__routeTree${routerOpts});\n` +
       '  __router.__hydrators = __hydrators;\n' +
       '  __router.__updateComponents = __updateComponents;\n' +
       '  globalThis.__vesk_router = __router;\n' +
@@ -495,6 +506,8 @@ async function buildMainBundle(
   const aliasCode = aliasLines.length > 0 ? aliasLines.join('\n') + '\n' : '';
   const hydratorAliasCode = hydratorAliasLines.length > 0 ? hydratorAliasLines.join('\n') + '\n' : '';
 
+  const routerOpts = buildRouterOpts({ routeDataCache });
+
   const code = preamble +
     'const __components = {};\n' +
     'const __hydrators = {};\n' +
@@ -524,7 +537,7 @@ async function buildMainBundle(
     updateComponentsFn +
     'const __routeTree = ' + routeTreeJson + ';\n' +
     '__resolveNames(__routeTree);\n' +
-    'const __router = createFileRouter(__routeTree);\n' +
+    `const __router = createFileRouter(__routeTree${routerOpts});\n` +
     'globalThis.__vesk_router = __router;\n' +
     '__router.__hydrators = __hydrators;\n' +
     '__router.__updateComponents = __updateComponents;\n' +

@@ -94,6 +94,25 @@ describe('preset()', () => {
 
 });
 
+describe('routeDataCache default', () => {
+
+	it('defaults to 0 when not set', () => {
+		const cfg = defineConfig({});
+		expect(cfg.routeDataCache).toBe(0);
+	});
+
+	it('preserves an explicit value', () => {
+		const cfg = defineConfig({ routeDataCache: 300000 });
+		expect(cfg.routeDataCache).toBe(300000);
+	});
+
+	it('keeps 0 explicitly', () => {
+		const cfg = defineConfig({ routeDataCache: 0 });
+		expect(cfg.routeDataCache).toBe(0);
+	});
+
+});
+
 describe('definePlugin()', () => {
 
 	it('returns the plugin object', () => {

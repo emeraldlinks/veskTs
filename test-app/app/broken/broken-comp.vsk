@@ -1,0 +1,4 @@
+component BrokenComp {
+	if (typeof window !== 'undefined') throw new Error('BrokenComp exploded')
+	<p class="text-gray-600">This component throws on the client only.</p>
+}

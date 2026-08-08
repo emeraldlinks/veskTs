@@ -727,7 +727,7 @@ testAsync('navigate sends X-Vesk-Data and patches DOM with fresh props', async (
 	}
 });
 
-testAsync('prefetch caches route data; navigate reuses it without refetch', async () => {
+testAsync('prefetch caches route data; navigate reuses it within the cache TTL', async () => {
 	const container = document.createElement('div');
 	let fetchCount = 0;
 	const origFetch = globalThis.fetch;
@@ -745,7 +745,7 @@ testAsync('prefetch caches route data; navigate reuses it without refetch', asyn
 			} },
 		]);
 		tree[0].segmentCount = 0;
-		const router = createFileRouter(tree, { container });
+		const router = createFileRouter(tree, { container, routeDataCache: 60000 });
 		router.prefetch('/fresh');
 		await tick(5);
 		expect(fetchCount).toBe(1);
@@ -753,6 +753,103 @@ testAsync('prefetch caches route data; navigate reuses it without refetch', asyn
 		await tick(10);
 		expect(container.textContent).toBe('prefetched');
 		expect(fetchCount).toBe(1);
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('routeDataCache default 0 refetches data on every visit', async () => {
+	const container = document.createElement('div');
+	let fetchCount = 0;
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path) => {
+		fetchCount++;
+		return mockFetchResponse({ props: { msg: 'fresh' + fetchCount }, head: '' });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/fresh', page: (props) => {
+				const d = document.createElement('p');
+				d.textContent = (props && props.msg) || 'about';
+				return d;
+			} },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/fresh', { replace: true });
+		await tick(10);
+		expect(fetchCount).toBe(1);
+		expect(container.textContent).toBe('fresh1');
+		router.navigate('/fresh', { replace: true });
+		await tick(10);
+		expect(fetchCount).toBe(2);
+		expect(container.textContent).toBe('fresh2');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('routeDataCache TTL: revisit within TTL reuses, after expiry refetches', async () => {
+	const container = document.createElement('div');
+	let fetchCount = 0;
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path) => {
+		fetchCount++;
+		return mockFetchResponse({ props: { msg: 'v' + fetchCount }, head: '' });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/ttl', page: (props) => {
+				const d = document.createElement('p');
+				d.textContent = (props && props.msg) || 'ttl';
+				return d;
+			} },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container, routeDataCache: 50 });
+		router.navigate('/ttl', { replace: true });
+		await tick(15);
+		expect(fetchCount).toBe(1);
+		expect(container.textContent).toBe('v1');
+		// Revisit within the TTL: cached data is reused, no refetch.
+		router.navigate('/ttl', { replace: true });
+		await tick(15);
+		expect(fetchCount).toBe(1);
+		// Once the TTL expires a fresh request is issued again.
+		await tick(60);
+		router.navigate('/ttl', { replace: true });
+		await tick(15);
+		expect(fetchCount).toBe(2);
+		expect(container.textContent).toBe('v2');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('server data error renders the route error component', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path) => mockFetchResponse(
+		{ error: 'DB unavailable', statusCode: 500 },
+		{ ok: false, status: 500, headers: { get: () => 'application/json' }, json: async () => ({ error: 'DB unavailable' }) },
+	);
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/boom', page: () => document.createTextNode('optimistic'), error: (props) => {
+				const el = document.createElement('div');
+				el.textContent = 'Data Error: ' + ((props && props.error && props.error.message) || 'unknown');
+				return el;
+			} },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/boom', { replace: true });
+		expect(container.textContent).toBe('optimistic');
+		await tick(15);
+		expect(container.textContent).toContain('Data Error: DB unavailable');
 	} finally {
 		globalThis.fetch = origFetch;
 	}

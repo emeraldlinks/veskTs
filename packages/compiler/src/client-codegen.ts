@@ -1146,7 +1146,7 @@ ${renderAllItems('      ', null)}
     for (const e of ${effectsVar}) destroy_block(e);
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
-${renderAllItems('    ', false)}
+${renderAllItems('    ', null)}
   });
 }`);
     }

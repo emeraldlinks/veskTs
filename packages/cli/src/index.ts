@@ -24,6 +24,7 @@ function usage(code = 0) {
   console.error('  vesk build [--platform <name>] [--seo] [--strict] [--skip-split]  Build app/ for production');
   console.error('  vesk build                       Auto-detect platform from CI env (vercel/netlify/cf/deno/aws/coxmos)');
   console.error('  vesk seo [--strict]           Run SEO analysis on app/');
+  console.error('  vesk typecheck [--no-strict]  Typecheck .vsk/.ts files via tsc-in-.vsk (strict by default)');
   console.error('  vesk start [-p 3000]          Start production server');
   console.error('  vesk dev [-p 3000]            Start dev server with HMR');
   console.error('  vesk --help                   Show this help');
@@ -137,6 +138,7 @@ if (cmd === 'build') {
   const config = await loadConfig(projectDir);
   const plugins = (config as Record<string, unknown>)?.plugins || [];
   const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
+  if (config.routeDataCache !== undefined) opts.routeDataCache = config.routeDataCache;
   if (platform) opts.platform = platform;
 
   try {
@@ -163,6 +165,34 @@ if (cmd === 'seo') {
     console.error(`vesk seo: failed with ${audit.errors} error(s)`);
     process.exit(1);
   }
+  process.exit(0);
+}
+
+if (cmd === 'typecheck') {
+  const projectDir = process.cwd();
+  const appDirPath = join(projectDir, 'app');
+  if (!existsSync(appDirPath)) {
+    console.error(`vesk typecheck: no app/ directory found in ${projectDir}`);
+    process.exit(1);
+  }
+
+  const { typecheckProject, formatTypecheckErrors, formatTypecheckWarnings } = await import('@vesk/compiler/src/typecheck');
+  const strict = !args.includes('--no-strict');
+  const result = typecheckProject(projectDir, { strict });
+
+  if (result.warnings.length > 0) {
+    console.error(`vesk typecheck: ${result.warnings.length} warning(s):`);
+    console.error(formatTypecheckWarnings(result.warnings));
+    console.error('');
+  }
+  if (result.errors.length > 0) {
+    console.error(`vesk typecheck: ${result.errors.length} error(s):`);
+    console.error(formatTypecheckErrors(result.errors));
+    process.exit(1);
+  }
+  console.error(
+    `vesk typecheck: no type errors found${result.warnings.length > 0 ? ` (${result.warnings.length} warning(s))` : ''}`
+  );
   process.exit(0);
 }
 

@@ -40,6 +40,8 @@ interface RouterInstance {
 	__updateComponents?: (tree: RouteNode[] | RouteMatch['matchChain']) => void;
 	_prefetched?: Map<string, RouteMatch>;
 	_navToken?: number;
+	/** Client route-data freshness TTL (ms). 0 = always fetch fresh data. */
+	_routeDataCache?: number;
 	[k: string]: unknown;
 }
 
@@ -47,6 +49,8 @@ interface RouterOptions {
 	container?: HTMLElement;
 	prefetch?: boolean;
 	hydrate?: 'full' | 'viewport' | 'idle' | 'interaction';
+	/** Route-data freshness TTL in ms. Default 0 = always refetch on SPA nav. */
+	routeDataCache?: number;
 	[k: string]: unknown;
 }
 
@@ -85,6 +89,8 @@ interface RouteDataResult {
 	head?: string;
 	notFound?: boolean;
 	redirect?: string;
+	error?: string;
+	statusCode?: number;
 }
 
 const _dataPromises = new Map<string, Promise<RouteDataResult | null>>();
@@ -100,8 +106,23 @@ async function fetchRouteData(path: string): Promise<RouteDataResult | null> {
 			}
 		}
 		if (res.status === 404) return { notFound: true };
-		if (!res.ok) return null;
 		const ct = res.headers.get('content-type') || '';
+		if (!res.ok) {
+			// The server's x-vesk-data error payload is `{ error: message }`.
+			// Surface it so the route's error component can render instead of
+			// silently falling back to an HTML fetch.
+			if (ct.includes('application/json')) {
+				try {
+					const body = await res.json() as Record<string, unknown>;
+					if (body && typeof body === 'object' && typeof body.error === 'string') {
+						return { error: body.error, statusCode: res.status };
+					}
+				} catch {
+					/* fall through to null */
+				}
+			}
+			return null;
+		}
 		if (!ct.includes('application/json')) return null;
 		return (await res.json()) as RouteDataResult;
 	} catch {
@@ -164,11 +185,19 @@ async function applyRouteData(
 		await renderNotFound(router, match, container);
 		return;
 	}
+	if (data.error) {
+		const err = new Error(data.error);
+		(err as Error & { statusCode?: number }).statusCode = data.statusCode || 500;
+		await renderErrorPage(router, match, container, err);
+		router._currentMatch = match;
+		return;
+	}
 	const pathname = match.pathname || window.location.pathname;
 	const pageNode = findPageNode(match);
 	if (pageNode && data.props) {
 		pageNode.props = data.props;
 		pageNode._dataPath = pathname;
+		pageNode._dataFetchedAt = Date.now();
 	}
 	if (data.head) {
 		applyHead(data.head);
@@ -205,11 +234,15 @@ function shouldFetchData(router: RouterInstance, match: RouteMatch): boolean {
 	const pageNode = findPageNode(match);
 	if (!pageNode) return false;
 	const pathname = match.pathname || window.location.pathname;
-	return (pageNode._dataPath as string | undefined) !== pathname;
+	if ((pageNode._dataPath as string | undefined) !== pathname) return true;
+	const ttl = (router._routeDataCache as number | undefined) ?? 0;
+	if (ttl <= 0) return true;
+	const fetchedAt = (pageNode._dataFetchedAt as number | undefined) ?? 0;
+	return Date.now() - fetchedAt >= ttl;
 }
 
 function hasRealPageData(data: RouteDataResult): boolean {
-	if (data.notFound || data.redirect) return true;
+	if (data.notFound || data.redirect || data.error) return true;
 	if (data.head && data.head.trim().length > 0) return true;
 	const props = data.props as Record<string, unknown> | undefined;
 	if (!props) return false;
@@ -223,6 +256,7 @@ function storePrefetchedData(match: RouteMatch, data: RouteDataResult): void {
 	if (pageNode && data.props) {
 		pageNode.props = data.props;
 		pageNode._dataPath = pathname;
+		pageNode._dataFetchedAt = Date.now();
 	}
 	if (data.head && pageNode) pageNode._head = data.head;
 }
@@ -361,23 +395,19 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	// suspends (async page / `await useFetch`). Sync throws propagate to the
 	// caller so `navigate()` keeps throwing synchronously for plain pages.
 	function renderLayoutChain(index: number): unknown {
+		return renderLayoutWith(index, pageStep);
+	}
+
+	// Renders the chain of `layoutNodes` from `index` down, calling `renderPage`
+	// at the innermost step. The real page step and the error step (see
+	// `renderErrorInLayout`) both go through here so an error page keeps the
+	// layout/nav instead of replacing the whole container.
+	function renderLayoutWith(index: number, renderPage: () => unknown): unknown {
 		if (index >= layoutNodes.length) {
-			set(_state.params, paramValues);
-			set(_state.path, match.pathname || window.location.pathname);
-			set(_state.search, window.location.search || '');
-			const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
-			const result = pageNode!.page!(pageProps, new Map(), clientWalker) as unknown;
-			if (result && typeof (result as { then?: unknown }).then === 'function') {
-				return (result as Promise<unknown>).then((res) => {
-					storePageInstance(router, pageNode!, pageProps, res);
-					return wrapPageContent(res as Node | string | undefined);
-				});
-			}
-			storePageInstance(router, pageNode!, pageProps, result);
-			return wrapPageContent(result as Node | string | undefined);
+			return renderPage();
 		}
 		const node = layoutNodes[index]!;
-		const childDom = renderLayoutChain(index + 1);
+		const childDom = renderLayoutWith(index + 1, renderPage);
 		if (childDom && typeof (childDom as { then?: unknown }).then === 'function') {
 			return (childDom as Promise<unknown>).then((resolved) => {
 				const layoutProps = { children: resolved, params: paramValues };
@@ -402,6 +432,63 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		}
 		storeLayoutInstance(router, node, layoutProps, result);
 		return result;
+	}
+
+	// The real page step: sets router state and invokes the page component.
+	const pageStep = (): unknown => {
+		set(_state.params, paramValues);
+		set(_state.path, match.pathname || window.location.pathname);
+		set(_state.search, window.location.search || '');
+		const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
+		const result = pageNode!.page!(pageProps, new Map(), clientWalker) as unknown;
+		if (result && typeof (result as { then?: unknown }).then === 'function') {
+			return (result as Promise<unknown>).then((res) => {
+				storePageInstance(router, pageNode!, pageProps, res);
+				return wrapPageContent(res as Node | string | undefined);
+			});
+		}
+		storePageInstance(router, pageNode!, pageProps, result);
+		return wrapPageContent(result as Node | string | undefined);
+	};
+
+	// Renders the route's error component inside the layout chain so the error
+	// page keeps the site nav. Throws when no error component exists.
+	function renderErrorInLayout(error: unknown): unknown {
+		const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+		if (!errorFn) throw error;
+		const retry = () => {
+			if (router && router.navigate) {
+				router.navigate(window.location.pathname, { replace: true });
+			}
+		};
+		const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? window.location.pathname : '' };
+		return runInBlockWindow(() => renderLayoutWith(0, () => {
+			const result = errorFn(errorProps, new Map(), clientWalker) as unknown;
+			if (result && typeof (result as { then?: unknown }).then === 'function') {
+				return (result as Promise<unknown>).then((res) => wrapPageContent(res as Node | string | undefined));
+			}
+			return wrapPageContent(result as Node | string | undefined);
+		}));
+	}
+
+	// Renders the error component into the container directly (used only when
+	// re-rendering through the layout also throws, e.g. the layout is the
+	// component that failed).
+	function mountStandaloneError(error: unknown): void {
+		const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+		if (!errorFn) throw error;
+		const retry = () => {
+			if (router && router.navigate) {
+				router.navigate(window.location.pathname, { replace: true });
+			}
+		};
+		const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? window.location.pathname : '' };
+		const errDom = runInBlockWindow(() => errorFn(errorProps, new Map(), clientWalker));
+		if (errDom && typeof (errDom as { then?: unknown }).then === 'function') {
+			(errDom as Promise<unknown>).then(mountDom);
+		} else {
+			mountDom(errDom);
+		}
 	}
 
 	function storePageInstance(router: RouterInstance, pageNode: RouteNode, pageProps: Record<string, unknown>, result: unknown): void {
@@ -436,18 +523,18 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		if (error && (error as Error).name === 'NotFoundError') {
 			return renderNotFound(router, match, container);
 		}
-		const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
-		if (errorFn) {
-			const retry = () => {
-				if (router && router.navigate) {
-					router.navigate(window.location.pathname, { replace: true });
-				}
-			};
-			const errorProps = { error, retry, params: paramValues };
-			mountDom(runInBlockWindow(() => errorFn(errorProps, new Map(), clientWalker)));
+		let errDom: unknown;
+		try {
+			errDom = renderErrorInLayout(error);
+		} catch (err2: unknown) {
+			mountStandaloneError(err2);
 			return;
 		}
-		throw error;
+		if (errDom && typeof (errDom as { then?: unknown }).then === 'function') {
+			return (errDom as Promise<unknown>).then(mountDom, (e: unknown) => { mountStandaloneError(e); });
+		}
+		mountDom(errDom);
+		return;
 	}
 	if (rootDom && typeof (rootDom as { then?: unknown }).then === 'function') {
 		return (rootDom as Promise<unknown>).then(
@@ -456,26 +543,88 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 				if (error && (error as Error).name === 'NotFoundError') {
 					return renderNotFound(router, match, container);
 				}
-				const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
-				if (errorFn) {
-					const retry = () => {
-						if (router && router.navigate) {
-							router.navigate(window.location.pathname, { replace: true });
-						}
-					};
-					const errorProps = { error, retry, params: paramValues };
-					const errDom = runInBlockWindow(() => errorFn(errorProps, new Map(), clientWalker));
-					if (errDom && typeof (errDom as { then?: unknown }).then === 'function') {
-						return (errDom as Promise<unknown>).then(mountDom);
-					}
-					mountDom(errDom);
-					return;
-				}
-				throw error;
+				return Promise.resolve(renderErrorInLayout(error)).then(
+					mountDom,
+					(e: unknown) => { mountStandaloneError(e); },
+				);
 			},
 		);
 	}
 	mountDom(rootDom);
+}
+
+// Constructs the error object used when the server already rendered an error
+// page for this route (the DOM carries the `vesk-ssr-error` marker).
+function makeSsrError(): Error {
+	const e = new Error('Internal Server Error');
+	(e as Error & { statusCode?: number }).statusCode = 500;
+	return e;
+}
+
+// Client-side render of the route's error component (used after a hydration
+// failure or when the SSR output is already an error page). The error
+// component renders in place of the page inside the layout chain so the error
+// page keeps the site nav.
+async function renderErrorPage(
+	router: RouterInstance,
+	match: RouteMatch,
+	container: HTMLElement,
+	error: unknown,
+): Promise<void> {
+	const chain = match.matchChain;
+	const paramValues = match.params;
+	const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+	if (!errorFn) {
+		if (container.replaceChildren) container.replaceChildren();
+		else container.innerHTML = '';
+		container.innerHTML = '<h1>500 — Internal Server Error</h1>';
+		return;
+	}
+	const layoutNodes = chain.filter(n => n.layout);
+	const tempRoot = document.createDocumentFragment();
+	const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
+	const retry = () => {
+		if (router && router.navigate) {
+			router.navigate(window.location.pathname, { replace: true });
+		}
+	};
+	const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? window.location.pathname : '' };
+
+	const renderErrorChain = (index: number): unknown => {
+		if (index >= layoutNodes.length) {
+			const result = errorFn(errorProps, new Map(), walker) as unknown;
+			if (result && typeof (result as { then?: unknown }).then === 'function') {
+				return (result as Promise<unknown>).then((res) => wrapPageContent(res as Node | string | undefined));
+			}
+			return wrapPageContent(result as Node | string | undefined);
+		}
+		const node = layoutNodes[index]!;
+		const childDom = renderErrorChain(index + 1);
+		if (childDom && typeof (childDom as { then?: unknown }).then === 'function') {
+			return (childDom as Promise<unknown>).then((resolved) => {
+				const layoutProps = { children: resolved, params: paramValues };
+				const result = node.layout!(layoutProps, new Map(), walker) as unknown;
+				if (result && typeof (result as { then?: unknown }).then === 'function') {
+					return (result as Promise<unknown>).then((res) => res);
+				}
+				return result;
+			});
+		}
+		const layoutProps = { children: childDom, params: paramValues };
+		const result = node.layout!(layoutProps, new Map(), walker) as unknown;
+		if (result && typeof (result as { then?: unknown }).then === 'function') {
+			return (result as Promise<unknown>).then((res) => res);
+		}
+		return result;
+	};
+
+	const dom = await runInBlockWindow(() => renderErrorChain(0));
+	if (dom && typeof dom === 'object' && (dom as Node).nodeType) {
+		if (container.replaceChildren) container.replaceChildren(dom as Node);
+		else { container.innerHTML = ''; container.appendChild(dom as Node); }
+	} else if (typeof dom === 'string') {
+		container.innerHTML = dom;
+	}
 }
 
 async function hydrateInitial(
@@ -505,11 +654,26 @@ async function hydrateInitial(
 		return;
 	}
 
-	const layoutNodes = chain.filter(n => n.layout);
-
+	// When SSR rendered an error page for this route (the page component threw
+	// on the server) the DOM holds error-component markup, not page markup.
+	// Rendering the error component client-side instead of hydrating the page
+	// against mismatched markers keeps the initial load from exploding.
+	const ssrErrorMarker = ((): boolean => {
+		const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
+		while (walker.nextNode()) {
+			if (walker.currentNode.nodeValue === 'vesk-ssr-error') return true;
+		}
+		return false;
+	})();
 	set(_state.params, paramValues);
 	set(_state.path, match.pathname || window.location.pathname);
 	set(_state.search, window.location.search || '');
+	if (ssrErrorMarker) {
+		await renderErrorPage(router, match, container, makeSsrError());
+		return;
+	}
+
+	const layoutNodes = chain.filter(n => n.layout);
 
 	const hydrators = router.__hydrators;
 	const hydPage: (props: Record<string, unknown>, registry: Map<string, unknown>, walker: HydrateWalker) => unknown = hydrators && pageNode._pageName
@@ -522,56 +686,72 @@ async function hydrateInitial(
 		return n.layout;
 	});
 
-	if (layoutNodes.length === 0) {
-		const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
-		if (!strategy || strategy === 'full') {
-			const walker = createHydrateWalker(container);
-			setIsHydrating(true);
-			await runInBlockWindow(() => hydPage(pageProps, new Map(), walker));
-			setIsHydrating(false);
-		} else if (strategy === 'viewport') {
-			root(() => { hydrateViewport(container, hydPage, pageProps); });
-		} else if (strategy === 'idle') {
-			root(() => { hydrateIdle(container, hydPage, pageProps); });
-		} else if (strategy === 'interaction') {
-			root(() => { hydrateOnInteraction(container, hydPage, pageProps); });
+	try {
+		if (layoutNodes.length === 0) {
+			const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
+			if (!strategy || strategy === 'full') {
+				const walker = createHydrateWalker(container);
+				setIsHydrating(true);
+				await runInBlockWindow(() => hydPage(pageProps, new Map(), walker));
+				setIsHydrating(false);
+			} else if (strategy === 'viewport') {
+				root(() => { hydrateViewport(container, hydPage, pageProps); });
+			} else if (strategy === 'idle') {
+				root(() => { hydrateIdle(container, hydPage, pageProps); });
+			} else if (strategy === 'interaction') {
+				root(() => { hydrateOnInteraction(container, hydPage, pageProps); });
+			}
+			return;
 		}
-		return;
-	}
 
-	setIsHydrating(true);
+		setIsHydrating(true);
 
-	// Keep the hydration chain synchronous so every track()/effect() created by
-	// the layout and page hydrators runs inside the active block below. Unlike a
-	// bare root() block, runInBlockWindow keeps that block active across `await`
-	// suspensions, so an async page resuming from `await useFetch(...)` still
-	// attaches its track()/effect() blocks to the root instead of orphaning them
-	// (orphaned effects never flush — async pages would hydrate with empty lists).
-	function renderLayoutChain(index: number): unknown {
-		if (index >= layoutNodes.length) {
-			return (subWalker: HydrateWalker) => {
-				if (!strategy || strategy === 'full') {
-					return hydPage({ params: paramValues, ...(pageNode!.props as Record<string, unknown>) }, new Map(), subWalker);
-				} else if (strategy === 'viewport') {
-					hydrateViewport(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
-				} else if (strategy === 'idle') {
-					hydrateIdle(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
-				} else if (strategy === 'interaction') {
-					hydrateOnInteraction(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
-				}
-				return undefined;
-			};
+		// Keep the hydration chain synchronous so every track()/effect() created by
+		// the layout and page hydrators runs inside the active block below. Unlike a
+		// bare root() block, runInBlockWindow keeps that block active across `await`
+		// suspensions, so an async page resuming from `await useFetch(...)` still
+		// attaches its track()/effect() blocks to the root instead of orphaning them
+		// (orphaned effects never flush — async pages would hydrate with empty lists).
+		function renderLayoutChain(index: number): unknown {
+			if (index >= layoutNodes.length) {
+				return (subWalker: HydrateWalker) => {
+					if (!strategy || strategy === 'full') {
+						return hydPage({ params: paramValues, ...(pageNode!.props as Record<string, unknown>) }, new Map(), subWalker);
+					} else if (strategy === 'viewport') {
+						hydrateViewport(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
+					} else if (strategy === 'idle') {
+						hydrateIdle(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
+					} else if (strategy === 'interaction') {
+						hydrateOnInteraction(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
+					}
+					return undefined;
+				};
+			}
+			const node = layoutNodes[index]!;
+			const hydLayout = hydLayouts[index]!;
+			const childHydrator = renderLayoutChain(index + 1);
+			const layoutProps = { children: childHydrator, params: paramValues };
+			return hydLayout(layoutProps, new Map(), walker);
 		}
-		const node = layoutNodes[index]!;
-		const hydLayout = hydLayouts[index]!;
-		const childHydrator = renderLayoutChain(index + 1);
-		const layoutProps = { children: childHydrator, params: paramValues };
-		return hydLayout(layoutProps, new Map(), walker);
-	}
 
-	const walker = createHydrateWalker(container);
-	await runInBlockWindow(() => renderLayoutChain(0));
-	setIsHydrating(false);
+		const walker = createHydrateWalker(container);
+		await runInBlockWindow(() => renderLayoutChain(0));
+		setIsHydrating(false);
+	} catch (error: unknown) {
+		setIsHydrating(false);
+		// Hydration failed — most often the page component throwing on the
+		// client after a clean SSR. Re-render through renderMatch so the error
+		// component replaces just the page slot and the layout/nav survives.
+		if (error && (error as Error).name === 'NotFoundError') {
+			await renderNotFound(router, match, container);
+			return;
+		}
+		try {
+			await renderMatch(router, match, container);
+		} catch (err2: unknown) {
+			await renderErrorPage(router, match, container, err2);
+		}
+	}
 }
 
 export function createRouter(
@@ -591,6 +771,7 @@ export function createRouter(
 		_outletPlaceholders: [],
 		_currentSegments: null,
 		_depth: 0,
+		_routeDataCache: options.routeDataCache ?? 0,
 
 		start() {
 			setCurrentRouter(this);
@@ -802,6 +983,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		_outletPlaceholders: [],
 		_currentSegments: null,
 		_depth: 0,
+		_routeDataCache: options.routeDataCache ?? 0,
 
 		start() {
 			setCurrentRouter(this);

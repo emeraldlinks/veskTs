@@ -150,6 +150,37 @@ test('typecheck: skips node_modules, dist and generated virtual files', () => {
   }
 });
 
+test('typecheck: auto-imported names (useFetch etc.) resolve without an import', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const posts = await useFetch<{ id: number }[]>('/api/posts')\n  <Link href="/">home</Link>\n  <p>{posts.length}</p>\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for auto-imported names, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: const track decl typechecks (no "const let" regression)', () => {
+  const f = fixture({
+    'app/page.vsk': `component Page() {\n  const &[count] = track<number>(10)\n  <p>{count}</p>\n}\n`,
+    'app/multi.vsk': `component Multi() {\n  const &[posts, cell] = track<number[]>([])\n  <p>{posts.length}</p>\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for track decls, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
 const results = () => {
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);
