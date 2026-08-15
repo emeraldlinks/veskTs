@@ -2,7 +2,7 @@ import { readFileSync, existsSync, watch, statSync } from 'node:fs';
 import { resolve, extname, dirname } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { transformSync } from 'esbuild';
+import { transformSync } from './esbuild-fallback.js';
 import { build } from '@vesk/adapter/src/index';
 import { createHmrServer } from '@vesk/adapter/src/hmr';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';

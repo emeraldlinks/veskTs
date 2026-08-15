@@ -11,6 +11,11 @@ const PACKAGES_DIR = join(ROOT, 'packages');
 const INTERNAL_NAMES = new Set([
   '@vesk/adapter',
   '@vesk/compiler',
+  '@vesk/haul-darwin-arm64',
+  '@vesk/haul-darwin-x64',
+  '@vesk/haul-linux-arm64',
+  '@vesk/haul-linux-x64',
+  '@vesk/haul-win32-x64',
   '@vesk/lsp',
   '@vesk/plugin-tailwind',
   '@vesk/runtime',
@@ -24,6 +29,11 @@ const PUBLISH_ORDER = [
   '@vesk/plugin-tailwind',
   '@vesk/adapter',
   '@vesk/lsp',
+  '@vesk/haul-linux-x64',
+  '@vesk/haul-linux-arm64',
+  '@vesk/haul-darwin-x64',
+  '@vesk/haul-darwin-arm64',
+  '@vesk/haul-win32-x64',
   'vesk',
   'create-vesk',
 ];
@@ -70,7 +80,18 @@ for (const { dir, path, pkg } of packages) {
 const scaffold = join(PACKAGES_DIR, 'create-vesk', 'src', 'index.js');
 if (existsSync(scaffold)) {
   const src = readFileSync(scaffold, 'utf8');
-  writeFileSync(scaffold, src.replaceAll(/\^0\.1\.0/g, `^${newVersion}`));
+  const patched = src.replaceAll(/\^0\.1\.0/g, `^${newVersion}`);
+  // Every vesk package reference in the scaffold template must be bumped to
+  // the release version; a stale literal (e.g. a dep added with a pinned
+  // version instead of the ^0.1.0 placeholder) fails the release.
+  const stray = (patched.match(/['"](?:@vesk\/[a-z0-9-]+|vesk)['"]\s*:\s*['"][^'"]+['"]/g) || [])
+    .filter((s) => !s.includes(`^${newVersion}`));
+  if (stray.length > 0) {
+    console.error('\x1b[31mrelease: create-vesk references an unpatched vesk version:\x1b[0m');
+    for (const s of stray) console.error(`  ${s}`);
+    process.exit(1);
+  }
+  writeFileSync(scaffold, patched);
   console.log('  \x1b[32m✓\x1b[0m create-vesk scaffold template versions');
 }
 

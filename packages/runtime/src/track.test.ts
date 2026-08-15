@@ -79,6 +79,88 @@ describe('Tracked', () => {
 });
 
 // ============================================================
+// Tracked with get/set hooks
+// ============================================================
+describe('Tracked with hooks', () => {
+	it('track(v, get, set) shorthand — get transforms reads, set transforms writes', () => {
+		root(() => {
+			let getCalls: unknown[] = [];
+			let setCalls: unknown[] = [];
+			const t = track(
+				0,
+				(current: unknown) => { getCalls.push(current); return current; },
+				(next: unknown, prev: unknown) => { setCalls.push([next, prev]); return typeof next === 'string' ? Number(next) : next; },
+			);
+			// initial read flows through the get hook
+			expect(get(t)).toBe(0);
+			expect(getCalls).toEqual([0]);
+			// string write is coerced by the set hook
+			set(t, '42');
+			expect(setCalls).toEqual([['42', 0]]);
+			expect(get(t)).toBe(42);
+			expect(getCalls).toEqual([0, 42]);
+			// repeated writes pass the previous (already transformed) value
+			set(t, '7');
+			expect(setCalls).toEqual([['42', 0], ['7', 42]]);
+			expect(get(t)).toBe(7);
+		});
+	});
+
+	it('track(v, get) — get-only hook fires on every read', () => {
+		root(() => {
+			let reads = 0;
+			const t = track(2, (current: unknown) => { reads++; return (current as number) * 10; });
+			expect(get(t)).toBe(20);
+			expect(get(t)).toBe(20);
+			expect(reads).toBe(2);
+			set(t, 3);
+			expect(get(t)).toBe(30);
+		});
+	});
+
+	it('track(v, undefined, get, set) explicit form still works', () => {
+		root(() => {
+			const t = track(0, undefined, (current: unknown) => `v=${current}`, (next: unknown) => Number(next));
+			expect(get(t)).toBe('v=0');
+			set(t, '5');
+			expect(get(t)).toBe('v=5');
+		});
+	});
+
+	it('track(fn, get, set) — derived with shifted hooks', () => {
+		root(() => {
+			const base = track(1);
+			const d = track(
+				() => get(base) * 2,
+				(current: unknown) => (current as number) + 1,
+				(next: unknown) => next,
+			);
+			expect(get(d)).toBe(3); // (1*2) + 1 via get hook
+			set(base, 5);
+			flush_sync();
+			expect(get(d)).toBe(11); // (5*2) + 1
+		});
+	});
+
+	it('hooks work through .value accessors', () => {
+		root(() => {
+			const t = track(10, undefined, (current: unknown) => (current as number) * 2, (next: unknown) => Number(next));
+			expect(t.value).toBe(20);
+			t.value = '50';
+			expect(t.value).toBe(100);
+		});
+	});
+
+	it('block slot is untouched when a real block is passed (internal form)', () => {
+		const b = root(() => {});
+		const t = track(1, b as never);
+		expect(get(t)).toBe(1);
+		set(t, 2);
+		expect(get(t)).toBe(2);
+	});
+});
+
+// ============================================================
 // Effect tracking
 // ============================================================
 describe('Effect', () => {

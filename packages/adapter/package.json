@@ -1,6 +1,6 @@
 {
   "name": "@vesk/adapter",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "type": "module",
   "description": "Vesk adapter — builds deployable .vesk/ output for Deno and Node serverless",
   "main": "./dist/index.js",
@@ -18,14 +18,17 @@
     "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build"
   },
-  "dependencies": {
-    "@vesk/compiler": "^0.1.0",
-    "@vesk/runtime": "^0.1.0",
+  "optionalDependencies": {
     "esbuild": "^0.25.0",
     "sharp": "^0.35.3"
   },
+  "dependencies": {
+    "@vesk/compiler": "^0.1.0",
+    "@vesk/runtime": "^0.1.0"
+  },
   "devDependencies": {
     "@types/ws": "^8.18.1",
+    "esbuild-wasm": "^0.25.0",
     "typescript": "^5.8.0"
   },
   "license": "MIT",

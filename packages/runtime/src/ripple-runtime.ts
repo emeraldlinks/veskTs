@@ -417,23 +417,39 @@ class DerivedValue implements Derived {
 	}
 }
 
-export function tracked(v: unknown, block?: Block, get?: (value: unknown) => unknown, set?: (next: unknown, prev: unknown) => unknown): Tracked {
+export type GetHook = (value: unknown) => unknown;
+export type SetHook = (next: unknown, prev: unknown) => unknown;
+
+export function tracked(v: unknown, block?: Block, get?: GetHook, set?: SetHook): Tracked {
 	return new TrackedValue(v, block || active_block!, get || set ? { get, set } : empty_get_set);
 }
 
-export function derived(fn: () => unknown, block?: Block, get?: (value: unknown) => unknown, set?: (next: unknown, prev: unknown) => unknown): Derived {
+export function derived(fn: () => unknown, block?: Block, get?: GetHook, set?: SetHook): Derived {
 	return new DerivedValue(fn, block || active_block!, get || set ? { get, set } : empty_get_set);
 }
 
-export function track(v: unknown, b?: Block, get?: (value: unknown) => unknown, set?: (next: unknown, prev: unknown) => unknown): Tracked | Derived {
+export function track(v: unknown, b?: Block, get?: GetHook, set?: SetHook): Tracked | Derived;
+export function track(v: unknown, get: GetHook, set?: SetHook): Tracked;
+export function track(v: unknown, b?: Block | GetHook, get?: GetHook | SetHook, set?: SetHook): Tracked | Derived {
 	if (is_ripple_object(v)) {
 		return v as Tracked | Derived;
 	}
 
-	if (typeof v === 'function') {
-		return derived(v as () => unknown, b, get, set);
+	let hookGet: GetHook | undefined;
+	let hookSet: SetHook | undefined;
+	if (typeof b === 'function') {
+		hookSet = (set === undefined ? get : set) as SetHook | undefined;
+		hookGet = b as GetHook;
+		b = undefined;
+	} else {
+		hookGet = get as GetHook | undefined;
+		hookSet = set;
 	}
-	return tracked(v, b, get, set);
+
+	if (typeof v === 'function') {
+		return derived(v as () => unknown, b as Block | undefined, hookGet, hookSet);
+	}
+	return tracked(v, b as Block | undefined, hookGet, hookSet);
 }
 
 function create_dependency(tracked: Tracked | Derived): Dependency {

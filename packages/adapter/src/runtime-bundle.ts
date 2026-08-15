@@ -1,7 +1,7 @@
 import { writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import * as esbuild from 'esbuild';
+import * as esbuild from './esbuild-fallback.js';
 
 let buildId = 0;
 
@@ -129,7 +129,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     });
 
     if (result.errors.length > 0) {
-      throw new Error(`esbuild errors: ${result.errors.map(e => e.text).join(', ')}`);
+      throw new Error(`esbuild errors: ${result.errors.map((e: { text: string }) => e.text).join(', ')}`);
     }
     if (result.warnings.length > 0) {
       for (const w of result.warnings) console.error('vesk build warning:', w.text);

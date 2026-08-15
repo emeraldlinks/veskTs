@@ -8,7 +8,7 @@ import {
 import { isStaticIR, collectTrackedNames, transformTracked, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
-import { unwrapTrackCall, skipWhitespace, findBalancedEnd, startsWithIdentifier } from '@vesk/compiler/src/scan';
+import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, findBalancedEnd, startsWithIdentifier } from '@vesk/compiler/src/scan';
 import {
   isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
@@ -43,7 +43,8 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
   if (node instanceof ForLoop) return forLoopToJS(node, isAsync, tracked);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
-    const inner = unwrapTrackCall(node.init);
+    const unwrapped = unwrapTrackCall(node.init);
+    const inner = hasTopLevelComma(unwrapped) ? stripTrackGeneric(node.init) : unwrapped;
     const key = JSON.stringify(`${compKey(node)}:${node.name}`);
     return [
       `const ${cellName} = (() => {`,

@@ -302,3 +302,12 @@ export function hydrationCount(container: HTMLElement): number {
 	while (walker.nextNode());
 	return count;
 }
+
+export function hydrateInitial(
+	container: HTMLElement,
+	componentFn: (props: Record<string, unknown>, registry: Map<string, unknown>, walker: HydrateWalker) => unknown,
+	props?: Record<string, unknown>,
+): void {
+	const walker = createHydrateWalker(container);
+	componentFn(props || {}, new Map(), walker);
+}

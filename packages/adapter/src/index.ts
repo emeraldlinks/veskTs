@@ -190,7 +190,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
 
   function stripTailwindDirectives(css: string): string {
-    const blockStart = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/;
+    const blockStart = /^\s*@(theme\s*\{|layer\s+(components|utilities)\s*\{|utility\s+\w+\s*\{)/;
     let result = css.replace(/^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$/gm, '');
     result = result.replace(/^\s*@source\s+['"][^'"]+['"]\s*;?\s*$/gm, '');
     const output: string[] = [];

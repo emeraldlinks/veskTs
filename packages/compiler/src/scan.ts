@@ -209,6 +209,29 @@ export function splitTopLevel(text: string, sep: string): string[] {
 }
 
 /**
+ * True when `text` contains a `,` at bracket depth 0, outside strings and
+ * comments — i.e. a genuine multi-expression sequence rather than commas
+ * inside a call, object literal or parameter list.
+ */
+export function hasTopLevelComma(text: string): boolean {
+  let depth = 0;
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === '`') { i = skipString(text, i); continue; }
+    if (c === '/' && (text[i + 1] === '/' || text[i + 1] === '*')) { i = skipComment(text, i); continue; }
+    if (c === '(' || c === '[' || c === '{') depth++;
+    else if (c === ')' || c === ']' || c === '}') {
+      if (depth > 0) depth--;
+    } else if (depth === 0 && c === ',') {
+      return true;
+    }
+    i++;
+  }
+  return false;
+}
+
+/**
  * True when `text` contains a whole-identifier `of` or `in` at bracket
  * depth 0, outside strings and comments — used to tell `for (... of ...)`
  * and `for (... in ...)` headers apart from classic `for` loops.

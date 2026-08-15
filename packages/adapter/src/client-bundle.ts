@@ -1,7 +1,7 @@
 import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build, transformSync } from 'esbuild';
+import { build, transformSync } from './esbuild-fallback.js';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
@@ -364,7 +364,7 @@ async function buildMainBundle(
   runtimeImportNames?: Set<string>,
   routeDataCache?: number,
 ): Promise<string> {
-  const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps'];
+  const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps', 'matchRoute', 'ensureChunk'];
   const allRuntimeImports = runtimeImportNames && runtimeImportNames.size > 0
     ? [...new Set([...baseRuntimeImports, ...runtimeImportNames])]
     : baseRuntimeImports;
@@ -416,6 +416,7 @@ async function buildMainBundle(
     const resolveNamesFn = 'function __resolveNames(nodes) {\n' +
       '  for (const n of nodes) {\n' +
       "    if (n.chunk) n._chunk = n.chunk;\n" +
+      "    if (n.chunkError) n._chunkError = n.chunkError;\n" +
       "    if (typeof n.page === 'string') n._pageName = n.page;\n" +
       "    if (typeof n.layout === 'string') n._layoutName = n.layout;\n" +
       "    if (typeof n.error === 'string') n._errorName = n.error;\n" +
@@ -448,33 +449,32 @@ async function buildMainBundle(
       "  if (typeof document !== 'undefined') __router.start();\n" +
       '};\n' +
       "if (__pendChunks.length > 0 && typeof ensureChunk === 'function') {\n" +
-      '  Promise.all(__pendChunks.map(ensureChunk)).then(__startRouter);\n' +
+      "  Promise.all(__pendChunks.map(u => ensureChunk(u).catch(() => undefined))).then(__startRouter);\n" +
       '} else {\n' +
       '  __startRouter();\n' +
       '}\n';
 
+    // Chunks execute as classic scripts, so the bootstrap's chunk loader
+    // and route matcher must exist on globalThis before any chunk loads.
+    // Runtime names are only emitted when a chunk's compiled code imports
+    // them — otherwise an app without (say) keyed maps would reference an
+    // unimported `reconcile` and kill the whole module.
+    const globalNames = [
+      'reactiveProps', 'getActiveComponent', 'setActiveComponent', 'track',
+      'set', 'get', 'effect', 'destroy_block', 'reconcile', 'NavLink', 'Link',
+      'createHydrateWalker', 'needsHydration', 'hydrate', 'hydrateViewport',
+      'hydrateIdle', 'hydrateOnInteraction', 'collectVskMarkers',
+      'matchRoute', 'ensureChunk',
+    ];
+    const importedSet = new Set(allRuntimeImports);
     const runtimeGlobals =
-      'globalThis.reactiveProps = reactiveProps;\n' +
-      'globalThis.getActiveComponent = getActiveComponent;\n' +
-      'globalThis.setActiveComponent = setActiveComponent;\n' +
-      'globalThis.track = track;\n' +
-      'globalThis.set = set;\n' +
-      'globalThis.get = get;\n' +
-      'globalThis.effect = effect;\n' +
-      'globalThis.destroy_block = destroy_block;\n' +
-      'globalThis.reconcile = reconcile;\n' +
-      'globalThis.NavLink = NavLink;\n' +
-      'globalThis.Link = Link;\n' +
-      'globalThis.createHydrateWalker = createHydrateWalker;\n' +
-      'globalThis.needsHydration = needsHydration;\n' +
-      'globalThis.hydrate = hydrate;\n' +
-      'globalThis.hydrateViewport = hydrateViewport;\n' +
-      'globalThis.hydrateIdle = hydrateIdle;\n' +
-      'globalThis.hydrateOnInteraction = hydrateOnInteraction;\n' +
-      'globalThis.collectVskMarkers = collectVskMarkers;\n' +
+      globalNames
+        .filter(n => importedSet.has(n))
+        .map(n => `globalThis.${n} = ${n};\n`)
+        .join('') +
       'globalThis.__runtime_comps = __runtime_comps;\n' +
-       'globalThis.__cleanup = __cleanup;\n' +
-       'globalThis.__place = __place;\n\n';
+      'globalThis.__cleanup = __cleanup;\n' +
+      'globalThis.__place = __place;\n\n';
 
     const extraGlobals = [...(runtimeImportNames || [])]
       .filter(n => n && n !== 'default')

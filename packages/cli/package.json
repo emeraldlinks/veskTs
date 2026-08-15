@@ -1,10 +1,11 @@
 {
   "name": "vesk",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "type": "module",
-  "description": "Vesk — compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
+  "description": "Vesk \u2014 compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
   "bin": {
-    "vesk": "./dist/cli.js"
+    "vesk": "./dist/cli.js",
+    "haul": "./bin/haul.js"
   },
   "main": "./dist/cli.js",
   "dependencies": {
@@ -40,6 +41,14 @@
     "node": ">=20.0.0"
   },
   "files": [
-    "dist"
-  ]
+    "dist",
+    "bin"
+  ],
+  "optionalDependencies": {
+    "@vesk/haul-darwin-arm64": "0.1.12",
+    "@vesk/haul-darwin-x64": "0.1.12",
+    "@vesk/haul-linux-arm64": "0.1.12",
+    "@vesk/haul-linux-x64": "0.1.12",
+    "@vesk/haul-win32-x64": "0.1.12"
+  }
 }

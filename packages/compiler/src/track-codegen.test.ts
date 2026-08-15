@@ -98,5 +98,61 @@ test('client: plain init without track is unchanged', () => {
   expect(code).toContain('const plainCell = [3, 4];');
 });
 
+test('server stmt-mode: track(v, get, set) shorthand renders initial value', () => {
+  const source = `component App {
+    let &[count] = track(0, (current) => current, (next, prev) => typeof next === 'string' ? Number(next) : next)
+    <p>{count}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>0</p>');
+});
+
+test('server expr-mode: track(v, get, set) shorthand renders initial value', () => {
+  const source = `component App {
+    let &[count] = track(0, (current) => current, (next, prev) => typeof next === 'string' ? Number(next) : next)
+    return <p>{count}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>0</p>');
+});
+
+test('server: get hook is applied during SSR, matching client display', () => {
+  const source = `component App {
+    let &[count] = track(0, (current) => current.toFixed(2))
+    <p>{count}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>0.00</p>');
+});
+
+test('client stmt-mode: track(v, get, set) shorthand hooks are preserved verbatim', () => {
+  const source = `component App {
+    let &[count] = track(0, (current) => current.toFixed(2), (next, prev) => typeof next === 'string' ? Number(next) : next)
+    <p>{count}</p>
+  }`;
+  const code = compileClient(source, 'App', { hydrate: true });
+  expect(code).toContain("const count = track(0, (current) => current.toFixed(2), (next, prev) => typeof next === 'string' ? Number(next) : next);");
+  expect(code).notToContain('track(0);');
+});
+
+test('client expr-mode: track(v, get, set) shorthand hooks are preserved verbatim', () => {
+  const source = `component App {
+    let &[count] = track(0, (current) => current.toFixed(2), (next, prev) => typeof next === 'string' ? Number(next) : next)
+    return <p>{count}</p>
+  }`;
+  const code = compileClient(source, 'App', { hydrate: true });
+  expect(code).toContain("const count = track(0, (current) => current.toFixed(2), (next, prev) => typeof next === 'string' ? Number(next) : next);");
+  expect(code).notToContain('track(0);');
+});
+
+test('client: shorthand works with destructured raw cell', () => {
+  const source = `component App {
+    let &[count, rawCell] = track(0, (current) => current * 2, (next, prev) => typeof next === 'string' ? Number(next) : next)
+    <p>{count}</p>
+  }`;
+  const code = compileClient(source, 'App', { hydrate: true });
+  expect(code).toContain("const rawCell = track(0, (current) => current * 2, (next, prev) => typeof next === 'string' ? Number(next) : next);");
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

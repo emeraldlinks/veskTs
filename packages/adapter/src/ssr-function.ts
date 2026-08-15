@@ -180,7 +180,7 @@ export function generateSsrFunction(
       '    const stack = err && typeof err === \'object\' && \'stack\' in err ? String(err.stack) : \'\';',
       '    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: requestUrl || \'\' }), head: \'\' };',
       '  }',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',

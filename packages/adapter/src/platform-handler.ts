@@ -176,7 +176,7 @@ export interface BundlePlatformOptions {
 
 export async function bundlePlatformHandler(options: BundlePlatformOptions): Promise<void> {
   const { nodeBuiltins = false, outfile, entry } = options;
-  const esbuild = await import('esbuild');
+  const { build } = await import('./esbuild-fallback.js');
   const plugins = [];
   if (!nodeBuiltins) {
     plugins.push({
@@ -221,7 +221,7 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
       },
     });
   }
-  const result = await esbuild.build({
+  const result = await build({
     entryPoints: [entry],
     bundle: true,
     platform: nodeBuiltins ? 'node' : 'neutral',

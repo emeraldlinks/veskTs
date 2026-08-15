@@ -2,7 +2,7 @@
 
 > Living task tracker. Read at start of every session. Update after every unit of work.
 
-**Current phase:** 5 (CLI + Dev Tooling)
+**Current phase:** haul
 
 **Total tests:** compiler 739 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 24 + parser 79 + server-codegen 99 + integration 111 + client-codegen 160 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 121
 **Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
@@ -114,10 +114,12 @@
 
 ## Current Session Work
 
-### Focus: SPA route-data freshness + data-error rendering + `vesk typecheck`
-- [x] **`routeDataCache` config option** — new `VeskConfig.routeDataCache` (ms), default **0 = always fetch fresh server data on every SPA visit** (old session cache reused data up to 5 min). Positive TTL emits `createFileRouter(__routeTree, { routeDataCache: <ms> })` in the client bundle via `buildRouterOpts()`; default 0 emits a bare call. Wired compiler → adapter `build()` → CLI build/dev (`buildClientBundle`).
-- [x] **SPA data-error rendering** — when the `X-Vesk-Data` response is a 500 `{ error }` JSON payload, the router renders the route error component (nav + footer survive) instead of silently falling back to an HTML fetch. `fetchRouteData` parses the payload into `{ error, statusCode }`; `applyRouteData` converts it to an `Error` and calls `renderErrorPage`. Dev server data branches now return `{ error }` JSON 500 on render throws, matching the prod adapter. New fixture `test-app/app/dataerror/`; hydration-test Test 17d + crawl `/dataerror` (500 expected). 279 hydration tests green.
-- [x] **`vesk typecheck` CLI command** — `vesk typecheck [--no-strict]` runs `typecheckProject` over `.vsk` + `.ts`, prints formatted diagnostics, exits 1 on errors. Fixed `vskToTsx` track-decl rewrite `const let` + `;;` bug (test-app dropped 12 → 0 errors); extended typecheck `AMBIENT` with auto-imported runtime names. 26 vsk-tsx + 8 typecheck tests.
+### Focus: haul — native engine + CLI replacement
+- [ ] **Phase 0** — Make `esbuild` + `sharp` optionalDependencies; wire esbuild-wasm fallback; verify `npm install` never SIGILLs
+- [ ] **Phase 1** — Native `haul` Go binary (build/dev/start/seo/typecheck); embed esbuild-Go tree-shaker + minifier (`GOAMD64=v1`, `GOARM=7`); native TS stripper; Node sidecar for `.vsk` transforms + typecheck only; remove all 6 JS esbuild call sites; differential fuzz gate vs current esbuild output
+- [ ] **Phase 2** — Persistent `.vesk-cache/`, parallel module graph, lazy dev compilation, shared-chunk code-splitting
+- [ ] **Phase 3** — Security hardening: import allowlists, hashed assets + SRI, eval-free scanner (`haul audit`), dev-server hardening, secret redaction
+- [ ] **Phase 4** — Native `.vsk` parser/IR port (drop sidecar); optional vesk-owned tree-shaker/minifier behind differential gate
 
 ### Focus: async components + error isolation + hydration error reporting
 - [x] **Async component breaks hydration silently** — fixed. Async-child propagation in client codegen (`async` parent scope + `await`, resolved fragment appended) + SSR awaits async children; `/async` full-page-reload hydration verified (data persists, markers claimed, zero errors) via hydration-test 12/13 + browser probes.
@@ -216,6 +218,44 @@ Phase 6 is docs + examples; the items below should be closed first (blockers / i
 - [ ] Transitions / animations
 - [x] Form actions (progressive enhancement)
 - [ ] Headless component primitives (Show/For/Switch/Match)
+
+---
+
+## haul
+
+> Native Go engine + CLI replacement. See `/docs/haul.md` for full proposal.
+
+### Phase 0 — esbuild/sharp → optionalDeps + fallback
+- [ ] Make `esbuild` and `sharp` optionalDependencies in root `package.json`
+- [ ] Wire esbuild-wasm fallback path with friendly warning when native binary unavailable
+- [ ] Verify `npm install` never hard-fails on unsupported CPU (SIGILL devices)
+
+### Phase 1 — haul binary (native CLI + bundler core)
+- [ ] Go static binary implementing `haul build`/`dev`/`start`/`seo`/`typecheck`
+- [ ] Embed esbuild-Go tree-shaker + minifier (conservative `GOAMD64=v1` / `GOARM=7`)
+- [ ] Native TS stripper (Go) for routes, API, HMR content
+- [ ] Node sidecar (`vesk-compiler`) for `.vsk` IR transforms + `typecheck` only; long-lived, batched JSON-RPC
+- [ ] Remove all 6 JS esbuild call sites from `packages/adapter/src/` (client-bundle, runtime bundle, api-function, dev-server, hmr, edge-entry)
+- [ ] Differential fuzz harness: tree-shake/minify output parity vs current esbuild
+- [ ] All 739 compiler tests + 257 runtime tests + 121 hydration tests green on `haul`
+
+### Phase 2 — Persistent cache + lazy dev
+- [ ] Content-addressed `.vesk-cache/` shared across dev/build/CI
+- [ ] Parallel module graph (goroutine pool over parse/resolve/transform)
+- [ ] Lazy dev compilation (first-request route/module only)
+- [ ] Shared-chunk code-splitting with deterministic hashed filenames
+
+### Phase 3 — Security hardening
+- [ ] Import allowlists (no absolute paths, no `node:` in client bundles)
+- [ ] Hashed assets + SRI manifest emitted to `static/`
+- [ ] Eval-free output scanner + `haul audit` command
+- [ ] Dev-server hardening (path-traversal-proof, no dir listing, CSP headers)
+- [ ] Secret redaction in native logger
+
+### Phase 4 — Native `.vsk` parser/IR (drop sidecar)
+- [ ] Port `.vsk` parser + IR transforms to Go
+- [ ] Optional vesk-owned tree-shaker/minifier behind differential gate
+- [ ] Full suite green with sidecar off
 
 ---
 

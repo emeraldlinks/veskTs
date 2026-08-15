@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { transformSync } from 'esbuild';
+import { transformSync } from './esbuild-fallback.js';
 import type { ApiRouteNode, ApiFunctionOptions } from '@vesk/adapter/src/types';
 
 function apiRouteName(fullPath: string): string {

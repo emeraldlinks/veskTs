@@ -29,3 +29,14 @@ await esbuild.build({
     },
   }],
 });
+
+await esbuild.build({
+  entryPoints: [resolve(__dirname, '..', 'haul', 'internal', 'sidecar', 'server.ts')],
+  bundle: true,
+  platform: 'node',
+  target: 'node20',
+  outfile: resolve(__dirname, 'dist/sidecar.js'),
+  format: 'esm',
+  sourcemap: false,
+  external: ['typescript', '@vesk/compiler', '@vesk/compiler/*', '@vesk/runtime', '@vesk/runtime/*', 'esbuild', 'esbuild-wasm'],
+});

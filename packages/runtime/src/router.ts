@@ -55,6 +55,11 @@ interface RouterOptions {
 }
 
 const loadedChunks = new Set<string>();
+const failedChunks = new Map<string, Error>();
+
+function chunkLoadError(chunkUrl: string): Error | undefined {
+	return failedChunks.get(chunkUrl);
+}
 
 function ensureChunk(chunkUrl: string): Promise<void> {
 	if (!chunkUrl || loadedChunks.has(chunkUrl)) return Promise.resolve();
@@ -65,13 +70,23 @@ function ensureChunk(chunkUrl: string): Promise<void> {
 	return new Promise<void>((resolve, reject) => {
 		const s = document.createElement('script');
 		s.src = chunkUrl;
-		s.onload = () => resolve();
+		s.onload = () => {
+			failedChunks.delete(chunkUrl);
+			resolve();
+		};
 		s.onerror = () => {
 			loadedChunks.delete(chunkUrl);
-			reject(new Error(`Failed to load chunk: ${chunkUrl}`));
+			const err = new Error(`Failed to load chunk: ${chunkUrl}`);
+			failedChunks.set(chunkUrl, err);
+			reject(err);
 		};
 		document.head.appendChild(s);
 	});
+}
+
+/** Loads pending chunks without letting a single failed chunk abort the flow. */
+function loadChunksQuietly(urls: string[]): Promise<void> {
+	return Promise.all(urls.map((u) => ensureChunk(u).catch(() => undefined))).then(() => undefined);
 }
 
 function hasPendingChunks(nodes: RouteNode[]): string[] {
@@ -130,11 +145,11 @@ async function fetchRouteData(path: string): Promise<RouteDataResult | null> {
 	}
 }
 
-function getRouteData(path: string): Promise<RouteDataResult | null> {
-	const key = path;
+function getRouteData(path: string, scope?: string): Promise<RouteDataResult | null> {
+	const key = scope === undefined ? path : path + '\u0000' + scope;
 	const existing = _dataPromises.get(key);
 	if (existing) return existing;
-	const p = fetchRouteData(key).finally(() => { _dataPromises.delete(key); });
+	const p = fetchRouteData(path).finally(() => { _dataPromises.delete(key); });
 	_dataPromises.set(key, p);
 	return p;
 }
@@ -145,6 +160,29 @@ function findPageNode(match: RouteMatch): RouteNode | null {
 		if (chain[i].page) return chain[i];
 	}
 	return null;
+}
+
+/**
+ * A route whose component chunk failed to load (or failed to compile) must
+ * surface as an error page for that route only — never as a 404, and never
+ * as a thrown exception that breaks the rest of the app.
+ */
+function findPageNodeOrFailed(match: RouteMatch): RouteNode | null {
+	const chain = match.matchChain;
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].page || chain[i]._pageName) return chain[i];
+	}
+	return null;
+}
+
+function chunkErrorForNode(node: RouteNode | null): Error | undefined {
+	if (!node) return undefined;
+	if (node._chunk) {
+		const err = chunkLoadError(node._chunk as string);
+		if (err) return err;
+	}
+	if (node._chunkError) return new Error(String(node._chunkError));
+	return undefined;
 }
 
 async function renderNotFound(
@@ -350,10 +388,7 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
-	let pageNode: RouteNode | null = null;
-	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].page) { pageNode = chain[i]; break; }
-	}
+	let pageNode: RouteNode | null = findPageNodeOrFailed(match);
 
 	const mountNotFound = (nfDom: unknown): void => {
 		if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
@@ -384,6 +419,19 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		}
 		container.innerHTML = '<h1>404 — Not Found</h1>';
 		return;
+	}
+
+	// The route matched and has a page name, but its component chunk failed
+	// to load or compile. Render the route's error boundary (or a generic
+	// error page) without touching any other route's components.
+	if (!pageNode.page && pageNode._pageName) {
+		const chunkErr = chunkErrorForNode(pageNode);
+		return renderErrorPage(
+			router,
+			match,
+			container,
+			chunkErr || new Error(`Component "${pageNode._pageName}" is unavailable`),
+		);
 	}
 
 	const layoutNodes = chain.filter(n => n.layout);
@@ -554,9 +602,12 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 }
 
 // Constructs the error object used when the server already rendered an error
-// page for this route (the DOM carries the `vesk-ssr-error` marker).
-function makeSsrError(): Error {
-	const e = new Error('Internal Server Error');
+// page for this route (the DOM carries the `vesk-ssr-error` marker). The
+// marker optionally carries the URI-encoded server error message so the
+// client-side error boundary can render the real reason instead of a generic
+// one.
+function makeSsrError(message?: string): Error {
+	const e = new Error(message || 'Internal Server Error');
 	(e as Error & { statusCode?: number }).statusCode = 500;
 	return e;
 }
@@ -636,10 +687,7 @@ async function hydrateInitial(
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
-	let pageNode: RouteNode | null = null;
-	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].page) { pageNode = chain[i]; break; }
-	}
+	let pageNode: RouteNode | null = findPageNodeOrFailed(match);
 	if (!pageNode) {
 		const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
 		if (notFoundFn) {
@@ -658,24 +706,48 @@ async function hydrateInitial(
 	// on the server) the DOM holds error-component markup, not page markup.
 	// Rendering the error component client-side instead of hydrating the page
 	// against mismatched markers keeps the initial load from exploding.
-	const ssrErrorMarker = ((): boolean => {
+	const ssrErrorMarker = ((): string | null => {
 		const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
 		while (walker.nextNode()) {
-			if (walker.currentNode.nodeValue === 'vesk-ssr-error') return true;
+			const v = walker.currentNode.nodeValue;
+			if (v && v.startsWith('vesk-ssr-error')) {
+				return v.slice('vesk-ssr-error'.length);
+			}
 		}
-		return false;
+		return null;
 	})();
 	set(_state.params, paramValues);
 	set(_state.path, match.pathname || window.location.pathname);
 	set(_state.search, window.location.search || '');
-	if (ssrErrorMarker) {
-		await renderErrorPage(router, match, container, makeSsrError());
+	if (ssrErrorMarker !== null) {
+		let message = 'Internal Server Error';
+		if (ssrErrorMarker.startsWith(':')) {
+			try {
+				message = decodeURIComponent(ssrErrorMarker.slice(1));
+			} catch {
+				// malformed payload — keep the generic message
+			}
+		}
+		await renderErrorPage(router, match, container, makeSsrError(message));
 		return;
 	}
 
 	const layoutNodes = chain.filter(n => n.layout);
 
 	const hydrators = router.__hydrators;
+	if (!pageNode.page && !(hydrators && pageNode._pageName && hydrators[pageNode._pageName as string])) {
+		// The route's component chunk failed to load or compile. Render the
+		// error boundary for this route instead of hydrating nothing.
+		const chunkErr = chunkErrorForNode(pageNode);
+		await renderErrorPage(
+			router,
+			match,
+			container,
+			chunkErr || new Error(`Component "${pageNode._pageName}" is unavailable`),
+		);
+		return;
+	}
+
 	const hydPage: (props: Record<string, unknown>, registry: Map<string, unknown>, walker: HydrateWalker) => unknown = hydrators && pageNode._pageName
 		? (hydrators[pageNode._pageName as string] || pageNode.page)! as (props: Record<string, unknown>, registry: Map<string, unknown>, walker: HydrateWalker) => unknown
 		: pageNode.page! as (props: Record<string, unknown>, registry: Map<string, unknown>, walker: HydrateWalker) => unknown;
@@ -854,7 +926,7 @@ export function createRouter(
 
 			let firstRenderFailed = false;
 
-			const doRender = () => {
+			const updateUrl = () => {
 				if (!opts.replace) {
 					window.history.pushState({ path: url.pathname }, '', url.pathname);
 				} else {
@@ -862,6 +934,9 @@ export function createRouter(
 				}
 				set(_state.path, url.pathname);
 				set(_state.search, url.search);
+			};
+
+			const renderContent = () => {
 				try {
 					renderMatch(this, match!, this.container);
 				} catch (e) {
@@ -872,10 +947,15 @@ export function createRouter(
 				handleScroll(url.pathname, opts.replace);
 			};
 
+			const doRender = () => {
+				updateUrl();
+				renderContent();
+			};
+
 			const fetchData = () => {
 				if (firstRenderFailed) return;
 				if (!shouldFetchData(this, match!)) return;
-			getRouteData(url.pathname + url.search).then(async (data) => {
+			getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
 				if (navToken !== this._navToken) return;
 				if (!data) return;
 				if (data.redirect) {
@@ -903,7 +983,7 @@ export function createRouter(
 			this._prefetched = this._prefetched || new Map();
 			this._prefetched.set(url.pathname, match);
 			if (typeof document === 'undefined') return;
-			getRouteData(url.pathname + url.search).then((data) => {
+			getRouteData(url.pathname + url.search, 'prefetch').then((data) => {
 				if (data) storePrefetchedData(match!, data);
 			});
 		},
@@ -1072,7 +1152,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 			let firstRenderFailed = false;
 
-			const doRender = () => {
+			const updateUrl = () => {
 				const fullUrl = url.pathname + url.search;
 				if (!opts.replace) {
 					window.history.pushState({ path: fullUrl }, '', fullUrl);
@@ -1081,6 +1161,18 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				}
 				set(_state.path, url.pathname);
 				set(_state.search, url.search);
+			};
+
+			const renderContent = () => {
+				// Data isolation: route nodes are shared singletons. When the
+				// navigation changes the path a node was last hydrated with, its
+				// cached props must not render on the new path (a params-only or
+				// failed data payload would otherwise merge stale foreign data
+				// into the new page).
+				const propsNode = findPageNode(match!);
+				if (propsNode && propsNode._dataPath !== url.pathname) {
+					propsNode.props = undefined;
+				}
 				try {
 					renderFn(router, match!, container);
 				} catch (e) {
@@ -1091,10 +1183,15 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				handleScroll(url.pathname, opts.replace);
 			};
 
+			const doRender = () => {
+				updateUrl();
+				renderContent();
+			};
+
 			const fetchData = () => {
 				if (firstRenderFailed) return;
 				if (!shouldFetchData(router, match!)) return;
-				getRouteData(url.pathname + url.search).then(async (data) => {
+				getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
 					if (navToken !== router._navToken) return;
 					if (!data) return;
 					if (data.redirect) {
@@ -1104,7 +1201,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					if (!hasRealPageData(data)) return;
 					const pending = hasPendingChunks(match!.matchChain);
 					if (pending.length > 0) {
-						await Promise.all(pending.map(ensureChunk));
+						await loadChunksQuietly(pending);
 						if (navToken !== router._navToken) return;
 						if (typeof router.__updateComponents === 'function') {
 							router.__updateComponents(match!.matchChain);
@@ -1117,12 +1214,19 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			const pendingChunks = hasPendingChunks(match.matchChain);
 
 			const doRenderWithChunks = pendingChunks.length > 0
-				? () => Promise.all(pendingChunks.map(ensureChunk)).then(() => {
-					if (typeof router.__updateComponents === 'function') {
-						router.__updateComponents(match!.matchChain);
-					}
-					doRender();
-				})
+				? () => {
+					updateUrl();
+					return loadChunksQuietly(pendingChunks).then(() => {
+						// A newer navigation (e.g. popstate back while the chunk
+						// was still loading) may have superseded this one; don't
+						// paint the stale route over the current URL.
+						if (navToken !== router._navToken) return;
+						if (typeof router.__updateComponents === 'function') {
+							router.__updateComponents(match!.matchChain);
+						}
+						renderContent();
+					});
+				}
 				: (() => { doRender(); }) as (() => Promise<void>) | (() => void);
 
 			async function runMwChain(index: number): Promise<void> {
@@ -1186,7 +1290,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			const preloadUrls = hasPendingChunks(match.matchChain);
 			preloadUrls.forEach(ensureChunk);
 			if (typeof document === 'undefined') return;
-			getRouteData(url.pathname + url.search).then((data) => {
+			getRouteData(url.pathname + url.search, 'prefetch').then((data) => {
 				if (data) storePrefetchedData(match!, data);
 			});
 		},

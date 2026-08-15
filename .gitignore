@@ -5,3 +5,22 @@ dist/
 ripple-fork-source/
 test-app/node_modules
 chrome-headless-shell/
+
+# haul native binaries (built per-platform)
+packages/haul-linux-x64/bin/
+packages/haul-linux-arm64/bin/
+packages/haul-darwin-x64/bin/
+packages/haul-darwin-arm64/bin/
+packages/haul-win32-x64/bin/
+packages/haul-*/vesk-haul-*.tgz
+packages/haul/*
+!packages/haul/cmd/
+!packages/haul/internal/
+!packages/haul/go.mod
+!packages/haul/go.sum
+
+# npm pack outputs left in package dirs
+packages/adapter/*.tgz
+packages/cli/*.tgz
+packages/runtime/*.tgz
+/*.tgz

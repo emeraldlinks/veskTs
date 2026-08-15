@@ -12,6 +12,7 @@ import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router'
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
+import type { ChunkEntry } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
@@ -107,10 +108,11 @@ export async function startDevServer(port: number, projectDir: string, config: R
   } catch (e) {
     LOG.warn('package auto-build failed:', (e as Error).message);
   }
-  const runtimeDir = resolveRuntimeDir(projectDir);
-  if (!runtimeDir) {
+  const runtimeDirUnchecked = resolveRuntimeDir(projectDir);
+  if (!runtimeDirUnchecked) {
     process.exit(1);
   }
+  const runtimeDir: string = runtimeDirUnchecked;
   const devPlugins = (config.plugins || []) as { onBuildStart?: () => Promise<void>; onCSS?: (css: string, path: string) => Promise<string | null> }[];
 
   let devUserCssContent = '';
@@ -147,33 +149,70 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
   let routeTree: RouteNode[] = scanRoutes(appDirPath);
   let clientBundle = '';
+  let clientChunks = new Map<string, string>();
   let runtimeBundle = '';
+
+  function runtimeImportNamesFrom(clientJs: string): string[] | null {
+    const m = clientJs.match(/^import\s*\{([^}]*)\}\s*from\s*['"]\/_vesk\/runtime\.js['"];?\s*$/m);
+    if (!m) return null;
+    const names = m[1].split(',').map((s) => s.trim()).filter(Boolean);
+    return names.length > 0 ? names : null;
+  }
 
   async function bundleRuntime() {
     try {
-      const available = runtimeExportNames(runtimeDir);
-      runtimeBundle = await buildTreeShakenRuntime(runtimeDir, [...available]);
+      const used = runtimeImportNamesFrom(clientBundle) ?? [...runtimeExportNames(runtimeDir)].filter((n): n is string => !!n);
+      runtimeBundle = await buildTreeShakenRuntime(runtimeDir, used);
     } catch (e) {
       LOG.err(`runtime bundle error:`, (e as Error).message);
     }
   }
 
+  function storeChunks(chunks: ChunkEntry[]): void {
+    const next = new Map<string, string>();
+    for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
+    clientChunks = next;
+  }
+
   async function buildClientBundle() {
     try {
-      const { main } = await generateClientBundle(routeTree, appDirPath, new Map(), {
+      const { main, chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
         importRuntime: true,
         hmr: true,
+        codeSplit: true,
         ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
       clientBundle = main;
+      storeChunks(chunks);
     } catch (e) {
       LOG.err(`client build error:`, (e as Error).message);
       throw e;
     }
   }
 
-  await bundleRuntime();
+  /**
+   * Rebuilds only the route chunks. The main bundle is left untouched so a
+   * broken route can never blank the client app; on error the previous chunk
+   * map is kept and the error is broadcast over HMR.
+   */
+  async function buildClientChunks(): Promise<Error | null> {
+    try {
+      const { chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
+        importRuntime: true,
+        hmr: true,
+        codeSplit: true,
+        ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
+      });
+      storeChunks(chunks);
+      return null;
+    } catch (e) {
+      LOG.err(`client chunks build error:`, (e as Error).message);
+      return e as Error;
+    }
+  }
+
   await buildClientBundle();
+  await bundleRuntime();
 
   const sourceToComponents = new Map<string, string[]>();
 
@@ -231,14 +270,22 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({ type: 'compiling' });
               }
 
+              const stripAnnots = (t: unknown): string =>
+                JSON.stringify(t, (k, v) => (k === 'chunk' || k === 'chunkError') ? undefined : v);
+              const prevTree = stripAnnots(routeTree);
               routeTree = scanRoutes(appDirPath);
               updateSourceMapping();
               const changedComponents = sourceToComponents.get(fullPath) || [];
+              const treeChanged = prevTree !== stripAnnots(routeTree);
 
-              clientBundle = '';
               let bundleError: Error | null = null;
               try {
-                await buildClientBundle();
+                if (treeChanged) {
+                  await buildClientBundle();
+                  await bundleRuntime();
+                } else {
+                  bundleError = await buildClientChunks();
+                }
               } catch (e) {
                 bundleError = e as Error;
                 LOG.err(`client build error:`, (e as Error).message);
@@ -462,6 +509,14 @@ export async function startDevServer(port: number, projectDir: string, config: R
       res.writeHead(200, { 'Content-Type': 'application/javascript' });
       res.end(clientBundle);
       return;
+    }
+    if (url.pathname.startsWith('/_vesk/static/') && url.pathname.endsWith('.js')) {
+      const code = clientChunks.get(url.pathname);
+      if (code !== undefined) {
+        res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
+        res.end(code);
+        return;
+      }
     }
     if (url.pathname === '/_vesk/ssr-data.js') {
       const token = url.searchParams.get('t') || '';
@@ -918,15 +973,24 @@ export async function startDevServer(port: number, projectDir: string, config: R
   await new Promise(() => {});
 }
 
+const TAILWIND_BLOCK = /^\s*@(theme\s*\{|layer\s+(components|utilities)\s*\{|utility\s+\w+\s*\{)/;
+const LAYER_BASE = /^\s*@layer\s+base\s*\{/;
+
 function stripTailwindDirectives(css: string): string {
-  const blockStart = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/;
-  css = css.replace(/^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$/gm, '');
-  css = css.replace(/^\s*@source\s+['"][^'"]+['"]\s*;?\s*$/gm, '');
   const lines = css.split('\n');
   const result: string[] = [];
   let i = 0;
   while (i < lines.length) {
-    if (blockStart.test(lines[i].trim())) {
+    const line = lines[i].trim();
+    if (line.startsWith("@import 'tailwindcss'") || line.startsWith('@import "tailwindcss"')) {
+      i++;
+      continue;
+    }
+    if (line.startsWith('@source ')) {
+      i++;
+      continue;
+    }
+    if (TAILWIND_BLOCK.test(line)) {
       let braceCount = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
       i++;
       while (i < lines.length && braceCount > 0) {
