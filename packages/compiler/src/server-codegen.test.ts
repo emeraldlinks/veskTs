@@ -3,7 +3,7 @@
  *
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
-import { render, renderPage, irNodeToJS } from '@vesk/compiler/src/server-codegen';
+import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate } from '@vesk/compiler/src/server-codegen';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
@@ -879,6 +879,56 @@ describe('Async Discipline', () => {
 		}
 	});
 
+	it('SSR data stays isolated per page — no useFetch means no data script', async () => {
+		const savedFetch = globalThis.fetch;
+		globalThis.fetch = (url: unknown) => Promise.resolve({
+			ok: true,
+			json: () => Promise.resolve('payload-for-' + url),
+		}) as any;
+		try {
+			const withFetch = await renderFullPage(`
+				component Data() {
+					const d = useFetch('/api/a')
+					<p>{d.data ?? 'loading'}</p>
+				}
+			`, 'Data', {}, new Map(), { hydrate: true });
+			expect(withFetch).toContain('__vsk_ssr_data');
+			expect(withFetch).toContain('/api/a');
+
+			const withoutFetch = await renderFullPage(`
+				component Plain() {
+					<p>no data here</p>
+				}
+			`, 'Plain', {}, new Map(), { hydrate: true });
+			expect(withoutFetch).not.toContain('__vsk_ssr_data');
+			expect(withoutFetch).not.toContain('/api/a');
+		} finally {
+			globalThis.fetch = savedFetch;
+		}
+	});
+
+	it('concurrent SSR renders never mix useFetch data (AsyncLocalStorage)', async () => {
+		const savedFetch = globalThis.fetch;
+		globalThis.fetch = (url: unknown) => new Promise((res) =>
+			setTimeout(() => res({ ok: true, json: () => Promise.resolve('v-' + url) } as any), 15)
+		);
+		try {
+			const mk = (url: string, comp: string) => renderFullPage(`
+				component ${comp}() {
+					const d = useFetch('${url}')
+					<p>{d.data ?? 'loading'}</p>
+				}
+			`, comp, {}, new Map(), { hydrate: true });
+			const [h1, h2] = await Promise.all([mk('/api/one', 'One'), mk('/api/two', 'Two')]);
+			expect(h1).toContain('/api/one');
+			expect(h1).not.toContain('/api/two');
+			expect(h2).toContain('/api/two');
+			expect(h2).not.toContain('/api/one');
+		} finally {
+			globalThis.fetch = savedFetch;
+		}
+	});
+
 	it('layout rendering a slot does not need async', async () => {
 		const html = await render(`
 			async component Page() {
@@ -1068,6 +1118,67 @@ describe('Root Event Delegation', () => {
 		expect(code).toContain('__vesk_dlg_click');
 		expect(code).toContain('data-vsk-ev');
 		expect(code).toContain('__evh_click');
+	});
+});
+
+describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
+	const pageSrc = `component App(props: { name: string }) {
+		<div>Hello, {props.name}!</div>
+	}`;
+
+	function hydratePrecompile(source) {
+		setVskHydrate(true);
+		try {
+			return compileFile(source);
+		} finally {
+			setVskHydrate(false);
+		}
+	}
+
+	function plainPrecompile(source) {
+		setVskHydrate(false);
+		try {
+			return compileFile(source);
+		} finally {
+			setVskHydrate(false);
+		}
+	}
+
+	it('renderPage with hydrate-precompiled cached emits markers', async () => {
+		const cached = hydratePrecompile(pageSrc);
+		const result = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		setVskHydrate(false);
+		expect(result.body).toBe('<!--vsk--><div>Hello, W!</div>');
+	});
+	it('renderPage with non-hydrate-precompiled cached omits markers (regression guard)', async () => {
+		const cached = plainPrecompile(pageSrc);
+		const result = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		setVskHydrate(false);
+		expect(result.body).toBe('<div>Hello, W!</div>');
+	});
+	it('cached hydrate render matches fresh compile render', async () => {
+		const cached = hydratePrecompile(pageSrc);
+		const viaCache = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		setVskHydrate(false);
+		const viaFresh = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true });
+		setVskHydrate(false);
+		expect(viaCache.body).toBe(viaFresh.body);
+	});
+	it('renderFullPage with hydrate-precompiled cached emits markers', async () => {
+		const cached = hydratePrecompile(pageSrc);
+		const html = await renderFullPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		setVskHydrate(false);
+		expect(html).toContain('<!--vsk-->');
+		expect(html).toContain('Hello, W!');
+	});
+	it('renderPageStream with hydrate-precompiled cached emits markers', async () => {
+		const cached = hydratePrecompile(pageSrc);
+		const stream = renderPageStream(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		setVskHydrate(false);
+		expect(out).toContain('<!--vsk-->');
+		expect(out).toContain('<div>Hello, W!</div>');
 	});
 });
 

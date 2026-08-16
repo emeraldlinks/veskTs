@@ -147,6 +147,7 @@ export interface FullPageOptions {
   hydrate?: boolean;
   sourcePath?: string;
   externalDataScript?: ExternalDataScript;
+  cached?: CompileFileResult;
 }
 
 export const VESK_BUILTINS = [

@@ -828,6 +828,52 @@ testAsync('routeDataCache TTL: revisit within TTL reuses, after expiry refetches
 	}
 });
 
+	testAsync('lazy chunked route fetches route data even before its chunk loads', async () => {
+	const container = document.createElement('div');
+	let fetchCount = 0;
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async (path, init) => {
+		fetchCount++;
+		expect(init.headers['X-Vesk-Data']).toBe('1');
+		return mockFetchResponse({ props: { msg: 'lazy-fresh' }, head: '' });
+	};
+	try {
+		// Lazy file-route nodes: `_pageName` is set but `page` is not wired yet
+		// (their chunks are still loading), exactly like the first SPA visit to
+		// a chunked route. fetchData runs before the chunk resolves; it must
+		// still issue the data fetch (the route node is findable via _pageName).
+		const lazyNode = {
+			path: 'lazy',
+			fullPath: '/lazy',
+			isGroup: false,
+			isDynamic: false,
+			isCatchAll: false,
+			_pageName: 'Page_Lazy',
+			_chunk: '/_vesk/static/page-lazy.js',
+			children: [],
+		};
+		const tree = [
+			{
+				path: '',
+				fullPath: '/',
+				isGroup: false,
+				isDynamic: false,
+				isCatchAll: false,
+				segmentCount: 0,
+				children: [lazyNode],
+			},
+		];
+		const router = createFileRouter(tree, { container });
+		router.navigate('/lazy', { replace: true });
+		// The chunk never resolves in jsdom, but the data fetch must already
+		// have been issued synchronously in navigate's finally block.
+		await tick(5);
+		expect(fetchCount).toBe(1);
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
 testAsync('server data error renders the route error component', async () => {
 	const container = document.createElement('div');
 	const origFetch = globalThis.fetch;

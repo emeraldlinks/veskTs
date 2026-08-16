@@ -5,13 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/emeraldlinks/vesk/haul/internal/vsk"
-	"github.com/evanw/esbuild/pkg/api"
 )
 
 // RPCClient is the slice of the sidecar client the bundler needs. It is
@@ -65,52 +63,10 @@ func (s *orderedSet) has(v string) bool { return s.seen[v] }
 
 // The following text transformations mirror packages/adapter/src/client-bundle.ts.
 // They operate on emitted client code (adapter-level text processing), not on
-// source syntax.
-
-var (
-	reRuntimeImport   = regexp.MustCompile(`(?m)^import\s*\{[^}]*\}\s*from\s*['"]@vesk/runtime['"];?\s*\n?`)
-	reComponentsDecl  = regexp.MustCompile(`const\s+__components\s*=\s*\{\};\s*\n?`)
-	reCleanupFn       = regexp.MustCompile(`(?m)^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?`)
-	rePlaceFn         = regexp.MustCompile(`(?m)^function __place\(start, end, nodes, fallback\) \{[\s\S]*?\n\}\s*\n?`)
-	reVskImport       = regexp.MustCompile(`(?m)^import\s*\{[^}]*\}\s*from\s*['"][^'"]*\.vsk['"];?\s*\n?`)
-	reExportDefault   = regexp.MustCompile(`(?m)^export\s+default\s+__components\[.*?\];?\s*\n?`)
-	reExportComp      = regexp.MustCompile(`(?m)^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?`)
-	reRuntimeImports  = regexp.MustCompile(`(?m)^import\s*\{([^}]*)\}\s*from\s*['"]@vesk/runtime['"];?\s*\n?`)
-	reExportFromNames = regexp.MustCompile(`export\s*\{([^}]+)\}\s*from`)
-)
-
-func collectRuntimeImports(code string, out *orderedSet) {
-	for _, m := range reRuntimeImports.FindAllStringSubmatch(code, -1) {
-		for _, raw := range strings.Split(m[1], ",") {
-			trimmed := strings.TrimSpace(raw)
-			if i := strings.Index(trimmed, " as "); i >= 0 {
-				trimmed = strings.TrimSpace(trimmed[:i])
-			}
-			if trimmed == "" || strings.HasPrefix(trimmed, "type ") || strings.HasPrefix(trimmed, "typeof ") {
-				continue
-			}
-			out.add(trimmed)
-		}
-	}
-}
-
-func stripRuntimeImport(code string) string {
-	code = reRuntimeImport.ReplaceAllString(code, "")
-	code = reComponentsDecl.ReplaceAllString(code, "")
-	code = reCleanupFn.ReplaceAllString(code, "")
-	code = rePlaceFn.ReplaceAllString(code, "")
-	return code
-}
-
-func stripVskImports(code string) string {
-	return reVskImport.ReplaceAllString(code, "")
-}
-
-func stripExports(code string) string {
-	code = reExportDefault.ReplaceAllString(code, "")
-	code = reExportComp.ReplaceAllString(code, "")
-	return code
-}
+// source syntax. Scaffolding stripping (runtime imports, `.vsk` imports, the
+// `const __components = {};` declaration, the `__cleanup`/`__place` helpers and
+// the component exports) happens in the sidecar's tokenizer/AST postprocessor
+// (see sidecar/client-postprocess.ts); no regexes here.
 
 func trimBlankLines(code string) string {
 	code = strings.TrimLeft(code, "\n")
@@ -189,70 +145,21 @@ func uniqueStrings(in []string) []string {
 
 // buildTreeShakenRuntime bundles the used runtime export names into one closed
 // IIFE plus an explicit re-export line, mirroring buildTreeShakenRuntime in
-// client-bundle.ts. The entry file is written into the runtime dir so the
-// relative `./index-client.js` import resolves.
-func buildTreeShakenRuntime(runtimeDir string, usedNames []string) (string, error) {
+// client-bundle.ts. The sidecar's mini-bundler does the tree-shaking; the
+// returned code is the full replacement (IIFE + destructure + re-export).
+func buildTreeShakenRuntime(rpc RPCClient, runtimeDir string, usedNames []string) (string, error) {
 	unique := uniqueStrings(usedNames)
-	available := runtimeExportNames(runtimeDir)
-	var missing []string
-	for _, n := range unique {
-		if !available[n] {
-			missing = append(missing, n)
-		}
-	}
-	if len(missing) > 0 {
-		return "", fmt.Errorf("runtime names not exported by @vesk/runtime: %s", strings.Join(missing, ", "))
-	}
-
-	entry := filepath.Join(runtimeDir, fmt.Sprintf(".runtime-tree-entry-%d.mjs", os.Getpid()))
-	if err := os.WriteFile(entry, []byte(fmt.Sprintf("export { %s } from './index-client.js';\n", strings.Join(unique, ", "))), 0o644); err != nil {
-		return "", err
-	}
-	defer os.Remove(entry)
-
-	result := api.Build(api.BuildOptions{
-		EntryPoints:       []string{entry},
-		Bundle:            true,
-		Format:            api.FormatIIFE,
-		GlobalName:        "__veskRuntime",
-		Platform:          api.PlatformBrowser,
-		Target:            api.ES2022,
-		TreeShaking:       api.TreeShakingTrue,
-		MinifyWhitespace:  true,
-		MinifyIdentifiers: true,
-		MinifySyntax:      true,
-		Write:             false,
-		LogLevel:          api.LogLevelSilent,
-	})
-	if len(result.Errors) > 0 {
-		return "", fmt.Errorf("runtime tree-shake failed: %v", result.Errors)
-	}
-	if len(result.OutputFiles) == 0 {
-		return "", fmt.Errorf("runtime tree-shake produced no output")
-	}
-	bundle := string(result.OutputFiles[0].Contents)
-	return fmt.Sprintf("%s\nconst { %s } = __veskRuntime;\nexport { %s };\n",
-		bundle, strings.Join(unique, ", "), strings.Join(unique, ", ")), nil
-}
-
-// runtimeExportNames returns the names the client runtime actually exports,
-// mirroring runtimeExportNames in client-bundle.ts.
-func runtimeExportNames(runtimeDir string) map[string]bool {
-	names := map[string]bool{}
-	src, err := os.ReadFile(filepath.Join(runtimeDir, "index-client.js"))
+	resp, err := rpc.CallResult("bundle_runtime_iife", []any{map[string]any{"runtimeDir": runtimeDir, "usedNames": unique}})
 	if err != nil {
-		return names
+		return "", fmt.Errorf("runtime tree-shake failed: %w", err)
 	}
-	for _, m := range reExportFromNames.FindAllStringSubmatch(string(src), -1) {
-		for _, raw := range strings.Split(m[1], ",") {
-			parts := strings.Split(strings.TrimSpace(raw), " as ")
-			n := strings.TrimSpace(parts[len(parts)-1])
-			if n != "" {
-				names[n] = true
-			}
-		}
+	var out struct {
+		Code string `json:"code"`
 	}
-	return names
+	if err := json.Unmarshal(resp, &out); err != nil {
+		return "", fmt.Errorf("runtime tree-shake produced no output: %w", err)
+	}
+	return out.Code, nil
 }
 
 // clientCompiler compiles route .vsk files into component/hydrator
@@ -276,22 +183,24 @@ func newClientCompiler(rpc RPCClient) *clientCompiler {
 	}
 }
 
-func (c *clientCompiler) compileClientCode(source, filePath string, options map[string]any) (string, error) {
+func (c *clientCompiler) compileClientCode(source, filePath string, options map[string]any) (string, []string, error) {
+	options["postprocess"] = true
 	raw, err := c.rpc.CallResult("compile_client", []any{map[string]any{
 		"source":   source,
 		"filePath": filePath,
 		"options":  options,
 	}})
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	var resp struct {
-		Code string `json:"code"`
+		Code           string   `json:"code"`
+		RuntimeImports []string `json:"runtimeImports"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
-		return "", err
+		return "", nil, err
 	}
-	return resp.Code, nil
+	return resp.Code, resp.RuntimeImports, nil
 }
 
 func (c *clientCompiler) compileFile(filePath, resolvedName string) error {
@@ -316,22 +225,26 @@ func (c *clientCompiler) compileFile(filePath, resolvedName string) error {
 		}
 	}
 
-	compCode, err := c.compileClientCode(source, filePath, map[string]any{"forceClient": true})
+	compCode, compImports, err := c.compileClientCode(source, filePath, map[string]any{"forceClient": true})
 	if err != nil {
 		return err
 	}
 	if compCode != "" {
-		collectRuntimeImports(compCode, c.runtime)
-		c.components = append(c.components, trimBlankLines(stripExports(stripVskImports(stripRuntimeImport(compCode)))))
+		for _, n := range compImports {
+			c.runtime.add(n)
+		}
+		c.components = append(c.components, trimBlankLines(compCode))
 	}
 
-	hydCode, err := c.compileClientCode(source, filePath, map[string]any{"hydrate": true, "forceClient": true, "includeTopLevel": false})
+	hydCode, hydImports, err := c.compileClientCode(source, filePath, map[string]any{"hydrate": true, "forceClient": true, "includeTopLevel": false})
 	if err != nil {
 		return err
 	}
 	if hydCode != "" {
-		collectRuntimeImports(hydCode, c.runtime)
-		stripped := strings.ReplaceAll(stripExports(stripVskImports(stripRuntimeImport(hydCode))), "__components", "__hydrators")
+		for _, n := range hydImports {
+			c.runtime.add(n)
+		}
+		stripped := strings.ReplaceAll(hydCode, "__components", "__hydrators")
 		c.hydrators = append(c.hydrators, trimBlankLines(stripped))
 	}
 
@@ -442,7 +355,7 @@ func BuildMonolithicClientBundle(rpc RPCClient, routes []*RouteNode, appDir, out
 	}
 	usedNames := used.slice()
 
-	runtimeCode, err := buildTreeShakenRuntime(runtimeDir, usedNames)
+	runtimeCode, err := buildTreeShakenRuntime(rpc, runtimeDir, usedNames)
 	if err != nil {
 		return "", err
 	}
@@ -708,7 +621,7 @@ func BuildCodeSplitClientBundle(rpc RPCClient, routes []*RouteNode, appDir, outD
 	}
 	usedNames := used.slice()
 
-	runtimeCode, err := buildTreeShakenRuntime(runtimeDir, usedNames)
+	runtimeCode, err := buildTreeShakenRuntime(rpc, runtimeDir, usedNames)
 	if err != nil {
 		return nil, err
 	}

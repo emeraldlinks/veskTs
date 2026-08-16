@@ -148,19 +148,10 @@ func resolveSidecarPath(projectDir string) string {
 			}
 		}
 	}
-	candidates := []string{
-		filepath.Join(".", "packages", "haul", "internal", "sidecar", "server.ts"),
-		filepath.Join("..", "packages", "haul", "internal", "sidecar", "server.ts"),
-		filepath.Join("..", "..", "packages", "haul", "internal", "sidecar", "server.ts"),
-	}
-	for _, c := range candidates {
-		if abs, err := filepath.Abs(c); err == nil && fileExists(abs) {
-			return abs
-		}
-	}
 	// Last resort: the embedded bundle. Extract it into the project's .vesk/haul
-	// dir so `node` resolves @vesk/compiler/@vesk/runtime/@vesk/adapter from the
-	// project's node_modules.
+	// dir so the user never needs a sidecar file — the binary ships the
+	// compiler sidecar inside itself. `node` resolves @vesk/compiler,
+	// @vesk/runtime and @vesk/adapter from the project's node_modules.
 	if projectDir != "" && len(sidecar.SidecarJS) > 0 {
 		dir := filepath.Join(projectDir, ".vesk", "haul")
 		if err := os.MkdirAll(dir, 0o755); err == nil {

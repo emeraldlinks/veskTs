@@ -10,10 +10,43 @@ import puppeteer from 'puppeteer-core';
 const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
 const BASE = process.env.BASE || 'http://localhost:3000';
 
+// CDP Input.dispatchMouseEvent / dispatchKeyEvent can crash some chromium
+// builds in this environment, so dispatch clicks/typing in-page via JS.
+async function clickEl(page, selector) {
+  await page.evaluate((sel) => {
+    const el = document.querySelector(sel);
+    if (!el) throw new Error('clickEl: no element for ' + sel);
+    el.click();
+  }, selector);
+}
+
+async function typeInto(page, selector, value) {
+  await page.evaluate((sel, val) => {
+    const el = document.querySelector(sel);
+    if (!el) throw new Error('typeInto: no element for ' + sel);
+    el.value = val;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+  }, selector, value);
+}
+
+// newPage() can race main-frame attach; retry transient frame races.
+async function goto(page, url, opts = {}) {
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return await page.goto(url, opts);
+    } catch (e) {
+      if (!String(e).includes('Requesting main frame too early') && !String(e).includes('Navigating frame was detached') && !String(e).includes('Attempted to use detached Frame')) throw e;
+      await new Promise(r => setTimeout(r, 200));
+    }
+  }
+  throw new Error('goto retried too many times: ' + url);
+}
+
 async function clickNav(page, href, expectedPath) {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await page.click(`a[href="${href}"]`);
+      await clickEl(page, `a[href="${href}"]`);
     } catch (e) {
       if (!String(e).includes('detached from document')) throw e;
     }
@@ -67,7 +100,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     assert(errors.length === 0, 'Zero JS errors on load (got ' + errors.length + ': ' + errors.join(', ') + ')');
 
@@ -135,7 +168,7 @@ async function main() {
   console.log('\n=== TEST 2: Reactivity ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     // Initial count should be 10
     const before = await page.evaluate(() => {
@@ -144,7 +177,7 @@ async function main() {
     });
     assert(before.some(p => p === '10'), 'initial count is 10');
 
-    await page.click('button');
+    await clickEl(page, 'button');
     await new Promise(r => setTimeout(r, 200));
 
     const after = await page.evaluate(() => {
@@ -155,7 +188,7 @@ async function main() {
 
     // Click 4 more times to reach 15
     for (let i = 0; i < 4; i++) {
-      await page.click('button');
+      await clickEl(page, 'button');
       await new Promise(r => setTimeout(r, 50));
     }
 
@@ -178,7 +211,7 @@ async function main() {
   console.log('\n=== TEST 3: Error boundaries ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     const errorsAt = await page.evaluate(() => {
       return Array.from(document.querySelectorAll('.error')).map(e => e.textContent);
@@ -193,7 +226,7 @@ async function main() {
   console.log('\n=== TEST 4: SPA navigation ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     await clickNav(page, '/about', '/about');
 
@@ -224,7 +257,7 @@ async function main() {
   console.log('\n=== TEST 5: Back navigation ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     await clickNav(page, '/about', '/about');
 
@@ -253,7 +286,7 @@ async function main() {
   console.log('\n=== TEST 6: Dynamic route ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE + '/blog/hello-world', { waitUntil: 'networkidle0' });
+    await goto(page, BASE + '/blog/hello-world', { waitUntil: 'networkidle0' });
 
     const url = page.url();
     assert(url.includes('/blog/hello-world'), 'URL at /blog/hello-world');
@@ -277,9 +310,9 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
-    await page.click('button');
+    await clickEl(page, 'button');
     await new Promise(r => setTimeout(r, 100));
     await clickNav(page, '/about', '/about');
     await page.goBack();
@@ -296,7 +329,7 @@ async function main() {
   console.log('\n=== TEST 8: Tailwind CSS ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     // All tailwind utilities live in _tailwind.css (auto-generated)
     const twCss = await page.evaluate(async () => {
@@ -384,7 +417,7 @@ async function main() {
   console.log('\n=== TEST 9: Streaming ===');
   {
     const page = await browser.newPage();
-    const response = await page.goto(BASE, { waitUntil: 'networkidle0' });
+    const response = await goto(page, BASE, { waitUntil: 'networkidle0' });
     const headers = response.headers();
     const encoding = headers['transfer-encoding'] || '';
     assert(encoding === 'chunked', `Transfer-Encoding: ${encoding}`);
@@ -402,7 +435,7 @@ async function main() {
   console.log('\n=== TEST 10: Hydration strategies ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     // Verify hydration module functions are accessible
     const modulesAccessible = await page.evaluate(async () => {
@@ -449,7 +482,7 @@ async function main() {
   {
     // Verify the server function signature by checking the generated HTML
     const page = await browser.newPage();
-    const response = await page.goto(BASE, { waitUntil: 'networkidle0' });
+    const response = await goto(page, BASE, { waitUntil: 'networkidle0' });
     const html = await response.text();
 
     // The streaming render should place head BEFORE body
@@ -477,7 +510,7 @@ async function main() {
     page.on('request', req => {
       if (req.headers()['x-vesk-data'] === '1') dataRequests.push(req.url());
     });
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     const titleBefore = await page.evaluate(() => document.title);
     assert(titleBefore !== 'Async — async components', 'title is not the async one yet: "' + titleBefore + '"');
@@ -486,7 +519,7 @@ async function main() {
     assert(dataRequests.length === 0, `no X-Vesk-Data request on initial load (got ${dataRequests.length})`);
 
     await page.evaluate(() => { window.__spaFlag = true; });
-    await page.click('a[href="/async"]');
+    await clickEl(page, 'a[href="/async"]');
 
     // optimistic render should happen first, then fresh head + props land
     await page.waitForFunction(() => document.title.includes('Async'), { timeout: 8000 });
@@ -532,17 +565,17 @@ async function main() {
     page.on('request', req => {
       if (req.headers()['x-vesk-data'] === '1' && req.url().includes('/async')) asyncDataRequests++;
     });
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     // navigate away and back to /async twice
     for (let i = 0; i < 2; i++) {
       await page.evaluate(() => { window.__spaFlag = true; });
-      await page.click('a[href="/async"]');
+      await clickEl(page, 'a[href="/async"]');
       await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
       assert(true, `async fresh props render on visit ${i + 1}`);
 
       await page.evaluate(() => { window.__spaFlag = true; });
-      await page.click('a[href="/about"]');
+      await clickEl(page, 'a[href="/about"]');
       await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
     }
@@ -550,7 +583,7 @@ async function main() {
     // Third SPA nav to /async: routeDataCache defaults to 0, so every visit
     // issues a fresh X-Vesk-Data request and renders the fresh props.
     await page.evaluate(() => { window.__spaFlag = true; });
-    await page.click('a[href="/async"]');
+    await clickEl(page, 'a[href="/async"]');
     await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
     const bodyText = await page.evaluate(() => document.body.textContent);
     assert(bodyText.includes('Hello Vesk'), 'async renders fresh props on third visit');
@@ -569,7 +602,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE + '/comp-test', { waitUntil: 'networkidle0' });
+    await goto(page, BASE + '/comp-test', { waitUntil: 'networkidle0' });
 
     const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     assert(h1 === 'Component import test', 'h1: ' + h1);
@@ -588,14 +621,14 @@ async function main() {
     assert(helperBox.hasButton, 'imported component has its own button');
 
     // Reactivity inside the imported component must work after hydration
-    await page.click('.helper-box button');
+    await clickEl(page, '.helper-box button');
     await new Promise(r => setTimeout(r, 200));
     const afterClick = await page.evaluate(() => document.querySelector('.helper-label')?.textContent?.trim() || '');
     assert(afterClick === 'Helper says 6', 'imported component reactive state updates: "' + afterClick + '"');
 
     // Multiple clicks continue to update
-    await page.click('.helper-box button');
-    await page.click('.helper-box button');
+    await clickEl(page, '.helper-box button');
+    await clickEl(page, '.helper-box button');
     await new Promise(r => setTimeout(r, 200));
     const afterThree = await page.evaluate(() => document.querySelector('.helper-label')?.textContent?.trim() || '');
     assert(afterThree === 'Helper says 8', 'imported component persists state across clicks: "' + afterThree + '"');
@@ -610,7 +643,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE + '/actions', { waitUntil: 'networkidle0' });
+    await goto(page, BASE + '/actions', { waitUntil: 'networkidle0' });
 
     const formInfo = await page.evaluate(() => {
       const form = document.querySelector('form');
@@ -629,10 +662,10 @@ async function main() {
     assert(formInfo.errorEls === 3, '3 field error slots rendered (' + formInfo.errorEls + ')');
 
     // Client-side validation: empty/invalid values → field errors appear
-    await page.type('input[name="name"]', '');
-    await page.type('input[name="email"]', 'not-an-email');
-    await page.type('input[name="password"]', '123');
-    await page.click('button[type="submit"]');
+    await typeInto(page, 'input[name="name"]', '');
+    await typeInto(page, 'input[name="email"]', 'not-an-email');
+    await typeInto(page, 'input[name="password"]', '123');
+    await clickEl(page, 'button[type="submit"]');
     await new Promise(r => setTimeout(r, 300));
 
     const clientErrors = await page.evaluate(() => {
@@ -693,7 +726,7 @@ async function main() {
   console.log('\n=== TEST 16: API routes ===');
   {
     const page = await browser.newPage();
-    await page.goto(BASE, { waitUntil: 'networkidle0' });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
 
     const results = await page.evaluate(async () => {
       const j = (r) => r.json().catch(() => null);
@@ -752,7 +785,7 @@ async function main() {
     assert(results.postsFailError === 'simulated failure', 'failure body: ' + results.postsFailError);
 
     // The /posts page itself (SSR route) renders the API data
-    await page.goto(BASE + '/posts', { waitUntil: 'networkidle0' });
+    await goto(page, BASE + '/posts', { waitUntil: 'networkidle0' });
     const postsPage = await page.evaluate(() => {
       const t = document.body.textContent || '';
       return {
@@ -771,7 +804,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE + '/md', { waitUntil: 'networkidle0' });
+    await goto(page, BASE + '/md', { waitUntil: 'networkidle0' });
 
     assert(errors.length === 0, 'Zero JS errors on /md (got ' + errors.length + ': ' + errors.join(', ') + ')');
 
@@ -806,7 +839,7 @@ async function main() {
     const clickRetry = async (sel) => {
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          await page.click(sel);
+          await clickEl(page, sel);
           return;
         } catch (e) {
           if (!String(e).includes('detached from document')) throw e;
@@ -846,7 +879,7 @@ async function main() {
       const page = await browser.newPage();
       const errors = [];
       page.on('pageerror', err => errors.push(err.message));
-      const response = await page.goto(BASE + '/broken', { waitUntil: 'networkidle0' });
+      const response = await goto(page, BASE + '/broken', { waitUntil: 'networkidle0' });
       assert(response.status() === 200, '/broken SSR is 200 (got ' + response.status() + ')');
       await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 });
 
@@ -888,7 +921,7 @@ async function main() {
       const page = await browser.newPage();
       const errors = [];
       page.on('pageerror', err => errors.push(err.message));
-      await page.goto(BASE + '/store/boom', { waitUntil: 'networkidle0' });
+      await goto(page, BASE + '/store/boom', { waitUntil: 'networkidle0' });
 
       const state = await page.evaluate(() => {
         const nav = document.querySelector('nav');
@@ -919,7 +952,7 @@ async function main() {
       const page = await browser.newPage();
       const errors = [];
       page.on('pageerror', err => errors.push(err.message));
-      await page.goto(BASE, { waitUntil: 'networkidle0' });
+      await goto(page, BASE, { waitUntil: 'networkidle0' });
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickNav(page, '/broken', '/broken');
@@ -957,7 +990,7 @@ async function main() {
       const page = await browser.newPage();
       const errors = [];
       page.on('pageerror', err => errors.push(err.message));
-      await page.goto(BASE, { waitUntil: 'networkidle0' });
+      await goto(page, BASE, { waitUntil: 'networkidle0' });
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await page.evaluate(() => {
@@ -1028,7 +1061,7 @@ async function main() {
       const errors = [];
       page.on('pageerror', err => errors.push(err.message));
       try {
-        const resp = await page.goto(BASE + route, { waitUntil: 'networkidle0', timeout: 15000 });
+        const resp = await goto(page, BASE + route, { waitUntil: 'networkidle0', timeout: 15000 });
         const ct = resp ? (resp.headers()['content-type'] || '') : '';
         assert(resp && resp.status() === 200, `${route} full load is HTTP 200 (got ${resp?.status()})`);
         assert(ct.includes('text/html'), `${route} serves HTML not JSON (content-type: ${ct})`);
@@ -1058,7 +1091,7 @@ async function main() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
-    await page.goto(BASE + '/async', { waitUntil: 'networkidle0' });
+    await goto(page, BASE + '/async', { waitUntil: 'networkidle0' });
 
     const chain = Object.keys(SPA_TEXT).filter(r => r !== '/async');
     for (const route of chain) {
@@ -1098,7 +1131,7 @@ async function main() {
     // must return HTML again (regression: cached JSON poisoning the document).
     console.log('  18c: full reloads after SPA data fetches must stay HTML');
     for (const route of ['/async', '/posts', '/about', '/map']) {
-      const resp = await page.goto(BASE + route, { waitUntil: 'networkidle0' });
+      const resp = await goto(page, BASE + route, { waitUntil: 'networkidle0' });
       const ct = resp ? (resp.headers()['content-type'] || '') : '';
       assert(resp && resp.status() === 200 && ct.includes('text/html'),
         `reload of ${route} is HTML 200 (status ${resp?.status()}, content-type ${ct})`);
@@ -1119,7 +1152,7 @@ async function main() {
     console.log('  18d: fresh-document data-script isolation');
     for (const [route, expected] of [['/about', 0], ['/async', 1], ['/posts', 1], ['/map', 0]]) {
       const page = await browser.newPage();
-      await page.goto(BASE + route, { waitUntil: 'networkidle0' });
+      await goto(page, BASE + route, { waitUntil: 'networkidle0' });
       const html = await page.content();
       const count = (html.match(/ssr-data\.js/g) || []).length;
       assert(count === expected, `${route} view-source has ${count} ssr-data refs (expected ${expected})`);

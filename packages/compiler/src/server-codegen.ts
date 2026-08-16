@@ -19,6 +19,7 @@ export {
   __vskId,
   __vskImportedNames,
   resetVskState,
+  setVskHydrate,
   setVskImportedNames,
   securityHeaders,
   corsHeaders,

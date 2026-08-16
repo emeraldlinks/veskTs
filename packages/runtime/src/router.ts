@@ -231,7 +231,7 @@ async function applyRouteData(
 		return;
 	}
 	const pathname = match.pathname || window.location.pathname;
-	const pageNode = findPageNode(match);
+	const pageNode = findPageNodeOrFailed(match);
 	if (pageNode && data.props) {
 		pageNode.props = data.props;
 		pageNode._dataPath = pathname;
@@ -269,7 +269,13 @@ async function applyRouteData(
 }
 
 function shouldFetchData(router: RouterInstance, match: RouteMatch): boolean {
-	const pageNode = findPageNode(match);
+	// Use findPageNodeOrFailed: on lazy/chunked routes the page component is
+	// wired only after its chunk finishes loading, but the route node exists
+	// from the start (via _pageName). Requiring an already-loaded `.page`
+	// (findPageNode) makes shouldFetchData return false for a first visit to a
+	// chunked route — fetchData runs before the chunk resolves — silently
+	// dropping the X-Vesk-Data fetch for that visit.
+	const pageNode = findPageNodeOrFailed(match);
 	if (!pageNode) return false;
 	const pathname = match.pathname || window.location.pathname;
 	if ((pageNode._dataPath as string | undefined) !== pathname) return true;
@@ -290,7 +296,7 @@ function hasRealPageData(data: RouteDataResult): boolean {
 function storePrefetchedData(match: RouteMatch, data: RouteDataResult): void {
 	if (!data || data.notFound || data.redirect) return;
 	const pathname = match.pathname || window.location.pathname;
-	const pageNode = findPageNode(match);
+	const pageNode = findPageNodeOrFailed(match);
 	if (pageNode && data.props) {
 		pageNode.props = data.props;
 		pageNode._dataPath = pathname;
@@ -315,7 +321,7 @@ function wrapPageContent(result: Node | string | undefined): Node {
 }
 
 async function renderPageOnly(router: RouterInstance, match: RouteMatch): Promise<Node | string | undefined> {
-	const pageNode = findPageNode(match);
+	const pageNode = findPageNodeOrFailed(match);
 	if (!pageNode || !pageNode.page) return undefined;
 	const tempRoot = document.createDocumentFragment();
 	const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);

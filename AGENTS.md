@@ -9,6 +9,11 @@
   + `vesk-plugin.ts`). If a regex exists in `packages/compiler/src`, replace it with an
   AST-based equivalent. (The only exception: compile-time-inert tooling like error
   message matching in tests.)
+- **NEVER use regex in the Go haul engine.** Source-text manipulation and syntax
+  analysis under `packages/haul` must go through the sidecar's acorn AST/tokenizer
+  RPCs (`compile_client` postprocess, `rewrite_runtime_imports`, `strip_types`) or
+  plain string/line scanning. If a regex exists in a non-test `.go` file under
+  `packages/haul`, replace it. (The only exception: regex in test assertions.)
 - Every source edit under `packages/compiler/src` must be followed by
   `npx tsx packages/cli/src/build-packages.ts` — tests and probes resolve the
   package's `dist/` via the exports map.

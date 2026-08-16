@@ -282,10 +282,10 @@ export async function renderFullPage(
   try {
     let ssrProps = { ...props };
     let serializedProps: string | null = null;
-    const ast = parse(source);
-    const ir = generateIR(ast, source);
+    const cached = (options.cached as CompileFileResult | undefined) || undefined;
+    const ir = cached ? cached.ir : generateIR(parse(source), source);
     if (ir.loadFn) {
-      const __vesk = options.__vesk || loadRuntimeImports(ir.imports);
+      const __vesk = options.__vesk || cached?.__vesk || loadRuntimeImports(ir.imports);
       const loadResult = await callLoadFunction(ir.loadFn, ssrProps, __vesk);
       if (loadResult && typeof loadResult === 'object') {
         const result = loadResult as Record<string, unknown>;
@@ -354,12 +354,12 @@ export function renderPageStream(
   options: FullPageOptions = {}
 ): AsyncGenerator<string> {
   async function* raw(): AsyncGenerator<string> {
-  const ast = parse(source);
-  const ir = generateIR(ast, source);
+  const cached = (options.cached as CompileFileResult | undefined) || undefined;
+  const ir = cached ? cached.ir : generateIR(parse(source), source);
 
   let ssrProps = { ...props };
   let serializedProps: string | null = null;
-  let __vesk = loadRuntimeImports(ir.imports);
+  let __vesk = options.__vesk || cached?.__vesk || loadRuntimeImports(ir.imports);
 
   if (ir.loadFn) {
     const loadResult = await callLoadFunction(ir.loadFn, props, __vesk);
@@ -371,7 +371,7 @@ export function renderPageStream(
     serializedProps = JSON.stringify(ssrProps);
   }
 
-  const { componentMap } = compileFile(source, { sourcePath: (options.sourcePath as string) || undefined });
+  const componentMap = cached ? cached.componentMap : compileFile(source, { sourcePath: (options.sourcePath as string) || undefined }).componentMap;
   const fullRegistry = new Map([...registry, ...componentMap]);
   const renderFn = componentMap.get(componentName);
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);

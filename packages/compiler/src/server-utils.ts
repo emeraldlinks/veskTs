@@ -22,6 +22,10 @@ export function resetVskState(hydrate = false): void {
   __vskForceClaim = false;
 }
 
+export function setVskHydrate(v: boolean): void {
+  __vskHydrate = v;
+}
+
 export function setVskImportedNames(names: Set<string> | null): void {
   __vskImportedNames = names;
 }

@@ -9,9 +9,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.1.10.tgz",
+    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.1.11.tgz",
     "vesk": "file:./tarballs/vesk-0.1.13.tgz",
-    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.1.10.tgz",
+    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.1.11.tgz",
     "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.1.4.tgz",
     "@vesk/runtime": "file:./tarballs/vesk-runtime-0.1.10.tgz"
   },

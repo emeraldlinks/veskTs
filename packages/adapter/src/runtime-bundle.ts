@@ -43,7 +43,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
 
   const entryFile = resolve(outDir, 'server', `.runtime-entry-${buildId++}.mjs`);
   const entryContent = [
-    `import { renderPage, renderFullPage, renderPageStream, compileFile, setRuntimeModule } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
+    `import { renderPage, renderFullPage, renderPageStream, compileFile, setRuntimeModule, setVskHydrate } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
     `import { parseCookies } from ${JSON.stringify(resolve(compilerRoot, 'server-cookies.js'))};`,
     `import * as __veskRuntime from ${JSON.stringify(resolve(runtimeRoot, 'index-server.js'))};`,
     '',
@@ -81,7 +81,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     '  return req.locals || {};',
     '}',
     '',
-    'export { renderPage, renderFullPage, renderPageStream, compileFile, parseCookies };',
+    'export { renderPage, renderFullPage, renderPageStream, compileFile, setVskHydrate, parseCookies };',
     'export { withSsrStore } from "@vesk/compiler/src/ssr-store";',
     '',
     '// Deliver hydration data as an origin-served script so strict CSP (no unsafe-inline)',

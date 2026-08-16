@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
+	"strings"
 
 	"github.com/emeraldlinks/vesk/haul/internal/bundle"
 )
@@ -16,6 +16,34 @@ func filepathRel(base, target string) string {
 		return rel
 	}
 	return target
+}
+
+// stripTailwindImportLines removes whole lines whose trimmed form is an
+// `@import 'tailwindcss'` / `@import "tailwindcss"` (with optional trailing
+// semicolon). Used as the no-plugin fallback when producing _tailwind.css.
+func stripTailwindImportLines(css string) string {
+	var out strings.Builder
+	lines := strings.Split(css, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		inner := trimmed
+		if strings.HasSuffix(inner, ";") {
+			inner = strings.TrimSpace(strings.TrimSuffix(inner, ";"))
+		}
+		if !strings.HasPrefix(inner, "@import ") {
+			out.WriteString(line)
+		} else {
+			spec := strings.TrimSpace(strings.TrimPrefix(inner, "@import "))
+			if spec == "'tailwindcss'" || spec == "\"tailwindcss\"" {
+				continue
+			}
+			out.WriteString(line)
+		}
+		if i < len(lines)-1 {
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
 }
 
 func RunBuild(ctx context.Context, args []string) error {
@@ -222,7 +250,7 @@ func RunBuild(ctx context.Context, args []string) error {
 	walkApiRoutes = func(nodes []*bundle.ApiRouteNode) {
 		for _, apiNode := range nodes {
 			if apiNode.FilePath != nil {
-				funcPath, funcCode, ferr := bundle.GenerateApiFunction(apiNode, outDir, "")
+				funcPath, funcCode, ferr := bundle.GenerateApiFunction(sidecar, apiNode, outDir, "")
 				if ferr != nil {
 					walkErr = ferr
 					return
@@ -310,7 +338,7 @@ func RunBuild(ctx context.Context, args []string) error {
 		}})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[vesk haul] build: css plugin error: %v\n", err)
-			twContent := regexp.MustCompile(`(?m)^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$`).ReplaceAllString(cssContent, "")
+			twContent := stripTailwindImportLines(cssContent)
 			if err := os.WriteFile(tailwindCssPath, []byte(twContent), 0644); err != nil {
 				return fmt.Errorf("write tailwind css: %w", err)
 			}

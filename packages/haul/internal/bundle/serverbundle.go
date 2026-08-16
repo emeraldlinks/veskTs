@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strconv"
 	"strings"
-
-	"github.com/evanw/esbuild/pkg/api"
 )
 
 type AncestorLayout struct {
@@ -185,19 +182,21 @@ func indentBlock(s string, n int) string {
 	return strings.Join(out, "\n")
 }
 
-var reImportRuntime = regexp.MustCompile(`from\s+['"]@vesk/runtime(?:/[^'"]+)?['"]\s*;?`)
-var reImportTs = regexp.MustCompile(`from\s+['"][^'"]+\.ts['"]\s*;?`)
-
-func StripTSViaEsbuild(source string) (string, error) {
-	result := api.Transform(source, api.TransformOptions{
-		Loader:   api.LoaderTS,
-		Target:   api.ES2022,
-		LogLevel: api.LogLevelSilent,
-	})
-	if len(result.Errors) > 0 {
-		return "", fmt.Errorf("esbuild transform: %v", result.Errors[0].Text)
+// StripTypesViaSidecar strips TypeScript annotations from a source string via
+// the sidecar's `strip_types` RPC (compiler's stripCodeTypes). Callers keep
+// the original source on error.
+func StripTypesViaSidecar(rpc RPCClient, source string) (string, error) {
+	resp, err := rpc.CallResult("strip_types", []any{map[string]any{"source": source}})
+	if err != nil {
+		return "", err
 	}
-	return string(result.Code), nil
+	var out struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(resp, &out); err != nil {
+		return "", err
+	}
+	return out.Code, nil
 }
 
 func apiRouteName(fullPath string) string {
@@ -475,7 +474,7 @@ func StripTailwindDirectives(css string) string {
 			i++
 			continue
 		}
-		if reTailwindBlock.MatchString(line) {
+		if isTailwindBlockLine(line) {
 			braceCount := strings.Count(line, "{") - strings.Count(line, "}")
 			i++
 			for i < len(lines) && braceCount > 0 {
@@ -493,7 +492,46 @@ func StripTailwindDirectives(css string) string {
 	return strings.TrimSpace(result.String())
 }
 
-var reTailwindBlock = regexp.MustCompile(`^\s*@(theme\s*\{|layer\s+(components|utilities)\s*\{|utility\s+\w+\s*\{)`)
+// isTailwindBlockLine reports whether a trimmed CSS line opens one of the
+// Tailwind v4 directive blocks the old regex-based matcher recognized:
+// `@theme{`, `@layer components{`, `@layer utilities{` and `@utility <name>{`.
+func isTailwindBlockLine(line string) bool {
+	if !strings.HasPrefix(line, "@") {
+		return false
+	}
+	rest := line[1:]
+	if rest == "theme{" || rest == "theme {" {
+		return true
+	}
+	if rest == "layer components{" || rest == "layer components {" ||
+		rest == "layer utilities{" || rest == "layer utilities {" {
+		return true
+	}
+	if !strings.HasPrefix(rest, "utility") {
+		return false
+	}
+	rest = rest[len("utility"):]
+	if rest == "" || (rest[0] != ' ' && rest[0] != '\t') {
+		return false
+	}
+	rest = strings.TrimLeft(rest, " \t")
+	if rest == "" {
+		return false
+	}
+	i := 0
+	for i < len(rest) {
+		c := rest[i]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '-' {
+			i++
+		} else {
+			break
+		}
+	}
+	if i == 0 {
+		return false
+	}
+	return strings.TrimSpace(rest[i:]) == "{"
+}
 
 func CopyStaticAssets(publicDir, outDir string) {
 	if !fileExists(publicDir) {
@@ -665,7 +703,7 @@ func BundleServerRuntime(rpc RPCClient, appDir, outDir string) (string, error) {
 	}
 
 	entryFile := filepath.Join(outDir, "server", fmt.Sprintf(".runtime-entry-%d.mjs", os.Getpid()))
-	entryContent := fmt.Sprintf(`import { renderPage, renderFullPage, renderPageStream, compileFile, setRuntimeModule } from %s;
+	entryContent := fmt.Sprintf(`import { renderPage, renderFullPage, renderPageStream, compileFile, setRuntimeModule, setVskHydrate } from %s;
 import { parseCookies } from %s;
 import * as __veskRuntime from %s;
 
@@ -696,7 +734,7 @@ export function locals() {
   return req.locals || {};
 }
 
-export { renderPage, renderFullPage, renderPageStream, compileFile, parseCookies };
+export { renderPage, renderFullPage, renderPageStream, compileFile, parseCookies, setVskHydrate };
 export { withSsrStore } from %s;
 export function storeDataScriptGlobal(payload) {
   if (!payload || (!payload.props && !payload.ssrData)) return null;
@@ -725,30 +763,22 @@ export const issuesToFieldMap = __veskRuntime.issuesToFieldMap;
 	}
 	defer os.Remove(entryFile)
 
-	result := api.Build(api.BuildOptions{
-		EntryPoints:       []string{entryFile},
-		Bundle:            true,
-		Platform:          api.PlatformNeutral,
-		Format:            api.FormatESModule,
-		MinifyWhitespace:  true,
-		MinifyIdentifiers: true,
-		MinifySyntax:      true,
-		Outfile:           filepath.Join(outDir, "server", "runtime.js"),
-		External:          []string{"fs", "node:fs", "path", "node:path", "node:async_hooks"},
-		Alias: map[string]string{
-			"@vesk/compiler/src": resolved.CompilerDir,
-			"@vesk/runtime/src":  resolved.RuntimeDir,
-		},
-		Target:      api.ES2022,
-		TreeShaking: api.TreeShakingTrue,
-		Write:       false,
-		LogLevel:    api.LogLevelSilent,
-	})
-	if len(result.Errors) > 0 {
-		return "", fmt.Errorf("esbuild server runtime: %v", result.Errors[0].Text)
+	bundleResp, err := rpc.CallResult("bundle_server_runtime", []any{map[string]any{
+		"runtimeDir":  resolved.RuntimeDir,
+		"compilerDir": resolved.CompilerDir,
+		"entryPath":   entryFile,
+	}})
+	if err != nil {
+		return "", fmt.Errorf("server runtime bundle failed: %w", err)
+	}
+	var bundled struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(bundleResp, &bundled); err != nil {
+		return "", fmt.Errorf("server runtime bundle produced no output: %w", err)
 	}
 	os.MkdirAll(filepath.Join(outDir, "server"), 0755)
-	if err := os.WriteFile(filepath.Join(outDir, "server", "runtime.js"), result.OutputFiles[0].Contents, 0644); err != nil {
+	if err := os.WriteFile(filepath.Join(outDir, "server", "runtime.js"), []byte(bundled.Code), 0644); err != nil {
 		return "", err
 	}
 	return filepath.Join(outDir, "server", "runtime.js"), nil
@@ -811,9 +841,9 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		errorVars.WriteString(jsonString(errorComp))
 		errorVars.WriteString(";\nconst _errorPath = ")
 		errorVars.WriteString(jsonString(errorPath))
-		errorVars.WriteString(";\n")
+		errorVars.WriteString(";\nconst _errorCompiled = (() => { try { setVskHydrate(true); return compileFile(_errorSrc, { sourcePath: _errorPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n")
 	} else {
-		errorVars.WriteString("const _errorSrc = null;\nconst _errorComp = null;\nconst _errorPath = null;\n")
+		errorVars.WriteString("const _errorSrc = null;\nconst _errorComp = null;\nconst _errorPath = null;\nconst _errorCompiled = null;\n")
 	}
 
 	var srcCode strings.Builder
@@ -836,7 +866,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		srcCode.WriteString(jsonString(layoutPath))
 		srcCode.WriteString(";\nconst _pagePath = ")
 		srcCode.WriteString(jsonString(pagePath))
-		srcCode.WriteString(";\n")
+		srcCode.WriteString(";\nconst _layoutCompiled = (() => { try { setVskHydrate(true); return compileFile(_layoutSrc, { sourcePath: _layoutPath }); } catch { return null; } finally { setVskHydrate(false); } })();\nconst _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n")
 		srcCode.WriteString(errorVars.String())
 	} else if hasAncestorLayout {
 		outer := ancestorLayouts[0]
@@ -858,7 +888,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		srcCode.WriteString(jsonString(outerLayoutPath))
 		srcCode.WriteString(";\nconst _pagePath = ")
 		srcCode.WriteString(jsonString(pagePath))
-		srcCode.WriteString(";\n")
+		srcCode.WriteString(";\nconst _layoutCompiled = (() => { try { setVskHydrate(true); return compileFile(_layoutSrc, { sourcePath: _layoutPath }); } catch { return null; } finally { setVskHydrate(false); } })();\nconst _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n")
 		srcCode.WriteString(errorVars.String())
 	} else {
 		srcCode.WriteString("const _src = `")
@@ -867,7 +897,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		srcCode.WriteString(jsonString(pageComp))
 		srcCode.WriteString(";\nconst _srcPath = ")
 		srcCode.WriteString(jsonString(pagePath))
-		srcCode.WriteString(";\n")
+		srcCode.WriteString(";\nconst _srcCompiled = (() => { try { setVskHydrate(true); return compileFile(_src, { sourcePath: _srcPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n")
 		srcCode.WriteString(errorVars.String())
 	}
 
@@ -883,7 +913,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 	for compName, compPath := range componentMap {
 		compSrc := mustReadFile(compPath)
 		escapedSrc := escapeSource(compSrc)
-		compRegEntries = append(compRegEntries, fmt.Sprintf("  registry.set(%s, async (props, __registry, __vesk) => {\n    const _src = `%s`;\n    const _comp = %s;\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, sourcePath: %s });\n    return result.body;\n  })", jsonString(compName), escapedSrc, jsonString(compName), jsonString(compPath)))
+		compRegEntries = append(compRegEntries, fmt.Sprintf("  registry.set(%s, async (props, __registry, __vesk) => {\n    const _src = `%s`;\n    const _comp = %s;\n    const _compiled = (() => { try { setVskHydrate(true); return compileFile(_src, { sourcePath: %s }); } catch { return null; } finally { setVskHydrate(false); } })();\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, cached: _compiled, sourcePath: %s });\n    return result.body;\n  })", jsonString(compName), escapedSrc, jsonString(compName), jsonString(compPath), jsonString(compPath)))
 	}
 	if len(compRegEntries) > 0 {
 		registryCode.WriteString("const __componentRegistry = new Map();\n{\n")
@@ -898,7 +928,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		htmlFnCode.WriteString("async function __renderErrorBody(props) {\n")
 		htmlFnCode.WriteString("  if (!_errorSrc) throw props.error || new Error(\"Internal Server Error\");\n")
 		htmlFnCode.WriteString("  try {\n")
-		htmlFnCode.WriteString("    const result = await renderPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, sourcePath: _errorPath });\n")
+		htmlFnCode.WriteString("    const result = await renderPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled, sourcePath: _errorPath });\n")
 		htmlFnCode.WriteString("    return result.body;\n")
 		htmlFnCode.WriteString("  } catch {\n")
 		htmlFnCode.WriteString("    return '<h1>500 \\u2014 Internal Server Error</h1>';\n")
@@ -909,7 +939,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		htmlFnCode.WriteString("  let page;\n")
 		htmlFnCode.WriteString("  let caughtError = null;\n")
 		htmlFnCode.WriteString("  try {\n")
-		htmlFnCode.WriteString("    page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });\n")
+		htmlFnCode.WriteString("    page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled, sourcePath: _pagePath });\n")
 		htmlFnCode.WriteString("  } catch (err) {\n")
 		htmlFnCode.WriteString("    if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;\n")
 		htmlFnCode.WriteString("    caughtError = err;\n")
@@ -917,7 +947,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		htmlFnCode.WriteString("    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';\n")
 		htmlFnCode.WriteString("    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: requestUrl || '' }), head: '' };\n")
 		htmlFnCode.WriteString("  }\n")
-		htmlFnCode.WriteString("  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(String(caughtError.message)) : '') + '-->' : '') + page.body }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + dataScriptOption + ", pageHead: page.head, sourcePath: _layoutPath });\n")
+		htmlFnCode.WriteString("  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(String(caughtError.message)) : '') + '-->' : '') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled" + cssOption + clientScriptOption + dataScriptOption + ", pageHead: page.head, sourcePath: _layoutPath });\n")
 		htmlFnCode.WriteString("  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });\n")
 		htmlFnCode.WriteString("  });\n")
 		htmlFnCode.WriteString("}\n")
@@ -927,13 +957,13 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		htmlFnCode.WriteString("  const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);\n")
 		htmlFnCode.WriteString("  const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';\n")
 		htmlFnCode.WriteString("  const props = { params, statusCode: 500, error: message, stack, url: requestUrl || '' };\n")
-		htmlFnCode.WriteString("  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _errorPath });\n")
+		htmlFnCode.WriteString("  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled" + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _errorPath });\n")
 		htmlFnCode.WriteString("}\n\n")
 		htmlFnCode.WriteString("async function __renderHtml(params, requestUrl) {\n")
 		htmlFnCode.WriteString("  return withSsrStore(async () => {\n")
 		htmlFnCode.WriteString("  let stream;\n")
 		htmlFnCode.WriteString("  try {\n")
-		htmlFnCode.WriteString("    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true" + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });\n")
+		htmlFnCode.WriteString("    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled" + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });\n")
 		htmlFnCode.WriteString("  } catch (err) {\n")
 		htmlFnCode.WriteString("    if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;\n")
 		htmlFnCode.WriteString("    const html = await __renderErrorFullPage(params, requestUrl, err);\n")
@@ -965,13 +995,13 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		dataCode.WriteString("  if (request.headers.get('x-vesk-data') === '1') {\n")
 		dataCode.WriteString("    let dataPage;\n")
 		dataCode.WriteString("    try {\n")
-		dataCode.WriteString("      dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, sourcePath: _pagePath });\n")
+		dataCode.WriteString("      dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled, sourcePath: _pagePath });\n")
 		dataCode.WriteString("    } catch (err) {\n")
 		dataCode.WriteString("      if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;\n")
 		dataCode.WriteString("      const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);\n")
 		dataCode.WriteString("      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });\n")
 		dataCode.WriteString("    }\n")
-		dataCode.WriteString("    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true, sourcePath: _layoutPath });\n")
+		dataCode.WriteString("    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: '' }, __componentRegistry, { hydrate: true, cached: _layoutCompiled, sourcePath: _layoutPath });\n")
 		dataCode.WriteString("    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {\n")
 		dataCode.WriteString("      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },\n")
 		dataCode.WriteString("    });\n")
@@ -981,7 +1011,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		dataCode.WriteString("  if (request.headers.get('x-vesk-data') === '1') {\n")
 		dataCode.WriteString("    let dataPage;\n")
 		dataCode.WriteString("    try {\n")
-		dataCode.WriteString("      dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true, sourcePath: _srcPath });\n")
+		dataCode.WriteString("      dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled, sourcePath: _srcPath });\n")
 		dataCode.WriteString("    } catch (err) {\n")
 		dataCode.WriteString("      if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;\n")
 		dataCode.WriteString("      const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);\n")
@@ -1110,7 +1140,7 @@ return new Response(null, { status: 303, headers: { Location: location } });
 `
 
 	funcCodeParts := []string{
-		"import { renderFullPage, renderPageStream, renderPage, compileFile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore } from '../runtime.js';",
+		"import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore } from '../runtime.js';",
 		"",
 		middlewareCode,
 		registryCode.String(),
@@ -1145,7 +1175,7 @@ return new Response(null, { status: 303, headers: { Location: location } });
 	return funcPath, funcCode, name, nil
 }
 
-func GenerateApiFunction(apiNode *ApiRouteNode, outDir, middlewareCode string) (string, string, error) {
+func GenerateApiFunction(rpc RPCClient, apiNode *ApiRouteNode, outDir, middlewareCode string) (string, string, error) {
 	if apiNode.FilePath == nil {
 		return "", "", fmt.Errorf("no file for api route %s", apiNode.FullPath)
 	}
@@ -1153,9 +1183,16 @@ func GenerateApiFunction(apiNode *ApiRouteNode, outDir, middlewareCode string) (
 	funcPath := filepath.Join(funcDir, apiRouteName(apiNode.FullPath)+".js")
 
 	routeSrc := mustReadFile(*apiNode.FilePath)
-	routeSrc = reImportRuntime.ReplaceAllString(routeSrc, "from '../runtime.js';")
+	if rw, err := rpc.CallResult("rewrite_runtime_imports", []any{map[string]any{"source": routeSrc}}); err == nil {
+		var rwOut struct {
+			Code string `json:"code"`
+		}
+		if err := json.Unmarshal(rw, &rwOut); err == nil {
+			routeSrc = rwOut.Code
+		}
+	}
 	if strings.HasSuffix(*apiNode.FilePath, ".ts") {
-		if stripped, err := StripTSViaEsbuild(routeSrc); err == nil {
+		if stripped, err := StripTypesViaSidecar(rpc, routeSrc); err == nil {
 			routeSrc = stripped
 		}
 	}

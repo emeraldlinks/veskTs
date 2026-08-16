@@ -1,9 +1,12 @@
 import { createServer } from 'node:http';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync, existsSync, writeFileSync, mkdirSync, statSync, readdirSync } from 'node:fs';
 import { resolve, dirname, extname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractMiddlewareParts } from '@vesk/compiler/src/router';
 import { createRequire } from 'node:module';
+import { bundleClientRuntimeIife, bundleServerRuntime } from './mini-bundler';
+import { postprocessClientCode, rewriteRuntimeImportSources } from './client-postprocess';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -475,6 +478,18 @@ function storeDataScript(payload: SsrDataPayload): string | null {
   const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
   store.set(token, payload);
   return '/_vesk/ssr-data.js?t=' + token;
+}
+
+function prodStoreDataScript(payload: SsrDataPayload): string | null {
+  if (!payload.props && !payload.ssrData) return null;
+  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  const store = (globalThis as Record<string, Record<string, SsrDataPayload>>).__vsk_ssr_data_store ||= {};
+  store[token] = payload;
+  const keys = Object.keys(store);
+  if (keys.length > 100) {
+    for (let i = 0; i < keys.length - 100; i++) delete store[keys[i]];
+  }
+  return '/ssr-data.js?t=' + token;
 }
 
 function chainForPath(routeTree: any[], pathname: string): any[] {
@@ -1570,6 +1585,15 @@ async function prodInit(params: any): Promise<any> {
     functionCache: new Map<string, any>(),
   };
 
+  const warmTargets: string[] = [];
+  for (const route of buildConfig.routes) {
+    if (route.function) warmTargets.push(route.function);
+  }
+  for (const action of buildConfig.actions || []) {
+    if (action.function) warmTargets.push(action.function);
+  }
+  await Promise.all(warmTargets.map(fn => prodLoadFunction(fn)));
+
   const routes = buildConfig.routes || [];
   return {
     ok: true,
@@ -1596,19 +1620,33 @@ async function prodLoadFunction(funcPath: string): Promise<any | null> {
   }
 }
 
+let prodRtMod: any = null;
+let prodRtModMtime = 0;
+
+async function getProdRtMod(): Promise<any> {
+  const state = prodState;
+  const p = join(state.outDir, 'server', 'runtime.js');
+  const mtime = statSync(p).mtimeMs;
+  if (prodRtMod && prodRtModMtime === mtime) return prodRtMod;
+  prodRtMod = await import(p);
+  prodRtModMtime = mtime;
+  return prodRtMod;
+}
+
 async function prodRenderNotFound(urlPath: string): Promise<string | null> {
   const state = prodState;
   const appDir = join(state.projectDir, 'app');
   const nfPath = join(appDir, 'not-found.vsk');
   if (!existsSync(nfPath)) return null;
   try {
-    const rtMod = await import(`${join(state.outDir, 'server', 'runtime.js')}?t=${Date.now()}`) as { renderFullPage: (...args: any[]) => Promise<string> };
+    const rtMod = await getProdRtMod() as { renderFullPage: (...args: any[]) => Promise<string> };
     const src = readFileSync(nfPath, 'utf-8');
     const compName = devMods.resolveComponentName(src) || 'NotFound';
     return await rtMod.renderFullPage(src, compName, { params: {}, url: urlPath }, new Map(), {
       hydrate: true,
       cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'],
       security: (state.securityConfig.security as Record<string, unknown>) || {},
+      externalDataScript: prodStoreDataScript,
       sourcePath: nfPath,
     });
   } catch (e) {
@@ -1617,25 +1655,104 @@ async function prodRenderNotFound(urlPath: string): Promise<string | null> {
   }
 }
 
+let notFoundHtmlCache: string | null = null;
+let notFoundHtmlComputed = false;
+
+async function prodRenderNotFoundCached(urlPath: string): Promise<string | null> {
+  if (notFoundHtmlComputed) return notFoundHtmlCache;
+  notFoundHtmlComputed = true;
+  notFoundHtmlCache = await prodRenderNotFound(urlPath);
+  return notFoundHtmlCache;
+}
+
 async function prodRenderError(props: Record<string, unknown>): Promise<string | null> {
   const state = prodState;
   const appDir = join(state.projectDir, 'app');
   const errPath = join(appDir, 'error.vsk');
   if (!existsSync(errPath)) return null;
   try {
-    const rtMod = await import(`${join(state.outDir, 'server', 'runtime.js')}?t=${Date.now()}`) as { renderFullPage: (...args: any[]) => Promise<string> };
+    const rtMod = await getProdRtMod() as { renderFullPage: (...args: any[]) => Promise<string> };
     const src = readFileSync(errPath, 'utf-8');
     const compName = devMods.resolveComponentName(src) || 'Error';
     return await rtMod.renderFullPage(src, compName, props, new Map(), {
       hydrate: true,
       cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'],
       security: (state.securityConfig.security as Record<string, unknown>) || {},
+      externalDataScript: prodStoreDataScript,
       sourcePath: errPath,
     });
   } catch (e) {
     console.error('prod: error render error:', (e as Error).message);
     return null;
   }
+}
+
+const prodIpStore = new AsyncLocalStorage<{ clientIp: string }>();
+
+function withProdClientIp<T>(clientIp: string | undefined, fn: () => T | Promise<T>): Promise<T> {
+  return prodIpStore.run({ clientIp: clientIp || '127.0.0.1' }, fn);
+}
+
+// Route server-side useFetch calls that target this app's own origin directly to
+// the in-process request handler instead of round-tripping through the Go proxy
+// (sidecar -> haul -> sidecar RPC). External URLs fall back to a real fetch.
+function installSsrFetchHook(): void {
+  (globalThis as Record<string, unknown>).__vesk_ssr_fetch = (input: any, init?: RequestInit): Promise<Response> => {
+    const state = prodState;
+    const fallback = (): Promise<Response> => fetch(input as any, init as any);
+    if (!state) return fallback();
+    const baseUrl = (globalThis as Record<string, unknown>).__vesk_ssr_base_url as string | undefined;
+    const urlStr = typeof input === 'string' ? input : input instanceof URL ? input.href : (input && input.url) || '';
+    let target: URL;
+    try {
+      target = new URL(urlStr, baseUrl || `http://localhost:${state.port || 3000}`);
+    } catch {
+      return fallback();
+    }
+    const ownOrigin = (() => {
+      try {
+        return baseUrl ? target.origin === new URL(baseUrl).origin : target.origin === `http://localhost:${state.port || 3000}`;
+      } catch {
+        return false;
+      }
+    })();
+    if (!ownOrigin) return fallback();
+
+    const req = input instanceof Request ? input : null;
+    const method = String((init && init.method) || (req && req.method) || 'GET').toUpperCase();
+    const headers: Record<string, string> = {};
+    try {
+      new Headers((init && init.headers) || (req && req.headers) || {}).forEach((v, k) => { headers[k] = v; });
+    } catch {}
+
+    return (async () => {
+      let bodyB64: string | undefined;
+      try {
+        const rawBody = (init && init.body !== undefined && init.body !== null)
+          ? init.body
+          : (req && req.body !== null) ? req.body : undefined;
+        if (rawBody !== undefined && rawBody !== null) {
+          bodyB64 = Buffer.from(await new Response(rawBody).arrayBuffer()).toString('base64');
+        }
+      } catch {}
+      const devReq: DevRequest = {
+        method,
+        url: target.pathname + target.search,
+        headers,
+        bodyB64,
+        clientIp: prodIpStore.getStore()?.clientIp || '127.0.0.1',
+        port: state.port,
+      };
+      const resp = await handleProdRequest(devReq);
+      const bodyBuf = resp.bodyB64 ? Buffer.from(resp.bodyB64, 'base64') : Buffer.alloc(0);
+      const hdrs = new Headers();
+      for (const [k, v] of resp.headers) {
+        if (k.toLowerCase() === 'content-length') continue;
+        try { hdrs.append(k, String(v)); } catch {}
+      }
+      return new Response(bodyBuf, { status: resp.status, headers: hdrs });
+    })();
+  };
 }
 
 async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
@@ -1660,6 +1777,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
   const trustProxy = security.trustProxy as boolean | string | undefined;
   const proto = p.headers['x-forwarded-proto'] && trustProxy ? p.headers['x-forwarded-proto'] : 'http';
   (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
+  installSsrFetchHook();
 
   const secHeaders: Record<string, string> = {};
   try {
@@ -1766,7 +1884,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
     }
     try {
       const webRequest = makeWebRequest(req, url);
-      const response = await mod.handleAction(webRequest, actionId);
+      const response = await withProdClientIp(p.clientIp, () => mod.handleAction(webRequest, actionId));
       const body = await response.text();
       const headers: [string, string][] = [];
       for (const [k, v] of response.headers.entries()) headers.push([k, v]);
@@ -1782,14 +1900,17 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
       if (route.type === 'api') {
         const params = prodMatchPath(route.path, url.pathname);
         if (params) {
+          const t0 = Date.now();
           const mod = await prodLoadFunction(route.function);
+          const t1 = Date.now();
           if (mod) {
             try {
               const webRequest = makeWebRequest(req, url);
-              const response = await mod.handle(webRequest);
+              const response = await withProdClientIp(p.clientIp, () => mod.handle(webRequest));
               const body = await response.text();
               const headers: [string, string][] = [];
               for (const [k, v] of response.headers.entries()) headers.push([k, v]);
+              console.error(`sidecar: prod_api ${url.pathname} load=${t1 - t0}ms handle=${Date.now() - t1}ms`);
               return withSec({ status: response.status, headers, bodyB64: Buffer.from(body).toString('base64') });
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
@@ -1800,11 +1921,6 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
       }
     }
   }
-
-  let notFoundHtml: string | null = null;
-  try {
-    notFoundHtml = await prodRenderNotFound(url.pathname);
-  } catch {}
 
   for (const route of state.buildConfig.routes) {
     if (route.type === 'ssr') {
@@ -1818,7 +1934,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
             let cachedResult: { html: string; headers: Record<string, string> } | null = null;
             if (route.revalidate && route.revalidate > 0) {
               cachedResult = await devMods.runtimeServer.pageIsr(url.pathname, async () => {
-                const response = await mod.handle(webRequest);
+                const response = await withProdClientIp(p.clientIp, () => mod.handle(webRequest));
                 return { html: await response.text(), headers: Object.fromEntries(response.headers) };
               }, { revalidate: route.revalidate, tags: route.tags || [] });
             }
@@ -1827,7 +1943,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
               return withSec({ status: 200, headers, bodyB64: Buffer.from(cachedResult.html).toString('base64') });
             }
 
-            const response = await mod.handle(webRequest);
+            const response = await withProdClientIp(p.clientIp, () => mod.handle(webRequest));
             const headers: Record<string, string | number> = Object.fromEntries(response.headers);
             if (!headers['content-type'] && !headers['Content-Type']) headers['Content-Type'] = 'text/html';
             const body = await response.text();
@@ -1835,7 +1951,8 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
           } catch (e) {
             const err = e instanceof Error ? e : new Error(String(e));
             if (err.name === 'NotFoundError') {
-              return withSec({ status: 404, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>').toString('base64') });
+              const nfHtml = await prodRenderNotFoundCached(url.pathname);
+              return withSec({ status: 404, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(nfHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>').toString('base64') });
             }
             console.error('haul ssr error:', err.message);
             let errorHtml: string | null = null;
@@ -1849,7 +1966,8 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
     }
   }
 
-  return withSec({ status: 404, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>').toString('base64') });
+  const nfHtml = await prodRenderNotFoundCached(url.pathname);
+  return withSec({ status: 404, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(nfHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>').toString('base64') });
 }
 
 const server = createServer((req, res) => {
@@ -1901,7 +2019,13 @@ const server = createServer((req, res) => {
         switch (rpcReq.method) {
           case 'compile_client': {
             const { source, filePath, options } = (rpcReq.params[0] || {}) as any;
-            const code = compileClient(source, filePath || null, options || { forceClient: true });
+            const opts = options || { forceClient: true };
+            const code = compileClient(source, filePath || null, opts);
+            if (opts.postprocess) {
+              const post = postprocessClientCode(code);
+              respond({ jsonrpc: '2.0', id: rpcReq.id, result: { code: post.code, runtimeImports: post.runtimeImports } });
+              return;
+            }
             respond({ jsonrpc: '2.0', id: rpcReq.id, result: { code } });
             return;
           }
@@ -1978,6 +2102,31 @@ const server = createServer((req, res) => {
             respond({ jsonrpc: '2.0', id: rpcReq.id, result: { compilerDir, runtimeDir } });
             return;
           }
+          case 'bundle_runtime_iife': {
+            const { runtimeDir: rd, usedNames } = (rpcReq.params[0] || {}) as any;
+            const code = bundleClientRuntimeIife(rd || runtimeDir, usedNames || []);
+            respond({ jsonrpc: '2.0', id: rpcReq.id, result: { code } });
+            return;
+          }
+          case 'bundle_server_runtime': {
+            const { runtimeDir: rd, compilerDir: cd, entryPath } = (rpcReq.params[0] || {}) as any;
+            const code = bundleServerRuntime(rd || runtimeDir, cd || compilerDir, entryPath);
+            respond({ jsonrpc: '2.0', id: rpcReq.id, result: { code } });
+            return;
+          }
+          case 'strip_types': {
+            const { source } = (rpcReq.params[0] || {}) as any;
+            const stripMod = await import('@vesk/compiler/src/strip-ts');
+            const code = stripMod.stripCodeTypes(source);
+            respond({ jsonrpc: '2.0', id: rpcReq.id, result: { code } });
+            return;
+          }
+          case 'rewrite_runtime_imports': {
+            const { source } = (rpcReq.params[0] || {}) as any;
+            const code = rewriteRuntimeImportSources(source);
+            respond({ jsonrpc: '2.0', id: rpcReq.id, result: { code } });
+            return;
+          }
           case 'scan_routes': {
             const { appDir } = (rpcReq.params[0] || {}) as any;
             const routes = scanRoutes(appDir);
@@ -2039,7 +2188,9 @@ const server = createServer((req, res) => {
             return;
           }
           case 'prod_render': {
+            const t0 = Date.now();
             const result = await handleProdRequest((rpcReq.params[0] || {}) as DevRequest);
+            console.error(`sidecar: prod_render ${(rpcReq.params[0] || {}).url} ${Date.now() - t0}ms`);
             respond({ jsonrpc: '2.0', id: rpcReq.id, result });
             return;
           }

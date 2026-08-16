@@ -90,6 +90,7 @@ function cleanupGlobals(): void {
   delete (globalThis as any).__vsk_fetch_registry;
   delete (globalThis as any).__vsk_fetch_cache;
   delete (globalThis as any).__vesk_ssr_base_url;
+  delete (globalThis as any).__vesk_ssr_fetch;
   delete (globalThis as any).__vesk_request;
   clearSsrData();
 }
@@ -396,6 +397,48 @@ it('dedups concurrent SSR requests across components', async () => {
   const promises = (globalThis as any)['__vsk_ssr_promises_test-token'] as Promise<unknown>[];
   await Promise.allSettled(promises);
   expect(mock.calls.length).toBe(1);
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('routes SSR fetches through the __vesk_ssr_fetch hook, not global fetch', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vesk_ssr_base_url = 'http://localhost:4173';
+  const hookCalls: Array<{ url: string; init?: RequestInit }> = [];
+  (globalThis as any).__vesk_ssr_fetch = (url: string, init?: RequestInit) => {
+    hookCalls.push({ url, init: init ?? {} });
+    return Promise.resolve({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve({ hooked: true }) } as Response);
+  };
+  const mock = mockFetch(() => jsonResponse({ wrong: true }));
+  const res = useFetch<{ hooked: boolean }>('/api/hooked');
+  await waitFor(() => !res.loading);
+  expect(hookCalls.length).toBe(1);
+  expect(hookCalls[0].url).toBe('http://localhost:4173/api/hooked');
+  expect(mock.calls.length).toBe(0);
+  expect(res.data).toEqual({ hooked: true });
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('SSR retries use a fixed delay, not exponential backoff', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  let attempts = 0;
+  const mock = mockFetch(() => {
+    attempts++;
+    if (attempts <= 2) return jsonResponse({}, 500);
+    return jsonResponse({ healed: true });
+  });
+  const started = Date.now();
+  const res = useFetch<{ healed: boolean }>('/api/ssr-flaky', { retry: 2, retryDelay: 300 });
+  await waitFor(() => !res.loading);
+  const elapsed = Date.now() - started;
+  expect(mock.calls.length).toBe(3);
+  expect(res.data).toEqual({ healed: true });
+  // Fixed: 300 + 300 = 600ms. Exponential would be 300 + 600 = 900ms.
+  expect(elapsed >= 450).toBe(true);
+  expect(elapsed < 850).toBe(true);
   mock.restore();
   cleanupGlobals();
 });
