@@ -14,5 +14,8 @@
   ],
   "scripts": {
     "build": "node ../haul-platforms/build-platform.mjs linux-arm64"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

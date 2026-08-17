@@ -42,7 +42,8 @@
   },
   "files": [
     "dist",
-    "bin"
+    "bin",
+    "README.md"
   ],
   "optionalDependencies": {
     "@vesk/haul-darwin-arm64": "0.1.12",

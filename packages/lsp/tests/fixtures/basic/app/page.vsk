@@ -1,0 +1,36 @@
+import { track } from "@vesk/runtime"
+
+component Card(props) {
+  <div class="p-4">
+    <h2>{props.title}</h2>
+    <p>{props.body}</p>
+  </div>
+}
+
+export component Home() {
+  const &[count] = track(10)
+  return (
+    <main>
+      <h1 class="text-4xl font-bold">Welcome</h1>
+      <Card title="Hello" body="World" />
+      <button onClick={() => count++}>+</button>
+      <p>{count}</p>
+      <p>{undefinedVar}</p>
+    </main>
+  )
+}
+
+export component Typed(props: { value: number; label?: string }) {
+  <p>{props.label ?? String(props.value)}</p>
+}
+
+interface IFoo {
+  name?: string
+}
+
+export component Usage() {
+  <div>
+    <Typed value={count} label="x" />
+    <IFoo />
+  </div>
+}

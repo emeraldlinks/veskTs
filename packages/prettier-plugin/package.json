@@ -1,0 +1,42 @@
+{
+  "name": "@vesk/prettier-plugin",
+  "version": "0.1.0",
+  "description": "Prettier plugin for the Vesk component language",
+  "type": "module",
+  "main": "./src/index.js",
+  "exports": {
+    ".": {
+      "default": "./src/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "README.md"
+  ],
+  "keywords": [
+    "prettier",
+    "plugin",
+    "vesk",
+    "formatter"
+  ],
+  "license": "MIT",
+  "author": "emeraldlinks",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs.git"
+  },
+  "homepage": "https://github.com/emeraldlinks/veskTs#readme",
+  "bugs": {
+    "url": "https://github.com/emeraldlinks/veskTs/issues"
+  },
+  "peerDependencies": {
+    "prettier": "^3.0.0"
+  },
+  "dependencies": {
+    "@vesk/compiler": "^0.1.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

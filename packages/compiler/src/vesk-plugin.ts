@@ -352,6 +352,10 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         (node as any).body = [];
 
         this.pos = this.start;
+        const endPos = this.start + 2 + tagName.length + 1;
+        if (endPos > this.input.length) {
+          this.raise(this.start, `Unclosed ${tagName} block`);
+        }
         this.pos++;
         this.pos++;
         this.pos += tagName.length;
@@ -372,7 +376,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
             this.pos++;
           } else break;
         }
-        this.pos++;
+        if (this.pos < this.input.length) this.pos++;
         this.next();
 
         return this.finishNode(node, 'VeskBlock');
@@ -456,6 +460,10 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
 
         const contentStart = openingElement.end;
         const closeIdx = this.input.indexOf('</style>', contentStart);
+
+        if (closeIdx < 0) {
+          this.raise(contentStart, 'Unclosed <style> element: missing </style>');
+        }
 
         const children = [];
         if (closeIdx > contentStart) {

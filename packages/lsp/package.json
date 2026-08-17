@@ -4,6 +4,14 @@
   "type": "module",
   "description": "Vesk Language Server Protocol server for .vsk files",
   "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
+  },
   "bin": {
     "vesk-lsp": "./dist/server.js"
   },
@@ -14,6 +22,8 @@
   },
   "dependencies": {
     "@vesk/compiler": "^0.1.0",
+    "@vesk/prettier-plugin": "^0.1.0",
+    "prettier": "^3.0.0",
     "vscode-languageserver": "^9.0.0",
     "vscode-languageserver-textdocument": "^1.0.0"
   },
@@ -35,6 +45,10 @@
     "node": ">=20.0.0"
   },
   "files": [
-    "dist"
-  ]
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
 }

@@ -21,6 +21,7 @@
     "url": "https://github.com/emeraldlinks/veskTs/issues"
   },
   "files": [
-    "src"
+    "src",
+    "README.md"
   ]
 }

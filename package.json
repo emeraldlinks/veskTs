@@ -15,7 +15,8 @@
     "packages/create-vesk",
     "packages/plugin-tailwind",
     "packages/runtime",
-    "packages/lsp"
+    "packages/lsp",
+    "packages/prettier-plugin"
   ],
   "scripts": {
     "build": "npx tsx packages/cli/build.ts",
@@ -34,6 +35,7 @@
     "@rollup/plugin-typescript": "^12.3.0",
     "@rollup/wasm-node": "^4.62.2",
     "linkedom": "^0.18.13",
+    "prettier": "^3.9.6",
     "puppeteer-core": "^25.3.0",
     "tslib": "^2.8.1",
     "tsx": "^4.23.1",

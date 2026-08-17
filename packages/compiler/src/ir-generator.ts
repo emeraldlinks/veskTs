@@ -412,6 +412,21 @@ function exprToIR(source: string, expr: any): IRNode[] {
     const keyExpr = extractKeyExpr(bodyNodes);
     return [new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr, indexVar)];
   }
+  if (expr.type === 'ParenthesizedExpression') return exprToIR(source, expr.expression);
+  // Nested conditionals/`&&` with JSX branches become nested dynamic regions
+  // so `a ? <X/> : b ? <Y/> : <Z/>` compiles recursively instead of degrading
+  // to a raw text binding.
+  if (expr.type === 'ConditionalExpression') {
+    const condExpr = toExpression(source, expr.test);
+    const consequent = exprToIR(source, expr.consequent);
+    const alternate = exprToIR(source, expr.alternate);
+    return [new OpaqueDynamicRegion(condExpr, consequent, alternate)];
+  }
+  if (expr.type === 'LogicalExpression' && expr.operator === '&&') {
+    const condExpr = toExpression(source, expr.left);
+    const consequent = exprToIR(source, expr.right);
+    return [new OpaqueDynamicRegion(condExpr, consequent)];
+  }
   return [new DynamicBinding(toExpression(source, expr))];
 }
 
@@ -584,7 +599,7 @@ function processBlockBody(source: string, block: any): IRNode[] {
   }
   if (block.type === 'IfStatement') return processIfStatement(source, block);
   if (block.type === 'JSXExpressionContainer') {
-    return [new DynamicBinding(toExpression(source, block.expression))];
+    return exprToIR(source, block.expression);
   }
   const raw = getSource(source, block);
   if (raw) return [new RuntimeStatement(raw, block, source)];
@@ -668,7 +683,7 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
         nodes.push(new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr));
         continue;
       }
-      nodes.push(new DynamicBinding(toExpression(source, stmt.expression)));
+      nodes.push(...exprToIR(source, stmt.expression));
     } else if (stmt.type === 'JSXFragment') {
       for (const c of stmt.children) {
         nodes.push(...processJSXChildren(source, [c]));

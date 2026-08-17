@@ -14,5 +14,8 @@
   ],
   "scripts": {
     "build": "node ../haul-platforms/build-platform.mjs win32-x64"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }
