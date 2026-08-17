@@ -57,7 +57,7 @@ writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
 	dependencies: {
 		'@vesk/compiler': '^0.1.0',
 		'@vesk/runtime': '^0.1.0',
-		'vesk': '^0.1.0',
+		'@vesk/vesk-cli': '^0.1.0',
 		'@vesk/adapter': '^0.1.0',
 		'@vesk/plugin-tailwind': '^0.1.0',
 	},

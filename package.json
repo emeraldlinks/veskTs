@@ -1,6 +1,6 @@
 {
   "name": "vesk",
-  "private": true,
+  "private": false,
   "type": "module",
   "description": "Vesk — A Compiler-First Framework for the Post-VDOM Web",
   "author": "emeraldlinks",
@@ -42,7 +42,7 @@
     "typescript": "^5.8.0"
   },
   "dependencies": {
-    "@tailwindcss/oxide-linux-arm64-gnu": "^4.3.3",
-    "lightningcss-linux-arm64-gnu": "^1.32.0"
+    "tailwindcss": "^4.3.3",
+    "lightningcss": "^1.32.0"
   }
 }

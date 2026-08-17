@@ -19,7 +19,7 @@
     "@vesk/runtime": "file:./tarballs/vesk-runtime-0.1.10.tgz"
   },
   "optionalDependencies": {
-    "@vesk/haul-linux-arm64": "file:./tarballs/vesk-haul-linux-arm64-0.1.12.tgz"
+    "@vesk/haul-linux-arm64": "file:./tarballs/vesk-haul-linux-x64-0.1.12.tgz"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

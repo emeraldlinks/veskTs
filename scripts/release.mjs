@@ -20,7 +20,7 @@ const INTERNAL_NAMES = new Set([
   '@vesk/plugin-tailwind',
   '@vesk/prettier-plugin',
   '@vesk/runtime',
-  'vesk',
+  '@vesk/vesk-cli',
   'create-vesk',
 ]);
 
@@ -36,7 +36,7 @@ const PUBLISH_ORDER = [
   '@vesk/haul-darwin-x64',
   '@vesk/haul-darwin-arm64',
   '@vesk/haul-win32-x64',
-  'vesk',
+  '@vesk/vesk-cli',
   'create-vesk',
 ];
 
@@ -82,7 +82,10 @@ for (const { dir, path, pkg } of packages) {
 const scaffold = join(PACKAGES_DIR, 'create-vesk', 'src', 'index.js');
 if (existsSync(scaffold)) {
   const src = readFileSync(scaffold, 'utf8');
-  const patched = src.replaceAll(/\^0\.1\.0/g, `^${newVersion}`);
+  const patched = src.replace(
+    /(['"]@vesk\/[a-z0-9-]+['"]\s*:\s*['"])\^[^'"]+(['"])/g,
+    `$1^${newVersion}$2`
+  );
   // Every vesk package reference in the scaffold template must be bumped to
   // the release version; a stale literal (e.g. a dep added with a pinned
   // version instead of the ^0.1.0 placeholder) fails the release.

@@ -1,6 +1,6 @@
 {
   "name": "@vesk/adapter",
-  "version": "0.1.11",
+  "version": "0.1.0",
   "type": "module",
   "description": "Vesk adapter — builds deployable .vesk/ output for Deno and Node serverless",
   "main": "./dist/index.js",
