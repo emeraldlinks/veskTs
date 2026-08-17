@@ -3,10 +3,13 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vesk dev",
-    "build": "vesk build",
-    "start": "vesk start",
-    "typecheck": "tsc --noEmit"
+    "dev": "haul dev",
+    "build": "haul build",
+    "start": "haul start",
+    "typecheck": "tsc --noEmit",
+    "dev:vesk": "vesk dev",
+    "build:vesk": "vesk build",
+    "start:vesk": "vesk start"
   },
   "dependencies": {
     "@vesk/adapter": "file:./tarballs/vesk-adapter-0.1.11.tgz",
@@ -14,6 +17,9 @@
     "@vesk/compiler": "file:./tarballs/vesk-compiler-0.1.11.tgz",
     "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.1.4.tgz",
     "@vesk/runtime": "file:./tarballs/vesk-runtime-0.1.10.tgz"
+  },
+  "optionalDependencies": {
+    "@vesk/haul-linux-arm64": "file:./tarballs/vesk-haul-linux-arm64-0.1.12.tgz"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

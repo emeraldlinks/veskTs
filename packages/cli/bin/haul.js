@@ -2,11 +2,11 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
+const projectRequire = createRequire(resolve(process.cwd(), 'package.json'));
 
 const PLATFORM_BIN = {
   'linux-x64': '@vesk/haul-linux-x64',
@@ -26,7 +26,7 @@ if (!pkgName) {
 let binPath;
 try {
   const binFile = `bin/haul${process.platform === 'win32' ? '.exe' : ''}`;
-  binPath = require.resolve(`${pkgName}/${binFile}`);
+  binPath = projectRequire.resolve(`${pkgName}/${binFile}`);
 } catch {
   console.error(
     `[vesk haul] ${pkgName} is not installed — haul ships as a platform binary.\n` +
