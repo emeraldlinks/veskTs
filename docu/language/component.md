@@ -1,23 +1,48 @@
 # Component Declarations
 
-> Status: Phase 1 (expression mode only). Statement mode, `client`, and `async` modifiers coming in later phases.
+`component` is the Vesk component keyword. Components are the unit of markup,
+state, and effects: the compiler transforms a component body into IR and
+generates server (SSR) and client (hydration) code from it.
 
 ## Syntax
 
-```
-component Name(params) {
-  // body — expression mode (Phase 1)
-}
+```vsk
+component Name(params) { }
+component Name { }            // params optional — same as Name()
+component Island(params) client { }
+export component Exported(params) { }
+export default component App(params) { }
+export async component Loader() { }
+export default async component App() { }
 ```
 
-- `component` is a **reserved keyword** in Vesk. It cannot be used as an identifier.
-- The component name follows `component` and must be a valid identifier.
-- Parameter list is optional: `component App { ... }` and `component App() { ... }` are both valid.
-- TypeScript type annotations on parameters are supported: `component Foo(props: { name: string }) { ... }`.
+- `component` is a **reserved keyword**. Using it as an identifier raises
+  "`component` is a reserved keyword and cannot be used as an identifier".
+- `Name` must be a valid identifier.
+- Params are optional and fully TypeScript-typed:
+  `component Foo(props: { name: string }) { ... }`.
+- Generic type parameters are supported:
+  `component List<T>(props: { items: T[] }) { ... }` — the compiler parses
+  `typeParameters` like a TS function declaration.
+- `async` may appear before `component` — directly (`async component
+  X()`) or after `export` (`export default async component X()`) — with
+  arbitrary whitespace. `async` after the params (`component X() async`)
+  is not part of the grammar.
+- `client` (the island modifier) may appear after the closing paren or after
+  `component` — both positions parse to the same `client: true` flag.
+  See [client-boundary.md](client-boundary.md).
+
+## Body modes
+
+A component body is either:
+
+- **Expression mode** — ends with `return <jsx>;`. See
+  [expression-mode.md](expression-mode.md).
+- **Statement mode** — markup and control flow as statements (bare JSX,
+  `if`, `for`, `switch`, `try`, guard-clause returns). See
+  [statement-mode.md](statement-mode.md).
 
 ## Examples
-
-### Simple component
 
 ```vsk
 component App {
@@ -25,15 +50,11 @@ component App {
 }
 ```
 
-### Component with props
-
 ```vsk
 component Greeting(props: { name: string }) {
   return <div>Hello, {props.name}!</div>;
 }
 ```
-
-### Component with reactive state
 
 ```vsk
 component Counter(props: { initial: number }) {
@@ -41,8 +62,6 @@ component Counter(props: { initial: number }) {
   return <button onClick={() => count++}>Count: {count}</button>;
 }
 ```
-
-### Guard-clause early returns
 
 ```vsk
 component TodoList(props: { todos: Todo[] }) {
@@ -60,29 +79,25 @@ component TodoList(props: { todos: Todo[] }) {
 }
 ```
 
-## Restrictions (Phase 1)
-
-- `async component` — not yet supported (Phase 7)
-- `client component` — not yet supported (Phase 7)
-- `export component` — not yet supported
-- Generic type parameters (`component List<T>(...)`) — ambiguous with JSX in `.vsk` files; use inline type annotations instead
-
-## Reserved keyword
-
-`component` cannot be used as a variable name, object property key, or in any expression context:
-
-```vsk
-const x = component;  // ERROR: `component` is a reserved keyword
-```
-
 ## AST Node
+
+The parser emits `ComponentDeclaration`:
 
 ```
 ComponentDeclaration {
   type: 'ComponentDeclaration'
   id: Identifier
-  params: Pattern[]
+  params: Pattern[]          // [] when omitted
   body: BlockStatement
-  async: boolean (false in Phase 1)
+  async: boolean
+  client: boolean
+  typeParameters?: TypeParameterDeclaration[]
 }
 ```
+
+## Verified against
+
+- `packages/compiler/src/vesk-plugin.ts` — `parseComponentDeclaration`
+- `packages/compiler/src/parser.test.ts` — `client keyword`, generics,
+  `export [default] [async] component` suites
+- Commit `2a5b19d`

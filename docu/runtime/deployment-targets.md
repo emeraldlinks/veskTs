@@ -1,73 +1,65 @@
 # Deployment Targets
 
-> Status: Phase 2 — Node server target only.
+Vesk builds one SSR function and one client bundle; how they are served
+depends on the target platform. The default is a standard Node.js server;
+`vesk build --platform <name>` switches the output shape.
 
-## Target Environments
+## Supported platforms
 
-### Node.js Server (Phase 2+)
+`packages/adapter/src/platform.ts` defines:
 
-The primary deployment target. Standard Node.js server environment:
-
-- `packages/runtime` is written as ordinary Node-targeting server runtime
-- Node built-ins (`fs`, `path`, `net`, `Buffer`, `crypto`) are fine to use
-- Server codegen produces a render function callable from any Node HTTP framework
-- `defer`/streaming codegen uses Node streams for the Node path
-
-### Edge Runtime (Future)
-
-Separate adapter for edge environments (Cloudflare Workers, Vercel Edge). Not built in Phase 2.
-
-### Browser (Phase 3+)
-
-Client codegen produces JavaScript that runs in the browser. Creates real DOM, wires reactive bindings. See Phase 3.
-
-## Server Rendering
-
-Server rendering produces an HTML string from a `.vsk` source:
-
-```js
-import { render } from '@vesk/compiler';
-
-const html = render(source, 'ComponentName', { prop: 'value' });
+```
+type Platform = 'node' | 'vercel' | 'netlify' | 'cloudflare' | 'deno' | 'aws' | 'edge' | 'coxmos'
 ```
 
-### What gets rendered
+Platform detection order (during `vesk build`):
 
-- Static HTML elements with attributes
-- Dynamic expression interpolation (`{expr}`)
-- Conditional rendering (`{cond && <X />}`, `{cond ? <A /> : <B />}`)
-- List rendering via `.map()` — iterates array, concatenates HTML
-- Child component calls — renders nested component HTML
+1. Explicit `--platform <name>` CLI override
+2. Well-known platform environment variables (e.g. `DENO_DEPLOYMENT_ID`,
+   `DENO_REGION`, `DENO_DEPLOY_URL` → `deno`)
+3. Default: `node`
 
-### What does NOT get rendered
+## Node server (default)
 
-- Event handlers (`onClick`, `onChange`, etc.) — client-only
-- `track()` declarations — skipped on server (reactive state is client-only)
-- Client-only components — not supported in Phase 2
+- `vesk build` emits an SSR function (`ssr-function.ts` — `handle(request)`
+  entry, server actions via `handleAction(request, id)`) plus static
+  assets.
+- `vesk start` serves the build with `startProdServer(outDir, { port })`
+  (prod-server.ts, default port 3000).
+- Server-only runtime APIs (`cookies`, `headers`, `locals`, ISR, request
+  security) run in this environment.
 
-### HTML escaping
+## Deno
 
-All dynamic text content is escaped to prevent XSS:
-- `<` → `&lt;`
-- `>` → `&gt;`
-- `&` → `&amp;`
-- `"` → `&quot;`
-- `'` → `&#39;`
+`--platform deno` switches the build to Deno-shaped output (platform
+deploy/handler paths in the adapter).
 
-## Client Rendering (Phase 3+)
+## Server rendering
 
-Client rendering creates real DOM elements and wires reactive bindings:
+The server render path is `packages/compiler/src/server-render.ts` +
+`server-jsgen.ts`:
 
-- `track()` creates reactive cells
-- State mutations trigger targeted DOM updates
-- `.map()` uses runtime keyed reconciliation (the "slow path")
-- Statement-mode `if`/`for` uses static codegen (the "fast path")
+- **Rendered:** static HTML, dynamic interpolation `{expr}`, conditionals,
+  `.map()` / `for` lists, child component HTML, `{#server}` blocks, styles.
+- **Not rendered:** event-handler attributes (`on*` — client-only), and
+  `{#client}` blocks (stripped). Tracked state renders its initial value;
+  reactivity is client-side.
+- **Escaping:** all dynamic text content is escaped with `escapeHtml()`
+  (XSS-safe); static attribute values from source are trusted.
 
-## Hydration (Phase 6+)
+## Browser
 
-Server-rendered HTML can be hydrated on the client:
+The client bundle is built from the compiled client codegen plus the
+runtime's `index-client.ts` barrel, tree-shaken to the exports actually
+used, with hydration entry points (`hydrate`, `hydrateViewport`,
+`hydrateIdle`, `hydrateOnInteraction`, `needsHydration`,
+`createHydrateWalker`, `collectVskMarkers`, `reactiveProps`). See
+[hydration.md](hydration.md).
 
-1. Server renders HTML string with metadata markers
-2. Client walks existing DOM, attaches event handlers
-3. `track()` values adopt server-rendered initial state
-4. Component becomes interactive
+## Verified against
+
+- `packages/adapter/src/platform.ts` — platform list + detection
+- `packages/adapter/src/ssr-function.ts`, `prod-server.ts` — Node outputs
+- `packages/compiler/src/server-jsgen.ts`, `server-render.ts` — SSR
+  behavior
+- Commit `2a5b19d`

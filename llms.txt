@@ -1,0 +1,72 @@
+# llms.txt — Vesk framework
+
+> Machine-oriented reference for LLM agents. Covers the whole framework;
+> per-package detail lives in each package's `llms.txt`. Verified against
+> source at commit 2a5b19d.
+
+## What Vesk is
+
+A compiler-first framework for the post-VDOM web. `.vsk` is a TypeScript
+superset adding `component` declarations, `track()`-based reactivity,
+islands, and statement-mode component bodies. No virtual DOM: the compiler
+emits per-cell DOM updates and static subtrees need no hydration runtime.
+
+## Where everything is
+
+- Human/agent docs: `docu/` (language, compiler, runtime, CLI) — every
+  page verified against source with a "Verified against:" footer.
+- `packages/cli/llms.txt` — CLI reference (commands, config loading,
+  dev-server flow).
+- `docs/haul.md` — the native Go haul engine.
+- `AGENTS.md` (root + per-package) — conventions and hard rules.
+
+## Key facts
+
+- **Grammar**: `component Name(params) {}`, `async component`,
+  `export [default] [async] component`, `client` island modifier,
+  generics supported. `component` is reserved.
+- **Tracked state**: `const &[count] = track(0)` / `&[count, rawCell]`.
+  Runtime exports `track, get, set, untrack, peek, derived, effect,
+  flushSync, tick, on_destroy, createContext, pre_effect` etc.
+- **Body modes**: expression mode (`return <jsx>`) and statement mode
+  (bare JSX, `if`/`for`/`while`/`switch`/`try`, guard clauses, key/index
+  clauses, `empty {}` alternates). Both are first-class — features and
+  tests must cover both.
+- **Boundary**: `client` components are islands (render on server and
+  client). `{#server}` renders SSR-only; `{#client}` is SSR-stripped,
+  kept in the client bundle. A `client` component cannot contain
+  `{#server}` and vice versa (compile error).
+- **SSR**: event-handler attributes (`on*`) are excluded from SSR HTML
+  entirely. Dynamic text is escaped (`escapeHtml`).
+- **Hydration**: server emits `<!--vsk-->` markers before non-static
+  subtrees; client claims existing DOM via a walker
+  (`hydrate`, `hydrateViewport`, `hydrateIdle`, `hydrateOnInteraction`,
+  `needsHydration`, `hydrationCount`, `hydrateInitial`).
+- **Reactivity scheduler**: microtask-batched; `flushSync(fn)` for
+  synchronous mode; `tick()` resolves on the next animation frame;
+  max 1001 flush rounds ("Maximum update depth exceeded").
+- **Negative facts**: `batch` does NOT exist (use `flushSync`). No VDOM.
+  No `suspense` implementation. No `vite-plugin-vesk`. `track.ts` in the
+  runtime is dead code — never import it.
+
+## Packages
+
+| Package | Surface |
+| --- | --- |
+| `packages/compiler` | `@vesk/compiler` — preprocess/parser/IR/codegen, exports `parse`, `createBaseParser`, `VeskParserPlugin`, `generateIR`, `render` (server codegen), `compileClient`/`compile`, `isStaticIR`, `defineConfig`, `definePlugin`, `preset`, `validateConfig`, `scanRoutes`, `scanComponents`, `collectSources`, `matchUrl`, plus `typecheckProject` (via `src/typecheck`) |
+| `packages/runtime` | `@vesk/runtime` — client barrel `index-client`, server barrel `index-server` (split: hydrators/bindings client-only; request/ISR server-only) |
+| `packages/adapter` | build output (platforms: node/vercel/netlify/cloudflare/deno/aws/edge/coxmos), dev server, prod server, SSR function, SEO audit |
+| `packages/cli` | `vesk` binary — dev/build/start/typecheck/seo |
+| `packages/haul` + `@vesk/haul-<os>-<cpu>` | native Go engine: build/dev/start/seo; typecheck via Node sidecar (JSON-RPC to `@vesk/compiler`) |
+| `packages/lsp`, `prettier-plugin`, `plugin-tailwind`, `create-vesk` | tooling |
+
+## Rules for agents
+
+- Every compiler source edit needs a rebuild:
+  `npx tsx packages/cli/src/build-packages.ts`.
+- Tests: `npx tsx packages/compiler/src/<file>.test.ts`; full suite
+  `node scripts/test.js`; hydration paths: `node hydration-test.mjs`.
+- No regex for source parsing anywhere in compiler/haul (AST/tokenizer
+  only). No `batch` imports.
+- Docs edits: follow `docu/` conventions (verify against source, both
+  body modes, "Verified against:" footers).

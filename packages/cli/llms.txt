@@ -1,16 +1,16 @@
 # llms.txt — vesk CLI (`packages/cli`)
 
-> Machine-oriented reference for LLM agents. Verified against source at commit 5b94b66.
+> Machine-oriented reference for LLM agents. Verified against source at commit 2a5b19d.
 
 ## Package identity
 
-- `name`: `vesk` (the CLI binary), `version`: 0.1.6, ESM, `type: module`, Node >= 20.
+- `name`: `vesk` (the CLI binary), version: 0.1.0, ESM, `type: module`, Node >= 20.
 - `bin`: `./dist/cli.js`.
 - Deps: `@vesk/adapter`, `@vesk/compiler`, `@vesk/plugin-tailwind`, `@vesk/runtime`, `esbuild`, `esrap`, `sharp`, `typescript`, `ws`, `zimmerframe`.
 
 ## Entry points
 
-- `packages/cli/src/index.ts` — CLI entry. Parses `process.argv`, dispatches to `build`/`start`/`dev`/`seo`.
+- `packages/cli/src/index.ts` — CLI entry. Parses `process.argv`, dispatches to `build`/`start`/`dev`/`typecheck`/`seo`.
 - `packages/cli/src/dev-server.ts` — `startDevServer(port, projectDir, config)`.
 - `packages/cli/src/action-handler.ts` — server action routing.
 - `packages/cli/src/build-packages.ts` — monorepo incremental build (`buildPackages(force)`).
@@ -18,14 +18,18 @@
 ## CLI command dispatch (index.ts)
 
 ```
-args[0] == 'build'  → loadConfig → build(appDirPath, opts)
-args[0] == 'start'  → startProdServer(outDir, { port })
-args[0] == 'dev'    → setRuntimeModule(__veskRuntime) → startDevServer(port, projectDir, config)
-args[0] == 'seo'    → runSeoAudit(appDirPath)
-else / --help        → usage()
+args[0] == 'build'    → loadConfig → build(appDirPath, opts)
+args[0] == 'start'    → startProdServer(outDir, { port })
+args[0] == 'dev'      → setRuntimeModule(__veskRuntime) → startDevServer(port, projectDir, config)
+args[0] == 'typecheck'→ typecheckProject(projectDir, { strict }) via @vesk/compiler/src/typecheck
+args[0] == 'seo'      → runSeoAudit(appDirPath)
+else / --help          → usage()
 ```
 
 `parsePortArg(args, def=3000)` handles `-p`, `--port`, `--port=NNNN`.
+`vesk build` flags: `--platform <name>`, `--target <node|edge>` (edge only
+when the value is exactly `edge`, else node), `--seo`, `--strict`,
+`--skip-split` (disables route code splitting).
 
 ## Config loading algorithm (loadConfig)
 

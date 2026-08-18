@@ -1,94 +1,72 @@
 # Compiler Pipeline Overview
 
-> Status: Phase 2 complete (server codegen for expression mode).
+The compiler turns `.vsk` source into two JavaScript targets from one
+intermediate representation: server codegen (SSR HTML) and client codegen
+(real DOM construction + hydration wiring).
 
-## Pipeline Stages
+## Pipeline stages
 
 ```
 .vsk source
    │
    ▼
-[1] Lexer/Tokenizer
-   │  Acorn + @sveltejs/acorn-typescript + VeskPlugin()
-   │  Tokenizes: TS, JSX, component, let, &, track
+[1] Preprocess (parser.ts)
+   │  preprocessForClauses(): blanks `; key <expr>` / `; index <ident>`
+   │  clauses in for-of headers, preserving source offsets; records
+   │  VeskAnnotation[] so the IR generator can recover them
    ▼
-[2] Parser → AST
-   │  ESTree-compatible with Vesk extensions:
-   │  - ComponentDeclaration (not FunctionDeclaration)
-   │  - VariableDeclaration with lazy: true on patterns
-   │  - Standard JSX elements and expressions
+[2] Parse (acorn + acorn-ts-plugin + VeskPlugin)
+   │  ESTree-compatible AST with Vesk extensions:
+   │  - ComponentDeclaration (async / client flags)
+   │  - &[...] track-declaration binding atoms (lazy: true)
+   │  - JSX in statement position (bare <div> as a statement)
+   │  - VeskBlock: {#server}, {#client}, empty {}
+   │  - <style> elements captured raw
    ▼
-[3] Semantic Analysis (Phase 3+)
-   │  - Resolve track() bindings and dependency graphs
-   │  - Resolve client/server boundary reachability
-   │  - Reject track() inside non-client components
-   │  - Reject top-level await inside non-async components
+[3] IR generation (ir-generator.ts)
+   │  Walks the AST → typed IR node tree (see ir-format.md)
+   │  - statement-mode dispatch: if/for/while/switch/try/JSX/runtime code
+   │  - validateBlocks: rejects {#server} in client components and
+   │    {#client} in server components
+   │  - extractStyle: hoists <style> content out of the body
    ▼
-[4] IR Generation
-   │  Walks AST → produces typed IR node tree:
-   │  - StaticNode (HTML elements)
-   │  - DynamicBinding (expression interpolation)
-   │  - OpaqueDynamicRegion (conditionals, ternaries)
-   │  - MapRegion (.map() list rendering)
-   │  - ComponentCall (child component references)
-   │  - TextNode (literal text)
-   ▼
-[5] Codegen — two targets consume the same IR:
-   ├─ [5a] Server codegen → function that walks IR, emits HTML string
-   └─ [5b] Client codegen → creates real DOM, wires reactive bindings
+[4] Codegen — two targets consume the same IR
+   ├─ [4a] Server codegen (server-jsgen.ts) → function emitting HTML
+   │       string chunks; event attrs stripped; dynamic attrs rendered
+   │       with placeholder then replaced
+   └─ [4b] Client codegen (client-codegen.ts) → code that creates real
+           DOM nodes and wires tracked bindings, effects, hydration
 ```
 
-## Current State (Phase 2)
+## Verified stage behavior
 
-| Stage | Status |
-|-------|--------|
-| [1] Lexer | ✅ Complete |
-| [2] Parser | ✅ Complete (expression mode) |
-| [3] Semantic | ⬜ Phase 3 |
-| [4] IR | ✅ Complete (expression mode) |
-| [5a] Server | ✅ Complete (non-reactive, expression mode) |
-| [5b] Client | ⬜ Phase 3 |
+- **Parser**: `acorn` `ecmaVersion: 'latest'`, `sourceType: 'module'`, with
+  `locations` and `ranges`. Entry: `parse(source, { filename })`.
+- **IR**: statement mode and expression mode produce the same IR node
+  types. For example both `{items.map((i) => <X />)}` (expression mode)
+  and `for (const i of items; key i.id) { <X /> }` (statement mode)
+  become `MapRegion`.
+- **Static analysis**: `isStaticIR(body)` decides whether a subtree is
+  fully static (only `StaticNode`/`TextNode`, no dynamic attrs, no `on*`).
+  Static components skip runtime effect wiring; `<!--vsk-->` claim markers
+  are emitted in hydrate mode for subtrees that need client JS.
+- **Validation errors** come from `VeskError` factories
+  (`errors.ts`): e.g. `classDecl`, `serverBlockInClient`,
+  `clientBlockInServer`, `notFound` with candidate suggestions.
 
-## Usage
+## Design decisions
 
-```js
-import { render } from '@vesk/compiler';
+- IR is a typed class hierarchy (`ir.ts`), not JSON — codegen visitors
+  dispatch on `instanceof`, and the IR is ephemeral per compilation.
+- User code in statement-mode bodies stays raw: unrecognized statements
+  are preserved as `RuntimeStatement` and re-emitted verbatim; all
+  transformations happen on the IR with AST visitors and `esrap` reprinting.
+- Expression evaluation on the server uses the expression's source text
+  (`Expression.raw`); dynamic text is escaped with `escapeHtml()`.
+- No regex anywhere in parsing or codegen — tokenizer/character scans only.
 
-const source = `
-  component Greeting(props: { name: string }) {
-    return <div>Hello, {props.name}!</div>;
-  }
-`;
+## Verified against
 
-const html = render(source, 'Greeting', { name: 'World' });
-// → '<div>Hello, World!</div>'
-```
-
-## Output Format
-
-The server codegen produces an **HTML string** by walking the IR tree at runtime. Each IR node type maps to HTML:
-
-| IR Node | Server Output |
-|---------|---------------|
-| `StaticNode` | `<tag attrs>children</tag>` |
-| `TextNode` | literal text (preserved as-is) |
-| `DynamicBinding` | `escapeHtml(evaluate(expr, scope))` |
-| `OpaqueDynamicRegion` | evaluate condition, render consequent or alternate |
-| `MapRegion` | evaluate array, render bodyTemplate per item |
-| `ComponentCall` | look up component, call with props |
-
-## Key Design Decisions
-
-### IR is typed class hierarchy (not JSON)
-- Direct method dispatch for codegen visitors
-- Ephemeral — created during compilation, consumed immediately
-- See `/docs/decisions/001-ir-format.md`
-
-### Guard clauses → nested OpaqueDynamicRegion
-Guard clauses (`if (cond) return <X />`) are compiled as nested conditionals with short-circuiting. If a guard fires, subsequent guards and the main return are not evaluated.
-
-### Expression evaluation via `new Function()`
-Server codegen evaluates expressions by constructing functions from source text. Safe for server-side (trusted code), avoids complex AST-walking expression evaluator.
-
-### HTML escaping
-All dynamic text content is escaped via `escapeHtml()` to prevent XSS. Static attribute values from source are not escaped (trusted).
+- `packages/compiler/src/parser.ts`, `vesk-plugin.ts`, `ir-generator.ts`,
+  `ir.ts`, `server-jsgen.ts`, `client-codegen.ts`, `errors.ts`
+- Commit `2a5b19d`
