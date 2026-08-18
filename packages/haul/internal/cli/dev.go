@@ -218,8 +218,6 @@ func RunDev(ctx context.Context, args []string) error {
 	}
 	defer sidecar.Close()
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] dev: sidecar on port %d\n", sidecar.Port)
-
 	initResp, err := sidecar.CallResult("dev_init", []any{map[string]any{
 		"appDir":     appDir,
 		"projectDir": projectDir,
@@ -295,19 +293,21 @@ func RunDev(ctx context.Context, args []string) error {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w}
 
 		if r.URL.Path != "/" {
 			staticPath := filepath.Join(publicDir, r.URL.Path)
 			if strings.HasPrefix(staticPath, publicDir) && fileExists(staticPath) {
-				serveFile(w, r, staticPath)
-				logRequest(r, w, start)
+				serveFile(rec, r, staticPath)
+				logRequest(r, rec.Status(), start)
 				return
 			}
 		}
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+			http.Error(rec, "read body: "+err.Error(), http.StatusBadRequest)
+			logRequest(r, rec.Status(), start)
 			return
 		}
 		headers := flattenHeaders(r.Header)
@@ -323,16 +323,18 @@ func RunDev(ctx context.Context, args []string) error {
 		}})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[vesk haul] dev: render error: %v\n", err)
-			http.Error(w, "sidecar render failed: "+err.Error(), http.StatusBadGateway)
+			http.Error(rec, "sidecar render failed: "+err.Error(), http.StatusBadGateway)
+			logRequest(r, rec.Status(), start)
 			return
 		}
 		var result devRenderResult
 		if err := json.Unmarshal(renderResp, &result); err != nil {
-			http.Error(w, "decode render result: "+err.Error(), http.StatusBadGateway)
+			http.Error(rec, "decode render result: "+err.Error(), http.StatusBadGateway)
+			logRequest(r, rec.Status(), start)
 			return
 		}
-		writeRenderResult(w, r, result)
-		logRequest(r, w, start)
+		writeRenderResult(rec, r, result)
+		logRequest(r, rec.Status(), start)
 	})
 
 	server := &http.Server{
@@ -444,7 +446,6 @@ func RunDev(ctx context.Context, args []string) error {
 					}
 				}
 				if watchable(event.Name) {
-					fmt.Fprintf(os.Stderr, "[vesk haul] dev: change detected: %s\n", filepath.Base(event.Name))
 					scheduleRebuild(event.Name)
 				}
 			case err, ok := <-watcher.Errors:
@@ -481,13 +482,6 @@ func addWatchTree(watcher *fsnotify.Watcher, root string) {
 		_ = watcher.Add(path)
 		return nil
 	})
-}
-
-func logRequest(r *http.Request, w http.ResponseWriter, start time.Time) {
-	if strings.HasPrefix(r.URL.Path, "/_vesk") {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "[vesk haul] dev: %s %s %dms\n", r.Method, r.URL.Path, time.Since(start).Milliseconds())
 }
 
 func plural(n int, s string) string {

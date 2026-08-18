@@ -33,7 +33,7 @@ func RunTypecheck(ctx context.Context, args []string) error {
 	}
 	defer sidecar.Close()
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] typecheck: root=%s strict=%v sidecar=%d\n", projectRoot, strict, sidecar.Port)
+	fmt.Fprintf(os.Stderr, "[vesk haul] typecheck: root=%s strict=%v\n", projectRoot, strict)
 
 	_, callErr := sidecar.Call("typecheck", []any{map[string]any{
 		"projectRoot": projectRoot,

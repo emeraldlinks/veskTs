@@ -33,7 +33,7 @@ func RunSeo(ctx context.Context, args []string) error {
 	}
 	defer sidecar.Close()
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] seo: app=%s strict=%v sidecar=%d\n", appDir, strict, sidecar.Port)
+	fmt.Fprintf(os.Stderr, "[vesk haul] seo: app=%s strict=%v\n", appDir, strict)
 	fmt.Fprintf(os.Stderr, "[vesk haul] seo: not yet implemented (Phase 1)\n")
 	return nil
 }

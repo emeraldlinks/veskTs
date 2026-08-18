@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 )
 
@@ -70,8 +69,6 @@ func RunStart(ctx context.Context, args []string) error {
 	}
 	defer sidecar.Close()
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] start: sidecar on port %d\n", sidecar.Port)
-
 	initResp, err := sidecar.CallResult("prod_init", []any{map[string]any{
 		"outDir":     outDir,
 		"projectDir": projectDir,
@@ -92,10 +89,12 @@ func RunStart(ctx context.Context, args []string) error {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w}
 
 		body, err := io.ReadAll(r.Body)
 		if err != nil {
-			http.Error(w, "read body: "+err.Error(), http.StatusBadRequest)
+			http.Error(rec, "read body: "+err.Error(), http.StatusBadRequest)
+			logRequest(r, rec.Status(), start)
 			return
 		}
 		headers := flattenHeaders(r.Header)
@@ -111,30 +110,32 @@ func RunStart(ctx context.Context, args []string) error {
 		}})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[vesk haul] start: render error: %v\n", err)
-			http.Error(w, "sidecar render failed: "+err.Error(), http.StatusBadGateway)
+			http.Error(rec, "sidecar render failed: "+err.Error(), http.StatusBadGateway)
+			logRequest(r, rec.Status(), start)
 			return
 		}
 		var result devRenderResult
 		if err := json.Unmarshal(renderResp, &result); err != nil {
-			http.Error(w, "decode render result: "+err.Error(), http.StatusBadGateway)
+			http.Error(rec, "decode render result: "+err.Error(), http.StatusBadGateway)
+			logRequest(r, rec.Status(), start)
 			return
 		}
 		for _, h := range result.Headers {
 			if len(h) < 2 {
 				continue
 			}
-			w.Header().Add(h[0], h[1])
+			rec.Header().Add(h[0], h[1])
 		}
 		body, decodeErr := base64.StdEncoding.DecodeString(result.BodyB64)
 		if decodeErr != nil {
 			body = []byte(result.BodyB64)
 		}
-		w.WriteHeader(result.Status)
-		if f, ok := w.(http.Flusher); ok {
+		rec.WriteHeader(result.Status)
+		if f, ok := rec.ResponseWriter.(http.Flusher); ok {
 			f.Flush()
 		}
-		_, _ = w.Write(body)
-		logStartRequest(r, start)
+		_, _ = rec.Write(body)
+		logRequest(r, rec.Status(), start)
 	})
 
 	server := &http.Server{
@@ -162,11 +163,4 @@ func RunStart(ctx context.Context, args []string) error {
 	fmt.Fprintf(os.Stderr, "[vesk haul] start: production server at http://localhost:%d\n", port)
 
 	return server.ListenAndServe()
-}
-
-func logStartRequest(r *http.Request, start time.Time) {
-	if strings.HasPrefix(r.URL.Path, "/_vesk") || strings.HasPrefix(r.URL.Path, "/ssr-data.js") {
-		return
-	}
-	fmt.Fprintf(os.Stderr, "[vesk haul] start: %s %s %dms\n", r.Method, r.URL.Path, time.Since(start).Milliseconds())
 }

@@ -926,7 +926,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 	var htmlFnCode strings.Builder
 	if hasLayout || hasAncestorLayout {
 		htmlFnCode.WriteString("async function __renderErrorBody(props) {\n")
-		htmlFnCode.WriteString("  if (!_errorSrc) throw props.error || new Error(\"Internal Server Error\");\n")
+		htmlFnCode.WriteString("  if (!_errorSrc) return '<div style=\"font-family:system-ui;padding:2rem\"><h1>500 \\u2014 Internal Server Error</h1><pre>' + String(props.error || 'Unknown error').replace(/</g,'&lt;') + '</pre></div>';\n")
 		htmlFnCode.WriteString("  try {\n")
 		htmlFnCode.WriteString("    const result = await renderPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled, sourcePath: _errorPath });\n")
 		htmlFnCode.WriteString("    return result.body;\n")
@@ -953,8 +953,8 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		htmlFnCode.WriteString("}\n")
 	} else {
 		htmlFnCode.WriteString("async function __renderErrorFullPage(params, requestUrl, err) {\n")
-		htmlFnCode.WriteString("  if (!_errorSrc) throw err;\n")
 		htmlFnCode.WriteString("  const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);\n")
+		htmlFnCode.WriteString("  if (!_errorSrc) return '<!DOCTYPE html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"></head><body><div style=\"font-family:system-ui;padding:2rem\"><h1>500 \\u2014 Internal Server Error</h1><pre>' + message.replace(/</g,'&lt;') + '</pre></div></body></html>';\n")
 		htmlFnCode.WriteString("  const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';\n")
 		htmlFnCode.WriteString("  const props = { params, statusCode: 500, error: message, stack, url: requestUrl || '' };\n")
 		htmlFnCode.WriteString("  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled" + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _errorPath });\n")
@@ -979,8 +979,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		htmlFnCode.WriteString("      } catch (err) {\n")
 		htmlFnCode.WriteString("        if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;\n")
 		htmlFnCode.WriteString("        try {\n")
-		htmlFnCode.WriteString("          const html = await __renderErrorFullPage(params, requestUrl, err);\n")
-		htmlFnCode.WriteString("          controller.enqueue(enc.encode(html));\n")
+		htmlFnCode.WriteString("          controller.enqueue(enc.encode('<!--vesk-ssr-error:' + encodeURIComponent(String(err && err.message || err)) + '-->'));\n")
 		htmlFnCode.WriteString("        } catch {}\n")
 		htmlFnCode.WriteString("      }\n")
 		htmlFnCode.WriteString("      controller.close();\n")
@@ -1029,11 +1028,12 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 	if hasMiddleware {
 		indented := indentBlock(dataCode.String(), 2)
 		bodyCode.WriteString("  // ── Middleware context ──\n")
+		bodyCode.WriteString("  const prev = globalThis.__vesk_request;\n")
 		bodyCode.WriteString("  const __ctx = {\n")
 		bodyCode.WriteString("    request,\n")
 		bodyCode.WriteString("    params,\n")
 		bodyCode.WriteString("    url,\n")
-		bodyCode.WriteString("    locals: {},\n")
+		bodyCode.WriteString("    locals: (prev && prev.locals) || {},\n")
 		bodyCode.WriteString("    cookies: parseCookies(request.headers.get('cookie') || ''),\n")
 		bodyCode.WriteString("    set(key, value) { this.locals[key] = value; },\n")
 		bodyCode.WriteString("    get(key) { return this.locals[key]; },\n")
@@ -1041,7 +1041,6 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
 		bodyCode.WriteString("  const __mwResult = await __executeMw(__ctx);\n")
 		bodyCode.WriteString("  if (__mwResult.response) return __mwResult.response;\n")
 		bodyCode.WriteString("  if (__mwResult.rewriteUrl) url.pathname = __mwResult.rewriteUrl;\n")
-		bodyCode.WriteString("  const prev = globalThis.__vesk_request;\n")
 		bodyCode.WriteString("  globalThis.__vesk_request = __ctx;\n")
 		bodyCode.WriteString("  try {\n")
 		bodyCode.WriteString(indented)
@@ -1109,7 +1108,7 @@ func GenerateSsrFunction(routeNode *RouteNode, appDir, outDir string, componentM
     request,
     params,
     url: pageUrl,
-    locals: {},
+    locals: (prevReq && prevReq.locals) || {},
     cookies: parseCookies(request.headers.get('cookie') || ''),
   };
   try {
@@ -1237,11 +1236,12 @@ func GenerateApiFunction(rpc RPCClient, apiNode *ApiRouteNode, outDir, middlewar
 			"    enumerable: true,",
 			"  });",
 			"  // ── Middleware context ──",
+			"  const prev = globalThis.__vesk_request;",
 			"  const __ctx = {",
 			"    request,",
 			"    params,",
 			"    url,",
-			"    locals: {},",
+			"    locals: (prev && prev.locals) || {},",
 			"    cookies: parseCookies(request.headers.get('cookie') || ''),",
 			"    set(key, value) { this.locals[key] = value; },",
 			"    get(key) { return this.locals[key]; },",
@@ -1260,7 +1260,6 @@ func GenerateApiFunction(rpc RPCClient, apiNode *ApiRouteNode, outDir, middlewar
 			"    get: () => ctx.locals,",
 			"    enumerable: true,",
 			"  });",
-			"  const prev = globalThis.__vesk_request;",
 			"  globalThis.__vesk_request = ctx;",
 			"  try {",
 			"    const handler = { " + handlerObj + " }[method];",
@@ -1302,18 +1301,18 @@ func GenerateApiFunction(rpc RPCClient, apiNode *ApiRouteNode, outDir, middlewar
 			"    get: () => Object.fromEntries(url.searchParams.entries()),",
 			"    enumerable: true,",
 			"  });",
+			"  const prev = globalThis.__vesk_request;",
 			"  const ctx = {",
 			"    headers: Object.fromEntries(request.headers.entries()),",
 			"    url: request.url,",
 			"    method,",
 			"    cookies: parseCookies(request.headers.get('cookie') || ''),",
-			"    locals: {},",
+			"    locals: (prev && prev.locals) || {},",
 			"  };",
 			"  Object.defineProperty(request, 'locals', {",
 			"    get: () => ctx.locals,",
 			"    enumerable: true,",
 			"  });",
-			"  const prev = globalThis.__vesk_request;",
 			"  globalThis.__vesk_request = ctx;",
 			"  try {",
 			"    const handler = { " + handlerObj + " }[method];",

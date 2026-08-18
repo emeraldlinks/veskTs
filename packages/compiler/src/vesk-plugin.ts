@@ -87,6 +87,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
       #componentDepth = 0;
       #closeTagName: string | null = null;
       #jsxStartsStatement = false;
+      #inTSTypeDecl = false;
 
       constructor(options: Options, input: string) {
         super(options, input);
@@ -248,11 +249,24 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           }
         }
 
+        if (this.#componentDepth > 0 && tstt) {
+          const isTsDecl = (this.type === tstt.interface || this.type === tstt.enum ||
+            this.type === tstt.type || this.type === tstt.module || this.type === tstt.namespace);
+          if (isTsDecl) {
+            this.#inTSTypeDecl = true;
+            try {
+              return super.parseStatement(context, ...args);
+            } finally {
+              this.#inTSTypeDecl = false;
+            }
+          }
+        }
+
         return super.parseStatement(context, ...args);
       }
 
       parseBlock(createNewLexicalScope?: boolean, node?: any, exitStrict?: boolean): any {
-        if (this.#componentDepth > 0) {
+        if (this.#componentDepth > 0 && !this.#inTSTypeDecl) {
           if (createNewLexicalScope === void 0) createNewLexicalScope = true;
           if (node === void 0) node = this.startNode();
 

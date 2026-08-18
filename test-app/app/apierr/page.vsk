@@ -1,0 +1,12 @@
+interface FailMsg {
+	error: string
+}
+
+async component ApiErr() {
+	<Head>
+		<title>ApiErr — awaited failing fetch</title>
+	</Head>
+	const data = await useFetch<FailMsg>('/api/fail')
+	<h1 class="text-3xl font-bold mb-4">ApiErr Demo</h1>
+	<p>Should never reach here: {data.error}</p>
+}

@@ -722,6 +722,72 @@ describe('TypeScript Inside Components', () => {
 		`);
 		expect(ast.body[0].body.body[0]).toBeTruthy();
 	});
+
+	it('parses interface declaration inside statement-mode component body', () => {
+		const ast = parse(`
+			component Counter() {
+				interface Props { name: string; }
+				<p>{props.name}</p>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body[0].type).toBe('TSInterfaceDeclaration');
+		expect(body[0].id.name).toBe('Props');
+		expect(body[1].type).toBe('JSXElement');
+	});
+
+	it('parses type alias inside statement-mode component body', () => {
+		const ast = parse(`
+			component App() {
+				type Status = 'active' | 'inactive';
+				<p>hi</p>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body[0].type).toBe('TSTypeAliasDeclaration');
+		expect(body[1].type).toBe('JSXElement');
+	});
+
+	it('parses enum inside statement-mode component body', () => {
+		const ast = parse(`
+			component App() {
+				enum Dir { Up, Down }
+				<p>hi</p>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body[0].type).toBe('TSEnumDeclaration');
+		expect(body[1].type).toBe('JSXElement');
+	});
+
+	it('parses interface inside expression-mode component body', () => {
+		const ast = parse(`
+			component App() {
+				interface Box<T> { value: T }
+				return <p>hi</p>;
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body[0].type).toBe('TSInterfaceDeclaration');
+		expect(body[0].id.name).toBe('Box');
+	});
+
+	it('parses mixed TS declarations and JSX in statement mode', () => {
+		const ast = parse(`
+			component App() {
+				interface Props { x: number }
+				type Alias = string;
+				enum Kind { A, B }
+				<p>{props.x}</p>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(4);
+		expect(body[0].type).toBe('TSInterfaceDeclaration');
+		expect(body[1].type).toBe('TSTypeAliasDeclaration');
+		expect(body[2].type).toBe('TSEnumDeclaration');
+		expect(body[3].type).toBe('JSXElement');
+	});
 });
 
 // ============================================================

@@ -157,21 +157,13 @@ function extractTailwindDirectives(css: string): { directives: string; userCSS: 
 
 async function ensureModules() {
   if (compileClient) return;
-  console.log('sidecar: loading client-codegen');
   const clientCodegen = await loadCompilerModule('client-codegen.js');
-  console.log('sidecar: loading server-codegen');
   const serverCodegen = await loadCompilerModule('server-codegen.js');
-  console.log('sidecar: loading vsk-tsx');
   const vskTsx = await loadCompilerModule('vsk-tsx.js');
-  console.log('sidecar: loading typecheck');
   const typecheck = await loadCompilerModule('typecheck.js');
-  console.log('sidecar: loading router');
   const router = await loadCompilerModule('router.js');
-  console.log('sidecar: loading middleware');
   const middleware = await loadCompilerModule('middleware.js');
-  console.log('sidecar: loading api-routes');
   const apiRoutes = await loadCompilerModule('api-routes.js');
-  console.log('sidecar: all modules loaded');
   compileClient = clientCodegen.compileClient;
   compileServer = serverCodegen.compileServer;
   generateVskDts = vskTsx.generateVskDts;
@@ -1645,6 +1637,7 @@ async function prodRenderNotFound(urlPath: string): Promise<string | null> {
     return await rtMod.renderFullPage(src, compName, { params: {}, url: urlPath }, new Map(), {
       hydrate: true,
       cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'],
+      clientScriptUrl: '/_vesk/static/client.js',
       security: (state.securityConfig.security as Record<string, unknown>) || {},
       externalDataScript: prodStoreDataScript,
       sourcePath: nfPath,
@@ -1677,6 +1670,7 @@ async function prodRenderError(props: Record<string, unknown>): Promise<string |
     return await rtMod.renderFullPage(src, compName, props, new Map(), {
       hydrate: true,
       cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'],
+      clientScriptUrl: '/_vesk/static/client.js',
       security: (state.securityConfig.security as Record<string, unknown>) || {},
       externalDataScript: prodStoreDataScript,
       sourcePath: errPath,
@@ -1743,7 +1737,13 @@ function installSsrFetchHook(): void {
         clientIp: prodIpStore.getStore()?.clientIp || '127.0.0.1',
         port: state.port,
       };
-      const resp = await handleProdRequest(devReq);
+      const savedBase = (globalThis as Record<string, unknown>).__vesk_ssr_base_url;
+      let resp: DevResponse;
+      try {
+        resp = await handleProdRequest(devReq);
+      } finally {
+        (globalThis as Record<string, unknown>).__vesk_ssr_base_url = savedBase;
+      }
       const bodyBuf = resp.bodyB64 ? Buffer.from(resp.bodyB64, 'base64') : Buffer.alloc(0);
       const hdrs = new Headers();
       for (const [k, v] of resp.headers) {
@@ -1760,6 +1760,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
   if (!state) {
     return { status: 500, headers: [['Content-Type', 'application/json']], bodyB64: Buffer.from(JSON.stringify({ error: 'prod server not initialized' })).toString('base64') };
   }
+  let mwLocals: Record<string, unknown> = {};
 
   const url = new URL(p.url, `http://localhost:${p.port || state.port}`);
   const bodyBuffer = p.bodyB64 ? Buffer.from(p.bodyB64, 'base64') : Buffer.alloc(0);
@@ -1867,10 +1868,27 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
         return withSec({ status: mwResult.response.status, headers, bodyB64: Buffer.from(body).toString('base64') });
       }
       if (mwResult.rewriteUrl) url.pathname = mwResult.rewriteUrl;
+      mwLocals = (mwCtx.locals as Record<string, unknown>) || {};
     } catch (e) {
       console.error('prod: middleware error:', (e as Error).message);
     }
   }
+
+  const withVeskRequest = <T>(fn: () => Promise<T>): Promise<T> => {
+    const prev = (globalThis as Record<string, unknown>).__vesk_request;
+    (globalThis as Record<string, unknown>).__vesk_request = {
+      request: req,
+      params: {},
+      url,
+      locals: mwLocals,
+      cookies: {},
+    };
+    try {
+      return fn();
+    } finally {
+      (globalThis as Record<string, unknown>).__vesk_request = prev;
+    }
+  };
 
   if (url.pathname.startsWith('/_vesk/action/')) {
     const actionId = url.pathname.replace('/_vesk/action/', '');
@@ -1884,7 +1902,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
     }
     try {
       const webRequest = makeWebRequest(req, url);
-      const response = await withProdClientIp(p.clientIp, () => mod.handleAction(webRequest, actionId));
+      const response = await withVeskRequest(() => withProdClientIp(p.clientIp, () => mod.handleAction(webRequest, actionId)));
       const body = await response.text();
       const headers: [string, string][] = [];
       for (const [k, v] of response.headers.entries()) headers.push([k, v]);
@@ -1900,17 +1918,14 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
       if (route.type === 'api') {
         const params = prodMatchPath(route.path, url.pathname);
         if (params) {
-          const t0 = Date.now();
           const mod = await prodLoadFunction(route.function);
-          const t1 = Date.now();
           if (mod) {
             try {
               const webRequest = makeWebRequest(req, url);
-              const response = await withProdClientIp(p.clientIp, () => mod.handle(webRequest));
+              const response = await withVeskRequest(() => withProdClientIp(p.clientIp, () => mod.handle(webRequest)));
               const body = await response.text();
               const headers: [string, string][] = [];
               for (const [k, v] of response.headers.entries()) headers.push([k, v]);
-              console.error(`sidecar: prod_api ${url.pathname} load=${t1 - t0}ms handle=${Date.now() - t1}ms`);
               return withSec({ status: response.status, headers, bodyB64: Buffer.from(body).toString('base64') });
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
@@ -1934,7 +1949,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
             let cachedResult: { html: string; headers: Record<string, string> } | null = null;
             if (route.revalidate && route.revalidate > 0) {
               cachedResult = await devMods.runtimeServer.pageIsr(url.pathname, async () => {
-                const response = await withProdClientIp(p.clientIp, () => mod.handle(webRequest));
+                const response = await withVeskRequest(() => withProdClientIp(p.clientIp, () => mod.handle(webRequest)));
                 return { html: await response.text(), headers: Object.fromEntries(response.headers) };
               }, { revalidate: route.revalidate, tags: route.tags || [] });
             }
@@ -1943,7 +1958,7 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
               return withSec({ status: 200, headers, bodyB64: Buffer.from(cachedResult.html).toString('base64') });
             }
 
-            const response = await withProdClientIp(p.clientIp, () => mod.handle(webRequest));
+            const response = await withVeskRequest(() => withProdClientIp(p.clientIp, () => mod.handle(webRequest)));
             const headers: Record<string, string | number> = Object.fromEntries(response.headers);
             if (!headers['content-type'] && !headers['Content-Type']) headers['Content-Type'] = 'text/html';
             const body = await response.text();
@@ -1952,14 +1967,14 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
             const err = e instanceof Error ? e : new Error(String(e));
             if (err.name === 'NotFoundError') {
               const nfHtml = await prodRenderNotFoundCached(url.pathname);
-              return withSec({ status: 404, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(nfHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>').toString('base64') });
+              return withSec({ status: 404, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(nfHtml || '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/_vesk/static/_tailwind.css" /><link rel="stylesheet" href="/_vesk/static/global.css" /></head><body><h1>404</h1><p>Not Found</p><script type="module" src="/_vesk/static/client.js"></script></body></html>').toString('base64') });
             }
             console.error('haul ssr error:', err.message);
             let errorHtml: string | null = null;
             try {
               errorHtml = await prodRenderError({ error: err.message, stack: (err as Error).stack, statusCode: 500, url: url.pathname });
             } catch {}
-            return withSec({ status: 500, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(errorHtml || '<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>').toString('base64') });
+            return withSec({ status: 500, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(errorHtml || '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/_vesk/static/_tailwind.css" /><link rel="stylesheet" href="/_vesk/static/global.css" /></head><body><div style="font-family:system-ui;padding:2rem"><h1>500 \u2014 Internal Server Error</h1><pre>' + String(err.message).replace(/</g,'&lt;') + '</pre></div><script type="module" src="/_vesk/static/client.js"></script></body></html>').toString('base64') });
           }
         }
       }
@@ -2188,9 +2203,7 @@ const server = createServer((req, res) => {
             return;
           }
           case 'prod_render': {
-            const t0 = Date.now();
             const result = await handleProdRequest((rpcReq.params[0] || {}) as DevRequest);
-            console.error(`sidecar: prod_render ${(rpcReq.params[0] || {}).url} ${Date.now() - t0}ms`);
             respond({ jsonrpc: '2.0', id: rpcReq.id, result });
             return;
           }

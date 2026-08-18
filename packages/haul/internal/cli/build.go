@@ -11,13 +11,6 @@ import (
 	"github.com/emeraldlinks/vesk/haul/internal/bundle"
 )
 
-func filepathRel(base, target string) string {
-	if rel, err := filepath.Rel(base, target); err == nil {
-		return rel
-	}
-	return target
-}
-
 // stripTailwindImportLines removes whole lines whose trimmed form is an
 // `@import 'tailwindcss'` / `@import "tailwindcss"` (with optional trailing
 // semicolon). Used as the no-plugin fallback when producing _tailwind.css.
@@ -105,8 +98,6 @@ func RunBuild(ctx context.Context, args []string) error {
 	}
 	defer sidecar.Close()
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] build: sidecar on port %d\n", sidecar.Port)
-
 	scanResult, err := sidecar.CallResult("scan_routes", []any{map[string]any{"appDir": appDir}})
 	if err != nil {
 		return fmt.Errorf("scan routes: %w", err)
@@ -126,7 +117,6 @@ func RunBuild(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("scan api routes: %w", err)
 	}
-	fmt.Fprintf(os.Stderr, "[vesk haul] build: scanned api routes via sidecar (%d bytes)\n", len(apiScanResult))
 	var apiScan struct {
 		Routes []*bundle.ApiRouteNode `json:"routes"`
 	}
@@ -185,7 +175,7 @@ func RunBuild(ctx context.Context, args []string) error {
 				ssrErr = fmt.Errorf("write ssr function %s: %w", funcPath, werr)
 				return
 			}
-			fmt.Fprintf(os.Stderr, "[vesk haul] build: ssr -> %s  (%s)\n", filepathRel(outDir, funcPath), node.FullPath)
+			ssrRoutes = append(ssrRoutes, node)
 
 			// Collect server-action ids from the page, its own layout, and the
 			// ancestor layouts so config.json can route /_vesk/action/:id.
@@ -250,7 +240,16 @@ func RunBuild(ctx context.Context, args []string) error {
 	walkApiRoutes = func(nodes []*bundle.ApiRouteNode) {
 		for _, apiNode := range nodes {
 			if apiNode.FilePath != nil {
-				funcPath, funcCode, ferr := bundle.GenerateApiFunction(sidecar, apiNode, outDir, "")
+				mwChain := bundle.CollectMiddlewareChain(routesScan.Routes, "/api"+apiNode.FullPath, appDir)
+				mwCode := ""
+				if len(mwChain) > 0 {
+					mwCode, err = bundle.CompileMiddleware(sidecar, mwChain, appDir)
+					if err != nil {
+						walkErr = fmt.Errorf("compile middleware for api %s: %w", apiNode.FullPath, err)
+						return
+					}
+				}
+				funcPath, funcCode, ferr := bundle.GenerateApiFunction(sidecar, apiNode, outDir, mwCode)
 				if ferr != nil {
 					walkErr = ferr
 					return
@@ -259,7 +258,6 @@ func RunBuild(ctx context.Context, args []string) error {
 					walkErr = werr
 					return
 				}
-				fmt.Fprintf(os.Stderr, "[vesk haul] build: api  -> %s  (%s)\n", filepathRel(outDir, funcPath), apiNode.FullPath)
 				apiRoutes = append(apiRoutes, apiNode)
 			}
 			walkApiRoutes(apiNode.Children)
@@ -374,6 +372,8 @@ func RunBuild(ctx context.Context, args []string) error {
 	}
 	fmt.Fprintf(os.Stderr, "[vesk haul] build: config -> config.json\n")
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] build: complete (output -> %s)\n", outDir)
+	printRouteTree(routesScan.Routes, apiScan.Routes, appDir)
+	printOutputTree(outDir)
+	fmt.Fprintf(os.Stderr, "\n[vesk haul] build: complete (output -> %s)\n", outDir)
 	return nil
 }
