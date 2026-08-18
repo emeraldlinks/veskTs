@@ -165,6 +165,8 @@ export function renderPage(
 function clearSsrCells(token: string | undefined): void {
   if (!token) return;
   delete (globalThis as any)[`__vsk_ssr_promises_${token}`];
+  delete (globalThis as any)[`__vsk_ssr_failures_${token}`];
+  delete (globalThis as any).__vsk_ssr_token;
   const cells = (globalThis as any).__vsk_ssr_cells;
   if (!cells || !(cells instanceof Map)) return;
   for (const k of cells.keys()) {

@@ -5,10 +5,13 @@ import json from '@rollup/plugin-json';
 import typescript from '@rollup/plugin-typescript';
 import { fileURLToPath } from 'node:url';
 import { dirname, resolve as resolvePath } from 'node:path';
+import { copyFileSync } from 'node:fs';
 
 const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 
 async function build() {
+  const output = resolvePath(repoRoot, 'extension/vsk-vscode/lsp-server/index.mjs');
+  const neovim = resolvePath(repoRoot, 'extension/vsk-neovim/lsp-server/index.mjs');
   const bundle = await rollup({
     input: resolvePath(repoRoot, 'packages/lsp/src/server.ts'),
     plugins: [
@@ -39,7 +42,7 @@ async function build() {
   });
 
   await bundle.write({
-    file: resolvePath(repoRoot, 'extension/vsk-vscode/lsp-server/index.mjs'),
+    file: output,
     format: 'esm',
     inlineDynamicImports: true,
     sourcemap: true,
@@ -47,14 +50,10 @@ async function build() {
 
   console.log('LSP server bundle written to extension/vsk-vscode/lsp-server/index.mjs');
 
-  await bundle.write({
-    file: resolvePath(repoRoot, 'extension/vsk-neovim/lsp-server/index.mjs'),
-    format: 'esm',
-    inlineDynamicImports: true,
-    sourcemap: true,
-  });
+  copyFileSync(output, neovim);
+  copyFileSync(output + '.map', neovim + '.map');
 
-  console.log('LSP server bundle written to extension/vsk-neovim/lsp-server/index.mjs');
+  console.log('LSP server bundle copied to extension/vsk-neovim/lsp-server/index.mjs');
 }
 
 build().catch(e => {

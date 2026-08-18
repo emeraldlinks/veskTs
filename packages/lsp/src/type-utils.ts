@@ -205,8 +205,20 @@ export function inferTypeFromInitializer(
     case 'FunctionExpression': return 'function';
     case 'ThisExpression':    return 'this';
     case 'UnaryExpression':   return typeof (node as { argument: { value?: unknown } }).argument?.value === 'number' ? 'number' : inferTypeFromInitializer((node as { argument: Expression }).argument, analysis);
+    case 'AwaitExpression': {
+      const aw = node as { argument: Expression };
+      const arg = aw.argument;
+      if (arg.type === 'CallExpression') {
+        const typeArgs = (arg as { typeArguments?: { params: TSType[] }; typeParameters?: { params: TSType[] } }).typeArguments?.params || (arg as { typeParameters?: { params: TSType[] } }).typeParameters?.params;
+        if (typeArgs?.length) {
+          const t = typeArgs.map(t => printTypeNode(t)).join(', ');
+          if (t) return t;
+        }
+      }
+      return inferTypeFromInitializer(arg, analysis);
+    }
     case 'CallExpression': {
-      const call = node as { callee: Expression; arguments: Expression[] };
+      const call = node as { callee: Expression; arguments: Expression[]; typeArguments?: { params: TSType[] }; typeParameters?: { params: TSType[] } };
       const calleeName = call.callee.type === 'Identifier' ? (call.callee as { name: string }).name : undefined;
       if ((calleeName === 'track' || calleeName === 'cell') && call.arguments.length) {
         return inferTypeFromInitializer(call.arguments[0], analysis) || 'unknown';
@@ -215,6 +227,11 @@ export function inferTypeFromInitializer(
       if (call.callee.type === 'MemberExpression') {
         const member = call.callee as { property: { name?: string } };
         if (member.property?.name === 'call') return 'function';
+      }
+      const typeArgs = call.typeArguments?.params || call.typeParameters?.params;
+      if (typeArgs?.length) {
+        const t = typeArgs.map(t => printTypeNode(t)).join(', ');
+        if (t) return calleeName ? `${calleeName}<${t}>` : t;
       }
       return calleeName;
     }

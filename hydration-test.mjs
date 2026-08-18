@@ -523,19 +523,26 @@ async function main() {
 
     // optimistic render should happen first, then fresh head + props land
     await page.waitForFunction(() => document.title.includes('Async'), { timeout: 8000 });
-    // fresh props land asynchronously (cold-cache first fetch can exceed 200ms)
-    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+    // the API now returns 401, so the data-fetch render fails with that status
+    // and the client swaps the page slot for the route error component
+    await page.waitForFunction(() => document.body.textContent.includes('Error 401'), { timeout: 8000 });
 
     const url = page.url();
     assert(url.includes('/async'), 'URL changed to /async');
     assert(await page.evaluate(() => window.__spaFlag === true), '/async reached via SPA (no reload)');
 
-    const finalTitle = await page.evaluate(() => document.title);
-    assert(finalTitle === 'Async — async components', 'title swapped to fresh head: "' + finalTitle + '"');
-
     const bodyText = await page.evaluate(() => document.body.textContent);
-    assert(bodyText.includes('Posts fetched during SSR'), 'async page content rendered');
-    assert(bodyText.includes('Hello Vesk'), 'posts rendered via useFetch: ' + (bodyText.match(/Hello Vesk/) ? 'yes' : 'no'));
+    assert(bodyText.includes('HTTP 401: Unauthorized'), 'failing API error surfaced in error page');
+    const navFooter = await page.evaluate(() => {
+      const nav = document.querySelector('nav');
+      const footer = document.querySelector('footer');
+      return {
+        nav: nav ? nav.textContent.replace(/\s+/g, ' ').trim() : '',
+        footer: footer ? footer.textContent : '',
+      };
+    });
+    assert(navFooter.nav.includes('Home') && navFooter.nav.includes('About'), 'nav survives on failed-data error page');
+    assert(navFooter.footer.includes('Powered by Vesk'), 'footer survives on failed-data error page');
 
     const dataForAsync = dataRequests.filter(u => u.includes('/async'));
     assert(dataForAsync.length === 1, `exactly one X-Vesk-Data request for /async (got ${dataForAsync.length})`);
@@ -788,12 +795,16 @@ async function main() {
     await goto(page, BASE + '/posts', { waitUntil: 'networkidle0' });
     const postsPage = await page.evaluate(() => {
       const t = document.body.textContent || '';
+      const root = document.getElementById('root');
       return {
-        hasHelloVesk: t.includes('Hello Vesk'),
-        hasSsrInVesk: t.includes('SSR in Vesk'),
+        hasErrorText: t.includes('Failed to load posts: HTTP 401'),
+        hasPostsH1: t.includes('Posts'),
+        hasHydrationMarkers: root ? root.innerHTML.includes('<!--vsk-->') : false,
       };
     });
-    assert(postsPage.hasHelloVesk && postsPage.hasSsrInVesk, '/posts SSR page renders post titles from API');
+    assert(postsPage.hasErrorText, '/posts SSR page renders the useFetch error branch (401 API response)');
+    assert(postsPage.hasPostsH1, '/posts page header still rendered');
+    assert(postsPage.hasHydrationMarkers, '/posts hydration markers present despite failing API');
 
     await page.close();
   }

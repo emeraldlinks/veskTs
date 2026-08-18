@@ -22637,6 +22637,7 @@ function VeskParserPlugin(config = {}) {
             #componentDepth = 0;
             #closeTagName = null;
             #jsxStartsStatement = false;
+            #inTSTypeDecl = false;
             constructor(options, input) {
                 super(options, input);
             }
@@ -22790,10 +22791,23 @@ function VeskParserPlugin(config = {}) {
                         return this.finishNode(node, 'VeskBlock');
                     }
                 }
+                if (this.#componentDepth > 0 && tstt) {
+                    const isTsDecl = (this.type === tstt.interface || this.type === tstt.enum ||
+                        this.type === tstt.type || this.type === tstt.module || this.type === tstt.namespace);
+                    if (isTsDecl) {
+                        this.#inTSTypeDecl = true;
+                        try {
+                            return super.parseStatement(context, ...args);
+                        }
+                        finally {
+                            this.#inTSTypeDecl = false;
+                        }
+                    }
+                }
                 return super.parseStatement(context, ...args);
             }
             parseBlock(createNewLexicalScope, node, exitStrict) {
-                if (this.#componentDepth > 0) {
+                if (this.#componentDepth > 0 && !this.#inTSTypeDecl) {
                     if (createNewLexicalScope === void 0)
                         createNewLexicalScope = true;
                     if (node === void 0)
@@ -28301,6 +28315,22 @@ function exprToIR(source, expr) {
         const keyExpr = extractKeyExpr(bodyNodes);
         return [new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr, indexVar)];
     }
+    if (expr.type === 'ParenthesizedExpression')
+        return exprToIR(source, expr.expression);
+    // Nested conditionals/`&&` with JSX branches become nested dynamic regions
+    // so `a ? <X/> : b ? <Y/> : <Z/>` compiles recursively instead of degrading
+    // to a raw text binding.
+    if (expr.type === 'ConditionalExpression') {
+        const condExpr = toExpression(source, expr.test);
+        const consequent = exprToIR(source, expr.consequent);
+        const alternate = exprToIR(source, expr.alternate);
+        return [new OpaqueDynamicRegion(condExpr, consequent, alternate)];
+    }
+    if (expr.type === 'LogicalExpression' && expr.operator === '&&') {
+        const condExpr = toExpression(source, expr.left);
+        const consequent = exprToIR(source, expr.right);
+        return [new OpaqueDynamicRegion(condExpr, consequent)];
+    }
     return [new DynamicBinding(toExpression(source, expr))];
 }
 function processJSXCallbackBody(source, body) {
@@ -28490,7 +28520,7 @@ function processBlockBody(source, block) {
     if (block.type === 'IfStatement')
         return processIfStatement(source, block);
     if (block.type === 'JSXExpressionContainer') {
-        return [new DynamicBinding(toExpression(source, block.expression))];
+        return exprToIR(source, block.expression);
     }
     const raw = getSource(source, block);
     if (raw)
@@ -28570,7 +28600,7 @@ function processStatementModeBody(source, bodyStmts) {
                 nodes.push(new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr));
                 continue;
             }
-            nodes.push(new DynamicBinding(toExpression(source, stmt.expression)));
+            nodes.push(...exprToIR(source, stmt.expression));
         }
         else if (stmt.type === 'JSXFragment') {
             for (const c of stmt.children) {
@@ -29873,9 +29903,11 @@ function createContext(value) {
 
 class HttpError extends Error {
     status;
+    statusCode;
     constructor(status, statusText) {
         super(`HTTP ${status}: ${statusText}`);
         this.status = status;
+        this.statusCode = status;
         this.name = 'HttpError';
     }
 }
@@ -29923,6 +29955,26 @@ function getSsrData(key) {
     if (!store)
         return undefined;
     return store[key];
+}
+// Failed SSR fetches are memoized per render token so the codegen re-render
+// passes (up to 3) settle from the recorded error instead of re-fetching the
+// failing key every pass — an always-failing key (e.g. an API returning 401)
+// would otherwise keep the passes from converging and the page would render
+// empty. Successes already converge via `__vsk_ssr_data`; failures need the
+// same treatment. Cleared by the compiler's `clearSsrCells(token)`.
+// Untokenized calls (settle handlers that outlive a render) get no memo —
+// writing into a shared map there would leak the failure into other renders.
+function getSsrFailures() {
+    const tk = g$4().__vsk_ssr_token;
+    if (!tk)
+        return undefined;
+    const key = `__vsk_ssr_failures_${tk}`;
+    let store = g$4()[key];
+    if (!store) {
+        store = new Map();
+        g$4()[key] = store;
+    }
+    return store;
 }
 function setSsrData(key, value) {
     const sink = ssrSink$1;
@@ -30154,6 +30206,15 @@ function startRequest(handle, skipCache) {
     const key = handle.key;
     const options = handle.options;
     if (isServer()) {
+        const recorded = !skipCache ? getSsrFailures()?.get(key) : undefined;
+        if (recorded !== undefined) {
+            settleError(handle, recorded);
+            const settled = handle.settled.then(() => {
+                throw recorded;
+            });
+            settled.catch(() => { });
+            return settled;
+        }
         const existing = getInflight().get(key);
         const prom = existing ?? runFetcher(handle, options.timeout || 0);
         if (!existing) {
@@ -30161,7 +30222,10 @@ function startRequest(handle, skipCache) {
             prom.then(data => {
                 setSsrData(key, data);
                 settle(handle, data);
-            }, error => settleError(handle, error)).finally(() => {
+            }, error => {
+                getSsrFailures()?.set(key, error);
+                settleError(handle, error);
+            }).finally(() => {
                 if (getInflight().get(key) === prom)
                     getInflight().delete(key);
             });
@@ -30338,6 +30402,7 @@ async function resolveSsrResources() {
     await Promise.allSettled(promises);
     const data = (g$4().__vsk_ssr_data || {});
     delete g$4().__vsk_ssr_promises;
+    delete g$4().__vsk_ssr_failures;
     return data;
 }
 
@@ -37061,8 +37126,9 @@ function generateFunctionBody(comp, importedNames) {
     lines.push(`const __tk = globalThis.__vsk_ssr_token || '';`);
     if (asyncMode) {
         lines.push(`const __pk = __tk ? '__vsk_ssr_promises_' + __tk : '__vsk_ssr_promises';`);
+        lines.push(`let __out = [];`);
         lines.push(`for (let __pass = 0; __pass < 3; __pass++) {`);
-        lines.push(`const __out = [];`);
+        lines.push(`__out = [];`);
         lines.push(`const __start = (globalThis[__pk] || []).length;`);
     }
     else {
@@ -37085,7 +37151,7 @@ function generateFunctionBody(comp, importedNames) {
         lines.push(`globalThis[__pk] = __all.slice(0, __start);`);
         lines.push(`await Promise.allSettled(__ps);`);
         lines.push(`}`);
-        lines.push(`return '';`);
+        lines.push(`return __out.join('');`);
     }
     else {
         lines.push(`return __out.join('');`);
@@ -37221,6 +37287,8 @@ function clearSsrCells(token) {
     if (!token)
         return;
     delete globalThis[`__vsk_ssr_promises_${token}`];
+    delete globalThis[`__vsk_ssr_failures_${token}`];
+    delete globalThis.__vsk_ssr_token;
     const cells = globalThis.__vsk_ssr_cells;
     if (!cells || !(cells instanceof Map))
         return;
@@ -38502,6 +38570,19 @@ function inferTypeFromInitializer(node, analysis) {
         case 'FunctionExpression': return 'function';
         case 'ThisExpression': return 'this';
         case 'UnaryExpression': return typeof node.argument?.value === 'number' ? 'number' : inferTypeFromInitializer(node.argument, analysis);
+        case 'AwaitExpression': {
+            const aw = node;
+            const arg = aw.argument;
+            if (arg.type === 'CallExpression') {
+                const typeArgs = arg.typeArguments?.params || arg.typeParameters?.params;
+                if (typeArgs?.length) {
+                    const t = typeArgs.map(t => printTypeNode(t)).join(', ');
+                    if (t)
+                        return t;
+                }
+            }
+            return inferTypeFromInitializer(arg, analysis);
+        }
         case 'CallExpression': {
             const call = node;
             const calleeName = call.callee.type === 'Identifier' ? call.callee.name : undefined;
@@ -38514,6 +38595,12 @@ function inferTypeFromInitializer(node, analysis) {
                 const member = call.callee;
                 if (member.property?.name === 'call')
                     return 'function';
+            }
+            const typeArgs = call.typeArguments?.params || call.typeParameters?.params;
+            if (typeArgs?.length) {
+                const t = typeArgs.map(t => printTypeNode(t)).join(', ');
+                if (t)
+                    return calleeName ? `${calleeName}<${t}>` : t;
             }
             return calleeName;
         }
@@ -40738,6 +40825,14 @@ function registerHover() {
                         const declSrc = document.getText().slice(d.declStart, d.declEnd).trim();
                         if (declSrc)
                             declBlock = `\n\n\`\`\`\n${declSrc}\n\`\`\``;
+                    }
+                }
+                else {
+                    const d = syms.find(s => typeof s.declStart === 'number' && typeof s.declEnd === 'number');
+                    if (d && d.declStart !== undefined && d.declEnd !== undefined) {
+                        const declSrc = document.getText().slice(d.declStart, d.declEnd).trim();
+                        if (declSrc)
+                            declBlock = `\n\n\`\`\`ts\n${declSrc}\n\`\`\``;
                     }
                 }
                 const line = document.getText().split('\n').findIndex(l => new RegExp(`\\b${word}\\b`).test(l) && /(?:component|function|const|let|var|class|interface|type|enum)\s/.test(l));

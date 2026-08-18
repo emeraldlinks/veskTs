@@ -137,7 +137,9 @@ it('surfaces HTTP errors as HttpError with status', async () => {
   await waitFor(() => res.error !== null);
   expect(res.error instanceof HttpError).toBe(true);
   expect((res.error as HttpError).status).toBe(404);
+  expect((res.error as HttpError).statusCode).toBe(404);
   mock.restore();
+  cleanupGlobals();
 });
 
 it('does not retry 4xx errors', async () => {
@@ -439,6 +441,93 @@ it('SSR retries use a fixed delay, not exponential backoff', async () => {
   // Fixed: 300 + 300 = 600ms. Exponential would be 300 + 600 = 900ms.
   expect(elapsed >= 450).toBe(true);
   expect(elapsed < 850).toBe(true);
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('memoizes failed SSR fetches per render token: re-render passes settle from the recorded error without re-fetching', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vsk_ssr_token = 'fail-token';
+  const promKey = '__vsk_ssr_promises_fail-token';
+  const failKey = '__vsk_ssr_failures_fail-token';
+  const mock = mockFetch(() => jsonResponse({}, 401));
+  const res1 = useFetch('/api/failing');
+  expect(res1.loading).toBe(true);
+  await Promise.allSettled((globalThis as any)[promKey]);
+  await waitFor(() => res1.error !== null);
+  expect((res1.error as HttpError).status).toBe(401);
+  expect(mock.calls.length).toBe(1);
+  // codegen resets the tracked list between re-render passes
+  (globalThis as any)[promKey] = [];
+  const res2 = useFetch('/api/failing');
+  expect(res2.loading).toBe(false);
+  expect(res2.error).toBe(res1.error);
+  expect((res2.error as HttpError).status).toBe(401);
+  // no new promise tracked, no new fetch fired
+  expect((globalThis as any)[promKey].length).toBe(0);
+  expect(mock.calls.length).toBe(1);
+  // the recorded failure is keyed per render token
+  expect((globalThis as any)[failKey].get('/api/failing')).toBe(res1.error);
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('does not leak recorded SSR failures across render tokens', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vsk_ssr_token = 'token-a';
+  const mock = mockFetch(() => jsonResponse({}, 500));
+  useFetch('/api/token-scoped');
+  await Promise.allSettled((globalThis as any)['__vsk_ssr_promises_token-a']);
+  expect((globalThis as any)['__vsk_ssr_failures_token-a'].get('/api/token-scoped') !== undefined).toBe(true);
+  // next render: fresh token, fresh inflight + failures
+  (globalThis as any).__vsk_ssr_token = 'token-b';
+  (globalThis as any)['__vsk_ssr_promises_token-b'] = [];
+  const res = useFetch('/api/token-scoped');
+  expect(res.loading).toBe(true);
+  await Promise.allSettled((globalThis as any)['__vsk_ssr_promises_token-b']);
+  await waitFor(() => res.error !== null);
+  expect(mock.calls.length).toBe(2);
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('untokenized SSR settles do not record failures into a shared map', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  delete (globalThis as any).__vsk_ssr_token;
+  const mock = mockFetch(() => jsonResponse({}, 500));
+  const res = useFetch('/api/untokened');
+  await waitFor(() => res.error !== null);
+  expect((globalThis as any).__vsk_ssr_failures).toBe(undefined);
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('refresh() (skipCache) bypasses the recorded SSR failure and re-attempts', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vsk_ssr_token = 'recover-token';
+  let attempts = 0;
+  const mock = mockFetch(() => {
+    attempts++;
+    if (attempts === 1) return jsonResponse({}, 500);
+    return jsonResponse({ healed: true });
+  });
+  const res = useFetch<{ healed: boolean }>('/api/recovers');
+  await Promise.allSettled((globalThis as any)['__vsk_ssr_promises_recover-token']);
+  await waitFor(() => res.error !== null);
+  expect(attempts).toBe(1);
+  // a fresh render pass (same token) would settle from the memoized error...
+  const res2 = useFetch('/api/recovers');
+  expect(res2.error).toBe(res.error);
+  expect(attempts).toBe(1);
+  // ...but an explicit refresh() re-attempts and can recover
+  await res.refresh();
+  await waitFor(() => res.error === null && res.data !== undefined);
+  expect(res.data).toEqual({ healed: true });
+  expect(attempts).toBe(2);
   mock.restore();
   cleanupGlobals();
 });

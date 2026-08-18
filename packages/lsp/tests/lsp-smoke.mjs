@@ -312,6 +312,33 @@ async function main() {
   const trackDefRes = results(trackDef);
   assert(!!trackDefRes && (Array.isArray(trackDefRes) ? trackDefRes.length > 0 : true), 'definition on track resolves to runtime');
 
+  // 17. hover on awaited useFetch variable shows inferred type + declaration source
+  const asyncUri = 'file://' + FIXTURE + '/app/async.vsk';
+  const asyncSource = readFileSync(resolve(FIXTURE, 'app/async.vsk'), 'utf-8');
+  notify('textDocument/didOpen', {
+    textDocument: { uri: asyncUri, languageId: 'vsk', version: 1, text: asyncSource },
+  });
+  await new Promise(r => setTimeout(r, 200));
+  const postsLine = asyncSource.split('\n').findIndex(l => l.includes('const posts'));
+  const postsCol = asyncSource.split('\n')[postsLine].indexOf('posts') + 2;
+  const postsHover = await request('textDocument/hover', {
+    textDocument: { uri: asyncUri },
+    position: pos(postsLine, postsCol),
+  }, 'hover awaited posts');
+  const postsText = (results(postsHover)?.contents?.value || '');
+  assert(postsText.includes('Post[]'), `hover on awaited useFetch shows inferred type Post[] (got: ${postsText.slice(0, 300)})`);
+  assert(postsText.includes('useFetch'), `hover on posts shows declaration source (got: ${postsText.slice(0, 300)})`);
+
+  const loadedLine = asyncSource.split('\n').findIndex(l => l.includes('const loaded'));
+  const loadedCol = asyncSource.split('\n')[loadedLine].indexOf('loaded') + 2;
+  const loadedHover = await request('textDocument/hover', {
+    textDocument: { uri: asyncUri },
+    position: pos(loadedLine, loadedCol),
+  }, 'hover awaited string');
+  const loadedText = (results(loadedHover)?.contents?.value || '');
+  assert(loadedText.includes('string'), `hover on awaited string-typed useFetch shows string (got: ${loadedText.slice(0, 300)})`);
+  notify('textDocument/didClose', { textDocument: { uri: asyncUri } });
+
   await request('shutdown', null);
   notify('exit', null);
   child.kill();

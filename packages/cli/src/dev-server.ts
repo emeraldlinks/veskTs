@@ -461,14 +461,15 @@ export async function startDevServer(port: number, projectDir: string, config: R
     const url = new URL(req.url || '/', `http://localhost:${port}`);
     const reqStart = Date.now();
     const reqHost = req.headers.host || `localhost:${port}`;
-    const proto = (req.socket as { encrypted?: boolean }).encrypted
-      ? 'https'
-      : getClientProtocol({ headers: req.headers } as Record<string, unknown>, !!security?.trustProxy);
-    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
+    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `http://127.0.0.1:${port}`;
 
     const logRequest = (status: number) => {
       if (url.pathname.startsWith('/_vesk')) return;
       LOG.request(req.method || 'GET', url.pathname, status, Date.now() - reqStart);
+    };
+    const errorStatusCode = (e: unknown): number => {
+      const s = (e as { statusCode?: unknown } | null)?.statusCode ?? (e as { status?: unknown } | null)?.status;
+      return typeof s === 'number' && s >= 100 && s < 600 ? s : 500;
     };
 
     const rawCtx = buildRequestContext(req);
@@ -814,7 +815,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 if (forData) {
-                  return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });
+                  const code = errorStatusCode(e);
+                  return new Response(JSON.stringify({ error: msg, statusCode: code }), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });
                 }
                 throw e;
               }
@@ -908,7 +910,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 try {
                   const errSrc = readFileSync(errPath, 'utf-8');
                   const errCompName = extractCompName(errSrc) || (node.error as string);
-                  const errProps = { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname };
+                  const errProps = { error: err.message, stack: err.stack, statusCode: errorStatusCode(err), url: url.pathname };
                   const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security, externalDataScript: storeDataScript, sourcePath: errPath });
                   errorHtml = html.replace('</body>', `\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>`);
                 } catch (e2) {
@@ -919,9 +921,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
             }
           }
         }
-        logRequest(500);
-        res.writeHead(500, { 'Content-Type': 'text/html' });
-        res.end(errorHtml || `<!DOCTYPE html><html><body><h1>500</h1><pre>${err.message}\n${err.stack}</pre></body></html>`);
+        const errCode = errorStatusCode(err);
+        logRequest(errCode);
+        res.writeHead(errCode, { 'Content-Type': 'text/html' });
+        res.end(errorHtml || `<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${err.message}\n${err.stack}</pre></body></html>`);
       }
     }
   });

@@ -163,6 +163,12 @@ export function registerHover(): void {
           const declSrc = document.getText().slice(d.declStart, d.declEnd).trim();
           if (declSrc) declBlock = `\n\n\`\`\`\n${declSrc}\n\`\`\``;
         }
+      } else {
+        const d = syms.find(s => typeof s.declStart === 'number' && typeof s.declEnd === 'number');
+        if (d && d.declStart !== undefined && d.declEnd !== undefined) {
+          const declSrc = document.getText().slice(d.declStart, d.declEnd).trim();
+          if (declSrc) declBlock = `\n\n\`\`\`ts\n${declSrc}\n\`\`\``;
+        }
       }
       const line = document.getText().split('\n').findIndex(l => new RegExp(`\\b${word}\\b`).test(l) && /(?:component|function|const|let|var|class|interface|type|enum)\s/.test(l));
       const loc = line >= 0 ? `\n\n_Declared on line ${line + 1}_` : '';

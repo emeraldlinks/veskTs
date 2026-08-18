@@ -213,6 +213,11 @@ function ok(result: unknown): JsonRpcResponse {
   return { jsonrpc: '2.0', id: 0, result };
 }
 
+function errorStatusCode(e: unknown): number {
+  const s = (e as { statusCode?: unknown } | null)?.statusCode ?? (e as { status?: unknown } | null)?.status;
+  return typeof s === 'number' && s >= 100 && s < 600 ? s : 500;
+}
+
 function err(id: number | string, message: string): JsonRpcResponse {
   return { jsonrpc: '2.0', id, error: { code: 1, message } };
 }
@@ -945,7 +950,8 @@ async function handleDevSsr(req: any, url: URL): Promise<DevResponse> {
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
               if (forData) {
-                return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Vary': 'x-vesk-data' } });
+                const code = errorStatusCode(e);
+                return new Response(JSON.stringify({ error: msg, statusCode: code }), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', 'Vary': 'x-vesk-data' } });
               }
               throw e;
             }
@@ -1027,7 +1033,7 @@ async function handleDevSsr(req: any, url: URL): Promise<DevResponse> {
             try {
               const errSrc = readFileSync(errPath, 'utf-8');
               const errCompName = extractCompName(errSrc) || (node.error as string);
-              const errProps = { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname };
+              const errProps = { error: err.message, stack: err.stack, statusCode: errorStatusCode(err), url: url.pathname };
               const html = await devMods.renderFullPage(errSrc, errCompName, errProps, new Map(), {
                 hydrate: true,
                 cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'],
@@ -1044,10 +1050,11 @@ async function handleDevSsr(req: any, url: URL): Promise<DevResponse> {
     }
     const message = err.message || String(e);
     const stack = err.stack || '';
+    const errCode = errorStatusCode(err);
     return {
-      status: 500,
+      status: errCode,
       headers: [['Content-Type', 'text/html']],
-      bodyB64: Buffer.from(errorHtml || `<!DOCTYPE html><html><body><h1>500</h1><pre>${message}\n${stack}</pre></body></html>`).toString('base64'),
+      bodyB64: Buffer.from(errorHtml || `<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${message}\n${stack}</pre></body></html>`).toString('base64'),
     };
   }
 }
@@ -1069,8 +1076,7 @@ async function handleDevRequest(p: DevRequest): Promise<DevResponse> {
     return { status: 204, headers, bodyB64: '' };
   }
 
-  const proto = p.headers['x-forwarded-proto'] && state.security?.trustProxy ? p.headers['x-forwarded-proto'] : 'http';
-  (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
+  (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `http://127.0.0.1:${p.port || state.port}`;
 
   const req: any = {
     method: p.method,
@@ -1972,9 +1978,9 @@ async function handleProdRequest(p: DevRequest): Promise<DevResponse> {
             console.error('haul ssr error:', err.message);
             let errorHtml: string | null = null;
             try {
-              errorHtml = await prodRenderError({ error: err.message, stack: (err as Error).stack, statusCode: 500, url: url.pathname });
+              errorHtml = await prodRenderError({ error: err.message, stack: (err as Error).stack, statusCode: errorStatusCode(err), url: url.pathname });
             } catch {}
-            return withSec({ status: 500, headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(errorHtml || '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/_vesk/static/_tailwind.css" /><link rel="stylesheet" href="/_vesk/static/global.css" /></head><body><div style="font-family:system-ui;padding:2rem"><h1>500 \u2014 Internal Server Error</h1><pre>' + String(err.message).replace(/</g,'&lt;') + '</pre></div><script type="module" src="/_vesk/static/client.js"></script></body></html>').toString('base64') });
+            return withSec({ status: errorStatusCode(err), headers: [['Content-Type', 'text/html']], bodyB64: Buffer.from(errorHtml || '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/_vesk/static/_tailwind.css" /><link rel="stylesheet" href="/_vesk/static/global.css" /></head><body><div style="font-family:system-ui;padding:2rem"><h1>' + errorStatusCode(err) + ' \u2014 Internal Server Error</h1><pre>' + String(err.message).replace(/</g,'&lt;') + '</pre></div><script type="module" src="/_vesk/static/client.js"></script></body></html>').toString('base64') });
           }
         }
       }

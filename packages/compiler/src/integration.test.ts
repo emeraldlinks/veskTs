@@ -4,7 +4,7 @@
  *
  * Run with: node --experimental-vm-modules packages/compiler/src/integration.test.js
  */
-import { render, renderPage, renderFullPage, ssg } from '@vesk/compiler/src/server-codegen';
+import { render, renderPage, renderFullPage, ssg, compileFile, setVskHydrate } from '@vesk/compiler/src/server-codegen';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
@@ -768,6 +768,142 @@ it('useFetch without into also renders fetched data after awaiting', async () =>
   assert(!html.includes('Loading...'), `loading state should not remain in SSR body: ${html.slice(0, 900)}`);
   assert(html.includes('Loaded'), `fetched data should render in SSR body: ${html.slice(0, 900)}`);
   assert(html.includes('__vsk_ssr_data'), `ssr data script missing: ${html.slice(0, 900)}`);
+});
+
+it('useFetch failure renders the error branch in SSR instead of an empty body (statement mode, single fetch)', async () => {
+  const source = `component App {
+    const posts = useFetch('/api/fail-posts');
+    if (posts.error) {
+      <div class="error">Failed to load posts: {posts.error.message}</div>
+    } else if (posts.loading) {
+      <div>Loading...</div>
+    } else {
+      <div>Loaded</div>
+    }
+  }`;
+  let calls = 0;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => {
+    calls++;
+    return Promise.resolve({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({ error: 'unauthorized' }),
+    }) as any;
+  };
+  const html = await renderFullPage(source, 'App', {});
+  (globalThis as any).fetch = savedFetch;
+  show('  html', html.slice(0, 900));
+  assert(calls === 1, `failing key should be fetched once across re-render passes (got ${calls})`);
+  assert(html.includes('Failed to load posts'), `error branch should render in SSR body: ${html.slice(0, 900)}`);
+  assert(!html.includes('Loading...'), `loading state should not remain in SSR body: ${html.slice(0, 900)}`);
+  assert(!html.includes('Loaded'), `data branch should not render on failure: ${html.slice(0, 900)}`);
+});
+
+it('useFetch failure renders the error branch in SSR (expression mode, single fetch)', async () => {
+  const source = `component App {
+    const posts = useFetch('/api/fail-posts-exp');
+    return <div>{posts.error ? 'Failed: ' + posts.error.message : posts.loading ? 'Loading...' : 'Loaded'}</div>;
+  }`;
+  let calls = 0;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => {
+    calls++;
+    return Promise.resolve({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({ error: 'unauthorized' }),
+    }) as any;
+  };
+  const html = await renderFullPage(source, 'App', {});
+  (globalThis as any).fetch = savedFetch;
+  show('  html', html.slice(0, 900));
+  assert(calls === 1, `failing key should be fetched once across re-render passes (got ${calls})`);
+  assert(html.includes('Failed:'), `error branch should render in SSR body: ${html.slice(0, 900)}`);
+  assert(!html.includes('Loading...'), `loading state should not remain in SSR body: ${html.slice(0, 900)}`);
+});
+
+it('useFetch failure in hydrate mode still emits hydration markers', async () => {
+  const source = `component App {
+    const posts = useFetch('/api/fail-posts-hydrate');
+    if (posts.error) {
+      <div class="error">Failed to load posts: {posts.error.message}</div>
+    } else {
+      <div>Loaded</div>
+    }
+  }`;
+  let calls = 0;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => {
+    calls++;
+    return Promise.resolve({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      json: () => Promise.resolve({ error: 'unauthorized' }),
+    }) as any;
+  };
+  setVskHydrate(true);
+  let cached;
+  try {
+    cached = compileFile(source);
+  } finally {
+    setVskHydrate(false);
+  }
+  const html = await renderFullPage(source, 'App', {}, new Map(), { hydrate: true, cached });
+  (globalThis as any).fetch = savedFetch;
+  show('  html', html.slice(0, 900));
+  assert(calls === 1, `failing key should be fetched once across re-render passes (got ${calls})`);
+  assert(html.includes('Failed to load posts'), `error branch should render in SSR body: ${html.slice(0, 900)}`);
+  assert(html.includes('<!--vsk-->'), `hydration markers missing on failed fetch: ${html.slice(0, 900)}`);
+});
+
+it('awaiting a failing useFetch in an async component rejects the render (500 path)', async () => {
+  const source = `async component App {
+    const posts = await useFetch('/api/fail-await');
+    return <div>Loaded</div>;
+  }`;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => Promise.resolve({
+    ok: false,
+    status: 401,
+    statusText: 'Unauthorized',
+    json: () => Promise.resolve({ error: 'unauthorized' }),
+  }) as any;
+  let threw: unknown = null;
+  try {
+    await renderFullPage(source, 'App', {});
+  } catch (e) {
+    threw = e;
+  }
+  (globalThis as any).fetch = savedFetch;
+  assert(threw !== null, `render should reject when an awaited resource fails (got ${threw})`);
+  assert(String(threw).includes('401'), `rejection should surface the HTTP error: ${threw}`);
+});
+
+it('awaiting a failing useFetch in an async component rejects the render (500 path, statement mode)', async () => {
+  const source = `async component App {
+    const posts = await useFetch('/api/fail-await-stmt');
+    <div>Loaded</div>
+  }`;
+  const savedFetch = (globalThis as any).fetch;
+  globalThis.fetch = () => Promise.resolve({
+    ok: false,
+    status: 401,
+    statusText: 'Unauthorized',
+    json: () => Promise.resolve({ error: 'unauthorized' }),
+  }) as any;
+  let threw: unknown = null;
+  try {
+    await renderFullPage(source, 'App', {});
+  } catch (e) {
+    threw = e;
+  }
+  (globalThis as any).fetch = savedFetch;
+  assert(threw !== null, `render should reject when an awaited resource fails (got ${threw})`);
+  assert(String(threw).includes('401'), `rejection should surface the HTTP error: ${threw}`);
 });
 
 // =============================================================

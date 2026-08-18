@@ -32,9 +32,11 @@ export interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> {
 
 export class HttpError extends Error {
 	status: number;
+	statusCode: number;
 	constructor(status: number, statusText: string) {
 		super(`HTTP ${status}: ${statusText}`);
 		this.status = status;
+		this.statusCode = status;
 		this.name = 'HttpError';
 	}
 }
@@ -109,6 +111,26 @@ function getSsrData(key: string): unknown {
 	const store = g().__vsk_ssr_data as Record<string, unknown> | undefined;
 	if (!store) return undefined;
 	return store[key];
+}
+
+// Failed SSR fetches are memoized per render token so the codegen re-render
+// passes (up to 3) settle from the recorded error instead of re-fetching the
+// failing key every pass — an always-failing key (e.g. an API returning 401)
+// would otherwise keep the passes from converging and the page would render
+// empty. Successes already converge via `__vsk_ssr_data`; failures need the
+// same treatment. Cleared by the compiler's `clearSsrCells(token)`.
+// Untokenized calls (settle handlers that outlive a render) get no memo —
+// writing into a shared map there would leak the failure into other renders.
+function getSsrFailures(): Map<string, unknown> | undefined {
+	const tk = g().__vsk_ssr_token as string;
+	if (!tk) return undefined;
+	const key = `__vsk_ssr_failures_${tk}`;
+	let store = g()[key] as Map<string, unknown> | undefined;
+	if (!store) {
+		store = new Map<string, unknown>();
+		g()[key] = store;
+	}
+	return store;
 }
 
 export function setSsrData(key: string, value: unknown): void {
@@ -343,6 +365,15 @@ function startRequest<T>(handle: ResourceHandle<T>, skipCache: boolean): Promise
 	const options = handle.options;
 
 	if (isServer()) {
+		const recorded = !skipCache ? getSsrFailures()?.get(key) : undefined;
+		if (recorded !== undefined) {
+			settleError(handle, recorded);
+			const settled = handle.settled.then(() => {
+				throw recorded;
+			});
+			settled.catch(() => {});
+			return settled;
+		}
 		const existing = getInflight().get(key);
 		const prom = existing ?? runFetcher(handle, options.timeout || 0);
 		if (!existing) {
@@ -352,7 +383,10 @@ function startRequest<T>(handle: ResourceHandle<T>, skipCache: boolean): Promise
 					setSsrData(key, data);
 					settle(handle, data as T);
 				},
-				error => settleError(handle, error),
+				error => {
+					getSsrFailures()?.set(key, error);
+					settleError(handle, error);
+				},
 			).finally(() => {
 				if (getInflight().get(key) === prom) getInflight().delete(key);
 			});
@@ -584,5 +618,6 @@ export async function resolveSsrResources(): Promise<Record<string, unknown>> {
 	await Promise.allSettled(promises);
 	const data = (g().__vsk_ssr_data || {}) as Record<string, unknown>;
 	delete g().__vsk_ssr_promises;
+	delete g().__vsk_ssr_failures;
 	return data;
 }

@@ -1,0 +1,14 @@
+interface Post {
+  id: number
+  title: string
+}
+
+export async component Feed() {
+  const posts = await useFetch<Post[]>('/api/posts')
+  const loaded = await useFetch<string>('/api/name')
+  <ul>
+    for (const post of posts) {
+      <li>{post.title}</li>
+    }
+  </ul>
+}

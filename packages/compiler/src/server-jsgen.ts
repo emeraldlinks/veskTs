@@ -377,8 +377,9 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
 
   if (asyncMode) {
     lines.push(`const __pk = __tk ? '__vsk_ssr_promises_' + __tk : '__vsk_ssr_promises';`);
+    lines.push(`let __out = [];`);
     lines.push(`for (let __pass = 0; __pass < 3; __pass++) {`);
-    lines.push(`const __out = [];`);
+    lines.push(`__out = [];`);
     lines.push(`const __start = (globalThis[__pk] || []).length;`);
   } else {
     lines.push(`const __out = [];`);
@@ -402,7 +403,7 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
     lines.push(`globalThis[__pk] = __all.slice(0, __start);`);
     lines.push(`await Promise.allSettled(__ps);`);
     lines.push(`}`);
-    lines.push(`return '';`);
+    lines.push(`return __out.join('');`);
   } else {
     lines.push(`return __out.join('');`);
   }
