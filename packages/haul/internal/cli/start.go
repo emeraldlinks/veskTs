@@ -22,26 +22,21 @@ type prodInitResult struct {
 }
 
 func RunStart(ctx context.Context, args []string) error {
-	port := 3000
+	port, rest, err := parsePortArgs(args, 3000)
+	if err != nil {
+		return err
+	}
 	outDir := ""
 
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-p", "--port":
-			if i+1 < len(args) {
-				p, err := parseInt(args[i+1])
-				if err == nil {
-					port = p
-				}
-				i++
-			}
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
 		case "--out":
-			if i+1 < len(args) {
-				outDir = args[i+1]
+			if i+1 < len(rest) {
+				outDir = rest[i+1]
 				i++
 			}
 		default:
-			return fmt.Errorf("unexpected argument %q — haul runs the app in the current directory", args[i])
+			return fmt.Errorf("unexpected argument %q — haul runs the app in the current directory; port: -p <port>, --port=<port>, or a bare port number", rest[i])
 		}
 	}
 

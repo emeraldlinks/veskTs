@@ -177,25 +177,21 @@ func writeRenderResult(w http.ResponseWriter, r *http.Request, result devRenderR
 }
 
 func RunDev(ctx context.Context, args []string) error {
-	port := 3000
+	port, rest, err := parsePortArgs(args, 3000)
+	if err != nil {
+		return err
+	}
 	host := "localhost"
 
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "-p", "--port":
-			if i+1 < len(args) {
-				if p, err := parseInt(args[i+1]); err == nil {
-					port = p
-				}
-				i++
-			}
+	for i := 0; i < len(rest); i++ {
+		switch rest[i] {
 		case "-H", "--host":
-			if i+1 < len(args) {
-				host = args[i+1]
+			if i+1 < len(rest) {
+				host = rest[i+1]
 				i++
 			}
 		default:
-			return fmt.Errorf("unexpected argument %q — haul runs the app in the current directory", args[i])
+			return fmt.Errorf("unexpected argument %q — haul runs the app in the current directory; port: -p <port>, --port=<port>, or a bare port number", rest[i])
 		}
 	}
 

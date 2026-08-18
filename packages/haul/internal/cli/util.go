@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 )
 
@@ -53,7 +54,52 @@ func fileExists(path string) bool {
 }
 
 func parseInt(s string) (int, error) {
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	return n, err
+	return strconv.Atoi(s)
+}
+
+// parsePortArgs extracts a port from -p/--port <n>, -p=<n>/--port=<n>, or a
+// bare positional port number. `npm run dev -p 3995` passes "3995"
+// positionally because npm consumes -p itself; accepting a bare number makes
+// that form work. Other args are returned in order for the caller to handle.
+func parsePortArgs(args []string, def int) (int, []string, error) {
+	port := def
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "-p" || arg == "--port":
+			if i+1 >= len(args) {
+				return 0, nil, fmt.Errorf("%s requires a port number", arg)
+			}
+			p, err := parseInt(args[i+1])
+			if err != nil {
+				return 0, nil, fmt.Errorf("invalid port %q", args[i+1])
+			}
+			port = p
+			i++
+		case strings.HasPrefix(arg, "-p=") || strings.HasPrefix(arg, "--port="):
+			p, err := parseInt(arg[strings.IndexByte(arg, '=')+1:])
+			if err != nil {
+				return 0, nil, fmt.Errorf("invalid port %q", arg)
+			}
+			port = p
+		default:
+			if p, err := parseInt(arg); err == nil {
+				if p > 0 && p <= 65535 {
+					port = p
+				} else {
+					return 0, nil, fmt.Errorf("invalid port %d", p)
+				}
+			} else {
+				rest = append(rest, arg)
+			}
+		}
+	}
+	if port < 1 || port > 65535 {
+		return 0, nil, fmt.Errorf("invalid port %d", port)
+	}
+	if len(rest) == 0 {
+		rest = nil
+	}
+	return port, rest, nil
 }
