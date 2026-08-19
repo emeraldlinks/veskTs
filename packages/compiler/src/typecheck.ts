@@ -20,7 +20,7 @@ export interface TypecheckError {
 const SKIP_DIRS = new Set(['node_modules', '.vesk', '.git', 'dist', 'tarballs', '.next']);
 const SKIP_FILES = new Set(['__vesk_ambient.d.ts', '__vesk_runtime_override.d.ts']);
 
-const AMBIENT = `
+export const AMBIENT = `
 declare namespace JSX {
   interface IntrinsicElements {
     [elemName: string]: unknown;
@@ -83,7 +83,7 @@ declare function issuesToFieldMap(...args: unknown[]): unknown;
 declare function isFormAction(...args: unknown[]): unknown;
 `;
 
-const RUNTIME_OVERRIDE = `
+export const RUNTIME_OVERRIDE = `
 import '@vesk/runtime';
 declare module '@vesk/runtime' {
   export function track<T>(initialValue: T): Cell<T>;

@@ -24,3 +24,4 @@ packages/adapter/*.tgz
 packages/cli/*.tgz
 packages/runtime/*.tgz
 /*.tgz
+.vesk-cache/
