@@ -27,7 +27,7 @@
     "test": "npm run test:unit && npm run test:dev",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",
-    "build:vsix": "node scripts/build-lsp.js && cd extension/vsk-vscode && npx @vscode/vsce package --no-dependencies"
+    "build:vsix": "node scripts/build-lsp.js && cd extension/vsk-vscode && npx tsc && npx @vscode/vsce package --no-dependencies"
   },
   "devDependencies": {
     "@rollup/plugin-commonjs": "^29.0.3",
