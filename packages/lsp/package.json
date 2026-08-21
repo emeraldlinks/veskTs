@@ -13,7 +13,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "vesk-lsp": "./dist/bin.js"
+    "vesk-lsp": "./dist/server.js"
   },
   "scripts": {
     "build": "tsc",
@@ -21,16 +21,9 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@volar/language-core": "~2.4.28",
-    "@volar/language-server": "~2.4.28",
-    "@volar/language-service": "~2.4.28",
-    "@volar/typescript": "~2.4.28",
     "@vesk/compiler": "^0.1.0",
     "@vesk/prettier-plugin": "^0.1.0",
     "prettier": "^3.0.0",
-    "typescript": "^5.8.0",
-    "volar-service-css": "0.0.71",
-    "volar-service-typescript": "0.0.71",
     "vscode-languageserver": "^9.0.0",
     "vscode-languageserver-textdocument": "^1.0.0"
   },

@@ -13,7 +13,7 @@ async function build() {
   const output = resolvePath(repoRoot, 'extension/vsk-vscode/lsp-server/index.mjs');
   const neovim = resolvePath(repoRoot, 'extension/vsk-neovim/lsp-server/index.mjs');
   const bundle = await rollup({
-    input: resolvePath(repoRoot, 'packages/lsp/src/bin.ts'),
+    input: resolvePath(repoRoot, 'packages/lsp/src/server.ts'),
     plugins: [
       resolve({
         extensions: ['.js', '.ts', '.mjs', '.cjs', '.json'],
@@ -38,12 +38,7 @@ async function build() {
         },
       }),
     ],
-    // volar-service-typescript and typescript must stay external: the former so
-    // the getUserPreferences monkey-patch (packages/lsp/src/typescriptService.ts)
-    // hits the same Node module-cache entry its internal consumers load; the
-    // latter because bundling typescript.js leaves `__filename` undefined in ESM
-    // scope (isFileSystemCaseSensitive crashes at startup).
-    external: ['volar-service-typescript', 'typescript'],
+    external: [],
   });
 
   await bundle.write({

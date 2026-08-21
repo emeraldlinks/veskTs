@@ -70,9 +70,8 @@ function request(method, params, label) {
     const id = nextId++;
     const timer = setTimeout(() => {
       console.error(`TIMEOUT waiting for response to ${method}${label ? ' (' + label + ')' : ''} id=${id}`);
-      if (stderr) console.error('server stderr:', stderr.slice(0, 3000));
       process.exit(3);
-    }, 15000);
+    }, 5000);
     pending.set(id, (msg) => { clearTimeout(timer); resolvePromise(msg); });
     const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
     child.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
@@ -106,7 +105,6 @@ async function main() {
   const init = await request('initialize', {
     processId: process.pid,
     rootUri: 'file://' + FIXTURE,
-    workspaceFolders: [{ uri: 'file://' + FIXTURE, name: 'basic' }],
     capabilities: {},
     initializationOptions: { vesk: { 'tailwind.completion': true, tagAutoClose: true } },
   });
@@ -121,15 +119,9 @@ async function main() {
   notify('textDocument/didOpen', {
     textDocument: { uri, languageId: 'vsk', version: 1, text: source },
   });
-  // Volar computes diagnostics on didChange, not didOpen — send a no-op change.
-  notify('textDocument/didChange', {
-    textDocument: { uri, version: 2 },
-    contentChanges: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: '' }],
-  });
-  await new Promise(r => setTimeout(r, 8000));
+  await new Promise(r => setTimeout(r, 500));
 
   // 2. diagnostics
-  console.log('diagnostics received:', diagnostics.length, diagnostics.map(d => d.message).join(' | '));
   const undef = diagnostics.filter(d => d.message.includes("Cannot find name 'undefinedVar'"));
   assert(undef.length === 1, `diagnostics flag undefinedVar (${undef.length})`);
   const noUnknownComp = diagnostics.filter(d => d.message.includes('Unknown component') && d.message.includes('Card'));
@@ -144,9 +136,7 @@ async function main() {
     textDocument: { uri },
     position: pos(14, colAfter),
   });
-  const compList = results(comp);
-  const compItems = Array.isArray(compList) ? compList : (compList?.items ?? []);
-  const labels = compItems.map(i => i.label);
+  const labels = (results(comp) || []).map(i => i.label);
   assert(labels.includes('props'), `attr completion includes component prop 'props'`);
   assert(!labels.includes('title') && !labels.includes('body'), 'already-used attrs title/body filtered from completion');
   assert(labels.includes('onClick'), 'attr completion includes event handlers');
@@ -158,9 +148,7 @@ async function main() {
     textDocument: { uri },
     position: pos(16, exprCol),
   }, 'expression completion at {count}');
-  const exprList = results(exprComp);
-  const exprItems = Array.isArray(exprList) ? exprList : (exprList?.items ?? []);
-  const exprLabels = exprItems.map(i => i.label);
+  const exprLabels = (results(exprComp) || []).map(i => i.label);
   assert(exprLabels.includes('count'), 'expression completion includes reactive binding');
   assert(exprLabels.includes('track'), 'expression completion includes imported symbol');
   assert(exprLabels.includes('props'), 'expression completion includes props param');
@@ -198,8 +186,7 @@ async function main() {
 
   // 8. document symbols
   const syms = await request('textDocument/documentSymbol', { textDocument: { uri } });
-  const symResult = results(syms);
-  const symLabels = Array.isArray(symResult) ? symResult.map(s => s.name) : [];
+  const symLabels = (results(syms) || []).map(s => s.name);
   assert(symLabels.includes('Card') && symLabels.includes('Home'), `document symbols (${symLabels.join(',')})`);
 
   // 9. formatting
@@ -340,17 +327,7 @@ async function main() {
   }, 'hover awaited posts');
   const postsText = (results(postsHover)?.contents?.value || '');
   assert(postsText.includes('Post[]'), `hover on awaited useFetch shows inferred type Post[] (got: ${postsText.slice(0, 300)})`);
-
-  // hover on the useFetch identifier shows its declaration (from the ambient
-  // runtime d.ts; hovering posts itself only yields `const posts: Post[]`).
-  const ufLine = asyncSource.split('\n').findIndex(l => l.includes('useFetch'));
-  const ufCol = asyncSource.split('\n')[ufLine].indexOf('useFetch') + 2;
-  const ufHover = await request('textDocument/hover', {
-    textDocument: { uri: asyncUri },
-    position: pos(ufLine, ufCol),
-  }, 'hover useFetch identifier');
-  const ufText = (results(ufHover)?.contents?.value || '');
-  assert(ufText.includes('useFetch'), `hover on useFetch identifier shows declaration (got: ${ufText.slice(0, 300)})`);
+  assert(postsText.includes('useFetch'), `hover on posts shows declaration source (got: ${postsText.slice(0, 300)})`);
 
   const loadedLine = asyncSource.split('\n').findIndex(l => l.includes('const loaded'));
   const loadedCol = asyncSource.split('\n')[loadedLine].indexOf('loaded') + 2;
