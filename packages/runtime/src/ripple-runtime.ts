@@ -50,16 +50,18 @@ export interface Block {
 	tc: (() => void)[] | null;
 }
 
-export interface Tracked {
+export interface Tracked<T = unknown> {
 	a: { get?: Function; set?: Function };
 	b: Block;
 	c: number;
 	d: DeferredTrackedEntry[] | null;
 	f: number;
 	__v: unknown;
+	get(): T;
+	set(value: T): void;
 }
 
-export interface Derived {
+export interface Derived<T = unknown> {
 	a: { get?: Function; set?: Function };
 	b: Block;
 	blocks: Block[] | null;
@@ -69,6 +71,8 @@ export interface Derived {
 	f: number;
 	fn: () => unknown;
 	__v: unknown;
+	get(): T;
+	set(value: T): void;
 }
 
 export interface Dependency {
@@ -321,7 +325,7 @@ export function run_block(block: Block): void {
 
 const empty_get_set = { get: undefined, set: undefined } as { get?: Function; set?: Function };
 
-class TrackedValue implements Tracked {
+class TrackedValue<T = unknown> implements Tracked<T> {
 	a: { get?: Function; set?: Function };
 	b: Block;
 	c: number;
@@ -338,6 +342,14 @@ class TrackedValue implements Tracked {
 		this.__v = v;
 	}
 
+	get(): T {
+		return get_tracked(this as unknown as Tracked) as T;
+	}
+
+	set(value: T): void {
+		set(this as unknown as Tracked, value);
+	}
+
 	get [0]() {
 		return get_tracked(this as unknown as Tracked);
 	}
@@ -345,14 +357,14 @@ class TrackedValue implements Tracked {
 		set(this as unknown as Tracked, v);
 	}
 
-	get [1](): Tracked {
-		return this as unknown as Tracked;
+	get [1](): Tracked<T> {
+		return this as unknown as Tracked<T>;
 	}
 
-	get value() {
-		return get_tracked(this as unknown as Tracked);
+	get value(): T {
+		return get_tracked(this as unknown as Tracked) as T;
 	}
-	set value(v: unknown) {
+	set value(v: T) {
 		set(this as unknown as Tracked, v);
 	}
 
@@ -360,13 +372,13 @@ class TrackedValue implements Tracked {
 		return 2;
 	}
 
-	*[Symbol.iterator](): Iterator<unknown | Tracked> {
+	*[Symbol.iterator](): Iterator<unknown | Tracked<T>> {
 		yield get_tracked(this as unknown as Tracked);
-		yield this as unknown as Tracked;
+		yield this as unknown as Tracked<T>;
 	}
 }
 
-class DerivedValue implements Derived {
+class DerivedValue<T = unknown> implements Derived<T> {
 	a: { get?: Function; set?: Function };
 	b: Block;
 	blocks: Block[] | null;
@@ -389,6 +401,14 @@ class DerivedValue implements Derived {
 		this.__v = UNINITIALIZED;
 	}
 
+	get(): T {
+		return get_derived(this as unknown as Derived) as T;
+	}
+
+	set(value: T): void {
+		set(this as unknown as Derived, value);
+	}
+
 	get [0]() {
 		return get_derived(this as unknown as Derived);
 	}
@@ -396,14 +416,14 @@ class DerivedValue implements Derived {
 		set(this as unknown as Derived, v);
 	}
 
-	get [1](): Derived {
-		return this as unknown as Derived;
+	get [1](): Derived<T> {
+		return this as unknown as Derived<T>;
 	}
 
-	get value() {
-		return get_derived(this as unknown as Derived);
+	get value(): T {
+		return get_derived(this as unknown as Derived) as T;
 	}
-	set value(v: unknown) {
+	set value(v: T) {
 		set(this as unknown as Derived, v);
 	}
 
@@ -411,25 +431,28 @@ class DerivedValue implements Derived {
 		return 2;
 	}
 
-	*[Symbol.iterator](): Iterator<unknown | Derived> {
+	*[Symbol.iterator](): Iterator<unknown | Derived<T>> {
 		yield get_derived(this as unknown as Derived);
-		yield this as unknown as Derived;
+		yield this as unknown as Derived<T>;
 	}
 }
 
 export type GetHook = (value: unknown) => unknown;
 export type SetHook = (next: unknown, prev: unknown) => unknown;
 
+export function tracked<T>(v: T, block?: Block, get?: GetHook, set?: SetHook): Tracked<T>;
 export function tracked(v: unknown, block?: Block, get?: GetHook, set?: SetHook): Tracked {
 	return new TrackedValue(v, block || active_block!, get || set ? { get, set } : empty_get_set);
 }
 
+export function derived<T>(fn: () => T, block?: Block, get?: GetHook, set?: SetHook): Derived<T>;
 export function derived(fn: () => unknown, block?: Block, get?: GetHook, set?: SetHook): Derived {
 	return new DerivedValue(fn, block || active_block!, get || set ? { get, set } : empty_get_set);
 }
 
-export function track(v: unknown, b?: Block, get?: GetHook, set?: SetHook): Tracked | Derived;
-export function track(v: unknown, get: GetHook, set?: SetHook): Tracked;
+export function track<T>(fn: () => T, b?: Block): Derived<T>;
+export function track<T>(v: T, b?: Block): Tracked<T>;
+export function track<T>(v: T, get: GetHook, set?: SetHook): Tracked<T>;
 export function track(v: unknown, b?: Block | GetHook, get?: GetHook | SetHook, set?: SetHook): Tracked | Derived {
 	if (is_ripple_object(v)) {
 		return v as Tracked | Derived;

@@ -29,7 +29,7 @@ declare namespace JSX {
 declare const Head: (props: { children?: unknown }) => unknown;
 declare class Cell<T> {
   get(): T;
-  set(value: T): boolean;
+  set(value: T): void;
   peek(): T;
   update(fn: (current: T) => T): boolean;
   unsubscribe(effect: unknown): void;

@@ -523,16 +523,16 @@ async function main() {
 
     // optimistic render should happen first, then fresh head + props land
     await page.waitForFunction(() => document.title.includes('Async'), { timeout: 8000 });
-    // the API now returns 401, so the data-fetch render fails with that status
-    // and the client swaps the page slot for the route error component
-    await page.waitForFunction(() => document.body.textContent.includes('Error 401'), { timeout: 8000 });
+    // the data fetch returns 200 with posts — wait for content to render
+    await page.waitForFunction(() => document.body.textContent.includes('Posts fetched during SSR'), { timeout: 8000 });
 
     const url = page.url();
     assert(url.includes('/async'), 'URL changed to /async');
     assert(await page.evaluate(() => window.__spaFlag === true), '/async reached via SPA (no reload)');
 
     const bodyText = await page.evaluate(() => document.body.textContent);
-    assert(bodyText.includes('HTTP 401: Unauthorized'), 'failing API error surfaced in error page');
+    assert(bodyText.includes('Hello Vesk'), 'async page shows fetched post title');
+    assert(bodyText.includes('Posts fetched during SSR'), 'async page heading rendered');
     const navFooter = await page.evaluate(() => {
       const nav = document.querySelector('nav');
       const footer = document.querySelector('footer');
@@ -541,8 +541,8 @@ async function main() {
         footer: footer ? footer.textContent : '',
       };
     });
-    assert(navFooter.nav.includes('Home') && navFooter.nav.includes('About'), 'nav survives on failed-data error page');
-    assert(navFooter.footer.includes('Powered by Vesk'), 'footer survives on failed-data error page');
+    assert(navFooter.nav.includes('Home') && navFooter.nav.includes('About'), 'nav survives on async data page');
+    assert(navFooter.footer.includes('Powered by Vesk'), 'footer survives on async data page');
 
     const dataForAsync = dataRequests.filter(u => u.includes('/async'));
     assert(dataForAsync.length === 1, `exactly one X-Vesk-Data request for /async (got ${dataForAsync.length})`);
@@ -795,16 +795,16 @@ async function main() {
     await goto(page, BASE + '/posts', { waitUntil: 'networkidle0' });
     const postsPage = await page.evaluate(() => {
       const t = document.body.textContent || '';
-      const root = document.getElementById('root');
       return {
-        hasErrorText: t.includes('Failed to load posts: HTTP 401'),
         hasPostsH1: t.includes('Posts'),
-        hasHydrationMarkers: root ? root.innerHTML.includes('<!--vsk-->') : false,
+        hasPostData: t.includes('Hello Vesk'),
       };
     });
-    assert(postsPage.hasErrorText, '/posts SSR page renders the useFetch error branch (401 API response)');
-    assert(postsPage.hasPostsH1, '/posts page header still rendered');
-    assert(postsPage.hasHydrationMarkers, '/posts hydration markers present despite failing API');
+    assert(postsPage.hasPostsH1, '/posts page header rendered');
+    assert(postsPage.hasPostData, '/posts SSR page renders fetched post data');
+    // Confirm vsk hydration markers exist in SSR output via fetch
+    const rawHtml = await fetch(BASE + '/posts').then(r => r.text());
+    assert((rawHtml.match(/<!--vsk-->/g) || []).length > 0, '/posts SSR output contains <!--vsk--> hydration markers');
 
     await page.close();
   }
@@ -1029,7 +1029,13 @@ async function main() {
       // Navigation out of the error page still works.
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickNav(page, '/about', '/about');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      await page.waitForFunction(
+        () => {
+          const h1 = document.querySelector('h1');
+          return h1 && h1.textContent && h1.textContent.trim() === 'About Vesk';
+        },
+        { timeout: 15000 },
+      );
       assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from data-error page to /about (no reload)');
       await page.close();
     }

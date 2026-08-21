@@ -96948,6 +96948,12 @@ class TrackedValue {
         this.f = TRACKED;
         this.__v = v;
     }
+    get() {
+        return get_tracked(this);
+    }
+    set(value) {
+        set(this, value);
+    }
     get [0]() {
         return get_tracked(this);
     }
@@ -96991,6 +96997,12 @@ class DerivedValue {
         this.f = DERIVED;
         this.fn = fn;
         this.__v = UNINITIALIZED;
+    }
+    get() {
+        return get_derived(this);
+    }
+    set(value) {
+        set(this, value);
     }
     get [0]() {
         return get_derived(this);
@@ -98579,7 +98591,7 @@ declare namespace JSX {
 declare const Head: (props: { children?: unknown }) => unknown;
 declare class Cell<T> {
   get(): T;
-  set(value: T): boolean;
+  set(value: T): void;
   peek(): T;
   update(fn: (current: T) => T): boolean;
   unsubscribe(effect: unknown): void;
@@ -98665,17 +98677,25 @@ function createLogging(label) {
 /**
  * Get the root virtual code of the source script behind a (possibly embedded)
  * document URI, plus the mapper back to the source.
+ *
+ * For regular (non-embedded) `.vsk` documents the "virtual code" is the root
+ * code produced by the language plugin (`sourceScript.generated.root`).
+ * For embedded documents it is the specific embedded code identified by
+ * `virtualCodeId`.
  */
 function getVirtualCode(document, context) {
     const uri = URI$1.parse(document.uri);
     const decoded = context.decodeEmbeddedDocumentUri(uri);
-    if (!decoded) {
-        return { virtualCode: undefined, sourceUri: uri, sourceScript: undefined, sourceMap: undefined };
-    }
-    const [sourceUri, virtualCodeId] = decoded;
+    const sourceUri = decoded?.[0] ?? uri;
+    const virtualCodeId = decoded?.[1];
     const sourceScript = context.language.scripts.get(sourceUri);
-    const virtualCode = sourceScript?.generated?.embeddedCodes.get(virtualCodeId);
-    const sourceMap = sourceScript && virtualCode ? context.language.maps.get(virtualCode, sourceScript) : undefined;
+    if (!sourceScript?.generated) {
+        return { virtualCode: undefined, sourceUri, sourceScript, sourceMap: undefined };
+    }
+    const virtualCode = virtualCodeId
+        ? sourceScript.generated.embeddedCodes.get(virtualCodeId)
+        : sourceScript.generated.root;
+    const sourceMap = virtualCode ? context.language.maps.get(virtualCode, sourceScript) : undefined;
     return { virtualCode, sourceUri, sourceScript, sourceMap };
 }
 const IMPORT_EXPORT_REGEX = {
@@ -98746,6 +98766,12 @@ const resolveConfig$1 = (config) => {
     if (options.target === undefined) {
         options.target = ts$9.ScriptTarget.ESNext;
     }
+    if (options.moduleResolution === undefined) {
+        options.moduleResolution = ts$9.ModuleResolutionKind.Bundler;
+    }
+    if (options.module === undefined) {
+        options.module = ts$9.ModuleKind.ESNext;
+    }
     if (options.jsx === undefined) {
         options.jsx = ts$9.JsxEmit.Preserve;
     }
@@ -98792,7 +98818,7 @@ class VeskVirtualCode {
     /** Compiler mappings (source↔generated) with vesk customData. */
     compilerMappings = [];
     id = 'root';
-    languageId = 'vesk';
+    languageId = 'typescriptreact';
     codegenStacks = [];
     fileName;
     generatedCode = '';
@@ -98960,7 +98986,7 @@ function scanComponentUsages(source) {
         usage.count++;
         const tagStart = match.index;
         const attrPattern = /[\w$]+(?=\s*=\s*(?:"[^"]*"|'[^']*'|\{))/g;
-        attrPattern.lastIndex = tagStart + match[0].length;
+        attrPattern.lastIndex = match[0].length;
         let attrMatch;
         const end = source.indexOf('>', tagStart);
         const segment = source.slice(tagStart, end === -1 ? tagStart + match[0].length + 200 : end + 1);
@@ -98978,11 +99004,13 @@ function getVeskLanguagePlugin() {
         getLanguageId(fileNameOrUri) {
             const fileName = typeof fileNameOrUri === 'string' ? fileNameOrUri : fileNameOrUri.fsPath.replace(/\\/g, '/');
             if (isVeskFile(fileName)) {
+                log$7('getLanguageId matched vesk:', fileName);
                 return 'vesk';
             }
         },
         createVirtualCode(fileNameOrUri, languageId, snapshot) {
-            if (languageId === 'vesk') {
+            log$7('createVirtualCode called:', { fileNameOrUri: String(fileNameOrUri), languageId });
+            if (languageId === 'vesk' || languageId === 'vsk') {
                 const fileName = typeof fileNameOrUri === 'string' ? fileNameOrUri : fileNameOrUri.fsPath.replace(/\\/g, '/');
                 try {
                     return new VeskVirtualCode(fileName, snapshot);
@@ -99634,50 +99662,45 @@ function createHoverPlugin() {
             hoverProvider: true,
         },
         create(context) {
-            // Disable typescript-semantic's provideHover so it doesn't merge with ours.
-            let originalInstance;
-            let originalProvideHover;
-            for (const [plugin, instance] of context.plugins) {
-                if (plugin.name === 'typescript-semantic') {
-                    originalInstance = instance;
-                    originalProvideHover = instance.provideHover;
-                    instance.provideHover = undefined;
-                }
-            }
             return {
                 async provideHover(document, position, token) {
                     if (!document.uri.endsWith('.vsk')) {
-                        return undefined;
-                    }
-                    const source = document.getText();
-                    const offset = document.offsetAt(position);
-                    const word = getWordFromPosition(source, offset);
-                    const wordText = word.word;
-                    if (!wordText) {
                         return undefined;
                     }
                     const { virtualCode } = getVirtualCode(document, context);
                     if (!(virtualCode instanceof VeskVirtualCode)) {
                         return undefined;
                     }
+                    const source = document.getText();
+                    const vskSource = virtualCode.sourceSnapshot.getText(0, virtualCode.sourceSnapshot.getLength());
+                    const offset = document.offsetAt(position);
+                    const word = getWordFromPosition(source, offset);
+                    const wordText = word.word;
+                    if (!wordText) {
+                        return undefined;
+                    }
                     const markdown = [];
-                    // 1. TS hover (when typescript-semantic still runs at this position).
-                    if (originalProvideHover && originalInstance) {
-                        try {
-                            const tsHover = await originalProvideHover.call(originalInstance, document, position, token);
-                            if (tsHover && tsHover.contents && Array.isArray(tsHover.contents) && tsHover.contents.length > 0) {
-                                const content = tsHover.contents
-                                    .map((c) => (typeof c === 'string' ? c : c.value ?? ''))
-                                    .join('\n');
-                                markdown.push(content);
+                    // 1. TS hover — delegate to the typescript-semantic plugin so we
+                    //    get proper type information, signature labels, etc.
+                    for (const [plugin, instance] of context.plugins) {
+                        if (plugin.name === 'typescript-semantic' && instance.provideHover) {
+                            try {
+                                const tsHover = await instance.provideHover(document, position, token);
+                                if (tsHover && tsHover.contents && Array.isArray(tsHover.contents) && tsHover.contents.length > 0) {
+                                    const content = tsHover.contents
+                                        .map((c) => (typeof c === 'string' ? c : c.value ?? ''))
+                                        .join('\n');
+                                    markdown.push(content);
+                                }
                             }
-                        }
-                        catch (err) {
-                            log$3(`TS hover failed at ${offset}:`, err);
+                            catch (err) {
+                                log$3(`TS hover failed at ${offset}:`, err);
+                            }
+                            break;
                         }
                     }
-                    // 2. Reactive binding marker.
-                    if (scanReactiveBindings(source).includes(wordText)) {
+                    // 2. Reactive binding marker — scan original VSK source for &[] patterns.
+                    if (scanReactiveBindings(vskSource).includes(wordText)) {
                         markdown.push('`[reactive binding]`');
                     }
                     // 3. HTML element docs — TS cannot hover intrinsic elements because the
@@ -99689,8 +99712,8 @@ function createHoverPlugin() {
                     if (EVENT_HANDLERS[wordText]) {
                         markdown.push(EVENT_HANDLERS[wordText]);
                     }
-                    // 5. Inferred component props (from `<Name` usages).
-                    const usages = scanComponentUsages(source);
+                    // 5. Inferred component props (from `<Name` usages) — scan VSK source.
+                    const usages = scanComponentUsages(vskSource);
                     const usage = usages.get(wordText);
                     if (usage && usage.attrs.size > 0) {
                         const props = [...usage.attrs].sort().join(', ');
@@ -121768,7 +121791,7 @@ const RUNTIME_OVERRIDE_FILE_NAME = '__vesk_runtime_override.d.ts';
  * Prettier + @vesk/prettier-plugin (registered after initialize).
  */
 function stripDocumentFormatting(plugin) {
-    const { documentFormattingProvider: _fmt, documentRangeFormattingProvider: _rangeFmt, ...capabilities } = plugin.capabilities ?? {};
+    const { documentFormattingProvider: _fmt, documentRangeFormattingProvider: _rangeFmt, documentOnTypeFormattingProvider: _onTypeFmt, ...capabilities } = plugin.capabilities ?? {};
     return { ...plugin, capabilities };
 }
 function createVeskLanguageServer() {
@@ -121808,7 +121831,9 @@ function createVeskLanguageServer() {
      * node_modules and intrinsics/reactive declarations type-check.
      */
     function injectAmbientFiles(host, ambientDir) {
-        const ambientPaths = [URI$1.file(`${ambientDir}/${AMBIENT_FILE_NAME}`).toString()];
+        const ambientPaths = [
+            URI$1.file(`${ambientDir}/${AMBIENT_FILE_NAME}`).toString(),
+        ];
         if (host.getScriptFileNames) {
             const original = host.getScriptFileNames.bind(host);
             host.getScriptFileNames = () => [...original(), ...ambientPaths];
@@ -121861,6 +121886,7 @@ function createVeskLanguageServer() {
             log('Initializing vesk language server...');
             const ts = await import('typescript');
             patchUserPreferences();
+            const VESK_EXTENSION = '.vsk';
             const initResult = server.initialize(params, nodeExports$1.createTypeScriptProject(ts, undefined, ({ configFileName, projectHost, sys }) => {
                 log(`TypeScript project create callback (configFileName=${configFileName})`);
                 wrapCompilerOptionsProvider(projectHost, 'getCompilationSettings');
@@ -121868,6 +121894,22 @@ function createVeskLanguageServer() {
                     ? configFileName.replace(/[\\/][^\\/]*$/, '')
                     : sys.getCurrentDirectory();
                 const languagePlugin = getVeskLanguagePlugin();
+                // Patch sys.readDirectory so that TypeScript's config parser discovers
+                // `.vsk` files.  TS 5.9 ignores the `extraFileExtensions` parameter
+                // passed to `parseJsonSourceFileConfigFileContent` — it never adds
+                // them to the extensions array it passes to `readDirectory`.  By
+                // injecting `.vsk` at the `readDirectory` level (before
+                // `updateCommandLine` runs), the tsconfig glob picks up `.vsk` files.
+                if (typeof sys.readDirectory === 'function') {
+                    const originalReadDirectory = sys.readDirectory.bind(sys);
+                    sys.readDirectory = (rootDir, extensions, excludes, includes, depth, maxDepth) => {
+                        const exts = extensions && extensions.length > 0
+                            ? (extensions.includes(VESK_EXTENSION) ? extensions : [...extensions, VESK_EXTENSION])
+                            : [VESK_EXTENSION];
+                        return originalReadDirectory(rootDir, exts, excludes, includes, depth, maxDepth);
+                    };
+                    log('Patched sys.readDirectory to include .vsk extension');
+                }
                 return {
                     languagePlugins: [languagePlugin],
                     setup({ project }) {
@@ -121875,6 +121917,8 @@ function createVeskLanguageServer() {
                         wrapCompilerOptionsProvider(project?.typescript?.languageServiceHost, 'getCompilationSettings');
                         const lsHost = project?.typescript?.languageServiceHost;
                         if (lsHost) {
+                            const fileNames = lsHost.getScriptFileNames?.();
+                            log(`TS host fileNames (${fileNames?.length ?? 0}):`, fileNames?.filter(f => f.endsWith('.vsk'))?.join(', '));
                             injectAmbientFiles(lsHost, ambientDir);
                             log(`Ambient files injected into project root: ${ambientDir}`);
                         }

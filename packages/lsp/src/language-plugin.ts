@@ -33,6 +33,12 @@ export const resolveConfig = <T extends { options?: any }>(
   if (options.target === undefined) {
     options.target = ts.ScriptTarget.ESNext;
   }
+  if (options.moduleResolution === undefined) {
+    options.moduleResolution = ts.ModuleResolutionKind.Bundler;
+  }
+  if (options.module === undefined) {
+    options.module = ts.ModuleKind.ESNext;
+  }
   if (options.jsx === undefined) {
     options.jsx = ts.JsxEmit.Preserve;
   }
@@ -88,7 +94,7 @@ export class VeskVirtualCode implements VirtualCode {
   /** Compiler mappings (source↔generated) with vesk customData. */
   compilerMappings: CompilerCodeMapping[] = [];
   id = 'root';
-  languageId = 'vesk';
+  languageId = 'typescriptreact';
   codegenStacks: unknown[] = [];
   fileName: string;
   generatedCode = '';
@@ -276,7 +282,7 @@ export function scanComponentUsages(source: string): Map<string, { attrs: Set<st
     usage.count++;
     const tagStart = match.index;
     const attrPattern = /[\w$]+(?=\s*=\s*(?:"[^"]*"|'[^']*'|\{))/g;
-    attrPattern.lastIndex = tagStart + match[0].length;
+    attrPattern.lastIndex = match[0].length;
     let attrMatch: RegExpExecArray | null;
     const end = source.indexOf('>', tagStart);
     const segment = source.slice(tagStart, end === -1 ? tagStart + match[0].length + 200 : end + 1);
@@ -296,11 +302,13 @@ export function getVeskLanguagePlugin(): LanguagePlugin<URI> {
       const fileName =
         typeof fileNameOrUri === 'string' ? fileNameOrUri : fileNameOrUri.fsPath.replace(/\\/g, '/');
       if (isVeskFile(fileName)) {
+        log('getLanguageId matched vesk:', fileName);
         return 'vesk';
       }
     },
     createVirtualCode(fileNameOrUri: URI | string, languageId: string, snapshot: IScriptSnapshot): VirtualCode | undefined {
-      if (languageId === 'vesk') {
+      log('createVirtualCode called:', { fileNameOrUri: String(fileNameOrUri), languageId });
+      if (languageId === 'vesk' || languageId === 'vsk') {
         const fileName =
           typeof fileNameOrUri === 'string' ? fileNameOrUri : fileNameOrUri.fsPath.replace(/\\/g, '/');
         try {

@@ -106,6 +106,7 @@ async function main() {
   const init = await request('initialize', {
     processId: process.pid,
     rootUri: 'file://' + FIXTURE,
+    workspaceFolders: [{ uri: 'file://' + FIXTURE, name: 'basic' }],
     capabilities: {},
     initializationOptions: { vesk: { 'tailwind.completion': true, tagAutoClose: true } },
   });
@@ -197,7 +198,8 @@ async function main() {
 
   // 8. document symbols
   const syms = await request('textDocument/documentSymbol', { textDocument: { uri } });
-  const symLabels = (results(syms) || []).map(s => s.name);
+  const symResult = results(syms);
+  const symLabels = Array.isArray(symResult) ? symResult.map(s => s.name) : [];
   assert(symLabels.includes('Card') && symLabels.includes('Home'), `document symbols (${symLabels.join(',')})`);
 
   // 9. formatting

@@ -20,29 +20,9 @@ export function createHoverPlugin(): LanguageServicePlugin {
       hoverProvider: true,
     },
     create(context) {
-      // Disable typescript-semantic's provideHover so it doesn't merge with ours.
-      let originalInstance: LanguageServicePluginInstance | undefined;
-      let originalProvideHover: LanguageServicePluginInstance['provideHover'] | undefined;
-      for (const [plugin, instance] of context.plugins) {
-        if (plugin.name === 'typescript-semantic') {
-          originalInstance = instance;
-          originalProvideHover = instance.provideHover;
-          instance.provideHover = undefined;
-        }
-      }
-
       return {
         async provideHover(document, position, token) {
           if (!document.uri.endsWith('.vsk')) {
-            return undefined;
-          }
-
-          const source = document.getText();
-          const offset = document.offsetAt(position);
-          const word = getWordFromPosition(source, offset);
-          const wordText = word.word;
-
-          if (!wordText) {
             return undefined;
           }
 
@@ -51,25 +31,39 @@ export function createHoverPlugin(): LanguageServicePlugin {
             return undefined;
           }
 
+          const source = document.getText();
+          const vskSource = virtualCode.sourceSnapshot.getText(0, virtualCode.sourceSnapshot.getLength());
+          const offset = document.offsetAt(position);
+          const word = getWordFromPosition(source, offset);
+          const wordText = word.word;
+
+          if (!wordText) {
+            return undefined;
+          }
+
           const markdown: string[] = [];
 
-          // 1. TS hover (when typescript-semantic still runs at this position).
-          if (originalProvideHover && originalInstance) {
-            try {
-              const tsHover = await originalProvideHover.call(originalInstance, document, position, token);
-              if (tsHover && tsHover.contents && Array.isArray(tsHover.contents) && tsHover.contents.length > 0) {
-                const content = tsHover.contents
-                  .map((c: any) => (typeof c === 'string' ? c : c.value ?? ''))
-                  .join('\n');
-                markdown.push(content);
+          // 1. TS hover — delegate to the typescript-semantic plugin so we
+          //    get proper type information, signature labels, etc.
+          for (const [plugin, instance] of context.plugins) {
+            if (plugin.name === 'typescript-semantic' && instance.provideHover) {
+              try {
+                const tsHover = await instance.provideHover(document, position, token);
+                if (tsHover && tsHover.contents && Array.isArray(tsHover.contents) && tsHover.contents.length > 0) {
+                  const content = tsHover.contents
+                    .map((c: any) => (typeof c === 'string' ? c : c.value ?? ''))
+                    .join('\n');
+                  markdown.push(content);
+                }
+              } catch (err) {
+                log(`TS hover failed at ${offset}:`, err);
               }
-            } catch (err) {
-              log(`TS hover failed at ${offset}:`, err);
+              break;
             }
           }
 
-          // 2. Reactive binding marker.
-          if (scanReactiveBindings(source).includes(wordText)) {
+          // 2. Reactive binding marker — scan original VSK source for &[] patterns.
+          if (scanReactiveBindings(vskSource).includes(wordText)) {
             markdown.push('`[reactive binding]`');
           }
 
@@ -84,8 +78,8 @@ export function createHoverPlugin(): LanguageServicePlugin {
             markdown.push(EVENT_HANDLERS[wordText]);
           }
 
-          // 5. Inferred component props (from `<Name` usages).
-          const usages = scanComponentUsages(source);
+          // 5. Inferred component props (from `<Name` usages) — scan VSK source.
+          const usages = scanComponentUsages(vskSource);
           const usage = usages.get(wordText);
           if (usage && usage.attrs.size > 0) {
             const props = [...usage.attrs].sort().join(', ');

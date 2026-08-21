@@ -38,6 +38,11 @@ export function isVeskDocument(documentUri: string): boolean {
 /**
  * Get the root virtual code of the source script behind a (possibly embedded)
  * document URI, plus the mapper back to the source.
+ *
+ * For regular (non-embedded) `.vsk` documents the "virtual code" is the root
+ * code produced by the language plugin (`sourceScript.generated.root`).
+ * For embedded documents it is the specific embedded code identified by
+ * `virtualCodeId`.
  */
 export function getVirtualCode(
   document: { uri: string },
@@ -50,16 +55,17 @@ export function getVirtualCode(
 } {
   const uri = URI.parse(document.uri);
   const decoded = context.decodeEmbeddedDocumentUri(uri);
-  if (!decoded) {
-    return { virtualCode: undefined, sourceUri: uri, sourceScript: undefined, sourceMap: undefined };
-  }
-  const [sourceUri, virtualCodeId] = decoded;
+  const sourceUri = decoded?.[0] ?? uri;
+  const virtualCodeId = decoded?.[1];
   const sourceScript = context.language.scripts.get(sourceUri);
-  const virtualCode = sourceScript?.generated?.embeddedCodes.get(virtualCodeId);
-
+  if (!sourceScript?.generated) {
+    return { virtualCode: undefined, sourceUri, sourceScript, sourceMap: undefined };
+  }
+  const virtualCode = virtualCodeId
+    ? sourceScript.generated.embeddedCodes.get(virtualCodeId)
+    : sourceScript.generated.root;
   const sourceMap =
-    sourceScript && virtualCode ? context.language.maps.get(virtualCode, sourceScript) : undefined;
-
+    virtualCode ? context.language.maps.get(virtualCode, sourceScript) : undefined;
   return { virtualCode, sourceUri, sourceScript, sourceMap };
 }
 

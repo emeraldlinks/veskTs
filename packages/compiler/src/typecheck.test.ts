@@ -11,7 +11,7 @@ function test(name: string, fn: () => void) {
   catch (e) { failed++; console.log(`  ✗ ${name} — ${(e as Error).message}`); }
 }
 
-const RUNTIME_DTS = `export declare class Cell<T> { get(): T; set(v: T): boolean; peek(): T; update(f: (c: T) => T): boolean; unsubscribe(e: unknown): void; }
+const RUNTIME_DTS = `export declare class Cell<T> { get(): T; set(v: T): void; peek(): T; update(f: (c: T) => T): boolean; unsubscribe(e: unknown): void; }
 export declare function track<T>(initialValue: T): Cell<T>;
 export declare function derived<T>(fn: () => T): Cell<T>;
 export declare function effect(fn: () => void): unknown;

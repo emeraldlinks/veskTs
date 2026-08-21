@@ -48,8 +48,12 @@ const RUNTIME_OVERRIDE_FILE_NAME = '__vesk_runtime_override.d.ts';
  * Prettier + @vesk/prettier-plugin (registered after initialize).
  */
 function stripDocumentFormatting<T extends { capabilities?: Record<string, unknown> }>(plugin: T): T {
-  const { documentFormattingProvider: _fmt, documentRangeFormattingProvider: _rangeFmt, ...capabilities } =
-    plugin.capabilities ?? {};
+  const {
+    documentFormattingProvider: _fmt,
+    documentRangeFormattingProvider: _rangeFmt,
+    documentOnTypeFormattingProvider: _onTypeFmt,
+    ...capabilities
+  } = plugin.capabilities ?? {};
   return { ...plugin, capabilities };
 }
 
@@ -105,7 +109,9 @@ export function createVeskLanguageServer() {
     },
     ambientDir: string,
   ): void {
-    const ambientPaths = [URI.file(`${ambientDir}/${AMBIENT_FILE_NAME}`).toString()];
+    const ambientPaths = [
+      URI.file(`${ambientDir}/${AMBIENT_FILE_NAME}`).toString(),
+    ];
     if (host.getScriptFileNames) {
       const original = host.getScriptFileNames.bind(host);
       host.getScriptFileNames = () => [...original(), ...ambientPaths];
@@ -162,6 +168,8 @@ export function createVeskLanguageServer() {
       const ts = await import('typescript');
       patchUserPreferences();
 
+      const VESK_EXTENSION = '.vsk';
+
       const initResult = server.initialize(
         params,
         createTypeScriptProject(ts, undefined, ({ configFileName, projectHost, sys }) => {
@@ -172,6 +180,30 @@ export function createVeskLanguageServer() {
             : sys.getCurrentDirectory();
 
           const languagePlugin = getVeskLanguagePlugin();
+
+          // Patch sys.readDirectory so that TypeScript's config parser discovers
+          // `.vsk` files.  TS 5.9 ignores the `extraFileExtensions` parameter
+          // passed to `parseJsonSourceFileConfigFileContent` — it never adds
+          // them to the extensions array it passes to `readDirectory`.  By
+          // injecting `.vsk` at the `readDirectory` level (before
+          // `updateCommandLine` runs), the tsconfig glob picks up `.vsk` files.
+          if (typeof sys.readDirectory === 'function') {
+            const originalReadDirectory = sys.readDirectory.bind(sys);
+            sys.readDirectory = (
+              rootDir: string,
+              extensions?: readonly string[],
+              excludes?: readonly string[],
+              includes?: readonly string[],
+              depth?: number,
+              maxDepth?: number,
+            ) => {
+              const exts = extensions && extensions.length > 0
+                ? (extensions.includes(VESK_EXTENSION) ? extensions : [...extensions, VESK_EXTENSION])
+                : [VESK_EXTENSION];
+              return originalReadDirectory(rootDir, exts, excludes, includes, depth, maxDepth);
+            };
+            log('Patched sys.readDirectory to include .vsk extension');
+          }
 
           return {
             languagePlugins: [languagePlugin],
@@ -188,6 +220,8 @@ export function createVeskLanguageServer() {
                   }
                 | undefined;
               if (lsHost) {
+                const fileNames = lsHost.getScriptFileNames?.();
+                log(`TS host fileNames (${fileNames?.length ?? 0}):`, fileNames?.filter(f => f.endsWith('.vsk'))?.join(', '));
                 injectAmbientFiles(lsHost, ambientDir);
                 log(`Ambient files injected into project root: ${ambientDir}`);
               }

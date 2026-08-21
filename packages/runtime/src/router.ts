@@ -1233,7 +1233,16 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						renderContent();
 					});
 				}
-				: (() => { doRender(); }) as (() => Promise<void>) | (() => void);
+				: (() => {
+					// Chunks already loaded (e.g. by prefetch) — resolve
+					// component refs so page/layout properties hold functions
+					// rather than string names (code-split __resolveNames only
+					// stores _pageName; __updateComponents turns it into a ref).
+					if (typeof router.__updateComponents === 'function') {
+						router.__updateComponents(match!.matchChain);
+					}
+					doRender();
+				}) as (() => Promise<void>) | (() => void);
 
 			async function runMwChain(index: number): Promise<void> {
 				if (index >= middlewareFns.length) {
