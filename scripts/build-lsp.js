@@ -10,6 +10,18 @@ import { copyFileSync, readFileSync, writeFileSync } from 'node:fs';
 const repoRoot = resolvePath(dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
+ * Strip `#!` shebang lines from the bundle. Rollup hoists the entry's
+ * (bin.ts) shebang below its own import prologue, where it is a SyntaxError;
+ * ensureModuleFilename would otherwise push it to line 2. The server is always
+ * spawned as `node index.mjs`, so the shebang is dead weight.
+ */
+function stripShebang(file) {
+  let src = readFileSync(file, 'utf8');
+  const stripped = src.split('\n').filter((line, i) => !(i === 0 && line.startsWith('#!')) && !/^#!\/usr\/bin\/env node\s*$/.test(line)).join('\n');
+  if (stripped !== src) writeFileSync(file, stripped, 'utf8');
+}
+
+/**
  * Ensure a module-scope `__filename` is defined in the generated bundle.
  * The bundled TypeScript `tsserver.js` runtime references `__filename` in
  * `getNodeSystem()`/`isFileSystemCaseSensitive()` but never defines it. When the
@@ -32,7 +44,7 @@ async function build() {
   const output = resolvePath(repoRoot, 'extension/vsk-vscode/lsp-server/index.mjs');
   const neovim = resolvePath(repoRoot, 'extension/vsk-neovim/lsp-server/index.mjs');
   const bundle = await rollup({
-    input: resolvePath(repoRoot, 'packages/lsp/src/server.ts'),
+    input: resolvePath(repoRoot, 'packages/lsp/src/bin.ts'),
     plugins: [
       resolve({
         extensions: ['.js', '.ts', '.mjs', '.cjs', '.json'],
@@ -57,6 +69,11 @@ async function build() {
         },
       }),
     ],
+    // Must stay []: the packaged vsix ships without node_modules (vsce
+    // --no-dependencies), so any external bare specifier (typescript,
+    // prettier, volar-service-*) crashes the server on startup with
+    // ERR_MODULE_NOT_FOUND. Full bundling also keeps one module instance per
+    // package, preserving the volar-service-typescript monkey-patch identity.
     external: [],
   });
 
@@ -67,6 +84,7 @@ async function build() {
     sourcemap: true,
   });
 
+  stripShebang(output);
   ensureModuleFilename(output);
 
   console.log('LSP server bundle written to extension/vsk-vscode/lsp-server/index.mjs');

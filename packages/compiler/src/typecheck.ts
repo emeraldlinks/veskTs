@@ -22,7 +22,355 @@ const SKIP_FILES = new Set(['__vesk_ambient.d.ts', '__vesk_runtime_override.d.ts
 
 export const AMBIENT = `
 declare namespace JSX {
+  type VeskEventHandler<E extends Event = Event> = (event: E) => void;
+  interface VeskCommonAttributes {
+    key?: string | number;
+    class?: string;
+    id?: string;
+    style?: string;
+    title?: string;
+    hidden?: boolean | string;
+    lang?: string;
+    dir?: 'ltr' | 'rtl' | 'auto';
+    tabIndex?: number;
+    role?: string;
+  }
+  interface VeskEventAttributes {
+    onClick?: VeskEventHandler<MouseEvent>;
+    onDblClick?: VeskEventHandler<MouseEvent>;
+    onMouseDown?: VeskEventHandler<MouseEvent>;
+    onMouseUp?: VeskEventHandler<MouseEvent>;
+    onMouseEnter?: VeskEventHandler<MouseEvent>;
+    onMouseLeave?: VeskEventHandler<MouseEvent>;
+    onMouseMove?: VeskEventHandler<MouseEvent>;
+    onKeyDown?: VeskEventHandler<KeyboardEvent>;
+    onKeyUp?: VeskEventHandler<KeyboardEvent>;
+    onFocus?: VeskEventHandler<FocusEvent>;
+    onBlur?: VeskEventHandler<FocusEvent>;
+    onInput?: VeskEventHandler<InputEvent>;
+    onChange?: VeskEventHandler<Event>;
+    onSubmit?: VeskEventHandler<SubmitEvent>;
+    onScroll?: VeskEventHandler<UIEvent>;
+    onWheel?: VeskEventHandler<WheelEvent>;
+    // Lowercase aliases — HTML attribute names are case-insensitive and real
+    // code writes onclick=/oninput=. Keep in sync with the camelCase members.
+    onclick?: VeskEventHandler<MouseEvent>;
+    ondblclick?: VeskEventHandler<MouseEvent>;
+    onmousedown?: VeskEventHandler<MouseEvent>;
+    onmouseup?: VeskEventHandler<MouseEvent>;
+    onmouseenter?: VeskEventHandler<MouseEvent>;
+    onmouseleave?: VeskEventHandler<MouseEvent>;
+    onmousemove?: VeskEventHandler<MouseEvent>;
+    onkeydown?: VeskEventHandler<KeyboardEvent>;
+    onkeyup?: VeskEventHandler<KeyboardEvent>;
+    onfocus?: VeskEventHandler<FocusEvent>;
+    onblur?: VeskEventHandler<FocusEvent>;
+    oninput?: VeskEventHandler<InputEvent>;
+    onchange?: VeskEventHandler<Event>;
+    onsubmit?: VeskEventHandler<SubmitEvent>;
+  }
+  interface VeskGlobalAttributes extends VeskCommonAttributes, VeskEventAttributes {
+    children?: unknown;
+  }
+  interface VeskAnchorAttributes extends VeskGlobalAttributes {
+    href?: string;
+    target?: string;
+    rel?: string;
+    download?: string | boolean;
+    type?: string;
+    hreflang?: string;
+  }
+  interface VeskMediaAttributes extends VeskGlobalAttributes {
+    src?: string;
+    width?: string | number;
+    height?: string | number;
+  }
+  interface VeskInputAttributes extends VeskGlobalAttributes {
+    type?: string;
+    name?: string;
+    value?: string | number | readonly string[];
+    placeholder?: string;
+    checked?: boolean | string;
+    disabled?: boolean | string;
+    readOnly?: boolean | string;
+    required?: boolean | string;
+    min?: string | number;
+    max?: string | number;
+    step?: string | number;
+    pattern?: string;
+    autoComplete?: string;
+    autoFocus?: boolean | string;
+    multiple?: boolean | string;
+    accept?: string;
+    size?: number;
+    list?: string;
+  }
   interface IntrinsicElements {
+    html?: VeskGlobalAttributes & { manifest?: string };
+    head?: VeskGlobalAttributes;
+    body?: VeskGlobalAttributes;
+    div?: VeskGlobalAttributes;
+    span?: VeskGlobalAttributes;
+    p?: VeskGlobalAttributes;
+    h1?: VeskGlobalAttributes;
+    h2?: VeskGlobalAttributes;
+    h3?: VeskGlobalAttributes;
+    h4?: VeskGlobalAttributes;
+    h5?: VeskGlobalAttributes;
+    h6?: VeskGlobalAttributes;
+    a?: VeskAnchorAttributes;
+    nav?: VeskGlobalAttributes;
+    header?: VeskGlobalAttributes;
+    footer?: VeskGlobalAttributes;
+    main?: VeskGlobalAttributes;
+    section?: VeskGlobalAttributes;
+    article?: VeskGlobalAttributes;
+    aside?: VeskGlobalAttributes;
+    button?: VeskGlobalAttributes & {
+      type?: 'button' | 'submit' | 'reset';
+      disabled?: boolean | string;
+      name?: string;
+      value?: string | number;
+    };
+    form?: VeskGlobalAttributes & {
+      action?: string;
+      method?: 'get' | 'post';
+      target?: string;
+      encType?: string;
+      noValidate?: boolean | string;
+      name?: string;
+      autoComplete?: string;
+    };
+    input?: VeskInputAttributes;
+    textarea?: VeskGlobalAttributes & {
+      rows?: number;
+      cols?: number;
+      placeholder?: string;
+      value?: string | number;
+      disabled?: boolean | string;
+      readOnly?: boolean | string;
+      required?: boolean | string;
+      name?: string;
+    };
+    select?: VeskGlobalAttributes & {
+      name?: string;
+      value?: string | number | readonly string[];
+      disabled?: boolean | string;
+      required?: boolean | string;
+      multiple?: boolean | string;
+      size?: number;
+      autoComplete?: string;
+    };
+    option?: VeskGlobalAttributes & {
+      value?: string | number;
+      selected?: boolean | string;
+      disabled?: boolean | string;
+      label?: string;
+    };
+    optgroup?: VeskGlobalAttributes & { label?: string; disabled?: boolean | string };
+    label?: VeskGlobalAttributes & { htmlFor?: string };
+    fieldset?: VeskGlobalAttributes & { disabled?: boolean | string; name?: string; form?: string };
+    legend?: VeskGlobalAttributes;
+    datalist?: VeskGlobalAttributes;
+    img?: VeskGlobalAttributes & {
+      src?: string;
+      alt?: string;
+      width?: string | number;
+      height?: string | number;
+      srcSet?: string;
+      sizes?: string;
+      loading?: 'eager' | 'lazy';
+      decoding?: 'sync' | 'async' | 'auto';
+    };
+    picture?: VeskGlobalAttributes;
+    source?: VeskGlobalAttributes & { src?: string; srcSet?: string; sizes?: string; media?: string; type?: string };
+    video?: VeskMediaAttributes & {
+      controls?: boolean | string;
+      autoPlay?: boolean | string;
+      loop?: boolean | string;
+      muted?: boolean | string;
+      preload?: 'none' | 'metadata' | 'auto' | '';
+      poster?: string;
+      playsInline?: boolean | string;
+    };
+    audio?: VeskGlobalAttributes & {
+      src?: string;
+      controls?: boolean | string;
+      autoPlay?: boolean | string;
+      loop?: boolean | string;
+      muted?: boolean | string;
+      preload?: 'none' | 'metadata' | 'auto' | '';
+    };
+    track?: VeskGlobalAttributes & {
+      src?: string;
+      kind?: string;
+      srclang?: string;
+      label?: string;
+      default?: boolean | string;
+    };
+    canvas?: VeskGlobalAttributes & { width?: number; height?: number };
+    iframe?: VeskGlobalAttributes & {
+      src?: string;
+      srcDoc?: string;
+      width?: string | number;
+      height?: string | number;
+      allow?: string;
+      loading?: 'eager' | 'lazy';
+      sandbox?: string;
+      allowFullScreen?: boolean | string;
+      referrerPolicy?: string;
+    };
+    embed?: VeskGlobalAttributes & { src?: string; type?: string; width?: string | number; height?: string | number };
+    object?: VeskGlobalAttributes & { data?: string; type?: string; name?: string; width?: string | number; height?: string | number };
+    table?: VeskGlobalAttributes;
+    caption?: VeskGlobalAttributes;
+    thead?: VeskGlobalAttributes;
+    tbody?: VeskGlobalAttributes;
+    tfoot?: VeskGlobalAttributes;
+    tr?: VeskGlobalAttributes;
+    th?: VeskGlobalAttributes & { colSpan?: number; rowSpan?: number; scope?: string; headers?: string };
+    td?: VeskGlobalAttributes & { colSpan?: number; rowSpan?: number; headers?: string };
+    col?: VeskGlobalAttributes & { span?: number };
+    colgroup?: VeskGlobalAttributes & { span?: number };
+    ul?: VeskGlobalAttributes;
+    ol?: VeskGlobalAttributes & { start?: number; reversed?: boolean | string; type?: string };
+    li?: VeskGlobalAttributes & { value?: number };
+    dl?: VeskGlobalAttributes;
+    dt?: VeskGlobalAttributes;
+    dd?: VeskGlobalAttributes;
+    br?: VeskGlobalAttributes;
+    hr?: VeskGlobalAttributes;
+    pre?: VeskGlobalAttributes;
+    code?: VeskGlobalAttributes;
+    blockquote?: VeskGlobalAttributes & { cite?: string };
+    q?: VeskGlobalAttributes & { cite?: string };
+    strong?: VeskGlobalAttributes;
+    em?: VeskGlobalAttributes;
+    small?: VeskGlobalAttributes;
+    s?: VeskGlobalAttributes;
+    cite?: VeskGlobalAttributes;
+    dfn?: VeskGlobalAttributes;
+    abbr?: VeskGlobalAttributes & { title?: string };
+    time?: VeskGlobalAttributes & { dateTime?: string };
+    data?: VeskGlobalAttributes & { value?: string | number };
+    mark?: VeskGlobalAttributes;
+    del?: VeskGlobalAttributes & { cite?: string; dateTime?: string };
+    ins?: VeskGlobalAttributes & { cite?: string; dateTime?: string };
+    sub?: VeskGlobalAttributes;
+    sup?: VeskGlobalAttributes;
+    u?: VeskGlobalAttributes;
+    kbd?: VeskGlobalAttributes;
+    samp?: VeskGlobalAttributes;
+    var?: VeskGlobalAttributes;
+    figure?: VeskGlobalAttributes;
+    figcaption?: VeskGlobalAttributes;
+    details?: VeskGlobalAttributes & { open?: boolean | string };
+    summary?: VeskGlobalAttributes;
+    dialog?: VeskGlobalAttributes & { open?: boolean | string };
+    menu?: VeskGlobalAttributes;
+    address?: VeskGlobalAttributes;
+    b?: VeskGlobalAttributes;
+    i?: VeskGlobalAttributes;
+    ruby?: VeskGlobalAttributes;
+    rt?: VeskGlobalAttributes;
+    rp?: VeskGlobalAttributes;
+    bdi?: VeskGlobalAttributes;
+    bdo?: VeskGlobalAttributes;
+    wbr?: VeskGlobalAttributes;
+    area?: VeskGlobalAttributes & {
+      coords?: string;
+      shape?: string;
+      href?: string;
+      target?: string;
+      alt?: string;
+    };
+    map?: VeskGlobalAttributes & { name?: string };
+    noscript?: VeskGlobalAttributes;
+    template?: VeskGlobalAttributes;
+    slot?: VeskGlobalAttributes & { name?: string };
+    meta?: VeskGlobalAttributes & { name?: string; content?: string; charSet?: string; httpEquiv?: string };
+    title?: VeskGlobalAttributes;
+    base?: VeskGlobalAttributes & { href?: string; target?: string };
+    link?: VeskGlobalAttributes & {
+      rel?: string;
+      href?: string;
+      sizes?: string;
+      media?: string;
+      as?: string;
+      crossOrigin?: string;
+      integrity?: string;
+    };
+    style?: VeskGlobalAttributes & { media?: string };
+    script?: VeskGlobalAttributes & {
+      src?: string;
+      async?: boolean | string;
+      defer?: boolean | string;
+      type?: string;
+      crossOrigin?: string;
+      integrity?: string;
+      nonce?: string;
+      noModule?: boolean | string;
+    };
+    svg?: VeskGlobalAttributes & {
+      viewBox?: string;
+      xmlns?: string;
+      width?: string | number;
+      height?: string | number;
+      fill?: string;
+      stroke?: string;
+      strokeWidth?: string | number;
+    };
+    g?: VeskGlobalAttributes & { transform?: string; fill?: string; stroke?: string; strokeWidth?: string | number };
+    path?: VeskGlobalAttributes & {
+      d?: string;
+      fill?: string;
+      stroke?: string;
+      strokeWidth?: string | number;
+      fillRule?: string;
+      clipRule?: string;
+    };
+    circle?: VeskGlobalAttributes & {
+      cx?: string | number;
+      cy?: string | number;
+      r?: string | number;
+      fill?: string;
+      stroke?: string;
+      strokeWidth?: string | number;
+    };
+    ellipse?: VeskGlobalAttributes & {
+      cx?: string | number;
+      cy?: string | number;
+      rx?: string | number;
+      ry?: string | number;
+      fill?: string;
+    };
+    rect?: VeskGlobalAttributes & {
+      x?: string | number;
+      y?: string | number;
+      width?: string | number;
+      height?: string | number;
+      rx?: string | number;
+      ry?: string | number;
+      fill?: string;
+    };
+    line?: VeskGlobalAttributes & {
+      x1?: string | number;
+      y1?: string | number;
+      x2?: string | number;
+      y2?: string | number;
+      stroke?: string;
+      strokeWidth?: string | number;
+    };
+    polyline?: VeskGlobalAttributes & { points?: string; fill?: string; stroke?: string };
+    polygon?: VeskGlobalAttributes & { points?: string; fill?: string; stroke?: string };
+    text?: VeskGlobalAttributes & { x?: string | number; y?: string | number; fill?: string; fontSize?: string | number };
+    defs?: VeskGlobalAttributes;
+    linearGradient?: VeskGlobalAttributes;
+    radialGradient?: VeskGlobalAttributes;
+    stop?: VeskGlobalAttributes & { offset?: string | number; stopColor?: string; stopOpacity?: string | number };
+
+    // Unknown/custom tags stay permissive — components and web components
+    // resolve through the index signature, known tags get the typed members.
     [elemName: string]: unknown;
   }
 }

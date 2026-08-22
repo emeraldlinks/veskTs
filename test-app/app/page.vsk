@@ -12,10 +12,16 @@ interface ThrowProps {
 
 
 component Home (){
-	<Head> <title> VeskTS test app </title></Head>
+	<Head>
+		 <title> VeskTS test app </title>
+		</Head>
   const &[count] = track<number>(10)
+	<div class=""> </div>
+	
   
  
+	
+	
 	<h1 class="text-4xl font-bold mb-2">Welcome to Vesk</h1>
 	<p class="text-gray-500 mb-4">
 		A compiler-first reactive UI framework for the post-VDOM web.
@@ -49,7 +55,6 @@ component Throws(props: ThrowProps) {
 	if (props.fail) throw new Error(props.msg);
 	return <p>OK</p>
 }
-
 
 
 export component Appx {

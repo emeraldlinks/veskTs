@@ -2,7 +2,7 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "private": true,
   "license": "MIT",
   "publisher": "vesk",
@@ -75,18 +75,16 @@
     ]
   },
   "scripts": {
-    "build": "tsc",
+    "build": "esbuild src/extension.ts --bundle --platform=node --external:vscode --outfile=dist/extension.js --sourcemap",
     "typecheck": "tsc --noEmit",
-    "package": "vsce package"
+    "package": "npm run build && vsce package --no-dependencies"
   },
-  "dependencies": {
-    "vscode-languageclient": "^9.0.0",
-    "vscode-languageserver": "^9.0.0",
-    "vscode-languageserver-textdocument": "^1.0.0"
-  },
+  "dependencies": {},
   "devDependencies": {
     "@types/node": "^20.0.0",
+    "esbuild": "^0.28.1",
     "@types/vscode": "^1.85.0",
-    "typescript": "^5.8.0"
+    "typescript": "^5.8.0",
+    "vscode-languageclient": "^9.0.0"
   }
 }

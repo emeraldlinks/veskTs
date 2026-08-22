@@ -70,8 +70,9 @@ function request(method, params, label) {
     const id = nextId++;
     const timer = setTimeout(() => {
       console.error(`TIMEOUT waiting for response to ${method}${label ? ' (' + label + ')' : ''} id=${id}`);
+      if (stderr) console.error('server stderr:', stderr.slice(0, 3000));
       process.exit(3);
-    }, 5000);
+    }, 15000);
     pending.set(id, (msg) => { clearTimeout(timer); resolvePromise(msg); });
     const payload = JSON.stringify({ jsonrpc: '2.0', id, method, params });
     child.stdin.write(`Content-Length: ${Buffer.byteLength(payload)}\r\n\r\n${payload}`);
@@ -119,15 +120,39 @@ async function main() {
   notify('textDocument/didOpen', {
     textDocument: { uri, languageId: 'vsk', version: 1, text: source },
   });
-  await new Promise(r => setTimeout(r, 500));
+  // Volar computes diagnostics on didChange, not didOpen — send a no-op change.
+  notify('textDocument/didChange', {
+    textDocument: { uri, version: 2 },
+    contentChanges: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: '' }],
+  });
+  await new Promise(r => setTimeout(r, 8000));
 
   // 2. diagnostics
+  console.log('diagnostics received:', diagnostics.length, diagnostics.map(d => d.message).join(' | '));
   const undef = diagnostics.filter(d => d.message.includes("Cannot find name 'undefinedVar'"));
   assert(undef.length === 1, `diagnostics flag undefinedVar (${undef.length})`);
   const noUnknownComp = diagnostics.filter(d => d.message.includes('Unknown component') && d.message.includes('Card'));
   assert(noUnknownComp.length === 0, 'Card component not flagged as unknown');
   const unusedTrack = diagnostics.filter(d => d.message.includes("Unused import: 'track'"));
   assert(unusedTrack.length === 0, `used import 'track' not flagged unused (${unusedTrack.length})`);
+  // jsxImportSource must NOT be defaulted by the LSP — TS would hunt for
+  // '@vesk/runtime/jsx-runtime' module types that don't exist (TS2875).
+  const jsxRuntimeErr = diagnostics.filter(d => d.message.includes('jsx-runtime'));
+  assert(jsxRuntimeErr.length === 0, `no jsx-runtime module error (${jsxRuntimeErr.map(d => d.message).join('; ')})`);
+
+  // 2b. intrinsic-element attributes are typed via AMBIENT IntrinsicElements
+  // (not the `[elemName: string]: unknown` index signature).
+  const h1Line = source.split('\n').findIndex(l => l.includes('<h1 '));
+  const h1AttrCol = source.split('\n')[h1Line].indexOf('h1 ') + 3;
+  const h1Comp = await request('textDocument/completion', {
+    textDocument: { uri },
+    position: pos(h1Line, h1AttrCol),
+  });
+  const h1List = results(h1Comp);
+  const h1Items = Array.isArray(h1List) ? h1List : (h1List?.items ?? []);
+  const h1Labels = h1Items.map(i => i.label);
+  assert(h1Labels.includes('class'), `intrinsic attr completion includes 'class' (${h1Labels.slice(0, 12).join(',')})`);
+  assert(h1Labels.includes('lang'), `intrinsic attr completion includes 'lang' (${h1Labels.slice(0, 12).join(',')})`);
 
   // 3. attr/prop completion on <Card title=... body=...>
   const line14 = source.split('\n')[14];
@@ -136,7 +161,9 @@ async function main() {
     textDocument: { uri },
     position: pos(14, colAfter),
   });
-  const labels = (results(comp) || []).map(i => i.label);
+  const compList = results(comp);
+  const compItems = Array.isArray(compList) ? compList : (compList?.items ?? []);
+  const labels = compItems.map(i => i.label);
   assert(labels.includes('props'), `attr completion includes component prop 'props'`);
   assert(!labels.includes('title') && !labels.includes('body'), 'already-used attrs title/body filtered from completion');
   assert(labels.includes('onClick'), 'attr completion includes event handlers');
@@ -148,7 +175,9 @@ async function main() {
     textDocument: { uri },
     position: pos(16, exprCol),
   }, 'expression completion at {count}');
-  const exprLabels = (results(exprComp) || []).map(i => i.label);
+  const exprList = results(exprComp);
+  const exprItems = Array.isArray(exprList) ? exprList : (exprList?.items ?? []);
+  const exprLabels = exprItems.map(i => i.label);
   assert(exprLabels.includes('count'), 'expression completion includes reactive binding');
   assert(exprLabels.includes('track'), 'expression completion includes imported symbol');
   assert(exprLabels.includes('props'), 'expression completion includes props param');
@@ -327,7 +356,17 @@ async function main() {
   }, 'hover awaited posts');
   const postsText = (results(postsHover)?.contents?.value || '');
   assert(postsText.includes('Post[]'), `hover on awaited useFetch shows inferred type Post[] (got: ${postsText.slice(0, 300)})`);
-  assert(postsText.includes('useFetch'), `hover on posts shows declaration source (got: ${postsText.slice(0, 300)})`);
+
+  // hover on the useFetch identifier shows its declaration (from the ambient
+  // runtime d.ts; hovering posts itself only yields `const posts: Post[]`).
+  const ufLine = asyncSource.split('\n').findIndex(l => l.includes('useFetch'));
+  const ufCol = asyncSource.split('\n')[ufLine].indexOf('useFetch') + 2;
+  const ufHover = await request('textDocument/hover', {
+    textDocument: { uri: asyncUri },
+    position: pos(ufLine, ufCol),
+  }, 'hover useFetch identifier');
+  const ufText = (results(ufHover)?.contents?.value || '');
+  assert(ufText.includes('useFetch'), `hover on useFetch identifier shows declaration (got: ${ufText.slice(0, 300)})`);
 
   const loadedLine = asyncSource.split('\n').findIndex(l => l.includes('const loaded'));
   const loadedCol = asyncSource.split('\n')[loadedLine].indexOf('loaded') + 2;

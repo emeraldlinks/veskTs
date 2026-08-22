@@ -181,6 +181,48 @@ test('typecheck: const track decl typechecks (no "const let" regression)', () =>
   }
 });
 
+test('typecheck: typed JSX intrinsics accept known attributes (AMBIENT IntrinsicElements)', () => {
+  const f = fixture({
+    'app/page.vsk': [
+      'component Page() {',
+      "  <a href=\"/about\" target=\"_blank\">About</a>",
+      "  <img src=\"/logo.png\" alt=\"Logo\" width={120} />",
+      '  <input type="text" value={42} placeholder="Type..." />',
+      "  <button onClick={() => {}} disabled={false}>Go</button>",
+      '}',
+    ].join('\n'),
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (errors.some((e) => e.file.includes('page.vsk'))) {
+      throw new Error(`typed intrinsic attrs should typecheck clean, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: unknown/custom tags still permissive via IntrinsicElements index fallback', () => {
+  const f = fixture({
+    'app/page.vsk': [
+      'component Page() {',
+      '  <my-web-component someunknownattr="1">hi</my-web-component>',
+      '  <Head><title>T</title></Head>',
+      '}',
+    ].join('\n'),
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (errors.some((e) => e.file.includes('page.vsk'))) {
+      throw new Error(`custom tags must stay permissive, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
 const results = () => {
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);
