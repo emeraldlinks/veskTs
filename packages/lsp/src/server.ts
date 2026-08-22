@@ -10,7 +10,7 @@
  */
 
 import { URI } from 'vscode-uri';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createConnection, createServer, createTypeScriptProject } from '@volar/language-server/node';
@@ -167,6 +167,10 @@ export function createVeskLanguageServer() {
       if (cachedInput !== input) {
         cachedInput = input;
         cachedOutput = resolveConfig({ options: input as { options?: object } }).options;
+        const o = cachedOutput as { target?: unknown; jsx?: unknown; lib?: string[]; types?: string[] };
+        log(
+          `getCompilationSettings resolved: target=${o.target} jsx=${o.jsx} lib=[${(o.lib ?? []).join(',')}] types=[${(o.types ?? []).join(',')}]`,
+        );
       }
       return cachedOutput;
     };
@@ -222,6 +226,24 @@ export function createVeskLanguageServer() {
         }
         return original(fileName);
       };
+    } else {
+      // The volar TS service host may not implement readFile at all; without
+      // it, `/// <reference lib="...">` chains inside lib.d.ts files (esnext
+      // is a pure hub of them) cannot resolve and ES globals stay missing.
+      host.readFile = (fileName: string) => {
+        const content = getAmbientContent(fileName);
+        if (content !== undefined) {
+          return content;
+        }
+        if (hasUriScheme(fileName)) {
+          return undefined;
+        }
+        try {
+          return readFileSync(fileName, 'utf8');
+        } catch {
+          return undefined;
+        }
+      };
     }
     if (host.fileExists) {
       const original = host.fileExists.bind(host);
@@ -231,7 +253,35 @@ export function createVeskLanguageServer() {
         }
         return original(fileName);
       };
+    } else {
+      host.fileExists = (fileName: string) => {
+        if (getAmbientContent(fileName) !== undefined) {
+          return true;
+        }
+        if (hasUriScheme(fileName)) {
+          return false;
+        }
+        return existsSync(fileName);
+      };
     }
+  }
+
+  /** True for `file://…`-style URIs (as opposed to plain fs paths). */
+  function hasUriScheme(fileName: string): boolean {
+    const colon = fileName.indexOf(':');
+    if (colon <= 0) {
+      return false;
+    }
+    for (let i = 0; i < colon; i++) {
+      const c = fileName.charCodeAt(i);
+      const isAlpha = (c >= 97 && c <= 122) || (c >= 65 && c <= 90);
+      const isDigit = c >= 48 && c <= 57;
+      const isSpecial = c === 43 || c === 45 || c === 46; // + - .
+      if (!(isAlpha || (i > 0 && (isDigit || isSpecial)))) {
+        return false;
+      }
+    }
+    return true;
   }
 
   function getAmbientContent(fileName: string): string | undefined {
@@ -310,9 +360,69 @@ export function createVeskLanguageServer() {
                   : (tsLibDir ?? findTypescriptLibDir(candidateRoots));
                 if (effectiveLibDir && typeof lsHost.getDefaultLibFileName === 'function') {
                   const originalGetDefaultLibFile = lsHost.getDefaultLibFileName.bind(lsHost);
-                  lsHost.getDefaultLibFileName = (options: unknown) =>
-                    join(effectiveLibDir, originalGetDefaultLibFile(options));
+                  // volar's host already returns an ABSOLUTE path here
+                  // (ts.getDefaultLibFilePath). Take the basename before
+                  // re-rooting, otherwise join() produces a double path and
+                  // lib reference resolution breaks.
+                  lsHost.getDefaultLibFileName = (options: unknown) => {
+                    const raw = originalGetDefaultLibFile(options);
+                    const base = raw.split(/[\\/]/).pop() ?? raw;
+                    return join(effectiveLibDir, base);
+                  };
+                  // Also advertise the location: TS resolves options.lib
+                  // entries AND `/// <reference lib="…">` chains (the es
+                  // libs are pure hubs of them) against this.
+                  const hostWithLibLocation = lsHost as { getDefaultLibLocation?: () => string };
+                  hostWithLibLocation.getDefaultLibLocation = () => effectiveLibDir;
                   log(`Language service host libs redirected to: ${effectiveLibDir}`);
+                }
+                if (effectiveLibDir && typeof lsHost.getScriptFileNames === 'function') {
+                  // options.lib entries are not reliably resolved by the
+                  // embedded program, so add concrete lib d.ts files as root
+                  // files from disk. Raw paths (not URIs): the underlying
+                  // host reads them via fs. We inject every content-bearing
+                  // leaf lib (hubs like lib.es2015.d.ts only contain
+                  // ///-references), so ES/DOM globals resolve regardless of
+                  // whether reference chains resolve in this environment.
+                  const bareEraHubs = new Set([
+                    'es6',
+                    'es7',
+                    'es2015',
+                    'es2016',
+                    'es2017',
+                    'es2018',
+                    'es2019',
+                    'es2020',
+                    'es2021',
+                    'es2022',
+                    'es2023',
+                    'es2024',
+                    'esnext',
+                    'dom.asynciterable',
+                  ]);
+                  let libFiles: string[] = [];
+                  try {
+                    libFiles = readdirSync(effectiveLibDir)
+                      .filter(
+                        (name) =>
+                          name.startsWith('lib.') &&
+                          name.endsWith('.d.ts') &&
+                          !name.endsWith('.full.d.ts') &&
+                          name !== 'lib.d.ts' &&
+                          (() => {
+                            const stem = name.slice('lib.'.length, -'.d.ts'.length);
+                            return !bareEraHubs.has(stem);
+                          })(),
+                      )
+                      .map((f) => join(effectiveLibDir, f));
+                  } catch {
+                    libFiles = [];
+                  }
+                  if (libFiles.length > 0) {
+                    const originalGetScriptFileNames = lsHost.getScriptFileNames.bind(lsHost);
+                    lsHost.getScriptFileNames = () => [...originalGetScriptFileNames(), ...libFiles];
+                    log(`Lib d.ts files injected as root files: ${libFiles.length}`);
+                  }
                 }
                 injectAmbientFiles(lsHost, ambientDir, !effectiveLibDir);
                 log(`Ambient files injected into project root: ${ambientDir}`);

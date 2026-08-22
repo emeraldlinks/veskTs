@@ -1,3 +1,6 @@
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { join as join$2, dirname as dirname$2 } from 'node:path';
+import { fileURLToPath as fileURLToPath$1 } from 'node:url';
 import require$$0$3 from 'node:util';
 import * as require$$0$1 from 'util';
 import require$$0__default, { format as format$1, inspect } from 'util';
@@ -19,8 +22,6 @@ import require$$7 from 'tls';
 import require$$9 from 'zlib';
 import * as fs2 from 'fs/promises';
 import fs2__default from 'fs/promises';
-import 'node:path';
-import 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import require$$6 from 'inspector';
 import { createRequire, builtinModules } from 'module';
@@ -296480,6 +296481,7 @@ const AMBIENT = `
 declare namespace JSX {
   type VeskEventHandler<E extends Event = Event> = (event: E) => void;
   interface VeskCommonAttributes {
+    key?: string | number;
     class?: string;
     id?: string;
     style?: string;
@@ -296507,6 +296509,22 @@ declare namespace JSX {
     onSubmit?: VeskEventHandler<SubmitEvent>;
     onScroll?: VeskEventHandler<UIEvent>;
     onWheel?: VeskEventHandler<WheelEvent>;
+    // Lowercase aliases — HTML attribute names are case-insensitive and real
+    // code writes onclick=/oninput=. Keep in sync with the camelCase members.
+    onclick?: VeskEventHandler<MouseEvent>;
+    ondblclick?: VeskEventHandler<MouseEvent>;
+    onmousedown?: VeskEventHandler<MouseEvent>;
+    onmouseup?: VeskEventHandler<MouseEvent>;
+    onmouseenter?: VeskEventHandler<MouseEvent>;
+    onmouseleave?: VeskEventHandler<MouseEvent>;
+    onmousemove?: VeskEventHandler<MouseEvent>;
+    onkeydown?: VeskEventHandler<KeyboardEvent>;
+    onkeyup?: VeskEventHandler<KeyboardEvent>;
+    onfocus?: VeskEventHandler<FocusEvent>;
+    onblur?: VeskEventHandler<FocusEvent>;
+    oninput?: VeskEventHandler<InputEvent>;
+    onchange?: VeskEventHandler<Event>;
+    onsubmit?: VeskEventHandler<SubmitEvent>;
   }
   interface VeskGlobalAttributes extends VeskCommonAttributes, VeskEventAttributes {
     children?: unknown;
@@ -296614,6 +296632,8 @@ declare namespace JSX {
     img?: VeskGlobalAttributes & {
       src?: string;
       alt?: string;
+      width?: string | number;
+      height?: string | number;
       srcSet?: string;
       sizes?: string;
       loading?: 'eager' | 'lazy';
@@ -296973,7 +296993,7 @@ function concatMarkdownContents(...contents) {
  * Vesk language plugin — turns `.vsk` source into a virtual TSX document via
  * `compileVskCodegen`, with generated↔source mappings and embedded CSS codes.
  */
-const { log: log$7, logError: logError$2, logWarning } = createLogging('[Vesk Language Plugin]');
+const { log: log$7, logError: logError$2, logWarning: logWarning$1 } = createLogging('[Vesk Language Plugin]');
 /** Source offset of the `&[name]` in `const &[name] = track(...)` (reactive-binding decls). */
 const REACTIVE_DECL_PATTERN = /(?:^|\n)\s*const\s+&\[([\w$]+)/g;
 /**
@@ -296989,6 +297009,13 @@ const resolveConfig$1 = (config) => {
     if (options.jsx === undefined) {
         options.jsx = ts$9.JsxEmit.Preserve;
     }
+    // Match `vesk typecheck`: don't auto-include every @types/* package from
+    // node_modules (Node typings would flood completion lists with Buffer /
+    // process / require at JSX positions). Users can still opt in via their
+    // tsconfig "types" array.
+    if (!options.types) {
+        options.types = [];
+    }
     // NOTE: no jsxImportSource default. The virtual code keeps JSX verbatim and
     // element typing comes from the global `JSX.IntrinsicElements` declared in
     // @vesk/compiler's AMBIENT file (injected by server.ts) — exactly like
@@ -297000,26 +297027,31 @@ const resolveConfig$1 = (config) => {
             return undefined;
         }
         const trimmed = libName.trim();
+        // Already a resolved path (e.g. from getDefaultLibFileName) — keep it
+        // verbatim so repeated resolution never mangles it.
+        if (trimmed.includes('/') || trimmed.includes('\\')) {
+            return trimmed;
+        }
         if (trimmed.startsWith('lib.')) {
             return trimmed.toLowerCase();
         }
         return `lib.${trimmed.toLowerCase().replace(/\s+/g, '').replace(/_/g, '.')}.d.ts`;
     };
     const normalizedLibs = new Set((options.lib ?? []).map(normalizeLibName).filter((lib) => typeof lib === 'string'));
-    if (normalizedLibs.size === 0) {
-        const host = ts$9.createCompilerHost(options);
-        normalizedLibs.add(host.getDefaultLibFileName(options).toLowerCase());
-        normalizedLibs.add('lib.dom.d.ts');
-        normalizedLibs.add('lib.dom.iterable.d.ts');
-    }
+    // ALWAYS union in an ES + DOM baseline. Two failure modes are covered:
+    // - No tsconfig / no lib: without this the program would have no globals at
+    //   all (`Error`, `console`, `Promise` → TS2304).
+    // - A tsconfig whose `lib` omits ES entries (e.g. ["DOM"]): real tsc would
+    //   honour that, but .vsk is a browser-first superset of TS — code like
+    //   `throw new Error(...)` must always resolve, so we mirror what
+    //   `vesk typecheck` guarantees (es2022 chain + DOM + DOM.Iterable).
+    const host = ts$9.createCompilerHost(options);
+    const rawDefaultLib = host.getDefaultLibFileName(options);
+    const defaultLibFile = rawDefaultLib.split(/[\\/]/).pop() ?? rawDefaultLib;
+    normalizedLibs.add(normalizeLibName(defaultLibFile));
+    normalizedLibs.add('lib.dom.d.ts');
+    normalizedLibs.add('lib.dom.iterable.d.ts');
     options.lib = [...normalizedLibs];
-    if (!options.types) {
-        const host = ts$9.createCompilerHost(options);
-        const typeRoots = ts$9.getEffectiveTypeRoots(options, host);
-        if (typeRoots && typeRoots.length > 0) {
-            options.typeRoots = typeRoots;
-        }
-    }
     return {
         ...config,
         options,
@@ -297061,6 +297093,8 @@ class VeskVirtualCode {
     originalCode = '';
     mappingGenToSource = null;
     mappingSourceToGen = null;
+    /** Last successfully compiled state — served during transient fatal states. */
+    lastGood = null;
     constructor(fileName, snapshot) {
         this.fileName = fileName;
         this.snapshot = snapshot;
@@ -297076,19 +297110,50 @@ class VeskVirtualCode {
         this.mappingSourceToGen = null;
         this.fatalErrors = [];
         const result = compileVskCodegen(newCode, { typedCells: true });
-        if (result.errors.length === 0 || typeof result.code === 'string') {
+        const hasErrors = result.errors.length > 0;
+        if (!hasErrors) {
+            this.originalCode = newCode;
+            this.generatedCode = result.code;
+            this.compilerMappings = result.mappings ?? [];
+            this.mappings = (result.mappings ?? []);
+            this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions);
+            this.lastGood = {
+                generatedCode: result.code,
+                compilerMappings: result.mappings ?? [],
+                styleRegions: result.styleRegions,
+            };
+            log$7(`Compiled ${this.fileName}: ${this.generatedCode.length} generated chars, ${this.mappings.length} mappings`);
+        }
+        else if (this.lastGood) {
+            // Transient error state (mid-typing an incomplete tag/expression): the
+            // compiler still returns a PARTIAL code string here, but serving it
+            // degrades completions/hover to scope-global junk over half-valid TSX.
+            // Keep serving the last successfully compiled virtual code instead so
+            // language features stay sane; the compile error itself is still
+            // surfaced via fatalErrors (compileErrors plugin).
+            logWarning$1(`Vesk compilation failed transiently for ${this.fileName} — keeping last good virtual code (${result.errors.length} errors)`);
+            this.originalCode = newCode;
+            this.generatedCode = this.lastGood.generatedCode;
+            this.compilerMappings = this.lastGood.compilerMappings;
+            this.mappings = this.lastGood.compilerMappings;
+            this.fatalErrors = result.errors;
+            this.embeddedCodes = this.createCssEmbeddedCodes(this.lastGood.styleRegions);
+        }
+        else if (typeof result.code === 'string') {
+            // Broken on first open (no prior good state): serve the partial
+            // generated code so TS surfaces the broken construct, keep completion
+            // enabled so the user can still fix it.
+            logWarning$1(`Vesk compilation failed for ${this.fileName} — using partial code (${result.errors.length} errors)`);
             this.originalCode = newCode;
             this.generatedCode = result.code;
             this.compilerMappings = result.mappings ?? [];
             this.mappings = (result.mappings ?? []);
             this.fatalErrors = result.errors;
-            this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions);
-            log$7(`Compiled ${this.fileName}: ${this.generatedCode.length} generated chars, ${this.mappings.length} mappings, ${this.fatalErrors.length} errors`);
+            this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions ?? []);
         }
         else {
-            // Fatal mode: feed the raw source back so TS parses it and surfaces the
-            // broken construct, keep completion enabled so the user can still fix it.
-            logWarning(`Vesk compilation failed for ${this.fileName}`);
+            // Total failure with no prior good state: feed the raw source back.
+            logWarning$1(`Vesk compilation failed for ${this.fileName}`);
             this.originalCode = newCode;
             this.generatedCode = newCode;
             this.compilerMappings = [
@@ -297187,6 +297252,34 @@ class VeskVirtualCode {
             Math.min(Math.max(end - last.sourceOffsets[0], 0), last.generatedLengths?.[0] ?? last.lengths[0]);
         return [generatedStart, Math.max(generatedEnd, generatedStart + 1)];
     }
+    /**
+     * Map a position in the GENERATED virtual code back to the corresponding
+     * position in the ORIGINAL .vsk source. Prefers the smallest (most precise)
+     * mapping containing the offset so coarse whole-region chunks don't smear
+     * positions across collapsed/reordered generated code. Returns null when
+     * nothing covers the offset.
+     */
+    generatedOffsetToSourceOffset(genOffset) {
+        let best = null;
+        let bestGeneratedLength = Number.POSITIVE_INFINITY;
+        for (const mapping of this.compilerMappings) {
+            const genStart = mapping.generatedOffsets[0];
+            const genLength = mapping.generatedLengths?.[0] ?? mapping.lengths[0];
+            if (genOffset < genStart || genOffset > genStart + genLength) {
+                continue;
+            }
+            if (genLength < bestGeneratedLength) {
+                bestGeneratedLength = genLength;
+                best = mapping;
+            }
+        }
+        if (!best) {
+            return null;
+        }
+        const delta = genOffset - best.generatedOffsets[0];
+        const sourceLength = best.lengths[0];
+        return best.sourceOffsets[0] + Math.min(delta, sourceLength);
+    }
 }
 /**
  * Reactive binding names declared in the source, e.g. `const &[count] = track(0)`.
@@ -297284,9 +297377,25 @@ function getVeskLanguagePlugin() {
 
 /**
  * Auto-insert plugin — closes HTML tags when the user types `>`.
+ *
+ * All heuristics run on the ORIGINAL .vsk text: the incoming `position` is a
+ * caret mapped into generated coordinates, which chunk-level mappings can
+ * smear across collapsed/reordered generated code. Mapping back through
+ * VeskVirtualCode and scanning the user's own text is exact in both compiled
+ * and transient-error (retained last-good) states.
+ *
+ * The VS Code client must actively send the `volar/client/autoInsert` request
+ * on text changes (see extension/vsk-vscode/src/extension.ts); vanilla
+ * vscode-languageclient does not do this on its own.
+ *
+ * The back-scan is a small state machine: it steps over quoted attribute
+ * values ("…" / '…'), template literals (`…`), and braced expressions ({…},
+ * including strings nested inside), so tags WITH attributes auto-close too —
+ * a naive scan that stops at the first quote would kill every
+ * `<div class="x">`.
  */
 const { log: log$6 } = createLogging('[Vesk Auto-Insert Plugin]');
-const VOID_ELEMENTS = new Set([
+const VOID_ELEMENTS$1 = new Set([
     'area',
     'base',
     'br',
@@ -297304,6 +297413,71 @@ const VOID_ELEMENTS = new Set([
     'track',
     'wbr',
 ]);
+/** Scan bounds so pathological input can't stall completion latency. */
+const MAX_SCAN_CHARS = 2000;
+const MAX_SCAN_LINES = 12;
+/**
+ * Walk backwards from the character before `offset` to find the `<` that
+ * opens the tag whose `>` was just typed. Returns the index of `<`, or -1.
+ *
+ * Terminates without a match when the scan proves the caret is not inside a
+ * tag: another unquoted `>` (sibling tag / arrow function), a statement `;`,
+ * a `{` at brace depth 0 (JSX expression region), or an unterminated string.
+ */
+function findTagOpen(text, offset) {
+    let braces = 0;
+    let quote = null;
+    let newlines = 0;
+    const min = Math.max(0, offset - MAX_SCAN_CHARS);
+    let i = offset - 2;
+    for (; i >= min; i--) {
+        const char = text[i];
+        if (char === '\n') {
+            newlines++;
+            if (newlines > MAX_SCAN_LINES) {
+                return -1;
+            }
+        }
+        if (quote) {
+            if (char === '\\' && i - 1 >= min) {
+                i--; // skip escaped character inside string
+                continue;
+            }
+            if (char === quote) {
+                quote = null;
+            }
+            continue;
+        }
+        if (braces > 0) {
+            if (char === '}') {
+                braces++;
+            }
+            else if (char === '{') {
+                braces--;
+            }
+            else if (char === '"' || char === "'" || char === '`') {
+                quote = char;
+            }
+            continue;
+        }
+        if (char === '"' || char === "'" || char === '`') {
+            quote = char;
+            continue;
+        }
+        if (char === '}') {
+            braces++;
+            continue;
+        }
+        if (char === '<') {
+            return i;
+        }
+        // Not plausibly part of an open tag.
+        if (char === '>' || char === '{' || char === ';') {
+            return -1;
+        }
+    }
+    return -1;
+}
 function createAutoInsertPlugin() {
     return {
         name: 'vesk-auto-insert',
@@ -297313,6 +297487,17 @@ function createAutoInsertPlugin() {
             },
         },
         create(context) {
+            // volar-service-typescript's `typescript-syntactic` plugin answers the
+            // same request with its own JSX close-tag snippets (e.g. `$0</br>` even
+            // for void elements). Volar takes the FIRST non-empty result, so ours
+            // already wins when it has an answer — but for every case we decline
+            // (void, self-closing, components) TS's would leak through. Disable
+            // theirs entirely: vesk owns tag auto-insertion.
+            for (const [plugin, instance] of context.plugins) {
+                if (plugin.name === 'typescript-syntactic' && instance.provideAutoInsertSnippet) {
+                    instance.provideAutoInsertSnippet = undefined;
+                }
+            }
             return {
                 async provideAutoInsertSnippet(document, position, lastChange, _token) {
                     if (!document.uri.endsWith('.vsk')) {
@@ -297325,49 +297510,35 @@ function createAutoInsertPlugin() {
                     if (!(virtualCode instanceof VeskVirtualCode)) {
                         return null;
                     }
-                    const offset = document.offsetAt(position);
-                    const mapping = virtualCode.findMappingByGeneratedRange(lastChange.rangeOffset, offset);
-                    if (!mapping) {
+                    const text = virtualCode.originalCode || document.getText();
+                    const mappedCaret = virtualCode.generatedOffsetToSourceOffset(document.offsetAt(position));
+                    // Tolerate small mapping drift: skip whitespace back to what must be
+                    // the typed '>'.
+                    let caret = Math.min(mappedCaret ?? document.offsetAt(position), text.length);
+                    while (caret > 0 && /\s/.test(text[caret - 1])) {
+                        caret--;
+                    }
+                    if (caret < 1 || text[caret - 1] !== '>') {
                         return null;
                     }
-                    const sourceOffset = mapping.sourceOffsets[0];
-                    const sourceCode = virtualCode.originalCode;
-                    if (sourceCode[sourceOffset - 1] === '/') {
-                        // self-closing tag '/>'
+                    // Self-closing tag '/>'.
+                    if (text[caret - 2] === '/') {
                         return null;
                     }
-                    let found = false;
-                    let i = sourceOffset - 1;
-                    for (; i >= 0; i--) {
-                        const char = sourceCode[i];
-                        if (char === '<') {
-                            found = true;
-                            break;
-                        }
-                        if (char === '\n') {
-                            break;
-                        }
-                        if (char === '>' && sourceCode[i - 1] !== '/') {
-                            break;
-                        }
-                        if (char === '"' || char === "'") {
-                            break;
-                        }
-                    }
-                    if (!found) {
+                    const tagOpen = findTagOpen(text, caret);
+                    if (tagOpen < 0) {
                         return null;
                     }
-                    const isComponentTag = /^[A-Z][\w$]*/.test(sourceCode.slice(i + 1));
+                    const isComponentTag = /^[A-Z][\w$]*/.test(text.slice(tagOpen + 1));
                     if (isComponentTag) {
                         return null;
                     }
-                    const tagNameStart = i + 1;
-                    const tagNameMatch = sourceCode.slice(tagNameStart).match(/^[a-zA-Z][\w$-]*/);
+                    const tagNameMatch = text.slice(tagOpen + 1).match(/^[a-zA-Z][\w$-]*/);
                     if (!tagNameMatch) {
                         return null;
                     }
                     const tagName = tagNameMatch[0];
-                    if (VOID_ELEMENTS.has(tagName)) {
+                    if (VOID_ELEMENTS$1.has(tagName)) {
                         return null;
                     }
                     log$6(`Auto-insert closing tag for '${tagName}'`);
@@ -297446,6 +297617,9 @@ const HTML_ELEMENTS = [
     'var', 'video',
     'wbr',
 ];
+const VOID_ELEMENTS = new Set([
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
 const HTML_ELEMENT_DOCS = {
     a: 'Hyperlink. Use `href` for the target URL and `download` to force download.',
     abbr: 'Abbreviation or acronym, with a `title` attribute explaining the full term.',
@@ -297595,6 +297769,35 @@ const EVENT_HANDLERS = {
     onCut: 'Fires when cutting to the clipboard.',
 };
 const EVENT_HANDLER_NAMES = Object.keys(EVENT_HANDLERS);
+// ── HTML attributes ────────────────────────────────────────────
+const GLOBAL_HTML_ATTRIBUTES = [
+    'class', 'className', 'id', 'style', 'title', 'lang', 'dir', 'hidden', 'tabindex',
+    'role', 'aria-label', 'aria-hidden', 'aria-expanded', 'aria-checked', 'aria-describedby',
+    'data-id', 'spellcheck', 'autofocus', 'draggable', 'contenteditable',
+];
+const TAG_SPECIFIC_ATTRIBUTES = {
+    a: ['href', 'target', 'rel', 'download', 'hreflang'],
+    img: ['src', 'alt', 'width', 'height', 'loading', 'srcset', 'sizes', 'decoding'],
+    input: ['type', 'name', 'value', 'placeholder', 'disabled', 'readonly', 'required', 'checked', 'maxlength', 'minlength', 'pattern', 'min', 'max', 'step', 'autocomplete'],
+    textarea: ['name', 'value', 'placeholder', 'rows', 'cols', 'disabled', 'readonly', 'required', 'maxlength'],
+    select: ['name', 'value', 'multiple', 'disabled', 'required', 'autocomplete'],
+    option: ['value', 'disabled', 'selected', 'label'],
+    form: ['action', 'method', 'enctype', 'target', 'novalidate', 'name'],
+    button: ['type', 'name', 'value', 'disabled'],
+    label: ['for'],
+    meta: ['name', 'content', 'charset', 'http-equiv', 'property'],
+    link: ['href', 'rel', 'type', 'media', 'sizes'],
+    script: ['src', 'type', 'async', 'defer', 'defer'],
+    style: ['type', 'media'],
+    iframe: ['src', 'width', 'height', 'title', 'allow', 'loading', 'sandbox'],
+    video: ['src', 'poster', 'controls', 'width', 'height', 'autoplay', 'muted', 'loop', 'preload'],
+    audio: ['src', 'controls', 'autoplay', 'muted', 'loop', 'preload'],
+    source: ['src', 'srcset', 'type', 'media', 'sizes'],
+    table: ['border', 'cellspacing', 'cellpadding'],
+    td: ['colspan', 'rowspan', 'headers', 'scope'],
+    th: ['colspan', 'rowspan', 'scope', 'abbr'],
+    svg: ['viewBox', 'fill', 'stroke', 'width', 'height', 'xmlns'],
+};
 const COMPLETION_GLOBALS = [
     { name: 'console', detail: 'Debug console' },
     { name: 'window', detail: 'Global window object' },
@@ -297648,21 +297851,148 @@ function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 /**
- * True when the offset sits in the attribute area of an open tag — between the
- * tag name and the closing `>` (e.g. `<Card `, `<Card t|itle=`).
+ * Classify the caret context with one forward pass over the text before the
+ * offset, using a stack-based state machine:
+ * - code: TS statements (default)
+ * - tag:  inside an element's opening tag (`<div class="x" … >`)
+ * - expr: inside a `{ … }` container — a JSX expression in an open tag, or a
+ *   statement/object brace in a component body
+ *
+ * `<Name` pushes `tag` from ANY state (statement-mode bodies hold bare JSX
+ * inside plain braces), `{` pushes `expr`, and each closer pops back to
+ * whatever context opened it — so attribute expressions return to their tag,
+ * and tags inside body braces return to their expression.
+ *
+ * Strings, template literals and comments are stepped over so attribute
+ * values containing `>`/`{`/`<` don't derail the state machine. Replaces the
+ * old line-prefix heuristics, which misclassified component bodies
+ * (`component X() {` + bare JSX) as "inside an expression".
  */
-function isInTagAttributeArea(text, offset) {
-    const before = text.slice(0, offset);
-    const tagStart = before.lastIndexOf('<');
-    const lineStart = before.lastIndexOf('\n');
-    if (tagStart <= lineStart) {
-        return false;
+function classifyCompletionContext(text, offset) {
+    const start = Math.max(0, offset - 8000);
+    const stack = [];
+    let state = 'code';
+    let quote = null;
+    const enter = (s) => {
+        stack.push(s);
+        return s;
+    };
+    const exit = () => stack.pop() ?? 'code';
+    let i = start;
+    while (i < offset) {
+        const ch = text[i];
+        if (quote) {
+            if (ch === '\\') {
+                i += 2;
+                continue;
+            }
+            if (ch === quote) {
+                quote = null;
+            }
+            i++;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') {
+            quote = ch;
+            i++;
+            continue;
+        }
+        switch (state) {
+            case 'code': {
+                if (ch === '/' && text[i + 1] === '/') {
+                    // line comment
+                    while (i < offset && text[i] !== '\n')
+                        i++;
+                    continue;
+                }
+                if (ch === '/' && text[i + 1] === '*') {
+                    // block comment
+                    const end = text.indexOf('*/', i + 2);
+                    if (end === -1 || end >= offset)
+                        return 'none';
+                    i = end + 2;
+                    continue;
+                }
+                if (ch === '{') {
+                    state = enter('expr');
+                    break;
+                }
+                if (ch === '<') {
+                    const nextChar = text[i + 1];
+                    if (nextChar && /[A-Za-z]/.test(nextChar)) {
+                        state = enter('tag');
+                        break;
+                    }
+                    if (nextChar === '>') {
+                        // fragment open `<>` — skip its `>` as part of the tag
+                        state = enter('tag');
+                        i++;
+                    }
+                }
+                break;
+            }
+            case 'tag': {
+                if (ch === '{') {
+                    state = enter('expr');
+                    break;
+                }
+                if (ch === '>') {
+                    state = exit();
+                    break;
+                }
+                if (ch === '/' && text[i + 1] === '>') {
+                    state = exit();
+                    i++;
+                    break;
+                }
+                if (ch === '<') {
+                    // malformed nesting — treat as a new tag start attempt
+                    const nextChar = text[i + 1];
+                    if (nextChar && /[A-Za-z/>]/.test(nextChar)) {
+                        state = enter('tag');
+                    }
+                }
+                break;
+            }
+            case 'expr': {
+                if (ch === '{') {
+                    state = enter('expr');
+                    break;
+                }
+                if (ch === '}') {
+                    state = exit();
+                    break;
+                }
+                if (ch === '<') {
+                    const nextChar = text[i + 1];
+                    if (nextChar && /[A-Za-z]/.test(nextChar)) {
+                        state = enter('tag'); // JSX element inside a statement body / expression
+                    }
+                }
+                break;
+            }
+        }
+        i++;
     }
-    const tagSegment = before.slice(tagStart + 1);
-    if (!/^[A-Za-z][\w$-]*(\s|$)/.test(tagSegment)) {
-        return false;
+    if (state === 'expr') {
+        return 'expr';
     }
-    return !/[>=]/.test(tagSegment);
+    if (state !== 'tag') {
+        return 'none';
+    }
+    // Inside an open tag: distinguish tag-name position from attribute area by
+    // whether whitespace follows the tag name before the caret.
+    let tagStart = offset - 1;
+    while (tagStart >= start && text[tagStart] !== '<')
+        tagStart--;
+    const segment = text.slice(tagStart + 1, offset);
+    const nameMatch = segment.match(/^[A-Za-z][\w$.:-]*/);
+    if (!nameMatch) {
+        // Caret directly after `<` — a tag-name position.
+        return segment.length === 0 ? 'tag-open' : 'none';
+    }
+    const afterName = segment.slice(nameMatch[0].length);
+    return afterName.length > 0 ? 'attr' : 'tag-open';
 }
 function createCompletionPlugin() {
     return {
@@ -297685,26 +298015,50 @@ function createCompletionPlugin() {
                     }
                     const source = document.getText();
                     const offset = document.offsetAt(position);
-                    const linePrefix = source.slice(0, offset);
+                    // Heuristics run on the ORIGINAL .vsk text, not the generated
+                    // virtual code: generated JSX is collapsed/reordered and chunk-level
+                    // mappings can place a mid-JSX caret somewhere unrelated (e.g.
+                    // inside the cell-decl preamble), which would misclassify context.
+                    const originalText = virtualCode.originalCode || source;
+                    const mappedSourceOffset = virtualCode.generatedOffsetToSourceOffset(offset);
+                    const srcOffset = mappedSourceOffset ?? offset;
+                    const linePrefix = originalText.slice(0, srcOffset);
                     // Prefix-only word (matching the caret-at-end semantics of the old
                     // heuristic LSP): a caret right after `<Card ` completes an empty
                     // word, not the `title` that happens to start at the offset.
                     const lastWord = linePrefix.match(/[a-zA-Z_$][\w$]*$/)?.[0] || '';
                     const wordRegex = new RegExp(`^${escapeRegex(lastWord)}`);
-                    const isAttrPosition = isInTagAttributeArea(source, offset);
-                    const isExpressionPosition = /{[^}]*$/.test(linePrefix) && !isAttrPosition;
-                    log$5(`Completion at offset ${offset}: attr=${isAttrPosition} expr=${isExpressionPosition} word='${lastWord}'`);
-                    if (isAttrPosition) {
-                        const items = buildAttributeItems(source, offset, wordRegex);
+                    const contextKind = classifyCompletionContext(originalText, srcOffset);
+                    log$5(`Completion gen-offset=${offset} src-offset=${srcOffset}: context=${contextKind} word='${lastWord}'`);
+                    if (contextKind === 'attr') {
+                        const items = buildAttributeItems(originalText, srcOffset, wordRegex);
                         return items.length > 0 ? { isIncomplete: true, items } : undefined;
                     }
-                    if (isExpressionPosition) {
-                        const items = buildExpressionItems(source, wordRegex);
+                    if (contextKind === 'expr') {
+                        const items = buildExpressionItems(originalText, wordRegex);
                         return items.length > 0 ? { isIncomplete: true, items } : undefined;
                     }
                     // Tag-open position: `<` (or `<Name`) — offer intrinsics + components.
-                    if (/<\s*$/.test(linePrefix) || /<\s*[A-Za-z]*$/.test(linePrefix)) {
+                    if (contextKind === 'tag-open') {
                         const items = [];
+                        for (const tag of HTML_ELEMENTS) {
+                            if (!wordRegex.test(tag)) {
+                                continue;
+                            }
+                            items.push({
+                                label: tag,
+                                kind: CompletionItemKind.Class,
+                                detail: 'HTML element',
+                                documentation: VOID_ELEMENTS.has(tag)
+                                    ? { kind: MarkupKind.Markdown, value: `${HTML_ELEMENT_DOCS[tag] ?? ''}\n\nVoid element — no closing tag.` }
+                                    : HTML_ELEMENT_DOCS[tag]
+                                        ? { kind: MarkupKind.Markdown, value: HTML_ELEMENT_DOCS[tag] }
+                                        : undefined,
+                                insertText: tag,
+                                // Rank above generic TS scope suggestions at tag positions.
+                                sortText: `0${tag}`,
+                            });
+                        }
                         for (const tag of INTRINSIC_TAGS) {
                             if (wordRegex.test(tag)) {
                                 items.push({
@@ -297712,10 +298066,11 @@ function createCompletionPlugin() {
                                     kind: CompletionItemKind.Class,
                                     detail: 'Vesk intrinsic',
                                     insertText: tag,
+                                    sortText: `0${tag}`,
                                 });
                             }
                         }
-                        const components = scanComponentUsages(source);
+                        const components = scanComponentUsages(originalText);
                         for (const [name] of components) {
                             if (wordRegex.test(name)) {
                                 items.push({
@@ -297723,6 +298078,7 @@ function createCompletionPlugin() {
                                     kind: CompletionItemKind.Class,
                                     detail: 'Component',
                                     insertText: name,
+                                    sortText: `1${name}`,
                                 });
                             }
                         }
@@ -297760,7 +298116,7 @@ function buildAttributeItems(source, offset, wordRegex) {
     const tagStart = before.lastIndexOf('<');
     const tagEnd = source.indexOf('>', tagStart);
     const segment = source.slice(tagStart, tagEnd === -1 ? source.length : tagEnd);
-    const currentTagName = segment.match(/^<\s*([A-Z][\w$]*)/)?.[1] ?? null;
+    const currentTagName = segment.match(/^<\s*([A-Za-z][\w$]*)/)?.[1] ?? null;
     const usedNames = new Set();
     const usedPattern = /([\w$]+)\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\})/g;
     let usedMatch;
@@ -297791,6 +298147,16 @@ function buildAttributeItems(source, offset, wordRegex) {
             continue;
         }
         push(ev, CompletionItemKind.Event, 'Event handler', EVENT_HANDLERS[ev]);
+    }
+    // HTML attributes for intrinsic (lowercase) element tags.
+    if (currentTagName && currentTagName[0] === currentTagName[0].toLowerCase()) {
+        for (const attr of GLOBAL_HTML_ATTRIBUTES) {
+            push(attr, CompletionItemKind.Property, 'HTML attribute');
+        }
+        const tagAttrs = TAG_SPECIFIC_ATTRIBUTES[currentTagName];
+        for (const attr of tagAttrs ?? []) {
+            push(attr, CompletionItemKind.Property, `<${currentTagName}> attribute`);
+        }
     }
     // The `props` param is always available in component bodies.
     push('props', CompletionItemKind.Variable, 'Component parameter');
@@ -297949,7 +298315,7 @@ function createHoverPlugin() {
                                     .map((c) => (typeof c === 'string' ? c : c.value ?? ''))
                                     .join('\n');
                             }
-                            else if (tsHover && tsHover.contents && typeof tsHover.contents.value === 'string') {
+                            else if (tsHover && tsHover.contents && typeof tsHover.contents === 'object' && 'value' in tsHover.contents && typeof tsHover.contents.value === 'string') {
                                 content = tsHover.contents.value;
                             }
                             if (content.trim()) {
@@ -328272,7 +328638,7 @@ async function formatVeskDocument(document) {
  * see: compile errors, reactive bindings, event-handler docs, and completion
  * fallbacks at token-boundary positions where TS is unavailable.
  */
-const { log, logError } = createLogging('[Vesk Language Server]');
+const { log, logError, logWarning } = createLogging('[Vesk Language Server]');
 const WORKSPACE_FILE_PATTERNS = [
     '**/*.vsk',
     '**/*.ts',
@@ -328287,6 +328653,81 @@ const WORKSPACE_FILE_PATTERNS = [
 ];
 const AMBIENT_FILE_NAME = '__vesk_ambient.d.ts';
 const RUNTIME_OVERRIDE_FILE_NAME = '__vesk_runtime_override.d.ts';
+/**
+ * Served only when NO real TypeScript lib directory can be located (see
+ * findTypescriptLibDir). Without lib d.ts files the program has no ES/DOM
+ * globals at all (`Error`, `console`, `Promise` → TS2304 everywhere); this
+ * minimal fallback keeps the most common globals defined. When real libs are
+ * found this file is never injected (its declarations would collide).
+ */
+const LIB_FALLBACK_FILE_NAME = '__vesk_lib_fallback.d.ts';
+const LIB_FALLBACK_CONTENT = `
+type AnyFunction = (...args: any[]) => any;
+interface Error { name?: string; message?: string; stack?: string; }
+interface ErrorConstructor { new (message?: string): Error; (message?: string): Error; prototype: Error; }
+declare var Error: ErrorConstructor;
+declare var console: {
+  log: AnyFunction; error: AnyFunction; warn: AnyFunction; info: AnyFunction;
+  debug: AnyFunction; trace: AnyFunction; table: AnyFunction; dir: AnyFunction;
+  group: AnyFunction; groupEnd: AnyFunction; time: AnyFunction; timeEnd: AnyFunction;
+  assert: AnyFunction; count: AnyFunction;
+};
+`;
+/**
+ * Locate the `typescript/lib` directory that ships the lib.*.d.ts files.
+ *
+ * The LSP server bundle INLINES the typescript package, so inside the bundle
+ * `ts.getDefaultLibFilePath()` resolves relative to the bundle location
+ * (`lsp-server/index.mjs`) where no lib files exist — every global then fails
+ * with TS2304 ("Cannot find name 'Error'"). We must therefore resolve the REAL
+ * on-disk lib directory ourselves and patch it onto the language service host.
+ *
+ * Resolution order:
+ * 1. Walk up from each candidate root (workspace folders, tsconfig dir, cwd)
+ *    looking for node_modules/typescript/lib — the project's own TypeScript.
+ * 2. import.meta.resolve('typescript') — works when running from a checkout.
+ * 3. `<bundle dir>/libs` — lib files copied next to the bundle at build time
+ *    by scripts/build-lsp.js, so packaged extensions work standalone.
+ */
+function findTypescriptLibDir(candidateRoots) {
+    for (const root of candidateRoots) {
+        if (!root)
+            continue;
+        let dir = root;
+        // Walk up to the filesystem root looking for node_modules/typescript/lib.
+        for (;;) {
+            const libDir = join$2(dir, 'node_modules', 'typescript', 'lib');
+            if (existsSync(join$2(libDir, 'lib.dom.d.ts'))) {
+                return libDir;
+            }
+            const parent = dirname$2(dir);
+            if (parent === dir)
+                break;
+            dir = parent;
+        }
+    }
+    try {
+        // Available in Node >= 20.6 without flags; engines require >= 20.
+        const resolved = import.meta.resolve('typescript');
+        const pkgDir = join$2(dirname$2(fileURLToPath$1(resolved)));
+        if (existsSync(join$2(pkgDir, 'lib.dom.d.ts'))) {
+            return pkgDir;
+        }
+    }
+    catch {
+        // Not resolvable from here (bundled context) — fall through.
+    }
+    try {
+        const shipped = join$2(fileURLToPath$1(import.meta.url), '..', 'libs');
+        if (existsSync(join$2(shipped, 'lib.dom.d.ts'))) {
+            return shipped;
+        }
+    }
+    catch {
+        // ignore
+    }
+    return null;
+}
 /**
  * Strip whole-document formatting capabilities from a Volar service plugin.
  * The bundled TS and CSS services advertise document formatting against the
@@ -328323,6 +328764,8 @@ function createVeskLanguageServer() {
             if (cachedInput !== input) {
                 cachedInput = input;
                 cachedOutput = resolveConfig$1({ options: input }).options;
+                const o = cachedOutput;
+                log(`getCompilationSettings resolved: target=${o.target} jsx=${o.jsx} lib=[${(o.lib ?? []).join(',')}] types=[${(o.types ?? []).join(',')}]`);
             }
             return cachedOutput;
         };
@@ -328335,8 +328778,11 @@ function createVeskLanguageServer() {
      * declaration) through the language-service host so imports resolve without
      * node_modules and intrinsics/reactive declarations type-check.
      */
-    function injectAmbientFiles(host, ambientDir) {
+    function injectAmbientFiles(host, ambientDir, includeLibFallback = false) {
         const ambientPaths = [URI$1.file(`${ambientDir}/${AMBIENT_FILE_NAME}`).toString()];
+        if (includeLibFallback) {
+            ambientPaths.push(URI$1.file(`${ambientDir}/${LIB_FALLBACK_FILE_NAME}`).toString());
+        }
         if (host.getScriptFileNames) {
             const original = host.getScriptFileNames.bind(host);
             host.getScriptFileNames = () => [...original(), ...ambientPaths];
@@ -328365,6 +328811,26 @@ function createVeskLanguageServer() {
                 return original(fileName);
             };
         }
+        else {
+            // The volar TS service host may not implement readFile at all; without
+            // it, `/// <reference lib="...">` chains inside lib.d.ts files (esnext
+            // is a pure hub of them) cannot resolve and ES globals stay missing.
+            host.readFile = (fileName) => {
+                const content = getAmbientContent(fileName);
+                if (content !== undefined) {
+                    return content;
+                }
+                if (hasUriScheme(fileName)) {
+                    return undefined;
+                }
+                try {
+                    return readFileSync(fileName, 'utf8');
+                }
+                catch {
+                    return undefined;
+                }
+            };
+        }
         if (host.fileExists) {
             const original = host.fileExists.bind(host);
             host.fileExists = (fileName) => {
@@ -328374,6 +328840,34 @@ function createVeskLanguageServer() {
                 return original(fileName);
             };
         }
+        else {
+            host.fileExists = (fileName) => {
+                if (getAmbientContent(fileName) !== undefined) {
+                    return true;
+                }
+                if (hasUriScheme(fileName)) {
+                    return false;
+                }
+                return existsSync(fileName);
+            };
+        }
+    }
+    /** True for `file://…`-style URIs (as opposed to plain fs paths). */
+    function hasUriScheme(fileName) {
+        const colon = fileName.indexOf(':');
+        if (colon <= 0) {
+            return false;
+        }
+        for (let i = 0; i < colon; i++) {
+            const c = fileName.charCodeAt(i);
+            const isAlpha = (c >= 97 && c <= 122) || (c >= 65 && c <= 90);
+            const isDigit = c >= 48 && c <= 57;
+            const isSpecial = c === 43 || c === 45 || c === 46; // + - .
+            if (!(isAlpha || (i > 0 && (isDigit || isSpecial)))) {
+                return false;
+            }
+        }
+        return true;
     }
     function getAmbientContent(fileName) {
         if (fileName.endsWith(`/${AMBIENT_FILE_NAME}`)) {
@@ -328382,6 +328876,9 @@ function createVeskLanguageServer() {
         if (fileName.endsWith(`/${RUNTIME_OVERRIDE_FILE_NAME}`)) {
             return RUNTIME_OVERRIDE;
         }
+        if (fileName.endsWith(`/${LIB_FALLBACK_FILE_NAME}`)) {
+            return LIB_FALLBACK_CONTENT;
+        }
         return undefined;
     }
     connection.onInitialize(async (params) => {
@@ -328389,6 +328886,23 @@ function createVeskLanguageServer() {
             log('Initializing vesk language server...');
             const ts = await Promise.resolve().then(function () { return typescript$1; });
             patchUserPreferences();
+            const workspaceRoots = [];
+            for (const folder of params.workspaceFolders ?? []) {
+                try {
+                    workspaceRoots.push(URI$1.parse(folder.uri).fsPath);
+                }
+                catch {
+                    // ignore malformed folder URIs
+                }
+            }
+            const tsLibDir = findTypescriptLibDir(workspaceRoots);
+            if (tsLibDir) {
+                log(`TypeScript lib directory resolved: ${tsLibDir}`);
+            }
+            else {
+                logWarning('No TypeScript lib directory found — serving minimal global fallback. ' +
+                    'Install typescript in the workspace (npm i -D typescript) for full typings.');
+            }
             const initResult = server.initialize(params, nodeExports$1.createTypeScriptProject(ts, undefined, ({ configFileName, projectHost, sys }) => {
                 log(`TypeScript project create callback (configFileName=${configFileName})`);
                 wrapCompilerOptionsProvider(projectHost, 'getCompilationSettings');
@@ -328396,6 +328910,7 @@ function createVeskLanguageServer() {
                     ? configFileName.replace(/[\\/][^\\/]*$/, '')
                     : sys.getCurrentDirectory();
                 const languagePlugin = getVeskLanguagePlugin();
+                const candidateRoots = [...workspaceRoots, ambientDir];
                 return {
                     languagePlugins: [languagePlugin],
                     setup({ project }) {
@@ -328403,13 +328918,83 @@ function createVeskLanguageServer() {
                         wrapCompilerOptionsProvider(project?.typescript?.languageServiceHost, 'getCompilationSettings');
                         const lsHost = project?.typescript?.languageServiceHost;
                         if (lsHost) {
-                            injectAmbientFiles(lsHost, ambientDir);
+                            // The bundle inlines typescript, so the host's default
+                            // getDefaultLibFileName points at <bundle dir>/lib.*.d.ts
+                            // which does not exist → every ES/DOM global is "Cannot find
+                            // name". Redirect lib resolution to the real on-disk lib dir.
+                            const effectiveLibDir = existsSync(join$2(ambientDir, 'node_modules', 'typescript', 'lib', 'lib.dom.d.ts'))
+                                ? join$2(ambientDir, 'node_modules', 'typescript', 'lib')
+                                : (tsLibDir ?? findTypescriptLibDir(candidateRoots));
+                            if (effectiveLibDir && typeof lsHost.getDefaultLibFileName === 'function') {
+                                const originalGetDefaultLibFile = lsHost.getDefaultLibFileName.bind(lsHost);
+                                // volar's host already returns an ABSOLUTE path here
+                                // (ts.getDefaultLibFilePath). Take the basename before
+                                // re-rooting, otherwise join() produces a double path and
+                                // lib reference resolution breaks.
+                                lsHost.getDefaultLibFileName = (options) => {
+                                    const raw = originalGetDefaultLibFile(options);
+                                    const base = raw.split(/[\\/]/).pop() ?? raw;
+                                    return join$2(effectiveLibDir, base);
+                                };
+                                // Also advertise the location: TS resolves options.lib
+                                // entries AND `/// <reference lib="…">` chains (the es
+                                // libs are pure hubs of them) against this.
+                                const hostWithLibLocation = lsHost;
+                                hostWithLibLocation.getDefaultLibLocation = () => effectiveLibDir;
+                                log(`Language service host libs redirected to: ${effectiveLibDir}`);
+                            }
+                            if (effectiveLibDir && typeof lsHost.getScriptFileNames === 'function') {
+                                // options.lib entries are not reliably resolved by the
+                                // embedded program, so add concrete lib d.ts files as root
+                                // files from disk. Raw paths (not URIs): the underlying
+                                // host reads them via fs. We inject every content-bearing
+                                // leaf lib (hubs like lib.es2015.d.ts only contain
+                                // ///-references), so ES/DOM globals resolve regardless of
+                                // whether reference chains resolve in this environment.
+                                const bareEraHubs = new Set([
+                                    'es6',
+                                    'es7',
+                                    'es2015',
+                                    'es2016',
+                                    'es2017',
+                                    'es2018',
+                                    'es2019',
+                                    'es2020',
+                                    'es2021',
+                                    'es2022',
+                                    'es2023',
+                                    'es2024',
+                                    'esnext',
+                                    'dom.asynciterable',
+                                ]);
+                                let libFiles = [];
+                                try {
+                                    libFiles = readdirSync(effectiveLibDir)
+                                        .filter((name) => name.startsWith('lib.') &&
+                                        name.endsWith('.d.ts') &&
+                                        !name.endsWith('.full.d.ts') &&
+                                        name !== 'lib.d.ts' &&
+                                        (() => {
+                                            const stem = name.slice('lib.'.length, -'.d.ts'.length);
+                                            return !bareEraHubs.has(stem);
+                                        })())
+                                        .map((f) => join$2(effectiveLibDir, f));
+                                }
+                                catch {
+                                    libFiles = [];
+                                }
+                                if (libFiles.length > 0) {
+                                    const originalGetScriptFileNames = lsHost.getScriptFileNames.bind(lsHost);
+                                    lsHost.getScriptFileNames = () => [...originalGetScriptFileNames(), ...libFiles];
+                                    log(`Lib d.ts files injected as root files: ${libFiles.length}`);
+                                }
+                            }
+                            injectAmbientFiles(lsHost, ambientDir, !effectiveLibDir);
                             log(`Ambient files injected into project root: ${ambientDir}`);
                         }
                     },
                 };
             }), [
-                createAutoInsertPlugin(),
                 createCompletionPlugin(),
                 createCompileErrorDiagnosticPlugin(),
                 stripDocumentFormatting(volarServiceCssExports.create()),
@@ -328417,6 +329002,9 @@ function createVeskLanguageServer() {
                 // Must come after TypeScript services to intercept their providers.
                 createTypeScriptDiagnosticFilterPlugin(),
                 createHoverPlugin(),
+                // Must come after TypeScript services: its create() disables
+                // `typescript-syntactic`'s competing auto-insert snippets.
+                createAutoInsertPlugin(),
             ]);
             log('Server initialization complete');
             // Formatting is owned by this server (prettier over the `.vsk` source),

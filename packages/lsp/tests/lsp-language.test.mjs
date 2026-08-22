@@ -208,7 +208,9 @@ component ErrorGlobals() {
   function boom(): number {
     try {
       console.log('x');
-      return Promise.resolve(1);
+      const value = Promise.resolve(1);
+      void value;
+      return 1;
     } catch (e) {
       throw new Error((e as Error).message);
     }

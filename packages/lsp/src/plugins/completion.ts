@@ -8,7 +8,7 @@ import type { LanguageServicePlugin } from '@volar/language-service';
 import { CompletionItemKind, InsertTextFormat, MarkupKind } from 'vscode-languageserver-types';
 import { getVirtualCode, createLogging, isInsideImport, isInsideExport } from '../utils';
 import { VeskVirtualCode, scanReactiveBindings, scanComponentUsages } from '../language-plugin';
-import { EVENT_HANDLER_NAMES, EVENT_HANDLERS, COMPLETION_GLOBALS, HTML_ELEMENTS, VOID_ELEMENTS, HTML_ELEMENT_DOCS } from '../knowledge';
+import { EVENT_HANDLER_NAMES, EVENT_HANDLERS, COMPLETION_GLOBALS, HTML_ELEMENTS, VOID_ELEMENTS, HTML_ELEMENT_DOCS, GLOBAL_HTML_ATTRIBUTES, TAG_SPECIFIC_ATTRIBUTES } from '../knowledge';
 
 const { log } = createLogging('[Vesk Completion Plugin]');
 
@@ -34,22 +34,156 @@ function escapeRegex(str: string): string {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Completion-relevant caret contexts inside a .vsk file. */
+type CompletionContext = 'tag-open' | 'attr' | 'expr' | 'none';
+
 /**
- * True when the offset sits in the attribute area of an open tag — between the
- * tag name and the closing `>` (e.g. `<Card `, `<Card t|itle=`).
+ * Classify the caret context with one forward pass over the text before the
+ * offset, using a stack-based state machine:
+ * - code: TS statements (default)
+ * - tag:  inside an element's opening tag (`<div class="x" … >`)
+ * - expr: inside a `{ … }` container — a JSX expression in an open tag, or a
+ *   statement/object brace in a component body
+ *
+ * `<Name` pushes `tag` from ANY state (statement-mode bodies hold bare JSX
+ * inside plain braces), `{` pushes `expr`, and each closer pops back to
+ * whatever context opened it — so attribute expressions return to their tag,
+ * and tags inside body braces return to their expression.
+ *
+ * Strings, template literals and comments are stepped over so attribute
+ * values containing `>`/`{`/`<` don't derail the state machine. Replaces the
+ * old line-prefix heuristics, which misclassified component bodies
+ * (`component X() {` + bare JSX) as "inside an expression".
  */
-function isInTagAttributeArea(text: string, offset: number): boolean {
-  const before = text.slice(0, offset);
-  const tagStart = before.lastIndexOf('<');
-  const lineStart = before.lastIndexOf('\n');
-  if (tagStart <= lineStart) {
-    return false;
+function classifyCompletionContext(text: string, offset: number): CompletionContext {
+  const start = Math.max(0, offset - 8000);
+  const stack: Array<'tag' | 'expr'> = [];
+  let state: 'code' | 'tag' | 'expr' = 'code';
+  let quote: string | null = null;
+
+  const enter = (s: 'tag' | 'expr'): 'tag' | 'expr' => {
+    stack.push(s);
+    return s;
+  };
+  const exit = (): 'code' | 'tag' | 'expr' => stack.pop() ?? 'code';
+
+  let i = start;
+  while (i < offset) {
+    const ch = text[i];
+
+    if (quote) {
+      if (ch === '\\') {
+        i += 2;
+        continue;
+      }
+      if (ch === quote) {
+        quote = null;
+      }
+      i++;
+      continue;
+    }
+
+    if (ch === '"' || ch === "'" || ch === '`') {
+      quote = ch;
+      i++;
+      continue;
+    }
+
+    switch (state) {
+      case 'code': {
+        if (ch === '/' && text[i + 1] === '/') {
+          // line comment
+          while (i < offset && text[i] !== '\n') i++;
+          continue;
+        }
+        if (ch === '/' && text[i + 1] === '*') {
+          // block comment
+          const end = text.indexOf('*/', i + 2);
+          if (end === -1 || end >= offset) return 'none';
+          i = end + 2;
+          continue;
+        }
+        if (ch === '{') {
+          state = enter('expr');
+          break;
+        }
+        if (ch === '<') {
+          const nextChar = text[i + 1];
+          if (nextChar && /[A-Za-z]/.test(nextChar)) {
+            state = enter('tag');
+            break;
+          }
+          if (nextChar === '>') {
+            // fragment open `<>` — skip its `>` as part of the tag
+            state = enter('tag');
+            i++;
+          }
+        }
+        break;
+      }
+      case 'tag': {
+        if (ch === '{') {
+          state = enter('expr');
+          break;
+        }
+        if (ch === '>') {
+          state = exit();
+          break;
+        }
+        if (ch === '/' && text[i + 1] === '>') {
+          state = exit();
+          i++;
+          break;
+        }
+        if (ch === '<') {
+          // malformed nesting — treat as a new tag start attempt
+          const nextChar = text[i + 1];
+          if (nextChar && /[A-Za-z/>]/.test(nextChar)) {
+            state = enter('tag');
+          }
+        }
+        break;
+      }
+      case 'expr': {
+        if (ch === '{') {
+          state = enter('expr');
+          break;
+        }
+        if (ch === '}') {
+          state = exit();
+          break;
+        }
+        if (ch === '<') {
+          const nextChar = text[i + 1];
+          if (nextChar && /[A-Za-z]/.test(nextChar)) {
+            state = enter('tag'); // JSX element inside a statement body / expression
+          }
+        }
+        break;
+      }
+    }
+    i++;
   }
-  const tagSegment = before.slice(tagStart + 1);
-  if (!/^[A-Za-z][\w$-]*(\s|$)/.test(tagSegment)) {
-    return false;
+
+  if (state === 'expr') {
+    return 'expr';
   }
-  return !/[>=]/.test(tagSegment);
+  if (state !== 'tag') {
+    return 'none';
+  }
+
+  // Inside an open tag: distinguish tag-name position from attribute area by
+  // whether whitespace follows the tag name before the caret.
+  let tagStart = offset - 1;
+  while (tagStart >= start && text[tagStart] !== '<') tagStart--;
+  const segment = text.slice(tagStart + 1, offset);
+  const nameMatch = segment.match(/^[A-Za-z][\w$.:-]*/);
+  if (!nameMatch) {
+    // Caret directly after `<` — a tag-name position.
+    return segment.length === 0 ? 'tag-open' : 'none';
+  }
+  const afterName = segment.slice(nameMatch[0].length);
+  return afterName.length > 0 ? 'attr' : 'tag-open';
 }
 
 export function createCompletionPlugin(): LanguageServicePlugin {
@@ -75,30 +209,38 @@ export function createCompletionPlugin(): LanguageServicePlugin {
 
           const source = document.getText();
           const offset = document.offsetAt(position);
-          const linePrefix = source.slice(0, offset);
+          // Heuristics run on the ORIGINAL .vsk text, not the generated
+          // virtual code: generated JSX is collapsed/reordered and chunk-level
+          // mappings can place a mid-JSX caret somewhere unrelated (e.g.
+          // inside the cell-decl preamble), which would misclassify context.
+          const originalText = virtualCode.originalCode || source;
+          const mappedSourceOffset = virtualCode.generatedOffsetToSourceOffset(offset);
+          const srcOffset = mappedSourceOffset ?? offset;
+          const linePrefix = originalText.slice(0, srcOffset);
           // Prefix-only word (matching the caret-at-end semantics of the old
           // heuristic LSP): a caret right after `<Card ` completes an empty
           // word, not the `title` that happens to start at the offset.
           const lastWord = linePrefix.match(/[a-zA-Z_$][\w$]*$/)?.[0] || '';
           const wordRegex = new RegExp(`^${escapeRegex(lastWord)}`);
 
-          const isAttrPosition = isInTagAttributeArea(source, offset);
-          const isExpressionPosition = /{[^}]*$/.test(linePrefix) && !isAttrPosition;
+          const contextKind = classifyCompletionContext(originalText, srcOffset);
 
-          log(`Completion at offset ${offset}: attr=${isAttrPosition} expr=${isExpressionPosition} word='${lastWord}'`);
+          log(
+            `Completion gen-offset=${offset} src-offset=${srcOffset}: context=${contextKind} word='${lastWord}'`,
+          );
 
-          if (isAttrPosition) {
-            const items = buildAttributeItems(source, offset, wordRegex);
+          if (contextKind === 'attr') {
+            const items = buildAttributeItems(originalText, srcOffset, wordRegex);
             return items.length > 0 ? { isIncomplete: true, items } : undefined;
           }
 
-          if (isExpressionPosition) {
-            const items = buildExpressionItems(source, wordRegex);
+          if (contextKind === 'expr') {
+            const items = buildExpressionItems(originalText, wordRegex);
             return items.length > 0 ? { isIncomplete: true, items } : undefined;
           }
 
           // Tag-open position: `<` (or `<Name`) — offer intrinsics + components.
-          if (/<\s*$/.test(linePrefix) || /<\s*[A-Za-z]*$/.test(linePrefix)) {
+          if (contextKind === 'tag-open') {
             const items: any[] = [];
             for (const tag of HTML_ELEMENTS) {
               if (!wordRegex.test(tag)) {
@@ -129,7 +271,7 @@ export function createCompletionPlugin(): LanguageServicePlugin {
                 });
               }
             }
-            const components = scanComponentUsages(source);
+            const components = scanComponentUsages(originalText);
             for (const [name] of components) {
               if (wordRegex.test(name)) {
                 items.push({
@@ -180,7 +322,7 @@ function buildAttributeItems(source: string, offset: number, wordRegex: RegExp):
   const tagStart = before.lastIndexOf('<');
   const tagEnd = source.indexOf('>', tagStart);
   const segment = source.slice(tagStart, tagEnd === -1 ? source.length : tagEnd);
-  const currentTagName = segment.match(/^<\s*([A-Z][\w$]*)/)?.[1] ?? null;
+  const currentTagName = segment.match(/^<\s*([A-Za-z][\w$]*)/)?.[1] ?? null;
 
   const usedNames = new Set<string>();
   const usedPattern = /([\w$]+)\s*=\s*(?:"[^"]*"|'[^']*'|\{[^}]*\})/g;
@@ -214,6 +356,17 @@ function buildAttributeItems(source: string, offset: number, wordRegex: RegExp):
       continue;
     }
     push(ev, CompletionItemKind.Event, 'Event handler', EVENT_HANDLERS[ev]);
+  }
+
+  // HTML attributes for intrinsic (lowercase) element tags.
+  if (currentTagName && currentTagName[0] === currentTagName[0].toLowerCase()) {
+    for (const attr of GLOBAL_HTML_ATTRIBUTES) {
+      push(attr, CompletionItemKind.Property, 'HTML attribute');
+    }
+    const tagAttrs = TAG_SPECIFIC_ATTRIBUTES[currentTagName];
+    for (const attr of tagAttrs ?? []) {
+      push(attr, CompletionItemKind.Property, `<${currentTagName}> attribute`);
+    }
   }
 
   // The `props` param is always available in component bodies.

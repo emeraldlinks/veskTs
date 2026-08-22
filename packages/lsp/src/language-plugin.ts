@@ -55,6 +55,11 @@ export const resolveConfig = <T extends { options?: any }>(
       return undefined;
     }
     const trimmed = libName.trim();
+    // Already a resolved path (e.g. from getDefaultLibFileName) — keep it
+    // verbatim so repeated resolution never mangles it.
+    if (trimmed.includes('/') || trimmed.includes('\\')) {
+      return trimmed;
+    }
     if (trimmed.startsWith('lib.')) {
       return trimmed.toLowerCase();
     }
@@ -73,7 +78,10 @@ export const resolveConfig = <T extends { options?: any }>(
   //   `throw new Error(...)` must always resolve, so we mirror what
   //   `vesk typecheck` guarantees (es2022 chain + DOM + DOM.Iterable).
   const host = ts.createCompilerHost(options);
-  normalizedLibs.add(host.getDefaultLibFileName(options).toLowerCase());
+  const rawDefaultLib = host.getDefaultLibFileName(options);
+  const defaultLibFile =
+    rawDefaultLib.split(/[\\/]/).pop() ?? rawDefaultLib;
+  normalizedLibs.add(normalizeLibName(defaultLibFile)!);
   normalizedLibs.add('lib.dom.d.ts');
   normalizedLibs.add('lib.dom.iterable.d.ts');
   options.lib = [...normalizedLibs];
@@ -305,6 +313,35 @@ export class VeskVirtualCode implements VirtualCode {
       last.generatedOffsets[0] +
       Math.min(Math.max(end - last.sourceOffsets[0], 0), last.generatedLengths?.[0] ?? last.lengths[0]);
     return [generatedStart, Math.max(generatedEnd, generatedStart + 1)];
+  }
+
+  /**
+   * Map a position in the GENERATED virtual code back to the corresponding
+   * position in the ORIGINAL .vsk source. Prefers the smallest (most precise)
+   * mapping containing the offset so coarse whole-region chunks don't smear
+   * positions across collapsed/reordered generated code. Returns null when
+   * nothing covers the offset.
+   */
+  generatedOffsetToSourceOffset(genOffset: number): number | null {
+    let best: CompilerCodeMapping | null = null;
+    let bestGeneratedLength = Number.POSITIVE_INFINITY;
+    for (const mapping of this.compilerMappings) {
+      const genStart = mapping.generatedOffsets[0];
+      const genLength = mapping.generatedLengths?.[0] ?? mapping.lengths[0];
+      if (genOffset < genStart || genOffset > genStart + genLength) {
+        continue;
+      }
+      if (genLength < bestGeneratedLength) {
+        bestGeneratedLength = genLength;
+        best = mapping;
+      }
+    }
+    if (!best) {
+      return null;
+    }
+    const delta = genOffset - best.generatedOffsets[0];
+    const sourceLength = best.lengths[0];
+    return best.sourceOffsets[0] + Math.min(delta, sourceLength);
   }
 }
 

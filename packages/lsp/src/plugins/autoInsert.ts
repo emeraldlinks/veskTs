@@ -1,11 +1,11 @@
 /**
  * Auto-insert plugin — closes HTML tags when the user types `>`.
  *
- * Volar dispatches this against the GENERATED TSX document: `document` is the
- * virtual code snapshot, `position` is the caret mapped into generated
- * coordinates, and `lastChange.rangeOffset` is pre-mapped by volar's
- * provideAutoInsertSnippet wrapper. Component bodies keep user JSX verbatim,
- * so scanning the generated text directly is exact — no mapping lookups.
+ * All heuristics run on the ORIGINAL .vsk text: the incoming `position` is a
+ * caret mapped into generated coordinates, which chunk-level mappings can
+ * smear across collapsed/reordered generated code. Mapping back through
+ * VeskVirtualCode and scanning the user's own text is exact in both compiled
+ * and transient-error (retained last-good) states.
  *
  * The VS Code client must actively send the `volar/client/autoInsert` request
  * on text changes (see extension/vsk-vscode/src/extension.ts); vanilla
@@ -149,11 +149,11 @@ export function createAutoInsertPlugin(): LanguageServicePlugin {
             return null;
           }
 
-          const text = document.getText();
-          const offset = document.offsetAt(position);
+          const text = virtualCode.originalCode || document.getText();
+          const mappedCaret = virtualCode.generatedOffsetToSourceOffset(document.offsetAt(position));
           // Tolerate small mapping drift: skip whitespace back to what must be
           // the typed '>'.
-          let caret = Math.min(offset, text.length);
+          let caret = Math.min(mappedCaret ?? document.offsetAt(position), text.length);
           while (caret > 0 && /\s/.test(text[caret - 1])) {
             caret--;
           }
