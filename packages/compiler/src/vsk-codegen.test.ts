@@ -202,7 +202,7 @@ test('track decl rewrite text is identical to vskToTsx', () => {
   expect(r.code.includes('let c: any = count;'), 'extra name aliases the first');
 });
 
-test('typedCells emits value-typed cells with unique cell names', () => {
+test('typedCells emits inferred Tracked cells with unique cell names', () => {
   const src = `component C {
   const &[count] = track(0);
   const &[posts] = track<number[]>([]);
@@ -211,19 +211,27 @@ test('typedCells emits value-typed cells with unique cell names', () => {
 }`;
   const r = compileVskCodegen(src, { typedCells: true });
   expect(r.code.includes('const __cell = track(0);'), 'first cell is __cell');
-  expect(r.code.includes('const __cell1: number[] = track<number[]>([]);'), 'second cell is __cell1');
-  expect(r.code.includes('const __cell2: Map<string, number> = track<Map<string, number>>(new Map());'), 'third cell is __cell2');
+  expect(r.code.includes('const __cell1 = track<number[]>([]);'), 'second cell is __cell1 (inferred Tracked)');
+  expect(r.code.includes('const __cell2 = track<Map<string, number>>(new Map());'), 'third cell is __cell2 (inferred Tracked)');
   expect(r.code.includes('let count = __cell.get();'), 'count infers from get()');
   expect(r.code.includes('let posts: number[] = __cell1.get();'), 'posts infers from get()');
   expect(r.code.includes('let map: Map<string, number> = __cell2.get();'), 'map infers from get()');
-  expect(r.code.includes('let rawMap: Map<string, number> = __cell2;'), 'raw cell aliases the cell');
+  expect(r.code.includes('let rawMap = __cell2;'), 'raw cell aliases the cell as Tracked<T>');
   expect(!r.code.includes('let count: any'), 'typedCells drops the any fallback');
 });
 
-test('typedCells keeps annotations and uses them on the cell and bindings', () => {
+test('typedCells keeps value annotations on bindings only', () => {
   const src = `component C { let &[count]: number = track(0); <p>{count}</p> }`;
   const r = compileVskCodegen(src, { typedCells: true });
   expect(r.code.includes('let count: number = __cell.get();'), 'annotated binding keeps its type');
+});
+
+test('raw cell alias infers Tracked<T> so it satisfies into-like APIs', () => {
+  const src = `component C { const &[posts, postsCell] = track<Post[]>([]); <p>{posts.length}</p> }`;
+  const r = compileVskCodegen(src, { typedCells: true });
+  expect(r.code.includes('let posts: Post[] = __cell.get();'), 'value binding annotated');
+  expect(!r.code.includes(': Post[]>'), 'cell never annotated with the value type');
+  expect(!r.code.includes('let postsCell: Post[] ='), 'raw binding never value-annotated');
 });
 
 test('style regions are recorded in statement and expression modes', () => {

@@ -1,0 +1,12 @@
+import { track } from "@vesk/runtime"
+
+interface Post { title: string }
+
+component Home() {
+  const &[posts] = track<Post[]>([])
+	<div class="">
+		for (p of posts){
+			<p> {p.XXXX} </p>
+		}
+	</div>
+}

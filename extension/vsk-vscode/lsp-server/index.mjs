@@ -295727,46 +295727,30 @@ function emitTrackDeclStatement(g, source, stmt, indent, isLast, opts) {
         if (opts.typedCells) {
             const cellName = g.cellCount === 0 ? '__cell' : `__cell${g.cellCount}`;
             g.cellCount++;
+            // The cell holds a Tracked<T>, NOT a T — leave its type to inference
+            // from `track<T>(init)` so raw-cell aliases stay correctly typed too.
+            // Annotating it with the value annotation made `&[v, cell]` emit
+            // `cell: T = <Tracked>` (unsound), and broke passing `cell` to APIs
+            // expecting `Tracked<unknown>` (e.g. useFetch `into`).
+            g.add(`const ${cellName} = `);
+            g.add(initText, decl.init.start, decl.init.end);
+            g.add(';');
+            // First binding: the VALUE read from the cell.
+            g.add(' let ');
+            g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
             if (annotation) {
-                g.add(`const ${cellName}: `);
+                g.add(': ');
                 g.add(annotation, annStart, annEnd);
-                g.add(' = ');
-                g.add(initText, decl.init.start, decl.init.end);
-                g.add(';');
-                g.add(' let ');
-                g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
-                g.add(`: `);
-                g.add(annotation, annStart, annEnd);
-                g.add(` = ${cellName}.get();`);
-                for (let n = 1; n < names.length; n++) {
-                    g.add(' let ');
-                    g.add(names[n], elements[n].start, elements[n].end, REACTIVE_DATA);
-                    g.add(`: `);
-                    g.add(annotation, annStart, annEnd);
-                    g.add(` = ${cellName};`);
-                    if (n === names.length - 1 && dropLastSemi)
-                        g.code = g.code.slice(0, -1);
-                }
-                if (names.length === 1 && dropLastSemi)
-                    g.code = g.code.slice(0, -1);
             }
-            else {
-                g.add(`const ${cellName} = `);
-                g.add(initText, decl.init.start, decl.init.end);
-                g.add(';');
+            g.add(` = ${cellName}.get();`);
+            // Raw-cell aliases: inferred Tracked<T>, never the value annotation.
+            for (let n = 1; n < names.length; n++) {
                 g.add(' let ');
-                g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
-                g.add(` = ${cellName}.get();`);
-                for (let n = 1; n < names.length; n++) {
-                    g.add(' let ');
-                    g.add(names[n], elements[n].start, elements[n].end, REACTIVE_DATA);
-                    g.add(` = ${cellName};`);
-                    if (n === names.length - 1 && dropLastSemi)
-                        g.code = g.code.slice(0, -1);
-                }
-                if (names.length === 1 && dropLastSemi)
-                    g.code = g.code.slice(0, -1);
+                g.add(names[n], elements[n].start, elements[n].end, REACTIVE_DATA);
+                g.add(` = ${cellName};`);
             }
+            if (dropLastSemi)
+                g.code = g.code.slice(0, -1);
         }
         else {
             if (annotation) {

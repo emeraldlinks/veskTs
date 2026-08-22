@@ -10,13 +10,38 @@ interface ThrowProps {
 	msg: string
 }
 
+export interface Post {
+	id: number;
+	title: string;
+	slug: string;
+	excerpt: string;
+	body: string;
+	author: string;
+	tags: string[];
+	date: string;
+}
 
-component Home (){
+async component Home (){
+
+	const &[count] = track<number>(0)
+		const &[posts, postCe] = track<Post[]>([])
+			useFetch("/api/posts", {
+				key: "posts",
+				into: postCe
+			})
 	<Head>
-		 <title> VeskTS test app </title>
-		</Head>
-  const &[count] = track<number>(10)
-	<div class=""> </div>
+		<title> VeskTS test app </title>
+	</Head>
+	<div class="">
+		for (p of posts){
+			
+			<> <p> {p.title} </p>
+			<p>{p.slug } </p>
+				
+			</>
+		}
+	
+	</div>
 	
   
 	

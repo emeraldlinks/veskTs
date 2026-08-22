@@ -40,7 +40,7 @@ component PostsSummary {
 }
 
 export default component Posts {
-	<Head>
+	<Head> 
 		<title>Posts — useFetch demo</title>
 	</Head>
 	let &[posts, postsCell] = track<Post[]>([])

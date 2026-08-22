@@ -10,6 +10,7 @@ import {
   TextDocumentChangeReason,
   SnippetString,
   Position,
+  ConfigurationTarget,
 } from 'vscode';
 import {
   LanguageClient,
@@ -94,8 +95,43 @@ async function handleAutoInsert(event: TextDocumentChangeEvent) {
   await editor.insertSnippet(new SnippetString(snippet.replace(/\$/g, '$$')), new Position(position.line, position.character));
 }
 
+/**
+ * Keep `emmet.includeLanguages` in sync with the `vesk.emmet` setting.
+ *
+ * Emmet treats `p.` as an abbreviation prefix (tag + class), so with the
+ * vsk→html mapping enabled its suggestions crowd out TypeScript member
+ * completions inside `{ }` expressions. The mapping lives in user settings
+ * (the manifest only contributes a default), so we rewrite it there when
+ * the toggle changes.
+ */
+function syncEmmetIncludeLanguages(): void {
+  const enabled = workspace.getConfiguration('vesk').get<boolean>('emmet', true);
+  const emmet = workspace.getConfiguration('emmet');
+  const current = emmet.get<Record<string, string>>('includeLanguages') ?? {};
+  const desired = { ...current };
+  if (enabled) {
+    desired['vsk'] = 'html';
+  } else {
+    delete desired['vsk'];
+  }
+  if (JSON.stringify(current) !== JSON.stringify(desired)) {
+    void emmet.update('includeLanguages', desired, ConfigurationTarget.Global).then(() => {
+      outputChannel.appendLine(`emmet.includeLanguages ${enabled ? 'enabled' : 'disabled'} for vsk`);
+    });
+  }
+}
+
 export function activate(context: ExtensionContext) {
   outputChannel = window.createOutputChannel('Vesk LSP');
+
+  syncEmmetIncludeLanguages();
+  context.subscriptions.push(
+    workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration('vesk.emmet')) {
+        syncEmmetIncludeLanguages();
+      }
+    }),
+  );
 
   const serverModule = path.resolve(__dirname, '..', 'lsp-server', 'index.mjs');
 

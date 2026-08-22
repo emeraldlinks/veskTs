@@ -2,7 +2,7 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.3.2",
+  "version": "0.3.4",
   "private": true,
   "license": "MIT",
   "publisher": "vesk",
@@ -37,6 +37,11 @@
         "type": "boolean",
         "default": true,
         "description": "Automatically close HTML tags when typing '>' (e.g. <div> → <div></div>)"
+      },
+      "vesk.emmet": {
+        "type": "boolean",
+        "default": true,
+        "description": "Enable Emmet abbreviations in .vsk files. Disable if Emmet suggestions crowd out TypeScript completions inside { } expressions (e.g. typing p. offers an Emmet expansion instead of Post members). Toggling rewrites the user-level emmet.includeLanguages setting."
       },
       "vesk.lsp.trace.server": {
         "type": "string",
