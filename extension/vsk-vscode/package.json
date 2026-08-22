@@ -2,7 +2,7 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "private": true,
   "license": "MIT",
   "publisher": "vesk",

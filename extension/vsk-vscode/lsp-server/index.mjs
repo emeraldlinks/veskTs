@@ -296934,7 +296934,12 @@ function getVirtualCode(document, context) {
     }
     const [sourceUri, virtualCodeId] = decoded;
     const sourceScript = context.language.scripts.get(sourceUri);
-    const virtualCode = sourceScript?.generated?.embeddedCodes.get(virtualCodeId);
+    // The root virtual code is presented under an embedded-document URI with
+    // id 'root' in some dispatch rounds, but lives at generated.root.
+    let virtualCode = sourceScript?.generated?.embeddedCodes.get(virtualCodeId);
+    if (!virtualCode && virtualCodeId === 'root') {
+        virtualCode = sourceScript?.generated?.root;
+    }
     const sourceMap = sourceScript && virtualCode ? context.language.maps.get(virtualCode, sourceScript) : undefined;
     return { virtualCode, sourceUri, sourceScript, sourceMap };
 }
@@ -296987,6 +296992,139 @@ function getWordFromPosition(text, start) {
 }
 function concatMarkdownContents(...contents) {
     return contents.join('\n\n<br>\n\n---\n\n<br><br>\n\n');
+}
+
+/**
+ * Style-block language features — real CSS completion/hover inside
+ * `<style>…</style>` regions of a .vsk file.
+ *
+ * The compiler records style regions in source coordinates but SKIPS their
+ * content when emitting generated code. Volar therefore remaps client
+ * positions into generated space where the caret inside a style block has no
+ * exact counterpart, and its completion dispatcher never descends into the
+ * css embedded code — so plugin-level providers can't recover the caret.
+ *
+ * Instead this module installs a connection-level shim BEFORE volar registers
+ * its handlers: `connection.onCompletion`/`onHover` handlers are wrapped so
+ * requests whose RAW position (original .vsk geometry) falls inside a style
+ * region are answered here with vscode-css-languageservice, and everything
+ * else delegates to volar unchanged.
+ *
+ * The current document text + style regions are pushed into `noteStyleState`
+ * by VeskVirtualCode.update() on every change, so the shim always sees the
+ * editor's live buffer without touching disk.
+ */
+const cssLs = getCSSLanguageService({ useDefaultDataProvider: true });
+const stylesheets = new WeakMap();
+function parseStylesheet(doc) {
+    const cached = stylesheets.get(doc);
+    if (cached) {
+        return cached;
+    }
+    const sheet = cssLs.parseStylesheet(doc);
+    stylesheets.set(doc, sheet);
+    return sheet;
+}
+const latestDocs = new Map();
+/** Called by VeskVirtualCode.update() on every document change. */
+function noteStyleState(fileName, text, regions) {
+    latestDocs.set(fileNameToUriKey(fileName), { text, regions });
+}
+function fileNameToUriKey(fileName) {
+    // Both the tests (file:// URIs) and VS Code use file scheme for .vsk docs.
+    return fileName.startsWith('file://') ? fileName : `file://${fileName}`;
+}
+function positionToOffset(text, position) {
+    const lines = text.split('\n');
+    let offset = 0;
+    for (let i = 0; i < position.line && i < lines.length; i++) {
+        offset += lines[i].length + 1;
+    }
+    const lineText = lines[Math.min(position.line, lines.length - 1)] ?? '';
+    return offset + Math.min(position.character, lineText.length);
+}
+function offsetToPosition(text, offset) {
+    const before = text.slice(0, Math.max(0, Math.min(offset, text.length)));
+    const lastNewline = before.lastIndexOf('\n');
+    return {
+        line: before.split('\n').length - 1,
+        character: offset - (lastNewline + 1),
+    };
+}
+function locate(state, position) {
+    const offset = positionToOffset(state.text, position);
+    for (const region of state.regions) {
+        let contentStart = state.text.indexOf(region.content, region.start);
+        if (contentStart === -1 || contentStart >= region.end) {
+            contentStart = Math.max(0, region.end - region.content.length);
+        }
+        const bodyEnd = contentStart + region.content.length;
+        if (offset >= contentStart && offset <= bodyEnd) {
+            return { region, contentStart, bodyEnd, offset };
+        }
+    }
+    return null;
+}
+function withCss(params, compute) {
+    const uri = params.textDocument?.uri ?? '';
+    if (!uri.endsWith('.vsk')) {
+        return { matched: false, handled: undefined };
+    }
+    const state = latestDocs.get(uri);
+    if (!state || state.regions.length === 0) {
+        return { matched: false, handled: undefined };
+    }
+    const located = locate(state, params.position);
+    if (!located) {
+        return { matched: false, handled: undefined };
+    }
+    const cssDoc = TextDocument$1.create('vsk://style-block.css', 'css', 0, located.region.content);
+    const cssOffset = located.offset - located.contentStart;
+    const handled = compute(cssDoc, cssDoc.positionAt(Math.max(0, cssOffset)), state, located);
+    return { matched: true, handled };
+}
+/** Wrap volar's feature handlers with style-block-aware preemption. */
+function installStyleShim(connection) {
+    const realOnCompletion = connection.onCompletion.bind(connection);
+    connection.onCompletion = (handler) => realOnCompletion(async (params, token, workDone, resultProgress) => {
+        const shim = withCss(params, (doc, pos) => {
+            const list = cssLs.doComplete(doc, pos, parseStylesheet(doc));
+            if (!list) {
+                return null;
+            }
+            // Items keep label/insertText only: textEdits carry css-doc ranges
+            // that would be meaningless in root space; clients insert at caret.
+            const items = list.items.map((item) => {
+                const { textEdit: _t, additionalTextEdits: _a, ...rest } = item;
+                return rest;
+            });
+            return { isIncomplete: list.isIncomplete, items };
+        });
+        if (shim.matched) {
+            return shim.handled;
+        }
+        return handler(params, token, workDone, resultProgress);
+    });
+    const realOnHover = connection.onHover.bind(connection);
+    connection.onHover = (handler) => realOnHover(async (params, token, workDone) => {
+        const shim = withCss(params, (doc, pos, _state, located) => {
+            const hover = cssLs.doHover(doc, pos, parseStylesheet(doc));
+            if (!hover) {
+                return null;
+            }
+            if (hover.range) {
+                hover.range = {
+                    start: offsetToPosition(_state.text, located.contentStart + doc.offsetAt(hover.range.start)),
+                    end: offsetToPosition(_state.text, located.contentStart + doc.offsetAt(hover.range.end)),
+                };
+            }
+            return hover;
+        });
+        if (shim.matched) {
+            return shim.handled;
+        }
+        return handler(params, token, workDone);
+    });
 }
 
 /**
@@ -297093,6 +297231,8 @@ class VeskVirtualCode {
     originalCode = '';
     mappingGenToSource = null;
     mappingSourceToGen = null;
+    /** Style regions of whichever state is currently served. */
+    activeStyleRegions = [];
     /** Last successfully compiled state — served during transient fatal states. */
     lastGood = null;
     constructor(fileName, snapshot) {
@@ -297117,6 +297257,7 @@ class VeskVirtualCode {
             this.compilerMappings = result.mappings ?? [];
             this.mappings = (result.mappings ?? []);
             this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions);
+            this.activeStyleRegions = result.styleRegions;
             this.lastGood = {
                 generatedCode: result.code,
                 compilerMappings: result.mappings ?? [],
@@ -297138,6 +297279,7 @@ class VeskVirtualCode {
             this.mappings = this.lastGood.compilerMappings;
             this.fatalErrors = result.errors;
             this.embeddedCodes = this.createCssEmbeddedCodes(this.lastGood.styleRegions);
+            this.activeStyleRegions = this.lastGood.styleRegions;
         }
         else if (typeof result.code === 'string') {
             // Broken on first open (no prior good state): serve the partial
@@ -297150,6 +297292,7 @@ class VeskVirtualCode {
             this.mappings = (result.mappings ?? []);
             this.fatalErrors = result.errors;
             this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions ?? []);
+            this.activeStyleRegions = result.styleRegions ?? [];
         }
         else {
             // Total failure with no prior good state: feed the raw source back.
@@ -297167,13 +297310,20 @@ class VeskVirtualCode {
             ];
             this.mappings = this.compilerMappings;
             this.fatalErrors = result.errors;
+            this.activeStyleRegions = [];
             this.embeddedCodes = [];
         }
+        // Keep the connection-level style shim in sync with the live buffer.
+        noteStyleState(this.fileName, newCode, this.activeStyleRegions);
         this.snapshot = {
             getText: (start, end) => this.generatedCode.substring(start, end),
             getLength: () => this.generatedCode.length,
             getChangeRange: () => undefined,
         };
+    }
+    /** Style regions (source coords) of the currently served state. */
+    getStyleRegions() {
+        return this.activeStyleRegions;
     }
     createCssEmbeddedCodes(styleRegions) {
         return styleRegions.map((region, index) => {
@@ -328780,6 +328930,10 @@ function stripDocumentFormatting(plugin) {
 }
 function createVeskLanguageServer() {
     const connection = nodeExports$1.createConnection();
+    // Style-block shim must wrap volar's handlers, so install it BEFORE
+    // createServer registers them (registrations are single-slot; ours runs
+    // first and delegates everything non-style).
+    installStyleShim(connection);
     const server = nodeExports$1.createServer(connection);
     connection.listen();
     const wrappedFunctions = new WeakSet();

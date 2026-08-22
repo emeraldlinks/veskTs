@@ -195,6 +195,12 @@ async function withSession(root, label, fn) {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const after = (text, needle) => text.indexOf(needle) + needle.length;
+const offsetOf = (text, line, character) => {
+  const lines = text.split('\n');
+  let off = 0;
+  for (let i = 0; i < line; i++) off += lines[i].length + 1;
+  return off + character;
+};
 
 const GLOBALS_DOC = `import { track } from "@vesk/runtime"
 
@@ -318,6 +324,46 @@ async function main() {
     // f. '>' inside a JSX expression
     snip = await s.autoInsert(uri, GLOBALS_DOC, after(GLOBALS_DOC, '{1 >'));
     assert(snip === null, `'>' inside JSX expression does not auto-close (got ${JSON.stringify(snip)})`);
+
+    // ---------------- style-block CSS features ----------------
+    const styleOld = '  <Link href="/">home</Link>';
+    const styleNew = [
+      '  <style>',
+      '    .gg {',
+      '      color: red;',
+      '      col',
+      '    }',
+      '  </style>',
+      styleOld,
+    ].join('\n');
+    const styleDoc = GLOBALS_DOC.replace(styleOld, styleNew);
+    s.replace(uri, 9, styleOld, styleNew, GLOBALS_DOC);
+    await sleep(2500);
+
+    // a. CSS property completion after a partial property name
+    const cssLine = styleDoc.split('\n').findIndex((l) => l.trim() === 'col');
+    const cssCol = styleDoc.split('\n')[cssLine].indexOf('col') + 3;
+    const cssLabels = await s.completion(uri, toPos(styleDoc, offsetOf(styleDoc, cssLine, cssCol)));
+    assert(
+      cssLabels.includes('color') && cssLabels.length > 100,
+      `style-block completion offers CSS properties (${cssLabels.length} items, color=${cssLabels.includes('color')})`,
+    );
+
+    // b. hover on a complete CSS property shows real docs
+    const propLine = styleDoc.split('\n').findIndex((l) => l.trim() === 'color: red;');
+    const propChar = styleDoc.split('\n')[propLine].indexOf('color') + 2;
+    const hv = await s.request('textDocument/hover', {
+      textDocument: { uri },
+      position: toPos(styleDoc, offsetOf(styleDoc, propLine, propChar)),
+    });
+    const hoverText = JSON.stringify(hv?.result?.contents ?? '');
+    assert(
+      /color/i.test(hoverText) && hoverText.length > 20,
+      `style-block hover shows CSS docs (${hoverText.slice(0, 60)})`,
+    );
+
+    s.replace(uri, 10, styleNew, styleOld, styleDoc);
+    await sleep(2000);
   });
 
   // ------------------------------------------------------------------

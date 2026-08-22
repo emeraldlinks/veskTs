@@ -19,7 +19,7 @@ import { AMBIENT as AMBIENT_CONTENT, RUNTIME_OVERRIDE as RUNTIME_OVERRIDE_CONTEN
 import { createAutoInsertPlugin } from './plugins/autoInsert';
 import { createCompletionPlugin } from './plugins/completion';
 import { createCompileErrorDiagnosticPlugin } from './plugins/compileErrors';
-import { createHoverPlugin } from './plugins/hover';
+import { installStyleShim } from './styleShim';import { createHoverPlugin } from './plugins/hover';
 import { createTypeScriptDiagnosticFilterPlugin } from './plugins/diagnosticsFilter';
 import { getVeskLanguagePlugin, resolveConfig } from './language-plugin';
 import { createTypeScriptServices, patchUserPreferences } from './typescriptService';
@@ -140,6 +140,10 @@ function stripDocumentFormatting<T extends { capabilities?: Record<string, unkno
 
 export function createVeskLanguageServer() {
   const connection = createConnection();
+  // Style-block shim must wrap volar's handlers, so install it BEFORE
+  // createServer registers them (registrations are single-slot; ours runs
+  // first and delegates everything non-style).
+  installStyleShim(connection);
   const server = createServer(connection);
 
   connection.listen();

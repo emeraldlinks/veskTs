@@ -61,7 +61,12 @@ export function getVirtualCode(
   }
   const [sourceUri, virtualCodeId] = decoded;
   const sourceScript = context.language.scripts.get(sourceUri);
-  const virtualCode = sourceScript?.generated?.embeddedCodes.get(virtualCodeId);
+  // The root virtual code is presented under an embedded-document URI with
+  // id 'root' in some dispatch rounds, but lives at generated.root.
+  let virtualCode = sourceScript?.generated?.embeddedCodes.get(virtualCodeId);
+  if (!virtualCode && virtualCodeId === 'root') {
+    virtualCode = sourceScript?.generated?.root;
+  }
 
   const sourceMap =
     sourceScript && virtualCode ? context.language.maps.get(virtualCode, sourceScript) : undefined;

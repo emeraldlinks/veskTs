@@ -14,6 +14,7 @@ import { URI } from 'vscode-uri';
 import { compileVskCodegen } from '@vesk/compiler';
 import type { VskCodegenError, CodeMapping as CompilerCodeMapping } from '@vesk/compiler';
 import { createLogging } from './utils';
+import { noteStyleState } from './styleShim';
 
 const { log, logError, logWarning } = createLogging('[Vesk Language Plugin]');
 
@@ -130,6 +131,8 @@ export class VeskVirtualCode implements VirtualCode {
   originalCode = '';
   private mappingGenToSource: Map<string, CompilerCodeMapping> | null = null;
   private mappingSourceToGen: Map<string, CompilerCodeMapping> | null = null;
+  /** Style regions of whichever state is currently served. */
+  private activeStyleRegions: { start: number; end: number; content: string }[] = [];
   /** Last successfully compiled state — served during transient fatal states. */
   private lastGood: {
     generatedCode: string;
@@ -164,6 +167,7 @@ export class VeskVirtualCode implements VirtualCode {
       this.compilerMappings = result.mappings ?? [];
       this.mappings = (result.mappings ?? []) as unknown as VolarCodeMapping[];
       this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions);
+      this.activeStyleRegions = result.styleRegions;
       this.lastGood = {
         generatedCode: result.code,
         compilerMappings: result.mappings ?? [],
@@ -189,6 +193,7 @@ export class VeskVirtualCode implements VirtualCode {
       this.mappings = this.lastGood.compilerMappings as unknown as VolarCodeMapping[];
       this.fatalErrors = result.errors;
       this.embeddedCodes = this.createCssEmbeddedCodes(this.lastGood.styleRegions);
+      this.activeStyleRegions = this.lastGood.styleRegions;
     } else if (typeof result.code === 'string') {
       // Broken on first open (no prior good state): serve the partial
       // generated code so TS surfaces the broken construct, keep completion
@@ -202,6 +207,7 @@ export class VeskVirtualCode implements VirtualCode {
       this.mappings = (result.mappings ?? []) as unknown as VolarCodeMapping[];
       this.fatalErrors = result.errors;
       this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions ?? []);
+      this.activeStyleRegions = result.styleRegions ?? [];
     } else {
       // Total failure with no prior good state: feed the raw source back.
       logWarning(`Vesk compilation failed for ${this.fileName}`);
@@ -218,8 +224,12 @@ export class VeskVirtualCode implements VirtualCode {
       ];
       this.mappings = this.compilerMappings as unknown as VolarCodeMapping[];
       this.fatalErrors = result.errors;
+      this.activeStyleRegions = [];
       this.embeddedCodes = [];
     }
+
+    // Keep the connection-level style shim in sync with the live buffer.
+    noteStyleState(this.fileName, newCode, this.activeStyleRegions);
 
     this.snapshot = {
       getText: (start, end) => this.generatedCode.substring(start, end),
@@ -229,6 +239,11 @@ export class VeskVirtualCode implements VirtualCode {
 
     // Keep changeRange-based incremental updates for callers that care.
     void changeRange;
+  }
+
+  /** Style regions (source coords) of the currently served state. */
+  getStyleRegions(): { start: number; end: number; content: string }[] {
+    return this.activeStyleRegions;
   }
 
   private createCssEmbeddedCodes(styleRegions: { start: number; end: number; content: string }[]): VirtualCode[] {
