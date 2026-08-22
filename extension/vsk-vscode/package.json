@@ -2,7 +2,7 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "license": "MIT",
   "publisher": "vesk",
@@ -35,7 +35,11 @@
       },
       "vesk.lsp.trace.server": {
         "type": "string",
-        "enum": ["off", "messages", "verbose"],
+        "enum": [
+          "off",
+          "messages",
+          "verbose"
+        ],
         "default": "off",
         "description": "Trace LSP server communication"
       }

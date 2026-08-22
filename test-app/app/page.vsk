@@ -10,6 +10,7 @@ interface ThrowProps {
 	msg: string
 }
 
+
 component Home (){
 	<Head> <title> VeskTS test app </title></Head>
   const &[count] = track<number>(10)
