@@ -36,11 +36,15 @@ component Home (){
 		<h2 class="text-xl  font-semibold mb-2">Getting Started</h2>
 		<p>Edit <code class="bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono">app/page.vsk</code> to change this page.</p>
 	
-	<style>.gg {
+	<style>
+		
+		.gg {
 		color: red;
 		background: 3;
+		border: 4px;
 		
-	} </style>
+	} 
+</style>
 
 <Appx />
 <Appxx count={count} />
