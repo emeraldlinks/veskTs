@@ -81,7 +81,7 @@ export function createHoverPlugin(): LanguageServicePlugin {
                 content = tsHover.contents
                   .map((c: any) => (typeof c === 'string' ? c : c.value ?? ''))
                   .join('\n');
-              } else if (tsHover && tsHover.contents && typeof tsHover.contents.value === 'string') {
+              } else if (tsHover && tsHover.contents && typeof tsHover.contents === 'object' && 'value' in tsHover.contents && typeof tsHover.contents.value === 'string') {
                 content = tsHover.contents.value;
               }
               if (content.trim()) {

@@ -1,0 +1,21 @@
+import { track } from "@vesk/runtime"
+
+component Probe {
+  const &[count] = track(0)
+
+  function shout(msg: string): string {
+    try {
+      console.log(msg);
+      return Promise.resolve<string>(msg.toUpperCase());
+    } catch (e) {
+      throw new Error((e as Error).message);
+    }
+  }
+
+  <div class="wrap">
+    <p>{shout(String(count))}</p>
+    <br>
+    <Card title="x" />
+    <Link href="/">home</Link>
+  </div>
+}

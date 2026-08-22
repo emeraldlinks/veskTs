@@ -33,6 +33,11 @@
         "default": true,
         "description": "Enable Tailwind CSS class completion in class attributes"
       },
+      "vesk.autoCloseTags": {
+        "type": "boolean",
+        "default": true,
+        "description": "Automatically close HTML tags when typing '>' (e.g. <div> → <div></div>)"
+      },
       "vesk.lsp.trace.server": {
         "type": "string",
         "enum": [
@@ -47,6 +52,11 @@
   },
   "main": "./dist/extension.js",
   "contributes": {
+    "configurationDefaults": {
+      "emmet.includeLanguages": {
+        "vsk": "html"
+      }
+    },
     "languages": [
       {
         "id": "vsk",

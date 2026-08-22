@@ -8,7 +8,7 @@ import type { LanguageServicePlugin } from '@volar/language-service';
 import { CompletionItemKind, InsertTextFormat, MarkupKind } from 'vscode-languageserver-types';
 import { getVirtualCode, createLogging, isInsideImport, isInsideExport } from '../utils';
 import { VeskVirtualCode, scanReactiveBindings, scanComponentUsages } from '../language-plugin';
-import { EVENT_HANDLER_NAMES, EVENT_HANDLERS, COMPLETION_GLOBALS } from '../knowledge';
+import { EVENT_HANDLER_NAMES, EVENT_HANDLERS, COMPLETION_GLOBALS, HTML_ELEMENTS, VOID_ELEMENTS, HTML_ELEMENT_DOCS } from '../knowledge';
 
 const { log } = createLogging('[Vesk Completion Plugin]');
 
@@ -100,6 +100,24 @@ export function createCompletionPlugin(): LanguageServicePlugin {
           // Tag-open position: `<` (or `<Name`) — offer intrinsics + components.
           if (/<\s*$/.test(linePrefix) || /<\s*[A-Za-z]*$/.test(linePrefix)) {
             const items: any[] = [];
+            for (const tag of HTML_ELEMENTS) {
+              if (!wordRegex.test(tag)) {
+                continue;
+              }
+              items.push({
+                label: tag,
+                kind: CompletionItemKind.Class,
+                detail: 'HTML element',
+                documentation: VOID_ELEMENTS.has(tag)
+                  ? { kind: MarkupKind.Markdown, value: `${HTML_ELEMENT_DOCS[tag] ?? ''}\n\nVoid element — no closing tag.` }
+                  : HTML_ELEMENT_DOCS[tag]
+                    ? { kind: MarkupKind.Markdown, value: HTML_ELEMENT_DOCS[tag] }
+                    : undefined,
+                insertText: tag,
+                // Rank above generic TS scope suggestions at tag positions.
+                sortText: `0${tag}`,
+              });
+            }
             for (const tag of INTRINSIC_TAGS) {
               if (wordRegex.test(tag)) {
                 items.push({
@@ -107,6 +125,7 @@ export function createCompletionPlugin(): LanguageServicePlugin {
                   kind: CompletionItemKind.Class,
                   detail: 'Vesk intrinsic',
                   insertText: tag,
+                  sortText: `0${tag}`,
                 });
               }
             }
@@ -118,6 +137,7 @@ export function createCompletionPlugin(): LanguageServicePlugin {
                   kind: CompletionItemKind.Class,
                   detail: 'Component',
                   insertText: name,
+                  sortText: `1${name}`,
                 });
               }
             }

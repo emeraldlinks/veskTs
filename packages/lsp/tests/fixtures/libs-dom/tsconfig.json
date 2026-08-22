@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "lib": ["DOM", "DOM.Iterable"],
+    "strict": true,
+    "noEmit": true
+  },
+  "include": ["app/**/*.vsk"]
+}

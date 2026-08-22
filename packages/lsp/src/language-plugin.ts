@@ -36,6 +36,13 @@ export const resolveConfig = <T extends { options?: any }>(
   if (options.jsx === undefined) {
     options.jsx = ts.JsxEmit.Preserve;
   }
+  // Match `vesk typecheck`: don't auto-include every @types/* package from
+  // node_modules (Node typings would flood completion lists with Buffer /
+  // process / require at JSX positions). Users can still opt in via their
+  // tsconfig "types" array.
+  if (!options.types) {
+    options.types = [];
+  }
   // NOTE: no jsxImportSource default. The virtual code keeps JSX verbatim and
   // element typing comes from the global `JSX.IntrinsicElements` declared in
   // @vesk/compiler's AMBIENT file (injected by server.ts) — exactly like
@@ -58,21 +65,18 @@ export const resolveConfig = <T extends { options?: any }>(
     (options.lib ?? []).map(normalizeLibName).filter((lib): lib is string => typeof lib === 'string'),
   );
 
-  if (normalizedLibs.size === 0) {
-    const host = ts.createCompilerHost(options);
-    normalizedLibs.add(host.getDefaultLibFileName(options).toLowerCase());
-    normalizedLibs.add('lib.dom.d.ts');
-    normalizedLibs.add('lib.dom.iterable.d.ts');
-  }
+  // ALWAYS union in an ES + DOM baseline. Two failure modes are covered:
+  // - No tsconfig / no lib: without this the program would have no globals at
+  //   all (`Error`, `console`, `Promise` → TS2304).
+  // - A tsconfig whose `lib` omits ES entries (e.g. ["DOM"]): real tsc would
+  //   honour that, but .vsk is a browser-first superset of TS — code like
+  //   `throw new Error(...)` must always resolve, so we mirror what
+  //   `vesk typecheck` guarantees (es2022 chain + DOM + DOM.Iterable).
+  const host = ts.createCompilerHost(options);
+  normalizedLibs.add(host.getDefaultLibFileName(options).toLowerCase());
+  normalizedLibs.add('lib.dom.d.ts');
+  normalizedLibs.add('lib.dom.iterable.d.ts');
   options.lib = [...normalizedLibs];
-
-  if (!options.types) {
-    const host = ts.createCompilerHost(options);
-    const typeRoots = ts.getEffectiveTypeRoots(options, host);
-    if (typeRoots && typeRoots.length > 0) {
-      options.typeRoots = typeRoots;
-    }
-  }
 
   return {
     ...config,
@@ -118,6 +122,12 @@ export class VeskVirtualCode implements VirtualCode {
   originalCode = '';
   private mappingGenToSource: Map<string, CompilerCodeMapping> | null = null;
   private mappingSourceToGen: Map<string, CompilerCodeMapping> | null = null;
+  /** Last successfully compiled state — served during transient fatal states. */
+  private lastGood: {
+    generatedCode: string;
+    compilerMappings: CompilerCodeMapping[];
+    styleRegions: { start: number; end: number; content: string }[];
+  } | null = null;
 
   constructor(fileName: string, snapshot: IScriptSnapshot) {
     this.fileName = fileName;
@@ -138,20 +148,54 @@ export class VeskVirtualCode implements VirtualCode {
 
     const result = compileVskCodegen(newCode, { typedCells: true });
 
-    if (result.errors.length === 0 || typeof result.code === 'string') {
+    const hasErrors = result.errors.length > 0;
+
+    if (!hasErrors) {
+      this.originalCode = newCode;
+      this.generatedCode = result.code;
+      this.compilerMappings = result.mappings ?? [];
+      this.mappings = (result.mappings ?? []) as unknown as VolarCodeMapping[];
+      this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions);
+      this.lastGood = {
+        generatedCode: result.code,
+        compilerMappings: result.mappings ?? [],
+        styleRegions: result.styleRegions,
+      };
+
+      log(
+        `Compiled ${this.fileName}: ${this.generatedCode.length} generated chars, ${this.mappings.length} mappings`,
+      );
+    } else if (this.lastGood) {
+      // Transient error state (mid-typing an incomplete tag/expression): the
+      // compiler still returns a PARTIAL code string here, but serving it
+      // degrades completions/hover to scope-global junk over half-valid TSX.
+      // Keep serving the last successfully compiled virtual code instead so
+      // language features stay sane; the compile error itself is still
+      // surfaced via fatalErrors (compileErrors plugin).
+      logWarning(
+        `Vesk compilation failed transiently for ${this.fileName} — keeping last good virtual code (${result.errors.length} errors)`,
+      );
+      this.originalCode = newCode;
+      this.generatedCode = this.lastGood.generatedCode;
+      this.compilerMappings = this.lastGood.compilerMappings;
+      this.mappings = this.lastGood.compilerMappings as unknown as VolarCodeMapping[];
+      this.fatalErrors = result.errors;
+      this.embeddedCodes = this.createCssEmbeddedCodes(this.lastGood.styleRegions);
+    } else if (typeof result.code === 'string') {
+      // Broken on first open (no prior good state): serve the partial
+      // generated code so TS surfaces the broken construct, keep completion
+      // enabled so the user can still fix it.
+      logWarning(
+        `Vesk compilation failed for ${this.fileName} — using partial code (${result.errors.length} errors)`,
+      );
       this.originalCode = newCode;
       this.generatedCode = result.code;
       this.compilerMappings = result.mappings ?? [];
       this.mappings = (result.mappings ?? []) as unknown as VolarCodeMapping[];
       this.fatalErrors = result.errors;
-      this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions);
-
-      log(
-        `Compiled ${this.fileName}: ${this.generatedCode.length} generated chars, ${this.mappings.length} mappings, ${this.fatalErrors.length} errors`,
-      );
+      this.embeddedCodes = this.createCssEmbeddedCodes(result.styleRegions ?? []);
     } else {
-      // Fatal mode: feed the raw source back so TS parses it and surfaces the
-      // broken construct, keep completion enabled so the user can still fix it.
+      // Total failure with no prior good state: feed the raw source back.
       logWarning(`Vesk compilation failed for ${this.fileName}`);
       this.originalCode = newCode;
       this.generatedCode = newCode;

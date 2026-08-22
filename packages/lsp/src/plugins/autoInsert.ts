@@ -1,5 +1,21 @@
 /**
  * Auto-insert plugin — closes HTML tags when the user types `>`.
+ *
+ * Volar dispatches this against the GENERATED TSX document: `document` is the
+ * virtual code snapshot, `position` is the caret mapped into generated
+ * coordinates, and `lastChange.rangeOffset` is pre-mapped by volar's
+ * provideAutoInsertSnippet wrapper. Component bodies keep user JSX verbatim,
+ * so scanning the generated text directly is exact — no mapping lookups.
+ *
+ * The VS Code client must actively send the `volar/client/autoInsert` request
+ * on text changes (see extension/vsk-vscode/src/extension.ts); vanilla
+ * vscode-languageclient does not do this on its own.
+ *
+ * The back-scan is a small state machine: it steps over quoted attribute
+ * values ("…" / '…'), template literals (`…`), and braced expressions ({…},
+ * including strings nested inside), so tags WITH attributes auto-close too —
+ * a naive scan that stops at the first quote would kill every
+ * `<div class="x">`.
  */
 
 import type { LanguageServicePlugin } from '@volar/language-service';
@@ -27,6 +43,76 @@ const VOID_ELEMENTS = new Set([
   'wbr',
 ]);
 
+/** Scan bounds so pathological input can't stall completion latency. */
+const MAX_SCAN_CHARS = 2000;
+const MAX_SCAN_LINES = 12;
+
+/**
+ * Walk backwards from the character before `offset` to find the `<` that
+ * opens the tag whose `>` was just typed. Returns the index of `<`, or -1.
+ *
+ * Terminates without a match when the scan proves the caret is not inside a
+ * tag: another unquoted `>` (sibling tag / arrow function), a statement `;`,
+ * a `{` at brace depth 0 (JSX expression region), or an unterminated string.
+ */
+function findTagOpen(text: string, offset: number): number {
+  let braces = 0;
+  let quote: string | null = null;
+  let newlines = 0;
+
+  const min = Math.max(0, offset - MAX_SCAN_CHARS);
+  let i = offset - 2;
+  for (; i >= min; i--) {
+    const char = text[i];
+
+    if (char === '\n') {
+      newlines++;
+      if (newlines > MAX_SCAN_LINES) {
+        return -1;
+      }
+    }
+
+    if (quote) {
+      if (char === '\\' && i - 1 >= min) {
+        i--; // skip escaped character inside string
+        continue;
+      }
+      if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (braces > 0) {
+      if (char === '}') {
+        braces++;
+      } else if (char === '{') {
+        braces--;
+      } else if (char === '"' || char === "'" || char === '`') {
+        quote = char;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'" || char === '`') {
+      quote = char;
+      continue;
+    }
+    if (char === '}') {
+      braces++;
+      continue;
+    }
+    if (char === '<') {
+      return i;
+    }
+    // Not plausibly part of an open tag.
+    if (char === '>' || char === '{' || char === ';') {
+      return -1;
+    }
+  }
+  return -1;
+}
+
 export function createAutoInsertPlugin(): LanguageServicePlugin {
   return {
     name: 'vesk-auto-insert',
@@ -36,6 +122,17 @@ export function createAutoInsertPlugin(): LanguageServicePlugin {
       },
     },
     create(context) {
+      // volar-service-typescript's `typescript-syntactic` plugin answers the
+      // same request with its own JSX close-tag snippets (e.g. `$0</br>` even
+      // for void elements). Volar takes the FIRST non-empty result, so ours
+      // already wins when it has an answer — but for every case we decline
+      // (void, self-closing, components) TS's would leak through. Disable
+      // theirs entirely: vesk owns tag auto-insertion.
+      for (const [plugin, instance] of context.plugins) {
+        if (plugin.name === 'typescript-syntactic' && instance.provideAutoInsertSnippet) {
+          instance.provideAutoInsertSnippet = undefined;
+        }
+      }
       return {
         async provideAutoInsertSnippet(document, position, lastChange, _token) {
           if (!document.uri.endsWith('.vsk')) {
@@ -52,50 +149,34 @@ export function createAutoInsertPlugin(): LanguageServicePlugin {
             return null;
           }
 
+          const text = document.getText();
           const offset = document.offsetAt(position);
-          const mapping = virtualCode.findMappingByGeneratedRange(lastChange.rangeOffset, offset);
-
-          if (!mapping) {
+          // Tolerate small mapping drift: skip whitespace back to what must be
+          // the typed '>'.
+          let caret = Math.min(offset, text.length);
+          while (caret > 0 && /\s/.test(text[caret - 1])) {
+            caret--;
+          }
+          if (caret < 1 || text[caret - 1] !== '>') {
             return null;
           }
 
-          const sourceOffset = mapping.sourceOffsets[0];
-          const sourceCode = virtualCode.originalCode;
-
-          if (sourceCode[sourceOffset - 1] === '/') {
-            // self-closing tag '/>'
+          // Self-closing tag '/>'.
+          if (text[caret - 2] === '/') {
             return null;
           }
 
-          let found = false;
-          let i = sourceOffset - 1;
-          for (; i >= 0; i--) {
-            const char = sourceCode[i];
-            if (char === '<') {
-              found = true;
-              break;
-            }
-            if (char === '\n') {
-              break;
-            }
-            if (char === '>' && sourceCode[i - 1] !== '/') {
-              break;
-            }
-            if (char === '"' || char === "'") {
-              break;
-            }
-          }
-          if (!found) {
+          const tagOpen = findTagOpen(text, caret);
+          if (tagOpen < 0) {
             return null;
           }
 
-          const isComponentTag = /^[A-Z][\w$]*/.test(sourceCode.slice(i + 1));
+          const isComponentTag = /^[A-Z][\w$]*/.test(text.slice(tagOpen + 1));
           if (isComponentTag) {
             return null;
           }
 
-          const tagNameStart = i + 1;
-          const tagNameMatch = sourceCode.slice(tagNameStart).match(/^[a-zA-Z][\w$-]*/);
+          const tagNameMatch = text.slice(tagOpen + 1).match(/^[a-zA-Z][\w$-]*/);
           if (!tagNameMatch) {
             return null;
           }
