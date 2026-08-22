@@ -297478,6 +297478,34 @@ function findTagOpen(text, offset) {
     }
     return -1;
 }
+/**
+ * Decide whether the `<` at `tagOpen` sits at a JSX expression start — the
+ * only place a component tag may legally appear, versus generic arguments
+ * (`foo<Card>(x)`) or comparisons (`a < Card`). Skips whitespace back from
+ * the `<`; if the previous character starts an identifier, the whole word
+ * must be an expression-introducing keyword. Anything else (braces, parens,
+ * brackets, `=`, `,`, ternary/logical operators, `>` of a sibling tag or
+ * arrow, or start-of-file) counts as an expression position.
+ */
+function isJsxExpressionStart(text, tagOpen) {
+    const KEYWORDS = new Set([
+        'return', 'typeof', 'case', 'do', 'else', 'yield', 'await', 'default', 'throw', 'in', 'of',
+    ]);
+    let i = tagOpen - 1;
+    while (i >= 0 && /\s/.test(text[i]))
+        i--;
+    if (i < 0) {
+        return true;
+    }
+    if (/[A-Za-z0-9_$]/.test(text[i])) {
+        let j = i;
+        while (j >= 0 && /[A-Za-z0-9_$]/.test(text[j]))
+            j--;
+        const word = text.slice(j + 1, i + 1);
+        return KEYWORDS.has(word);
+    }
+    return true;
+}
 function createAutoInsertPlugin() {
     return {
         name: 'vesk-auto-insert',
@@ -297491,8 +297519,8 @@ function createAutoInsertPlugin() {
             // same request with its own JSX close-tag snippets (e.g. `$0</br>` even
             // for void elements). Volar takes the FIRST non-empty result, so ours
             // already wins when it has an answer — but for every case we decline
-            // (void, self-closing, components) TS's would leak through. Disable
-            // theirs entirely: vesk owns tag auto-insertion.
+            // (void, self-closing, generic-position components) TS's would leak
+            // through. Disable theirs entirely: vesk owns tag auto-insertion.
             for (const [plugin, instance] of context.plugins) {
                 if (plugin.name === 'typescript-syntactic' && instance.provideAutoInsertSnippet) {
                     instance.provideAutoInsertSnippet = undefined;
@@ -297529,10 +297557,6 @@ function createAutoInsertPlugin() {
                     if (tagOpen < 0) {
                         return null;
                     }
-                    const isComponentTag = /^[A-Z][\w$]*/.test(text.slice(tagOpen + 1));
-                    if (isComponentTag) {
-                        return null;
-                    }
                     const tagNameMatch = text.slice(tagOpen + 1).match(/^[a-zA-Z][\w$-]*/);
                     if (!tagNameMatch) {
                         return null;
@@ -297540,6 +297564,20 @@ function createAutoInsertPlugin() {
                     const tagName = tagNameMatch[0];
                     if (VOID_ELEMENTS$1.has(tagName)) {
                         return null;
+                    }
+                    // Component (uppercase) tags close only at JSX expression starts:
+                    // generic arguments (`foo<Card>(x)`), comparisons (`a < Card`) and
+                    // generic-arrow signatures (`<T,>(…)`) must not be touched.
+                    if (/^[A-Z]/.test(tagName)) {
+                        let j = caret - 2;
+                        while (j > tagOpen && /\s/.test(text[j]))
+                            j--;
+                        if (text[j] === ',') {
+                            return null; // `<T,>` type-parameter list
+                        }
+                        if (!isJsxExpressionStart(text, tagOpen)) {
+                            return null;
+                        }
                     }
                     log$6(`Auto-insert closing tag for '${tagName}'`);
                     return `</${tagName}>`;

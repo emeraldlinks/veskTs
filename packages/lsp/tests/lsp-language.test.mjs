@@ -285,9 +285,31 @@ async function main() {
     snip = await s.autoInsert(uri, GLOBALS_DOC, after(GLOBALS_DOC, '<br>'));
     assert(snip === null, `void element <br> does not auto-close (got ${JSON.stringify(snip)})`);
 
-    // d. component tag (uppercase)
+    // d. component tag (uppercase) at a JSX position closes
     snip = await s.autoInsert(uri, GLOBALS_DOC, after(GLOBALS_DOC, '<Link href="/">'));
-    assert(snip === null, `component tag does not auto-close via this plugin (got ${JSON.stringify(snip)})`);
+    assert(snip === '</Link>', `component tag <Link> auto-closes (got ${JSON.stringify(snip)})`);
+
+    // d2. component tag in a bare statement-mode body (prev context `{`)
+    const compOld = '  <Link href="/">home</Link>';
+    const compNew = '  <Card title="Hello"></Card>';
+    const compDoc = GLOBALS_DOC.replace(compOld, compNew);
+    s.replace(uri, 5, compOld, compNew, GLOBALS_DOC);
+    await sleep(2500);
+    snip = await s.autoInsert(uri, compDoc, after(compDoc, '<Card title="Hello">'));
+    assert(snip === '</Card>', `component tag in statement body auto-closes (got ${JSON.stringify(snip)})`);
+    s.replace(uri, 6, compNew, compOld, compDoc);
+    await sleep(2000);
+
+    // d3. generic-looking position does NOT close: identifier before `<`
+    const genOld = '  <Link href="/">home</Link>';
+    const genNew = '  const v = make<Card>(1);';
+    const genericDoc = GLOBALS_DOC.replace(genOld, genNew);
+    s.replace(uri, 7, genOld, genNew, GLOBALS_DOC);
+    await sleep(2500);
+    snip = await s.autoInsert(uri, genericDoc, after(genericDoc, '<Card'));
+    assert(snip === null, `generic-argument <Card> does not auto-close (got ${JSON.stringify(snip)})`);
+    s.replace(uri, 8, genNew, genOld, genericDoc);
+    await sleep(2000);
 
     // e. self-closing '/>'
     snip = await s.autoInsert(uri, GLOBALS_DOC, after(GLOBALS_DOC, '<Card title="x" />'));
