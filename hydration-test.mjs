@@ -1043,7 +1043,9 @@ async function main() {
 
   // ── Test 18: SSR data integrity across all routes ──
   console.log('\n=== TEST 18: SSR data integrity across all routes ===');
-  const DATA_ROUTES = new Set(['/async', '/posts']);
+  // '/' is a data route: Home demos `useFetch(..., { into })` with the posts
+  // resource, so it embeds exactly one ssr-data script like /async and /posts.
+  const DATA_ROUTES = new Set(['/', '/async', '/posts']);
   const FULL_ROUTES = [
     '/', '/about', '/blog', '/blog/hello-world', '/async', '/comp-test',
     '/actions', '/posts', '/empty', '/map', '/statements', '/broken',
@@ -1167,7 +1169,7 @@ async function main() {
     // never reference the ssr-data script; data routes must reference it exactly
     // once. Mirrors the reported "script leaks into other pages' view-source".
     console.log('  18d: fresh-document data-script isolation');
-    for (const [route, expected] of [['/about', 0], ['/async', 1], ['/posts', 1], ['/map', 0]]) {
+    for (const [route, expected] of [['/', 1], ['/about', 0], ['/async', 1], ['/posts', 1], ['/map', 0]]) {
       const page = await browser.newPage();
       await goto(page, BASE + route, { waitUntil: 'networkidle0' });
       const html = await page.content();

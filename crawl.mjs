@@ -57,7 +57,9 @@ const HYDRATION_DEADLINE = 5000;
 // leakTolerance:  error-boundary page that deliberately renders a stack trace;
 //                 matching content is reported as tolerated, not failed.
 const ROUTES = [
-  { route: '/' },
+  // '/' is a data route: Home demos `useFetch(..., { into })` with the posts
+  // resource, so it embeds exactly one ssr-data script like /async and /posts.
+  { route: '/', isData: true },
   { route: '/about' },
   { route: '/blog' },
   { route: '/blog/hello-world' },

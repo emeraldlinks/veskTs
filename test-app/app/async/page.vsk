@@ -13,7 +13,7 @@ async component AsyncPage() {
 		<title>Async — async components</title>
 	</Head>
 
-	const posts = useFetch<Post[]>('/api/posts')
+	const posts = await useFetch<Post[]>('/api/posts')
 
 	<h1 class="text-3xl font-bold mb-4">Async Demo</h1>
 	<p class="text-gray-500 mb-6">

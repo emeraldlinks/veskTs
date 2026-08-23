@@ -23,7 +23,7 @@ export interface Post {
 
 async component Home (){
 
-	const &[count] = track<number>(0)
+	const &[count] = track<number>(10)
 		const &[posts, postCe] = track<Post[]>([])
 			useFetch("/api/posts", {
 				key: "posts",
