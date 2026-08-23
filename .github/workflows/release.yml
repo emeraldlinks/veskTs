@@ -104,6 +104,15 @@ jobs:
         with:
           node-version: 22
 
+      - name: Install Chrome for puppeteer-core
+        id: chrome
+        run: |
+          npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome" > /dev/null
+          CHROME="$(find "$RUNNER_TEMP/chrome" -type f -name chrome | head -1)"
+          if [ -z "$CHROME" ]; then echo "chrome binary not found" >&2; exit 1; fi
+          echo "path=$CHROME" >> "$GITHUB_OUTPUT"
+          echo "chrome at: $CHROME"
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
@@ -164,6 +173,15 @@ jobs:
       - uses: denoland/setup-deno@v2
         with:
           deno-version: v2.x
+
+      - name: Install Chrome for puppeteer-core
+        id: chrome
+        run: |
+          npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome" > /dev/null
+          CHROME="$(find "$RUNNER_TEMP/chrome" -type f -name chrome | head -1)"
+          if [ -z "$CHROME" ]; then echo "chrome binary not found" >&2; exit 1; fi
+          echo "path=$CHROME" >> "$GITHUB_OUTPUT"
+          echo "chrome at: $CHROME"
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
