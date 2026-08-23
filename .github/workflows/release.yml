@@ -35,6 +35,10 @@ jobs:
         working-directory: packages/plugin-tailwind
         run: npm run build
 
+      - name: Install test-app dependencies (haul binaries, tailwindcss, runtime tarballs)
+        working-directory: test-app
+        run: npm install --no-audit --no-fund
+
       - name: Install Chrome for puppeteer-core
         id: chrome
         run: |

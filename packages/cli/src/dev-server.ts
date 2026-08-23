@@ -18,10 +18,17 @@ import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
 
 function resolveRuntimeDir(projectDir: string): string | null {
-  const pkgDir = resolve(projectDir, 'node_modules', '@vesk/runtime');
-  if (existsSync(join(pkgDir, 'ripple-runtime.js'))) return pkgDir;
-  const distDir = join(pkgDir, 'dist');
-  if (existsSync(join(distDir, 'ripple-runtime.js'))) return distDir;
+  const candidates = [
+    // installed app layout
+    resolve(projectDir, 'node_modules', '@vesk', 'runtime'),
+    // monorepo checkout (tests/probes run from the repo root)
+    resolve(import.meta.dirname ?? '.', '..', '..', 'runtime', 'dist'),
+  ];
+  for (const dir of candidates) {
+    if (existsSync(join(dir, 'ripple-runtime.js'))) return dir;
+    const distDir = join(dir, 'dist');
+    if (existsSync(join(distDir, 'ripple-runtime.js'))) return distDir;
+  }
   return null;
 }
 
@@ -110,6 +117,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
   }
   const runtimeDirUnchecked = resolveRuntimeDir(projectDir);
   if (!runtimeDirUnchecked) {
+    console.error('vesk dev: @vesk/runtime not found — run "npm install" in the project (or build packages/runtime in the monorepo)');
     process.exit(1);
   }
   const runtimeDir: string = runtimeDirUnchecked;
