@@ -94,9 +94,119 @@ jobs:
           cat /tmp/dev.log
           echo "===== end /tmp/dev.log ====="
 
+  haul-prod:
+    name: Haul prod engine (leakage isolation, build + start, hydration, crawl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build packages (compiler/runtime/adapter/sidecar)
+        run: npx tsx packages/cli/src/build-packages.ts
+
+      - name: Install test-app dependencies
+        working-directory: test-app
+        run: npm install --no-audit --no-fund
+
+      - name: Leakage isolation suite (haul build + prod server)
+        run: node test-app/leakage-test.mjs
+
+      - name: Haul production build
+        working-directory: test-app
+        run: npm run build
+
+      - name: Start haul production server
+        working-directory: test-app
+        run: |
+          (setsid nohup npm run start > /tmp/haul-start.log 2>&1 < /dev/null &)
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null http://localhost:3000/ && break
+            sleep 1
+          done
+          curl -s -o /dev/null -w "haul start: %{http_code}\n" http://localhost:3000/
+
+      - name: Hydration test against haul prod
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+          BASE: http://localhost:3000
+        run: node hydration-test.mjs
+
+      - name: SSR crawl against haul prod
+        if: always()
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+          BASE: http://localhost:3000
+        run: node crawl.mjs
+
+      - name: Dump haul start log (always)
+        if: always()
+        run: |
+          echo "===== /tmp/haul-start.log ====="
+          cat /tmp/haul-start.log || true
+          echo "===== end /tmp/haul-start.log ====="
+
+  deploy-targets:
+    name: Platform deployment targets (vercel/netlify/cloudflare/deno/aws)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Build packages (compiler/runtime/adapter)
+        run: npx tsx packages/cli/src/build-packages.ts
+
+      - name: Build plugin-tailwind dist
+        working-directory: packages/plugin-tailwind
+        run: npm run build
+
+      - name: Install test-app dependencies
+        working-directory: test-app
+        run: npm install --no-audit --no-fund
+
+      - name: Smoke vercel
+        run: npx tsx scripts/platform-smoke.mjs vercel
+
+      - name: Smoke netlify
+        run: npx tsx scripts/platform-smoke.mjs netlify
+
+      - name: Smoke cloudflare
+        run: npx tsx scripts/platform-smoke.mjs cloudflare
+
+      - name: Smoke deno (build + live serve)
+        run: npx tsx scripts/platform-smoke.mjs deno
+
+      - name: Smoke aws
+        run: npx tsx scripts/platform-smoke.mjs aws
+
+      - name: Hydration certification — edge bundle
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+        run: npx tsx scripts/platform-hydration.mjs edge
+
+      - name: Hydration certification — deno (live serve)
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+        run: npx tsx scripts/platform-hydration.mjs deno
+
   release:
     name: Publish to npm + GitHub tag & release
-    needs: test
+    needs: [test, haul-prod, deploy-targets]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       contains(github.event.head_commit.message, 'publish')

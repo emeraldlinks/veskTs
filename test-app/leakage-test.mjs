@@ -33,7 +33,10 @@ function assert(condition, msg) {
 }
 
 async function get(path) {
-  const res = await fetch(`${BASE}${path}`, { redirect: 'manual' });
+  // Tolerate relative refs stripped of their leading slash (e.g. regex
+  // matches like `ssr-data.js?t=...` from HTML src="/ssr-data.js?t=...").
+  const url = BASE + (path.startsWith('/') ? path : '/' + path);
+  const res = await fetch(url, { redirect: 'manual' });
   const body = await res.text();
   return { status: res.status, type: res.headers.get('content-type') || '', body };
 }
@@ -240,11 +243,16 @@ const shoes = await get('/store/shoes');
 assert(shirt.body.includes('shirt') && !shirt.body.includes('Item: shoes'), 'store/shirt contains only its own param');
 assert(shoes.body.includes('shoes') && !shoes.body.includes('Item: shirt'), 'store/shoes contains only its own param');
 
-// Serialized useFetch data isolation: posts JSON must stay on /posts.
+// Serialized useFetch data isolation. `/` legitimately renders its own posts
+// demo (added to the fixture), so 'Hello Vesk' is NOT a leak marker there —
+// instead we assert / does not contain the /posts page's unique copy, and
+// every OTHER route must not contain the posts data at all.
 const POSTS_TITLE = 'Hello Vesk'; // a real post title from /api/posts
+const POSTS_PAGE_UNIQUE = 'Fetched with useFetch'; // copy that exists only on /posts
 const posts = await get('/posts');
 assert(posts.body.includes(POSTS_TITLE), 'posts page contains its own fetched data');
-for (const path of ['/', '/about', '/store/shirt', '/typed', '/dataerror', '/broken']) {
+assert(!posts.body.includes('does not leak'), 'sanity: marker strings present');
+for (const path of ['/about', '/store/shirt', '/typed', '/dataerror', '/broken']) {
   const r = await get(path);
   assert(!r.body.includes(POSTS_TITLE), `${path} does not leak /posts fetched data`);
   const m = r.body.match(/ssr-data\.js\?t=([a-z0-9]+)/);
@@ -252,6 +260,11 @@ for (const path of ['/', '/about', '/store/shirt', '/typed', '/dataerror', '/bro
     const data = await get(m[0]);
     assert(!data.body.includes(POSTS_TITLE), `${path} ssr-data payload does not contain posts data`);
   }
+}
+{
+  const r = await get('/');
+  assert(r.body.includes(POSTS_TITLE), '/ renders its own posts demo data');
+  assert(!r.body.includes(POSTS_PAGE_UNIQUE), '/ does not leak /posts page content');
 }
 
 // Middleware locals isolation: Alice/db-result live only in protected API responses.

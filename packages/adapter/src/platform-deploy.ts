@@ -310,7 +310,8 @@ function shellFor(platform: Platform): Shell {
         staticServe: 'disk-deno',
         bootstrap: [
           'if (typeof Deno !== "undefined" && typeof Deno.serve === "function") {',
-          '  Deno.serve(async (request) => {',
+          '  const __veskPort = Number(Deno.env.get("PORT") || 8000);',
+          '  Deno.serve({ port: __veskPort }, async (request) => {',
           '    const staticResponse = await serveEmbeddedStatic(request);',
           '    if (staticResponse) return staticResponse;',
           '    return handleRequest(request);',
