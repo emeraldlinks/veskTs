@@ -181,6 +181,111 @@ test('typecheck: const track decl typechecks (no "const let" regression)', () =>
   }
 });
 
+test('typecheck: un-awaited useFetch is not the data — direct member access errors', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const posts = useFetch<{ id: number }[]>('/api/posts')\n  for (const p of posts) {\n    <p>{p.id}</p>\n  }\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    if (!errors.some((e) => e.file.includes('page.vsk'))) {
+      throw new Error('expected tsc errors for iterating an un-awaited useFetch resource');
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: awaited useFetch yields T', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const posts = await useFetch<{ id: number }[]>('/api/posts')\n  for (const p of posts) {\n    <p>{p.id}</p>\n  }\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for awaited useFetch, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: useFetch into a tracked cell needs no await and stays clean', () => {
+  const f = fixture({
+    'app/page.vsk': `component Page() {\n  const &[posts, postsCell] = track<{ id: number }[]>([])\n  const res = useFetch('/api/posts', { key: 'posts', into: postsCell })\n  <span>{res.loading ? 'Loading' : 'Fresh'}</span>\n  <button onClick={() => res.refresh()}>r</button>\n  for (const p of posts) {\n    <p>{p.id}</p>\n  }\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for useFetch-into-cell, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: unknown useFetch option keys error (options are typed)', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const posts = await useFetch<{ id: number }[]>('/api/posts', { kye: 'posts' })\n  <p>{posts.length}</p>\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    if (!errors.some((e) => e.file.includes('page.vsk'))) {
+      throw new Error('expected tsc error for misspelled useFetch option key');
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: into must be a tracked cell (wrong type errors)', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const posts = await useFetch<{ id: number }[]>('/api/posts', { into: 42 })\n  <p>{posts.length}</p>\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    if (!errors.some((e) => e.file.includes('page.vsk'))) {
+      throw new Error('expected tsc error for non-cell into value');
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: full typed useFetch options set stays clean', () => {
+  const f = fixture({
+    'app/page.vsk': [
+      'component Page() {',
+      '  const &[posts, cell] = track<string[]>([])',
+      "  useFetch('/api/posts', {",
+      "    key: 'posts',",
+      '    into: cell,',
+      '    staleTime: 30000,',
+      '    keepPreviousData: true,',
+      '    retry: 2,',
+      '    retryDelay: 400,',
+      '    timeout: 8000,',
+      '    enabled: true,',
+      '    dedupe: true,',
+      "    method: 'GET',",
+      "    headers: { accept: 'application/json' },",
+      '  })',
+      '  <p>{posts.length}</p>',
+      '}',
+    ].join('\n'),
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for fully-typed options, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('typecheck: typed JSX intrinsics accept known attributes (AMBIENT IntrinsicElements)', () => {
   const f = fixture({
     'app/page.vsk': [

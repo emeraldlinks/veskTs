@@ -391,7 +391,43 @@ declare function tick(): Promise<void>;
 declare function flushSync(fn: () => void): void;
 declare function on_destroy(fn: () => void): void;
 declare function createContext<T>(defaultValue?: T): { id: symbol; defaultValue: T | undefined };
-declare function useFetch<T = unknown>(...args: unknown[]): T;
+// useFetch returns a THENABLE resource, not the data itself. In async
+// components you must \`await\` it before reading/iterating the payload;
+// passing \`into: <tracked cell>\` writes the payload into the cell and makes
+// awaiting unnecessary (the return value can be ignored).
+interface VeskResource<T> {
+  loading: boolean;
+  error: unknown;
+  data: T | undefined;
+  refresh(): void;
+  abort(): void;
+  then<TResult1 = T, TResult2 = never>(
+    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | undefined | null,
+  ): PromiseLike<TResult1 | TResult2>;
+}
+interface VeskUseFetchOptions<T> {
+  /** Cache/SSR key — defaults to the URL string. */
+  key?: string;
+  /** Target tracked cell (from track<T>()) — the payload is written into it, so awaiting is unnecessary. */
+  into?: Cell<T>;
+  staleTime?: number;
+  keepPreviousData?: boolean;
+  retry?: number;
+  retryDelay?: number;
+  timeout?: number;
+  enabled?: boolean;
+  dedupe?: boolean;
+  method?: string;
+  headers?: Record<string, string>;
+  body?: unknown;
+  credentials?: 'omit' | 'same-origin' | 'include';
+  signal?: { readonly aborted: boolean };
+}
+declare function useFetch<T = unknown>(
+  urlOrFn: string | (() => Promise<T>),
+  options?: VeskUseFetchOptions<T>,
+): VeskResource<T>;
 declare function useRouter(): unknown;
 declare function useParams(): Record<string, string>;
 declare function usePathname(): string;

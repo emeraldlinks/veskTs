@@ -93,6 +93,50 @@ export function buildPackages(force = false): void {
     writeFileSync(join(distDir, 'package.json'), distPackageJson(cfg.name, cfg.entry, cfg.serverEntry, srcPkg.version || '1.0.0'));
     console.log(`[build] ${cfg.name} -> dist`);
   }
+  buildSidecar(force);
+}
+
+// The haul sidecar (`packages/haul/internal/sidecar/server.ts`) is bundled into
+// `packages/cli/dist/sidecar.js` — the copy the `vesk` package ships and the Go
+// haul engine spawns. A stale sidecar silently re-introduces fixed bugs into
+// dev/prod servers built from tarballs, so it is part of every build.
+export function buildSidecar(force = false): void {
+  const cliDir = resolve(root, 'packages', 'cli');
+  const sidecarSrc = resolve(root, 'packages', 'haul', 'internal', 'sidecar');
+  const outPath = join(cliDir, 'dist', 'sidecar.js');
+
+  let newest = 0;
+  const scan = (dir: string): void => {
+    for (const name of readdirSync(dir)) {
+      const p = join(dir, name);
+      const st = statSync(p);
+      if (st.isDirectory()) scan(p);
+      else if (st.isFile() && /\.tsx?$/.test(name) && !name.endsWith('.test.ts')) {
+        newest = Math.max(newest, st.mtimeMs);
+      }
+    }
+  };
+  scan(sidecarSrc);
+
+  if (!force && existsSync(outPath) && statSync(outPath).mtimeMs >= newest) return;
+
+  // esbuild is a dependency of packages/cli, not the repo root — resolve
+  // relative to this file so the script works from any cwd.
+  const esbuild = createRequire(import.meta.url)('esbuild') as typeof import('esbuild');
+  console.log('[build] @vesk/vesk-cli sidecar -> esbuild');
+  const res = esbuild.buildSync({
+    entryPoints: [join(sidecarSrc, 'server.ts')],
+    bundle: true,
+    platform: 'node',
+    target: 'node20',
+    outfile: outPath,
+    format: 'esm',
+    sourcemap: false,
+    external: ['typescript', '@vesk/compiler', '@vesk/compiler/*', '@vesk/runtime', '@vesk/runtime/*', 'esbuild', 'esbuild-wasm'],
+  });
+  if (res.errors.length > 0) {
+    throw new Error(`esbuild failed for haul sidecar: ${res.errors.map(e => e.text).join('; ')}`);
+  }
 }
 
 export function ensurePackagesBuilt(): void {

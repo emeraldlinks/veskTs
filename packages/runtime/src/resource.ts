@@ -19,7 +19,8 @@ export interface Resource<T> extends PromiseLike<T> {
 
 export interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> {
 	key?: string;
-	into?: Tracked;
+	/** Target tracked cell — the fetched payload is written into it, so awaiting is unnecessary. */
+	into?: Tracked<T>;
 	body?: unknown;
 	staleTime?: number;
 	keepPreviousData?: boolean;

@@ -23,7 +23,7 @@ export const VESK_INTRINSICS: { name: string; kind: CompletionItemKind; detail: 
   { name: 'useParams', kind: CompletionItemKind.Function, detail: 'Access route parameters', docs: 'Returns the current route parameters object.', signature: 'useParams(): Record<string, string>' },
   { name: 'usePathname', kind: CompletionItemKind.Function, detail: 'Access current pathname', docs: 'Returns the current URL pathname as a reactive string.', signature: 'usePathname(): string' },
   { name: 'useSearchParams', kind: CompletionItemKind.Function, detail: 'Access search parameters', docs: 'Returns reactive search params with get/set/delete.', signature: 'useSearchParams(): URLSearchParams' },
-  { name: 'useFetch', kind: CompletionItemKind.Function, detail: 'Data fetching with SSR support', docs: 'useFetch(url) — fetches data with SSR hydration support.', signature: 'useFetch<T>(url: string, init?: RequestInit): { data: T | null; error: Error | null; loading: boolean }' },
+  { name: 'useFetch', kind: CompletionItemKind.Function, detail: 'Data fetching with SSR support — thenable, await in async components', docs: 'useFetch<T>(url, options?) returns a thenable Resource<T>. In async components: `const posts = await useFetch<Post[]>(\'/api/posts\')`. To skip awaiting, fetch into a tracked cell: `useFetch(url, { key, into: cell })` — the payload lands in the cell and the return value can be ignored. Resource also exposes `.loading`, `.error`, `.data`, `.refresh()`, `.abort()`.', signature: 'useFetch<T>(url: string | (() => Promise<T>), options?: { key?: string; into?: unknown; staleTime?: number; ... }): Resource<T> (thenable — await for T)' },
   { name: 'Form', kind: CompletionItemKind.Class, detail: 'SSR-first form component', docs: '<Form action="/api/submit" onSubmit={...}> — validates and submits forms.', signature: 'Form(props: { action: string; onSubmit?: (data: FormData) => void; children?: unknown })' },
   { name: 'Field', kind: CompletionItemKind.Class, detail: 'Form field with validation', docs: '<Field name="email" required email> — form field with validation display.', signature: 'Field(props: { name: string; required?: boolean; children?: unknown })' },
   { name: 'required', kind: CompletionItemKind.Function, detail: 'Validation: required', docs: 'required("Custom message?") — validates value is non-empty.', signature: 'required(message?: string): Validator' },
@@ -408,8 +408,11 @@ export const RUNTIME_SIGNATURES: Record<string, { label: string; params: { label
   },
   useFetch: {
     label: 'useFetch(url)',
-    params: [{ label: 'url', docs: 'URL to fetch. Supports SSR preloads.' }],
-    docs: 'Fetches data with SSR hydration support.',
+    params: [
+      { label: 'url', docs: 'URL to fetch. Supports SSR preloads.' },
+      { label: 'options', docs: '{ key?, into?, staleTime?, retry?, timeout?, enabled? } — pass `into` (a tracked cell) to skip awaiting.' },
+    ],
+    docs: 'Returns a thenable Resource<T>. Await it in async components to get T; or pass `into: cell` so the payload is written into the tracked cell synchronously. Without await, the resource itself is NOT the data.',
   },
   useNavigate: {
     label: 'useNavigate()',

@@ -691,7 +691,7 @@ async function _getImpl(): Promise<Record<string, Function | null>> {
 		_signImpl = await import('@vesk/compiler/src/server-utils') as unknown as Record<string, Function | null>;
 	} catch {
 		try {
-			const mod = await import('@vesk/compiler') as Record<string, Function | null>;
+			const mod = await import('@vesk/compiler') as unknown as Record<string, Function | null>;
 			_signImpl = mod;
 		} catch {
 			_signImpl = { signCookie: null, unsignCookie: null, setSignedCookie: null, readSignedCookie: null };
