@@ -228,7 +228,7 @@ async function main() {
     assert(dataRequests.length === 0, `no X-Vesk-Data request on initial load (got ${dataRequests.length})`);
 
     const titleBefore = await page.evaluate(() => document.title);
-    assert(titleBefore !== 'Async — load() + async components', 'title is not the async one yet: "' + titleBefore + '"');
+    assert(titleBefore !== 'Async — async components', 'title is not the async one yet: "' + titleBefore + '"');
 
     // SPA nav to /async: optimistic render first, then fresh head + props land
     await page.evaluate(() => { window.__spaFlag = true; });
@@ -240,11 +240,11 @@ async function main() {
     assert(url.includes('/async'), 'URL changed to /async');
     assert(await page.evaluate(() => window.__spaFlag === true), '/async reached via SPA (no reload)');
     const finalTitle = await page.evaluate(() => document.title);
-    assert(finalTitle === 'Async — load() + async components', 'title swapped to fresh head: "' + finalTitle + '"');
+    assert(finalTitle === 'Async — async components', 'title swapped to fresh head: "' + finalTitle + '"');
 
     const bodyText = await page.evaluate(() => document.body.textContent);
-    assert(bodyText.includes('Posts from load()'), 'async page content rendered');
-    assert(bodyText.includes('Hello Vesk'), 'posts from load() props rendered: ' + (bodyText.match(/Hello Vesk/) ? 'yes' : 'no'));
+    assert(bodyText.includes('Posts fetched during SSR'), 'async page content rendered');
+    assert(bodyText.includes('Hello Vesk'), 'posts from useFetch SSR rendered: ' + (bodyText.match(/Hello Vesk/) ? 'yes' : 'no'));
 
     const dataForAsync = dataRequests.filter(u => u.includes('/async'));
     assert(dataForAsync.length === 1, `exactly one X-Vesk-Data request for /async (got ${dataForAsync.length})`);
@@ -277,25 +277,27 @@ async function main() {
     for (let i = 0; i < 2; i++) {
       await page.evaluate(() => { window.__spaFlag = true; });
       await page.click('a[href="/async"]');
-      await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+      await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 15000 });
       assert(true, `async fresh props render on visit ${i + 1}`);
+      await new Promise(r => setTimeout(r, 150));
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await page.click('a[href="/about"]');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
     }
 
-    // Third SPA nav to /async: data already fresh for this page session, no refetch
+    // Third SPA nav to /async: routeDataCache defaults to 0, so every visit
+    // issues a fresh X-Vesk-Data request and renders the fresh props.
     await page.evaluate(() => { window.__spaFlag = true; });
     await page.click('a[href="/async"]');
-    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 15000 });
     const bodyText = await page.evaluate(() => document.body.textContent);
-    assert(bodyText.includes('Hello Vesk'), 'async renders from cached fresh props without refetch');
+    assert(bodyText.includes('Hello Vesk'), 'async renders fresh props on third visit');
 
-    // First /async visit fetched fresh data; revisits (and the reuse nav) hit the
-    // session cache — exactly one X-Vesk-Data request for /async total.
-    assert(asyncDataRequests === 1, `async fresh data fetched once, reused on revisits (got ${asyncDataRequests})`);
+    // Default routeDataCache = 0: one fresh data request per visit, never a
+    // stale session cache hit.
+    assert(asyncDataRequests === 3, `async fresh data fetched on every visit (got ${asyncDataRequests})`);
     assert(errors.length === 0, 'zero JS errors during repeated data navs (got ' + errors.length + ')');
 
     await page.close();

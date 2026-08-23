@@ -182,12 +182,28 @@ export async function bundlePlatformHandler(options: BundlePlatformOptions): Pro
     plugins.push({
       name: 'empty-node-builtins',
       setup(build: any) {
-        const builtins = /^(fs|path|node:fs|node:path|child_process|os|crypto|net|stream|buffer|events|util|url|querystring|http|https|zlib|tty)$/;
-        build.onResolve({ filter: builtins }, () => {
-          return { path: 'node-builtin-empty', namespace: 'empty-node' };
+        const builtins = /^(node:)?(fs|path|child_process|os|crypto|net|stream|buffer|events|util|url|querystring|http|https|zlib|tty|async_hooks)$/;
+        build.onResolve({ filter: builtins }, (args: any) => {
+          return { path: args.path, namespace: 'empty-node' };
         });
-        build.onLoad({ filter: /.*/, namespace: 'empty-node' }, () => ({
-          contents: `
+        build.onLoad({ filter: /.*/, namespace: 'empty-node' }, (args: any) => {
+          // async_hooks needs a usable AsyncLocalStorage shape (constructor +
+          // run/getStore), not a callable-Proxy stub — the runtime's
+          // per-request SSR data isolation instantiates it.
+          if (/async_hooks$/.test(args.path)) {
+            return {
+              contents: `
+export class AsyncLocalStorage {
+  run(_store, fn) { return fn(); }
+  getStore() { return null; }
+  enterWith() {}
+  exit(fn) { return fn(); }
+}
+`,
+              loader: 'js',
+            };
+          }
+          const contents = `
 const __m = typeof Proxy !== 'undefined' ? new Proxy({}, {
   get(_, key) { return typeof key === 'string' ? () => {} : undefined; },
   has() { return true; },
@@ -215,9 +231,12 @@ export const spawnSync = () => ({ status: 0 });
 export const execSync = () => '';
 export const randomBytes = () => ({});
 export const createHash = () => ({ update: () => {}, digest: () => '' });
-`,
-          loader: 'js',
-        }));
+`;
+          return {
+            contents,
+            loader: 'js',
+          };
+        });
       },
     });
   }

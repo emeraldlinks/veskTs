@@ -149,7 +149,10 @@ async function main() {
       await page.goto(BASE, { waitUntil: 'networkidle0' });
 
       await page.click('a[href="/about"]');
-      await new Promise(r => setTimeout(r, 300));
+      await page.waitForFunction(
+        () => document.querySelector('h1')?.textContent?.trim() === 'About Vesk',
+        { timeout: 8000 },
+      ).catch(() => {});
 
       assert(page.url().includes('/about'), 'URL changed to /about');
 

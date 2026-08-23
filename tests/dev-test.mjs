@@ -50,7 +50,11 @@ function startDevServer() {
       }
     });
     serverProcess.on('error', reject);
-    setTimeout(() => { if (!started) resolve_(); }, 15000);
+    // Cold tsx startup can exceed 15s; poll the port instead of guessing.
+    const poll = setInterval(async () => {
+      try { const res = await fetch('http://localhost:' + PORT + '/'); if (res.ok) { clearInterval(poll); if (!started) { started = true; resolve_(); } } } catch {}
+    }, 500);
+    setTimeout(() => { clearInterval(poll); if (!started) resolve_(); }, 60000);
   });
 }
 
@@ -151,7 +155,10 @@ async function runHydrationTests() {
     const page = await browser.newPage();
     await page.goto(BASE, { waitUntil: 'networkidle0' });
     await page.click('a[href="/about"]');
-    await new Promise(r => setTimeout(r, 300));
+    await page.waitForFunction(
+      () => document.querySelector('h1')?.textContent?.trim() === 'About Vesk',
+      { timeout: 8000 },
+    ).catch(() => {});
     hydrateAssert(page.url().includes('/about'), 'URL /about');
     const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     hydrateAssert(h1 === 'About Vesk', 'h1: About Vesk');
@@ -258,29 +265,28 @@ async function runHmrTests() {
     else { failed++; process.stdout.write(`  \u2717 ${msg}\n`); }
   }
 
-  // Start adapter dev server on port 3002
-  let hmrServerProcess;
-  await new Promise((resolve_, reject) => {
-    const hmrEntry = resolve(root, 'packages/adapter/src/dev-server.ts');
-    const hmrEntryJs = resolve(root, 'packages/adapter/src/dev-server.js');
-    const hmrPath = existsSync(hmrEntry) ? hmrEntry : hmrEntryJs;
-    hmrServerProcess = spawn('npx', ['tsx', hmrPath], {
-      cwd: resolve(root, 'test-app'),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PORT: String(HMR_PORT) },
+  // Start the adapter dev server in-process (it is a library module, not a
+  // CLI). block:false makes startDevServer resolve with the http Server after
+  // listen instead of blocking forever.
+  let hmrServer;
+  {
+    const { startDevServer } = await import('@vesk/adapter/src/dev-server');
+    hmrServer = await startDevServer(resolve(root, 'test-app', 'app'), {
+      port: HMR_PORT,
+      publicDir: resolve(root, 'test-app', 'public'),
+      block: false,
     });
-    let started = false;
-    const onData = (data) => {
-      const text = data.toString();
-      if (!started && (text.includes('dev server at') || text.includes('rebuilt'))) {
-        started = true;
-        setTimeout(resolve_, 1000);
-      }
-    };
-    hmrServerProcess.stdout.on('data', onData);
-    hmrServerProcess.stderr.on('data', onData);
-    setTimeout(() => resolve_(), 15000);
-  });
+    // Wait for the first build (SSR functions + client bundle) to serve.
+    const deadline = Date.now() + 60000;
+    for (;;) {
+      try {
+        const res = await fetch('http://localhost:' + HMR_PORT + '/');
+        if (res.ok) break;
+      } catch {}
+      if (Date.now() > deadline) break;
+      await new Promise(r => setTimeout(r, 500));
+    }
+  }
 
   const browser = await puppeteer.launch({
     executablePath: CHROMIUM_PATH, headless: true,
@@ -363,7 +369,7 @@ async function runHmrTests() {
   }
 
   await browser.close();
-  if (hmrServerProcess) hmrServerProcess.kill('SIGTERM');
+  if (hmrServer) hmrServer.close();
 }
 
 async function main() {
