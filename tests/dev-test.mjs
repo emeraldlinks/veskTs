@@ -10,11 +10,14 @@ import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
+// The dev server + tailwind plugin resolve config/asset paths relative to the
+// process cwd — the spawned CLI always ran with cwd=test-app, so match that.
+process.chdir(resolve(root, 'test-app'));
 
 execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inherit' });
 
 const PORT = 3000;
-let serverProcess = null;
+
 let passed = 0;
 let failed = 0;
 
@@ -23,40 +26,29 @@ function assert(cond, msg) {
   else { failed++; process.stdout.write(`  \u2717 ${msg}\n`); }
 }
 
-function startDevServer() {
-  return new Promise((resolve_, reject) => {
-    const cliEntry = resolve(root, 'packages/cli/src/index.ts');
-    const cliEntryJs = resolve(root, 'packages/cli/src/index.js');
-    const cliPath = existsSync(cliEntry) ? cliEntry : cliEntryJs;
-    // Run tsx via node --import instead of npx: the npx layer can hang
-    // silently on CI. stdio inherit streams every byte of child output into
-    // the parent log; readiness is detected by polling the port.
-    serverProcess = spawn(process.execPath, ['--import', 'tsx', cliPath, 'dev', '--port', String(PORT)], {
-      cwd: resolve(root, 'test-app'),
-      stdio: ['ignore', 'inherit', 'inherit'],
-      env: { ...process.env, NODE_ENV: 'development' },
-    });
-    let started = false;
-    serverProcess.on('error', reject);
-    serverProcess.on('exit', (code, signal) => {
-      if (!started) reject(new Error(`dev server exited early code=${code} signal=${signal}`));
-    });
-    // Cold tsx startup can exceed 15s; poll the port instead of guessing.
-    const poll = setInterval(async () => {
-      try { const res = await fetch('http://localhost:' + PORT + '/'); if (res.ok) { clearInterval(poll); if (!started) { started = true; resolve_(); } } } catch {}
-    }, 500);
-    setTimeout(() => {
-      clearInterval(poll);
-      if (!started) reject(new Error('dev server did not start within 60s (see [dev-server] output above)'));
-    }, 60000);
-  });
+// Start the TS dev server in-process via the CLI's own dev-server module —
+// it owns plugin/tailwind wiring (config.plugins) that the raw adapter
+// dev-server lacks. Spawning the CLI as a child process proved flaky on CI.
+async function startDevServer() {
+  const projectDir = resolve(root, 'test-app');
+  const configModule = await import(resolve(projectDir, 'vesk.config.ts'));
+  const config = configModule.default || {};
+  const { startDevServer } = await import(resolve(root, 'packages/cli/src/dev-server.ts'));
+  // Fire-and-forget: it blocks until server close; readiness is polled below.
+  startDevServer(PORT, projectDir, config);
+  const deadline = Date.now() + 60000;
+  for (;;) {
+    try {
+      const res = await fetch('http://localhost:' + PORT + '/');
+      if (res.ok) return;
+    } catch {}
+    if (Date.now() > deadline) throw new Error('dev server did not become ready within 60s');
+    await new Promise(r => setTimeout(r, 500));
+  }
 }
 
 function stopDevServer() {
-  if (serverProcess) {
-    serverProcess.kill('SIGTERM');
-    serverProcess = null;
-  }
+  // The in-process server is torn down by process.exit at the end of main().
 }
 
 async function runUnitTests() {
