@@ -596,6 +596,8 @@ async function main() {
       });
     });
     await goto(page, BASE, { waitUntil: 'networkidle0' });
+    // Router breadcrumbs for stall diagnosis (flag-gated in the runtime).
+    await page.evaluate(() => { window.__veskNavDebug = []; });
 
     // navigate away and back to /async twice
     for (let i = 0; i < 2; i++) {
@@ -609,7 +611,8 @@ async function main() {
       try {
         await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
       } catch (e) {
-        await dumpNavDiag(page, { visit: i + 1, asyncDataRequests });
+        const navLog = await page.evaluate(() => window.__veskNavDebug || []).catch(() => []);
+        await dumpNavDiag(page, { visit: i + 1, asyncDataRequests, navLog });
         throw e;
       }
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);

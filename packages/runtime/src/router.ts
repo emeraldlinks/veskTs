@@ -86,7 +86,17 @@ function ensureChunk(chunkUrl: string): Promise<void> {
 
 /** Loads pending chunks without letting a single failed chunk abort the flow. */
 function loadChunksQuietly(urls: string[]): Promise<void> {
-	return Promise.all(urls.map((u) => ensureChunk(u).catch(() => undefined))).then(() => undefined);
+	navDebug('loadChunks start', urls);
+	return Promise.all(urls.map((u) => ensureChunk(u).catch(() => undefined))).then(() => {
+		navDebug('loadChunks done', urls);
+	});
+}
+
+// Set window.__veskNavDebug = [] in the page to capture router breadcrumbs.
+function navDebug(...parts: unknown[]): void {
+	if (typeof window === 'undefined') return;
+	const log = (window as unknown as { __veskNavDebug?: unknown[] }).__veskNavDebug;
+	if (log) log.push(parts.map(p => Array.isArray(p) ? p.join(',') : String(p)).join(' '));
 }
 
 function hasPendingChunks(nodes: RouteNode[]): string[] {
@@ -1152,6 +1162,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 			const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
 			router._navToken = (router._navToken || 0) + 1;
+			navDebug('navigate', url.pathname, 'token=' + router._navToken, 'pendingChunks', hasPendingChunks(match.matchChain));
 			const navToken = router._navToken;
 
 			const middlewareFns: Function[] = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
@@ -1190,14 +1201,18 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			};
 
 			const doRender = () => {
+				navDebug('doRender', url.pathname, 'token=' + navToken);
 				updateUrl();
 				renderContent();
+				navDebug('painted', url.pathname);
 			};
 
 			const fetchData = () => {
 				if (firstRenderFailed) return;
+				navDebug('fetchData?', url.pathname, String(shouldFetchData(router, match!)));
 				if (!shouldFetchData(router, match!)) return;
 				getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
+					navDebug('data arrived', url.pathname, 'token=' + navToken, 'current=' + router._navToken, 'realProps', JSON.stringify(data && hasRealPageData(data)));
 					if (navToken !== router._navToken) return;
 					if (!data) return;
 					if (data.redirect) {
