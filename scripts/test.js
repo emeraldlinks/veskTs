@@ -77,6 +77,7 @@ const e2eProcess = spawn('npx', ['tsx', 'scripts/e2e-setup.js'], {
   cwd: root,
   stdio: ['ignore', 'pipe', 'pipe'],
   env: { ...process.env, FORCE_COLOR: '0' },
+  detached: true, // own process group so shutdown can kill the whole tree
 })
 
 let e2eOutput = ''
@@ -202,7 +203,16 @@ if (existsSync(edgeTestPath)) {
 }
 
 console.error('\nShutting down E2E servers...')
-e2eProcess.kill('SIGTERM')
+// Kill the whole detached process group (npx → node → tsx chain), then wait
+// until the dev port actually frees — downstream suites bind :3002.
+try { process.kill(-e2eProcess.pid, 'SIGTERM') } catch { e2eProcess.kill('SIGTERM') }
+const e2eDeadline = Date.now() + 15000
+while (Date.now() < e2eDeadline) {
+  let freed = false
+  try { await fetch('http://localhost:3002/') } catch { freed = true }
+  if (freed) break
+  await new Promise(r => setTimeout(r, 250))
+}
 
 console.log(`\n==================================================`)
 console.log(`Files: ${totalFiles} | Passed: ${totalPassed} | Failed: ${totalFailed} | Total: ${totalPassed + totalFailed}`)
