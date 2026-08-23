@@ -82,9 +82,17 @@ jobs:
         run: node hydration-test.mjs
 
       - name: SSR crawl test
+        if: always()
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
         run: node crawl.mjs
+
+      - name: Dump haul dev server log (always)
+        if: always()
+        run: |
+          echo "===== /tmp/dev.log ====="
+          cat /tmp/dev.log
+          echo "===== end /tmp/dev.log ====="
 
   release:
     name: Publish to npm + GitHub tag & release

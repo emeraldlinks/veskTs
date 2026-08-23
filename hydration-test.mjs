@@ -20,6 +20,20 @@ async function clickEl(page, selector) {
   }, selector);
 }
 
+// On SPA-nav timeouts, dump everything needed to see WHERE it stalled:
+// current URL, recent network entries (was the request even issued?), and
+// any x-vesk-data responses captured by callers.
+async function dumpNavDiag(page, extra) {
+  const diag = await page.evaluate(() => ({
+    url: location.pathname,
+    readyState: document.readyState,
+    h1: document.querySelector('h1')?.textContent?.trim() || null,
+    root: (document.getElementById('root') || document.body).textContent.replace(/\s+/g, ' ').trim().slice(0, 200),
+    resources: performance.getEntriesByType('resource').slice(-8).map(r => `${r.initiatorType} ${r.name.replace(location.origin, '')} ${Math.round(r.duration)}ms`),
+  })).catch(e => ({ diagError: String(e) }));
+  console.log('  [diag] ' + JSON.stringify({ ...diag, ...(extra || {}) }));
+}
+
 async function typeInto(page, selector, value) {
   await page.evaluate((sel, val) => {
     const el = document.querySelector(sel);
@@ -583,7 +597,12 @@ async function main() {
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickEl(page, 'a[href="/about"]');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
+      try {
+        await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
+      } catch (e) {
+        await dumpNavDiag(page, { visit: i + 1, asyncDataRequests });
+        throw e;
+      }
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
     }
 
