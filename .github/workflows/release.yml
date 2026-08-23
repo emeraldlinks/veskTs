@@ -26,9 +26,14 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
+          cache: false
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
+
+      - name: Build plugin-tailwind dist (needed by test-app vesk.config)
+        working-directory: packages/plugin-tailwind
+        run: npm run build
 
       - name: Install Chrome for puppeteer-core
         id: chrome
@@ -97,6 +102,7 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: 'stable'
+          cache: false
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

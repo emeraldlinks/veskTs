@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname);
-const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
 const PORT = parseInt(process.env.VESK_E2E_PROD_PORT || '3099');
 const BASE = `http://localhost:${PORT}`;
 
