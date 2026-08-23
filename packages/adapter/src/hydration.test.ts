@@ -26,7 +26,7 @@ function assert(condition, msg) {
 }
 
 function findChrome() {
-  return '/data/data/com.termux/files/usr/bin/chromium-browser';
+  return process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
 }
 
 async function main() {

@@ -1,0 +1,157 @@
+name: CI / Release
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Test (typecheck, go, unit + e2e, hydration, crawl)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install Chrome for puppeteer-core
+        id: chrome
+        run: |
+          npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome" > /dev/null
+          CHROME="$(find "$RUNNER_TEMP/chrome" -type f -name chrome | head -1)"
+          if [ -z "$CHROME" ]; then echo "chrome binary not found" >&2; exit 1; fi
+          echo "path=$CHROME" >> "$GITHUB_OUTPUT"
+          echo "chrome at: $CHROME"
+
+      - name: Typecheck packages
+        run: npm run typecheck
+
+      - name: Build haul engine + Go tests
+        working-directory: packages/haul
+        run: |
+          go build ./...
+          go vet ./...
+          go test ./...
+
+      - name: Unit + E2E suite (scripts/test.js)
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+        run: npm test
+
+      - name: Start dev server
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+        run: |
+          cd test-app
+          npm install --no-audit --no-fund
+          (setsid nohup npm run dev > /tmp/dev.log 2>&1 < /dev/null &)
+          for i in $(seq 1 60); do
+            curl -s -o /dev/null http://localhost:3000/ && break
+            sleep 1
+          done
+          curl -s -o /dev/null -w "dev server: %{http_code}\n" http://localhost:3000/
+
+      - name: Hydration test (production-hydration path)
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+        run: node hydration-test.mjs
+
+      - name: SSR crawl test
+        env:
+          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
+        run: node crawl.mjs
+
+  release:
+    name: Publish to npm + GitHub tag & release
+    needs: test
+    if: >-
+      github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+      contains(github.event.head_commit.message, 'publish')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Resolve version (explicit from message or auto patch-bump)
+        id: version
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          EXPLICIT="$(node -e '
+            const m = process.argv[1].match(/publish\s+v?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)/i);
+            console.log(m ? m[1] : "");
+          ' "$COMMIT_MESSAGE")"
+          if [ -n "$EXPLICIT" ]; then
+            VERSION="$EXPLICIT"
+            echo "source=commit message" >> "$GITHUB_OUTPUT"
+          else
+            VERSION="$(node scripts/next-version.mjs)"
+            echo "source=auto patch bump" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "releasing v$VERSION ($([ -n "$EXPLICIT" ] && echo 'from commit message' || echo 'auto patch bump'))"
+
+      - name: Bump versions, build all packages, publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: node scripts/release.mjs "${{ steps.version.outputs.version }}"
+
+      - name: Commit version bumps, create tag, prepare notes
+        id: tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/*/package.json packages/create-vesk/src/index.js
+          git diff --cached --quiet || git commit -m "release: v$VERSION [skip ci]"
+          PREV_TAG="$(git describe --tags --abbrev=0 2>/dev/null || true)"
+          git tag -a "v$VERSION" -m "v$VERSION"
+          git push origin HEAD:"${{ github.ref_name }}"
+          git push origin "v$VERSION"
+          {
+            echo "## Changes in v$VERSION"
+            echo ""
+            if [ -n "$PREV_TAG" ]; then
+              git log --oneline "$PREV_TAG..HEAD~1"
+            else
+              git log --oneline -20 HEAD~1
+            fi
+            echo ""
+            echo "**npm:** all vesk packages published at \`$VERSION\`"
+          } > release-notes.md
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: gh release create "v$VERSION" --title "v$VERSION" --notes-file release-notes.md --verify-tag

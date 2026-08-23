@@ -97,7 +97,7 @@ async function runUnitTests() {
 async function runHydrationTests() {
   process.stdout.write('\n\x1b[1m=== Hydration Tests ===\x1b[0m\n');
   const { default: puppeteer } = await import('puppeteer-core');
-  const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
+  const CHROMIUM_PATH = (process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser');
   const BASE = `http://localhost:${PORT}`;
 
   const browser = await puppeteer.launch({
@@ -244,7 +244,7 @@ async function runHmrTests() {
   const { resolve } = await import('path');
   const { WebSocket } = await import('ws');
 
-  const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
+  const CHROMIUM_PATH = (process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser');
   const HMR_PORT = 3002;
   const BASE = `http://localhost:${HMR_PORT}`;
   const appDir = resolve(root, 'test-app', 'app');
