@@ -31,14 +31,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Build plugin-tailwind dist (needed by test-app vesk.config)
-        working-directory: packages/plugin-tailwind
-        run: npm run build
 
-      - name: Install test-app dependencies (haul binaries, tailwindcss, runtime tarballs)
-        working-directory: test-app
-        run: npm install --no-audit --no-fund
-
+      - name: Refresh test-app deps from latest workspace build
+        run: node scripts/refresh-testapp-deps.mjs
       - name: Install Chrome for puppeteer-core
         id: chrome
         run: |
@@ -116,12 +111,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Build packages (compiler/runtime/adapter/sidecar)
-        run: npx tsx packages/cli/src/build-packages.ts
-
-      - name: Install test-app dependencies
-        working-directory: test-app
-        run: npm install --no-audit --no-fund
+      - name: Refresh test-app deps from latest workspace build
+        run: node scripts/refresh-testapp-deps.mjs
 
       - name: Leakage isolation suite (haul build + prod server)
         run: node test-app/leakage-test.mjs
@@ -186,16 +177,8 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-      - name: Build packages (compiler/runtime/adapter)
-        run: npx tsx packages/cli/src/build-packages.ts
-
-      - name: Build plugin-tailwind dist
-        working-directory: packages/plugin-tailwind
-        run: npm run build
-
-      - name: Install test-app dependencies
-        working-directory: test-app
-        run: npm install --no-audit --no-fund
+      - name: Refresh test-app deps from latest workspace build
+        run: node scripts/refresh-testapp-deps.mjs
 
       - name: Smoke vercel
         run: npx tsx scripts/platform-smoke.mjs vercel
