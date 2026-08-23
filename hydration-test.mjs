@@ -30,6 +30,9 @@ async function dumpNavDiag(page, extra) {
     h1: document.querySelector('h1')?.textContent?.trim() || null,
     root: (document.getElementById('root') || document.body).textContent.replace(/\s+/g, ' ').trim().slice(0, 200),
     resources: performance.getEntriesByType('resource').slice(-8).map(r => `${r.initiatorType} ${r.name.replace(location.origin, '')} ${Math.round(r.duration)}ms`),
+    navToken: (window.__vesk_router && window.__vesk_router._navToken) ?? null,
+    chunksLoaded: Array.from(document.querySelectorAll('script[src*="page-"]')).map(s => s.getAttribute('src').split('/').pop()),
+    unhandledRejections: window.__unhandledRejections || [],
   })).catch(e => ({ diagError: String(e) }));
   console.log('  [diag] ' + JSON.stringify({ ...diag, ...(extra || {}) }));
 }
@@ -585,6 +588,12 @@ async function main() {
     page.on('pageerror', err => errors.push(err.message));
     page.on('request', req => {
       if (req.headers()['x-vesk-data'] === '1' && req.url().includes('/async')) asyncDataRequests++;
+    });
+    await page.evaluate(() => {
+      window.__unhandledRejections = [];
+      window.addEventListener('unhandledrejection', e => {
+        window.__unhandledRejections.push(String((e.reason && e.reason.stack) || e.reason).slice(0, 300));
+      });
     });
     await goto(page, BASE, { waitUntil: 'networkidle0' });
 
