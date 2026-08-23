@@ -28,33 +28,36 @@ function startDevServer() {
     const cliEntry = resolve(root, 'packages/cli/src/index.ts');
     const cliEntryJs = resolve(root, 'packages/cli/src/index.js');
     const cliPath = existsSync(cliEntry) ? cliEntry : cliEntryJs;
-    serverProcess = spawn('npx', ['tsx', cliPath, 'dev', '--port', String(PORT)], {
+    // Run tsx via node --import instead of npx: the npx layer can hang
+    // silently on CI, and every child log line must be visible for debugging.
+    serverProcess = spawn(process.execPath, ['--import', 'tsx', cliPath, 'dev', '--port', String(PORT)], {
       cwd: resolve(root, 'test-app'),
       stdio: ['ignore', 'pipe', 'pipe'],
       env: { ...process.env, NODE_ENV: 'development' },
     });
     let started = false;
-    serverProcess.stdout.on('data', (data) => {
+    const onData = (stream) => (data) => {
       const text = data.toString();
+      process.stdout.write('[dev-server] ' + text);
       if (!started && text.includes('dev server at')) {
         started = true;
         resolve_();
       }
-    });
-    serverProcess.stderr.on('data', (data) => {
-      const text = data.toString();
-      process.stderr.write(text);
-      if (!started && text.includes('dev server at')) {
-        started = true;
-        resolve_();
-      }
-    });
+    };
+    serverProcess.stdout.on('data', onData('stdout'));
+    serverProcess.stderr.on('data', onData('stderr'));
     serverProcess.on('error', reject);
+    serverProcess.on('exit', (code, signal) => {
+      if (!started) reject(new Error(`dev server exited early code=${code} signal=${signal}`));
+    });
     // Cold tsx startup can exceed 15s; poll the port instead of guessing.
     const poll = setInterval(async () => {
       try { const res = await fetch('http://localhost:' + PORT + '/'); if (res.ok) { clearInterval(poll); if (!started) { started = true; resolve_(); } } } catch {}
     }, 500);
-    setTimeout(() => { clearInterval(poll); if (!started) resolve_(); }, 60000);
+    setTimeout(() => {
+      clearInterval(poll);
+      if (!started) reject(new Error('dev server did not start within 60s (see [dev-server] output above)'));
+    }, 60000);
   });
 }
 
