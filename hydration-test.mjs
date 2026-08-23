@@ -1004,11 +1004,24 @@ async function main() {
       await goto(page, BASE, { waitUntil: 'networkidle0' });
 
       await page.evaluate(() => { window.__spaFlag = true; });
+      const dataResponses = [];
+      page.on('response', resp => {
+        if (resp.request().headers()['x-vesk-data'] === '1') dataResponses.push(resp.status() + ' ' + resp.url());
+      });
       await page.evaluate(() => {
         const router = window.__vesk_router;
         if (router && typeof router.navigate === 'function') router.navigate('/dataerror');
       });
-      await page.waitForFunction(() => document.body.textContent.includes('Data layer unavailable during SSR'), { timeout: 15000 });
+      try {
+        await page.waitForFunction(() => document.body.textContent.includes('Data layer unavailable during SSR'), { timeout: 15000 });
+      } catch (e) {
+        const diag = await page.evaluate(() => ({
+          url: location.pathname,
+          root: (document.getElementById('root') || document.body).textContent.replace(/\s+/g, ' ').trim().slice(0, 300),
+          spaFlag: window.__spaFlag === true,
+        }));
+        throw new Error(`17d timed out after 15s. data-responses=${JSON.stringify(dataResponses)} state=${JSON.stringify(diag)} jsErrors=${JSON.stringify(errors)} (original: ${e.message})`);
+      }
 
       const state = await page.evaluate(() => {
         const nav = document.querySelector('nav');
