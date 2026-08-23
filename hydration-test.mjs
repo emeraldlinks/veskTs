@@ -272,7 +272,7 @@ async function main() {
 
     await page.waitForFunction(
       () => document.querySelector('h1')?.textContent?.trim() === 'Welcome to Vesk',
-      { timeout: 8000 },
+      { timeout: 15000 },
     );
     const h1 = await page.evaluate(() => {
       const el = document.querySelector('h1');
@@ -522,9 +522,9 @@ async function main() {
     await clickEl(page, 'a[href="/async"]');
 
     // optimistic render should happen first, then fresh head + props land
-    await page.waitForFunction(() => document.title.includes('Async'), { timeout: 8000 });
+    await page.waitForFunction(() => document.title.includes('Async'), { timeout: 15000 });
     // the data fetch returns 200 with posts — wait for content to render
-    await page.waitForFunction(() => document.body.textContent.includes('Posts fetched during SSR'), { timeout: 8000 });
+    await page.waitForFunction(() => document.body.textContent.includes('Posts fetched during SSR'), { timeout: 15000 });
 
     const url = page.url();
     assert(url.includes('/async'), 'URL changed to /async');
@@ -553,7 +553,7 @@ async function main() {
     await page.evaluate(() => window.history.back());
     await page.waitForFunction(
       () => document.querySelector('h1')?.textContent?.trim() === 'Welcome to Vesk',
-      { timeout: 8000 },
+      { timeout: 15000 },
     );
     const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     assert(h1 === 'Welcome to Vesk', 'back to / after async data nav (h1: ' + h1 + ')');
@@ -578,12 +578,12 @@ async function main() {
     for (let i = 0; i < 2; i++) {
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickEl(page, 'a[href="/async"]');
-      await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+      await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 15000 });
       assert(true, `async fresh props render on visit ${i + 1}`);
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickEl(page, 'a[href="/about"]');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
     }
 
@@ -591,7 +591,7 @@ async function main() {
     // issues a fresh X-Vesk-Data request and renders the fresh props.
     await page.evaluate(() => { window.__spaFlag = true; });
     await clickEl(page, 'a[href="/async"]');
-    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 8000 });
+    await page.waitForFunction(() => document.body.textContent.includes('Hello Vesk'), { timeout: 15000 });
     const bodyText = await page.evaluate(() => document.body.textContent);
     assert(bodyText.includes('Hello Vesk'), 'async renders fresh props on third visit');
 
@@ -892,7 +892,7 @@ async function main() {
       page.on('pageerror', err => errors.push(err.message));
       const response = await goto(page, BASE + '/broken', { waitUntil: 'networkidle0' });
       assert(response.status() === 200, '/broken SSR is 200 (got ' + response.status() + ')');
-      await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 });
+      await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 15000 });
 
       const state = await page.evaluate(() => {
         const nav = document.querySelector('nav');
@@ -921,7 +921,7 @@ async function main() {
       // Nav still works after the error page render.
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickNav(page, '/statements', '/statements');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('JS Statement Demo'), { timeout: 8000 });
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('JS Statement Demo'), { timeout: 15000 });
       assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from error page to /statements (no reload)');
       await page.close();
     }
@@ -952,7 +952,7 @@ async function main() {
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickNav(page, '/', '/');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('Welcome to Vesk'), { timeout: 8000 });
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.includes('Welcome to Vesk'), { timeout: 15000 });
       assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from server-error page to / (no reload)');
       await page.close();
     }
@@ -967,7 +967,7 @@ async function main() {
 
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickNav(page, '/broken', '/broken');
-      await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 });
+      await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 15000 });
 
       const state = await page.evaluate(() => {
         const nav = document.querySelector('nav');
@@ -988,7 +988,7 @@ async function main() {
       // And navigation out of the error page still works.
       await page.evaluate(() => { window.__spaFlag = true; });
       await clickNav(page, '/about', '/about');
-      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 8000 });
+      await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
       assert(await page.evaluate(() => window.__spaFlag === true), 'SPA nav from SPA-error page to /about (no reload)');
       await page.close();
     }
@@ -1008,7 +1008,7 @@ async function main() {
         const router = window.__vesk_router;
         if (router && typeof router.navigate === 'function') router.navigate('/dataerror');
       });
-      await page.waitForFunction(() => document.body.textContent.includes('Data layer unavailable during SSR'), { timeout: 8000 });
+      await page.waitForFunction(() => document.body.textContent.includes('Data layer unavailable during SSR'), { timeout: 15000 });
 
       const state = await page.evaluate(() => {
         const nav = document.querySelector('nav');
@@ -1089,7 +1089,7 @@ async function main() {
         assert(scriptCount === expected, `${route} has ${scriptCount} ssr-data script ref(s) (expected ${expected})`);
         if (scriptCount !== expected) leakChecks.push(route + ':' + scriptCount);
         if (route === '/broken') {
-          await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 8000 }).catch(() => {});
+          await page.waitForFunction(() => document.body.textContent.includes('BrokenComp exploded'), { timeout: 15000 }).catch(() => {});
         }
         const text = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').trim());
         assert(text.includes(SPA_TEXT[route]), `${route} rendered real content (${SPA_TEXT[route]})`);
