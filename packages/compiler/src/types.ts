@@ -11,6 +11,8 @@ export interface RouteNode {
   loading: string | null;
   error: string | null;
   notFound: string | null;
+  offline: string | null;
+  network: string | null;
   hasMiddleware: boolean;
   children: RouteNode[];
   sourceDir: string;

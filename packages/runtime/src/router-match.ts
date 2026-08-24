@@ -9,6 +9,8 @@ export interface RouteNode {
 	loading?: Function | null;
 	error?: Function | null;
 	notFound?: Function | null;
+	offline?: Function | string | null;
+	network?: Function | string | null;
 	children?: RouteNode[];
 	segmentCount?: number;
 	_matchChain?: RouteNode[];
@@ -180,6 +182,8 @@ export function buildTreeFromMap(
 			loading: null,
 			error: null,
 			notFound: null,
+			offline: null,
+			network: null,
 			children: [],
 			segmentCount: parts.length || 1,
 			loader,

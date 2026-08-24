@@ -75,12 +75,13 @@ async function main() {
   utimesSync(aboutPath, pinned, pinned);
 
   const routeTree = () => [
-    routeNode(appDir, '/', '/', 0),
+    { ...routeNode(appDir, '/', '/', 0), offline: 'Offline_Index', network: 'Network_Index' },
     routeNode(join(appDir, 'about'), '/about', '/about', 1, 'Page_About'),
   ];
 
   const cache: ClientBundleCache = { files: new Map() };
   const opts = { importRuntime: true, hmr: true, codeSplit: true, cache };
+
 
   try {
     // Cold build
@@ -92,15 +93,31 @@ async function main() {
     const aboutChunkCold = cold.chunks.find(c => c.name.includes('about'));
     assert(!!homeChunkCold && homeChunkCold.code.includes('Home v1'), 'home chunk contains Home v1');
     assert(!!aboutChunkCold, 'about chunk exists');
+    // Route-level connectivity boundaries compile into the node's chunk.
+    writeFileSync(join(appDir, 'offline.vsk'), `component OfflineRoot {
+  	<p>offline-root-boundary</p>
+  }`);
+    writeFileSync(join(appDir, 'network.vsk'), `component NetworkRoot {
+  	<p>network-root-boundary</p>
+  }`);
 
-    // Warm rebuild — no changes.
+    // Force recompile of the root chunk so the new files are picked up.
+    cache.files.delete(homePath);
+    const withBoundaries = await generateClientBundle(routeTree(), appDir, new Map(), opts);
+    const homeChunkB = withBoundaries.chunks.find(c => c.name === homeChunkCold!.name)!;
+    assert(homeChunkB.code.includes('offline-root-boundary'), 'offline.vsk compiled into route chunk');
+    assert(homeChunkB.code.includes('network-root-boundary'), 'network.vsk compiled into route chunk');
+
+    // Warm rebuild — no changes since the boundary build. Byte-identity is
+    // now measured against the boundary build's chunk (the cold one predates
+    // offline.vsk / network.vsk).
     const warm = await generateClientBundle(routeTree(), appDir, new Map(), opts);
     assert(warm.compiledFiles === 0, `warm rebuild recompiles nothing (${warm.compiledFiles})`);
-    assert(warm.cachedFileHits === 2, `warm rebuild serves both files from cache (${warm.cachedFileHits})`);
+    assert(warm.cachedFileHits === 4, `warm rebuild serves all files from cache (${warm.cachedFileHits})`);
     assert(warm.mainFromCache === true, 'warm rebuild reuses the main bundle');
-    assert(warm.main === cold.main, 'warm main bundle is byte-identical');
+    assert(warm.main === withBoundaries.main, 'warm main bundle is byte-identical');
     const homeChunkWarm = warm.chunks.find(c => c.name === homeChunkCold!.name);
-    assert(homeChunkWarm!.code === homeChunkCold!.code, 'untouched chunk is byte-identical');
+    assert(homeChunkWarm!.code === homeChunkB.code, 'untouched chunk is byte-identical');
 
     // Edit one page → only it recompiles; its chunk updates, other doesn't.
     writeFileSync(homePath, `component Home {
@@ -109,7 +126,7 @@ async function main() {
 }`);
     const edited = await generateClientBundle(routeTree(), appDir, new Map(), opts);
     assert(edited.compiledFiles === 1, `edit recompiles exactly one file (${edited.compiledFiles})`);
-    assert(edited.cachedFileHits === 1, `edit serves the untouched file from cache (${edited.cachedFileHits})`);
+    assert(edited.cachedFileHits === 3, `edit serves the untouched files from cache (${edited.cachedFileHits})`);
     const homeChunkEdited = edited.chunks.find(c => c.name === homeChunkCold!.name);
     assert(homeChunkEdited!.code.includes('Home v2'), 'edited chunk reflects new source');
     const aboutChunkEdited = edited.chunks.find(c => c.name === aboutChunkCold!.name);

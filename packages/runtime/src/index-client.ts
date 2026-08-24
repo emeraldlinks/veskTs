@@ -2,6 +2,8 @@ export { track, get, set, untrack, peek_tracked as peek, derived, flush_sync as 
 export { effect, user_effect, block, branch, root, render, pre_effect, destroy_block, destroy_block_children, pause_block, resume_block, is_destroyed, unlink_block, create_try_block, boundary_fn_running_block } from '@vesk/runtime/src/ripple-blocks';
 export { hydrate, hydrateViewport, hydrateIdle, hydrateOnInteraction, needsHydration, hydrationCount, createHydrateWalker, collectVskMarkers, reactiveProps, hydrateInitial } from '@vesk/runtime/src/hydrate';
 export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound, NotFoundError, ensureChunk, matchRoute } from '@vesk/runtime/src/router';
+export { getNetworkState, watchNetwork } from '@vesk/runtime/src/network';
+export type { NetworkState, EffectiveType } from '@vesk/runtime/src/network';
 export { bindValue, bindChecked, bindGroup } from '@vesk/runtime/src/bindings';
 export { createContext, Context, getActiveComponent, setActiveComponent } from '@vesk/runtime/src/context';
 export { createResource, setSsrData, clearSsrData, resolveSsrResources, useFetch } from '@vesk/runtime/src/resource';

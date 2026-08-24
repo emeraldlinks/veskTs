@@ -100,6 +100,20 @@ export function findNotFoundComponent(chain: Record<string, unknown>[]): Functio
 	return null;
 }
 
+export function findOfflineComponent(chain: Record<string, unknown>[]): Function | string | null {
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].offline) return chain[i].offline as Function | string;
+	}
+	return null;
+}
+
+export function findNetworkComponent(chain: Record<string, unknown>[]): Function | string | null {
+	for (let i = chain.length - 1; i >= 0; i--) {
+		if (chain[i].network) return chain[i].network as Function | string;
+	}
+	return null;
+}
+
 export function showLoadingInContainer(container: HTMLElement, loadingFn: Function, params: Record<string, string>): void {
 	const tempRoot = document.createDocumentFragment();
 	const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);

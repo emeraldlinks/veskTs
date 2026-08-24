@@ -69,6 +69,36 @@ test('scans root page.vsk', () => {
 	cleanup(tmp);
 });
 
+test('scans offline.vsk and network.vsk into node names + sources', () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/offline.vsk': '',
+		'app/network.vsk': '',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	expect(tree.length).toBe(1);
+	expect(tree[0].offline).toBe('Offline_Index');
+	expect(tree[0].network).toBe('Network_Index');
+	const sources = collectSources(tree);
+	expect(sources.get('Offline_Index')).toContain('offline.vsk');
+	expect(sources.get('Network_Index')).toContain('network.vsk');
+	const manifest = generateRouteManifest(tree);
+	expect(manifest).toContain('offline: Offline_Index');
+	expect(manifest).toContain('network: Network_Index');
+	cleanup(tmp);
+});
+
+test('nested offline.vsk resolves segment-scoped name', () => {
+	const tmp = createFixture({
+		'app/blog/page.vsk': '',
+		'app/blog/offline.vsk': '',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const blog = tree[0].children[0];
+	expect(blog.offline).toBe('Offline_Blog');
+	cleanup(tmp);
+});
+
 test('scans root layout + page', () => {
 	const tmp = createFixture({
 		'app/layout.vsk': '',

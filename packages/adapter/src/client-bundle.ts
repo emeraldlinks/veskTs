@@ -212,6 +212,14 @@ export async function generateClientBundle(
         if (node.notFound && existsSync(notFoundPath)) {
           compileFile(notFoundPath, node.notFound, chunkCode);
         }
+        const offlinePath = resolve(appDir, node.sourceDir, 'offline.vsk');
+        if (node.offline && existsSync(offlinePath)) {
+          compileFile(offlinePath, node.offline, chunkCode);
+        }
+        const networkPath = resolve(appDir, node.sourceDir, 'network.vsk');
+        if (node.network && existsSync(networkPath)) {
+          compileFile(networkPath, node.network, chunkCode);
+        }
         const loadingPath = resolve(appDir, node.sourceDir, 'loading.vsk');
         if (node.loading && existsSync(loadingPath)) {
           compileFile(loadingPath, node.loading, chunkCode);
@@ -308,6 +316,10 @@ export async function generateClientBundle(
         if (node.error && existsSync(errorPath)) compileFileMono(errorPath, node.error);
         const notFoundPath = resolve(appDir, node.sourceDir, 'not-found.vsk');
         if (node.notFound && existsSync(notFoundPath)) compileFileMono(notFoundPath, node.notFound);
+        const offlinePath = resolve(appDir, node.sourceDir, 'offline.vsk');
+        if (node.offline && existsSync(offlinePath)) compileFileMono(offlinePath, node.offline);
+        const networkPath = resolve(appDir, node.sourceDir, 'network.vsk');
+        if (node.network && existsSync(networkPath)) compileFileMono(networkPath, node.network);
         const loadingPath = resolve(appDir, node.sourceDir, 'loading.vsk');
         if (node.loading && existsSync(loadingPath)) compileFileMono(loadingPath, node.loading);
         walkMono(node.children || []);
@@ -482,6 +494,8 @@ async function buildMainBundle(
     "    if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName];\n" +
     "    if (n._errorName && __components[n._errorName]) n.error = __components[n._errorName];\n" +
     "    if (n._notFoundName && __components[n._notFoundName]) n.notFound = __components[n._notFoundName];\n" +
+    "    if (n._offlineName && __components[n._offlineName]) n.offline = __components[n._offlineName];\n" +
+    "    if (n._networkName && __components[n._networkName]) n.network = __components[n._networkName];\n" +
     '    if (n.children) __updateComponents(n.children);\n' +
     '  }\n' +
     '}\n';
@@ -497,6 +511,8 @@ async function buildMainBundle(
       "    if (typeof n.layout === 'string') n._layoutName = n.layout;\n" +
       "    if (typeof n.error === 'string') n._errorName = n.error;\n" +
       "    if (typeof n.notFound === 'string') n._notFoundName = n.notFound;\n" +
+      "    if (typeof n.offline === 'string') n._offlineName = n.offline;\n" +
+      "    if (typeof n.network === 'string') n._networkName = n.network;\n" +
       '    if (n.children) __resolveNames(n.children);\n' +
       '  }\n' +
       '}\n';
@@ -607,6 +623,8 @@ async function buildMainBundle(
     '    }\n' +
     "    if (typeof n.error === 'string') n.error = __components[n.error];\n" +
     "    if (typeof n.notFound === 'string') n.notFound = __components[n.notFound];\n" +
+    "    if (typeof n.offline === 'string') n.offline = __components[n.offline];\n" +
+    "    if (typeof n.network === 'string') n.network = __components[n.network];\n" +
     '    if (n.children) __resolveNames(n.children);\n' +
     '  }\n' +
     '}\n' +

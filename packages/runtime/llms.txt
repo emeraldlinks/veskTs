@@ -109,9 +109,14 @@ Non-index module exports: `createHydrateChildWalker`, `_FILTER_ACCEPT`,
 ```ts
 createRouter(routes: RouteNode[] | Record<string, Function>, options?: RouterOptions): RouterInstance
 createFileRouter(routeTree: RouteNode[], options?: FileRouterOptions): FileRouterInstance
+getNetworkState(): { online: boolean; effectiveType: 'slow-2g'|'2g'|'3g'|'4g'|'unknown'; downlink: number|null; rtt: number|null; saveData: boolean }
+watchNetwork(cb: (state) => void): () => void
 /* RouterOptions.offline?: Function | string — component ({ url, params, retry }) or HTML string
    shown when an SPA nav fails offline; default panel + auto-recovery on `online`. Network
    failures never render not-found. */
+/* Route conventions: offline.vsk (dedicated offline UI) and network.vsk (state-aware) compile
+   into route chunks; precedence offline > network > option > error.vsk (props.offline=true,
+   props.networkState) > built-in panel; boundaries re-render live on connectivity changes. */
 defineRoute(path: string, config: Record<string, unknown>): RouteNode
 buildRouteTree(definitions: RouteNode[]): RouteNode[]
 ensureChunk(chunkUrl: string): Promise<void>

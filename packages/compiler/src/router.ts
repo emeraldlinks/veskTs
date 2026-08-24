@@ -170,6 +170,8 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
   let hasLoading = false;
   let hasError = false;
   let hasNotFound = false;
+  let hasOffline = false;
+  let hasNetwork = false;
   let hasMiddleware = false;
 
   for (const entry of entries) {
@@ -178,6 +180,8 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
     if (entry === 'loading.vsk') { hasLoading = true; continue; }
     if (entry === 'error.vsk') { hasError = true; continue; }
     if (entry === 'not-found.vsk') { hasNotFound = true; continue; }
+    if (entry === 'offline.vsk') { hasOffline = true; continue; }
+    if (entry === 'network.vsk') { hasNetwork = true; continue; }
     if (entry === 'middleware.ts') { hasMiddleware = true; continue; }
   }
 
@@ -217,6 +221,8 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
     loading: hasLoading ? extractComponentName(dir, 'loading', rootDir) : null,
     error: hasError ? extractComponentName(dir, 'error', rootDir) : null,
     notFound: hasNotFound ? extractComponentName(dir, 'not-found', rootDir) : null,
+    offline: hasOffline ? extractComponentName(dir, 'offline', rootDir) : null,
+    network: hasNetwork ? extractComponentName(dir, 'network', rootDir) : null,
     hasMiddleware,
     children: [],
     sourceDir: dir,
@@ -258,6 +264,8 @@ function extractComponentName(dir: string, type: string, rootDir: string): strin
   if (type === 'loading') return 'Loading_' + capitalized;
   if (type === 'error') return 'Error_' + capitalized;
   if (type === 'not-found') return 'NotFound_' + capitalized;
+  if (type === 'offline') return 'Offline_' + capitalized;
+  if (type === 'network') return 'Network_' + capitalized;
   return type + '_' + capitalized;
 }
 
@@ -270,6 +278,8 @@ export function collectSources(tree: RouteNode[]): Map<string, string> {
       if (node.loading) map.set(node.loading, join(node.sourceDir, 'loading.vsk'));
       if (node.error) map.set(node.error, join(node.sourceDir, 'error.vsk'));
       if (node.notFound) map.set(node.notFound, join(node.sourceDir, 'not-found.vsk'));
+      if (node.offline) map.set(node.offline, join(node.sourceDir, 'offline.vsk'));
+      if (node.network) map.set(node.network, join(node.sourceDir, 'network.vsk'));
       walk(node.children);
     }
   }
@@ -291,6 +301,8 @@ export function generateRouteManifest(tree: RouteNode[], options: RouteManifestO
     if (node.loading) parts.push(`loading: ${node.loading}`);
     if (node.error) parts.push(`error: ${node.error}`);
     if (node.notFound) parts.push(`notFound: ${node.notFound}`);
+    if (node.offline) parts.push(`offline: ${node.offline}`);
+    if (node.network) parts.push(`network: ${node.network}`);
     if (node.children.length > 0) {
       const childCodes = node.children.map(c => genNode(c));
       parts.push(`children: [\n${childCodes.map(c => '\t\t' + c).join(',\n')}\n\t]`);
@@ -324,6 +336,8 @@ function flattenSources(tree: RouteNode[]): Map<string, string> {
       if (node.loading) map.set(node.loading, node.sourceDir + '/loading.vsk');
       if (node.error) map.set(node.error, node.sourceDir + '/error.vsk');
       if (node.notFound) map.set(node.notFound, node.sourceDir + '/not-found.vsk');
+      if (node.offline) map.set(node.offline, node.sourceDir + '/offline.vsk');
+      if (node.network) map.set(node.network, node.sourceDir + '/network.vsk');
       walk(node.children);
     }
   }

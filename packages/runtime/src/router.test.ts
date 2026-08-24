@@ -1089,6 +1089,130 @@ testAsync('coming back online re-navigates and recovers the page', async () => {
 	}
 });
 
+
+testAsync('offline.vsk (route offline component) wins while offline', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	setNavigatorOnline(false);
+	globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{
+				path: '/away',
+				network: () => { const d = document.createElement('div'); d.textContent = 'network-ui'; return d; },
+				offline: () => { const d = document.createElement('div'); d.textContent = 'offline-route-ui'; return d; },
+				error: () => { const d = document.createElement('div'); d.textContent = 'error-route-ui'; return d; },
+				page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; },
+			},
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/', { replace: true });
+		await tick(5);
+		router.navigate('/away', { replace: true });
+		await tick(10);
+		const texts = (container.children || []).map(c => c.textContent);
+		expect(texts.includes('offline-route-ui')).toBeTruthy();
+		expect(texts.includes('error-route-ui')).toBeFalsy();
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('network.vsk receives live network state props', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	let seen = null;
+	setNavigatorOnline(false);
+	globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{
+				path: '/away',
+				network: (props) => {
+					seen = props;
+					const d = document.createElement('div');
+					d.textContent = 'network-state-ui';
+					return d;
+				},
+				page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; },
+			},
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/', { replace: true });
+		await tick(5);
+		router.navigate('/away', { replace: true });
+		await tick(10);
+		expect(seen).toBeTruthy();
+		expect(seen.online).toBe(false);
+		expect(typeof seen.effectiveType).toBe('string');
+		expect(typeof seen.retry).toBe('function');
+		expect(seen.url).toBe('/away');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('error.vsk receives offline flag when no network components exist', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	let errProps = null;
+	setNavigatorOnline(false);
+	globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{
+				path: '/away',
+				error: (props) => {
+					errProps = props;
+					const d = document.createElement('div');
+					d.textContent = 'error-as-offline';
+					return d;
+				},
+				page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; },
+			},
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/', { replace: true });
+		await tick(5);
+		router.navigate('/away', { replace: true });
+		await tick(10);
+		expect(errProps).toBeTruthy();
+		expect(errProps.offline).toBe(true);
+		expect(typeof errProps.networkState).toBe('object');
+		expect(errProps.networkState.online).toBe(false);
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('router offline option applies when route has no boundary components', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	setNavigatorOnline(false);
+	globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/away', page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container, offline: '<div data-opt-offline="1">opt</div>' });
+		router.navigate('/', { replace: true });
+		await tick(5);
+		router.navigate('/away', { replace: true });
+		await tick(10);
+		expect(container.innerHTML).toContain('data-opt-offline');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
 await asyncQueue;
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

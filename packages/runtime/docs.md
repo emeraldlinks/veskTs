@@ -170,6 +170,18 @@ objects to their values on property access.
   receiving `{ url, params, retry }`, or a raw HTML string. When omitted, a
   built-in panel with a Retry button is shown; the router listens for the
   browser `online` event and re-navigates automatically to recover.
+- **Connectivity boundaries**: route directories may export `offline.vsk`
+  (dedicated offline UI, shown while offline) and `network.vsk`
+  (state-aware UI). Both compile into the route's client chunk. Props:
+  `{ url, params, retry, online, effectiveType, downlink, rtt, saveData }`.
+  Precedence: `offline.vsk` → `network.vsk` → router `offline` option →
+  nearest `error.vsk` (which receives `offline: true` +
+  `networkState`) → built-in default panel. Displayed boundaries re-render
+  live on connectivity changes.
+- **`getNetworkState()` / `watchNetwork(cb)`**: snapshot of
+  `{ online, effectiveType, downlink, rtt, saveData }` (Network Information
+  API fields degrade to nulls/`'unknown'` where unsupported) plus a
+  subscription returning an unsubscribe function.
 - Bridge primitives: `Link`, `NavLink`, `Outlet`, `useNavigate`,
   `useParams`, `usePathname`, `useSearchParams`, `useRouter`.
 - Guards: `Redirect`, `redirect(url, status?)`, `permanentRedirect(url)`,
