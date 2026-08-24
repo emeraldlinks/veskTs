@@ -51,6 +51,14 @@ interface RouterOptions {
 	hydrate?: 'full' | 'viewport' | 'idle' | 'interaction';
 	/** Route-data freshness TTL in ms. Default 0 = always refetch on SPA nav. */
 	routeDataCache?: number;
+	/**
+	 * Offline experience for SPA navigations that fail due to loss of
+	 * connectivity: a component `(props, registry, walker) => Node | string`
+	 * receiving `{ url, params, retry }`, or a raw HTML string. When omitted,
+	 * a built-in default panel with automatic recovery is shown. Network
+	 * failures never render the not-found page.
+	 */
+	offline?: Function | string;
 	[k: string]: unknown;
 }
 
@@ -116,6 +124,19 @@ interface RouteDataResult {
 	redirect?: string;
 	error?: string;
 	statusCode?: number;
+	/** True when the request failed because the client has no network. */
+	offline?: boolean;
+}
+
+/**
+ * Classifies a data-fetch failure as a connectivity problem rather than a
+ * server problem: fetch rejects with TypeError on network failure, and
+ * `navigator.onLine === false` confirms it even where the error shape is
+ * environment-specific.
+ */
+function isConnectivityFailure(err: unknown): boolean {
+	if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) return true;
+	return err instanceof TypeError;
 }
 
 const _dataPromises = new Map<string, Promise<RouteDataResult | null>>();
@@ -150,7 +171,11 @@ async function fetchRouteData(path: string): Promise<RouteDataResult | null> {
 		}
 		if (!ct.includes('application/json')) return null;
 		return (await res.json()) as RouteDataResult;
-	} catch {
+	} catch (err) {
+		if (isConnectivityFailure(err)) return { offline: true };
+		// Passive signals can miss (proxies, emulation) — actively probe
+		// before classifying as a plain failure.
+		if (await looksOffline()) return { offline: true };
 		return null;
 	}
 }
@@ -195,11 +220,29 @@ function chunkErrorForNode(node: RouteNode | null): Error | undefined {
 	return undefined;
 }
 
+/**
+ * Active connectivity check for failure paths where passive signals
+ * (`navigator.onLine`) are unreliable (proxies, CDP emulation, some
+ * browsers lag the flag). Any HTTP response — even 404/500 — proves the
+ * origin is reachable; only a fetch-level rejection counts as offline.
+ */
+async function looksOffline(): Promise<boolean> {
+	if (typeof navigator !== 'undefined' && navigator && navigator.onLine === false) return true;
+	if (typeof fetch !== 'function') return false;
+	try {
+		await fetch('/__vesk_connectivity_' + Date.now(), { method: 'HEAD', cache: 'no-store' });
+		return false;
+	} catch (err) {
+		return err instanceof TypeError;
+	}
+}
+
 async function renderNotFound(
 	router: RouterInstance,
 	match: RouteMatch,
 	container: HTMLElement,
 ): Promise<void> {
+	clearOfflineFlag(router);
 	const chain = match.matchChain;
 	const paramValues = match.params;
 	const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
@@ -222,6 +265,93 @@ async function renderNotFound(
 	router._currentMatch = match;
 }
 
+type OfflineEntry = Function | string;
+
+function defaultOfflineHtml(url: string): string {
+	return '<div data-vesk-offline style="all:initial;display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;font-family:system-ui,-apple-system,sans-serif;color:#1f2937;text-align:center;padding:24px">' +
+		'<div style="font-size:40px;line-height:1;margin-bottom:16px" aria-hidden="true">📡</div>' +
+		'<h1 style="font-size:22px;font-weight:700;margin:0 0 8px">You\u2019re offline</h1>' +
+		'<p style="margin:0 0 20px;color:#6b7280;max-width:34em">Check your connection. <span style="color:#9ca3af">' + escapeOfflineUrl(url) + '</span> will load automatically once you\u2019re back online.</p>' +
+		'<button type="button" data-vesk-offline-retry style="all:unset;cursor:pointer;background:#2563eb;color:#fff;padding:10px 22px;border-radius:8px;font-size:14px;font-weight:600">Retry now</button>' +
+	'</div>';
+}
+
+function escapeOfflineUrl(url: string): string {
+	return String(url).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * Renders the offline experience for a navigation that failed due to loss of
+ * connectivity. Precedence: route-level custom component → router-level
+ * `offline` option (component or HTML string) → built-in default panel.
+ * Never renders the not-found page: a network failure is not a missing
+ * route. Registers a one-shot `online` listener that re-navigates to the
+ * current path so the page recovers without user action.
+ */
+async function renderOfflinePage(
+	router: RouterInstance,
+	match: RouteMatch,
+	container: HTMLElement,
+): Promise<void> {
+	const url = match.pathname || (typeof window !== 'undefined' ? window.location.pathname : '');
+	const offlineUI = router._offlineUI as OfflineEntry | undefined;
+
+	let mounted = false;
+	if (typeof offlineUI === 'function') {
+		const tempRoot = document.createDocumentFragment();
+		const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
+		// Debounced retry: a component that calls retry() while rendering
+		// must not trigger a navigate→fail→render→retry microtask loop.
+		const safeRetry = () => {
+			const r = router as RouterInstance & { _lastOfflineRetry?: number };
+			const now = Date.now();
+			if (now - (r._lastOfflineRetry || 0) < 300) return;
+			r._lastOfflineRetry = now;
+			router.navigate(url, { replace: true });
+		};
+		const dom = await runInBlockWindow(() => (offlineUI as Function)({ url, params: match.params, retry: safeRetry }, new Map(), walker));
+		if (dom && typeof dom === 'object' && (dom as Node).nodeType) {
+			if (container.replaceChildren) container.replaceChildren(dom as Node);
+			else { container.innerHTML = ''; container.appendChild(dom as Node); }
+			mounted = true;
+		} else if (typeof dom === 'string') {
+			container.innerHTML = dom;
+			mounted = true;
+		}
+	} else if (typeof offlineUI === 'string') {
+		container.innerHTML = offlineUI;
+		mounted = true;
+	}
+
+	if (!mounted) {
+		container.innerHTML = defaultOfflineHtml(url);
+		const retryBtn = (container.querySelector ? container.querySelector('[data-vesk-offline-retry]') : null) as HTMLElement | null;
+		if (retryBtn) {
+			const r = router as RouterInstance & { _lastOfflineRetry?: number };
+			retryBtn.addEventListener('click', () => {
+				const now = Date.now();
+				if (now - (r._lastOfflineRetry || 0) < 300) return;
+				r._lastOfflineRetry = now;
+				router.navigate(url, { replace: true });
+			});
+		}
+	}
+
+	router._showingOffline = true;
+	registerOnlineRecovery(router);
+}
+
+function registerOnlineRecovery(router: RouterInstance): void {
+	const r = router as RouterInstance & { _onlineHandler?: EventListener };
+	if (r._onlineHandler || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
+	r._onlineHandler = () => {
+		if (!r._showingOffline) return;
+		r._showingOffline = false;
+		router.navigate(window.location.pathname + window.location.search, { replace: true });
+	};
+	window.addEventListener('online', r._onlineHandler);
+}
+
 async function applyRouteData(
 	router: RouterInstance,
 	match: RouteMatch,
@@ -229,6 +359,10 @@ async function applyRouteData(
 	container: HTMLElement,
 	render: (router: RouterInstance, match: RouteMatch, container: HTMLElement) => Promise<void> | void = renderMatch,
 ): Promise<void> {
+	if (data.offline) {
+		await renderOfflinePage(router, match, container);
+		return;
+	}
 	if (data.notFound) {
 		await renderNotFound(router, match, container);
 		return;
@@ -296,7 +430,7 @@ function shouldFetchData(router: RouterInstance, match: RouteMatch): boolean {
 }
 
 function hasRealPageData(data: RouteDataResult): boolean {
-	if (data.notFound || data.redirect || data.error) return true;
+	if (data.offline || data.notFound || data.redirect || data.error) return true;
 	if (data.head && data.head.trim().length > 0) return true;
 	const props = data.props as Record<string, unknown> | undefined;
 	if (!props) return false;
@@ -438,16 +572,34 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	}
 
 	// The route matched and has a page name, but its component chunk failed
-	// to load or compile. Render the route's error boundary (or a generic
-	// error page) without touching any other route's components.
-	if (!pageNode.page && pageNode._pageName) {
-		const chunkErr = chunkErrorForNode(pageNode);
-		return renderErrorPage(
-			router,
-			match,
-			container,
-			chunkErr || new Error(`Component "${pageNode._pageName}" is unavailable`),
-		);
+	// to load or compile (or its component ref is still an unwired name).
+	// While offline that is a connectivity problem, not a broken route —
+	// show the offline experience instead of an error page. The connectivity
+	// probe only runs when a chunk actually failed or the browser reports
+	// offline, so ordinary lazy-loading never pays for it.
+	if (pageNode._pageName && (!pageNode.page || typeof pageNode.page === 'string')) {
+		const suspectOffline = failedChunks.has(pageNode._chunk as string)
+			|| (typeof navigator !== 'undefined' && !!navigator && navigator.onLine === false);
+		navDebug('unresolved page guard', String(pageNode._pageName), 'suspect=', String(suspectOffline));
+		if (!suspectOffline) {
+			const chunkErr0 = chunkErrorForNode(pageNode);
+			return renderErrorPage(
+				router,
+				match,
+				container,
+				chunkErr0 || new Error(`Component "${pageNode._pageName}" is unavailable`),
+			);
+		}
+		return looksOffline().then((offline) => {
+			if (offline) return renderOfflinePage(router, match, container);
+			const chunkErr = chunkErrorForNode(pageNode);
+			return renderErrorPage(
+				router,
+				match,
+				container,
+				chunkErr || new Error(`Component "${pageNode._pageName}" is unavailable`),
+			);
+		});
 	}
 
 	const layoutNodes = chain.filter(n => n.layout);
@@ -641,12 +793,17 @@ function makeSsrError(message?: string): Error {
 // failure or when the SSR output is already an error page). The error
 // component renders in place of the page inside the layout chain so the error
 // page keeps the site nav.
+function clearOfflineFlag(router: RouterInstance): void {
+	(router as RouterInstance & { _showingOffline?: boolean })._showingOffline = false;
+}
+
 async function renderErrorPage(
 	router: RouterInstance,
 	match: RouteMatch,
 	container: HTMLElement,
 	error: unknown,
 ): Promise<void> {
+	clearOfflineFlag(router);
 	const chain = match.matchChain;
 	const paramValues = match.params;
 	const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
@@ -761,8 +918,13 @@ async function hydrateInitial(
 
 	const hydrators = router.__hydrators;
 	if (!pageNode.page && !(hydrators && pageNode._pageName && hydrators[pageNode._pageName as string])) {
-		// The route's component chunk failed to load or compile. Render the
-		// error boundary for this route instead of hydrating nothing.
+		// The route's component chunk failed to load or compile. While
+		// offline that is a connectivity problem — show the offline
+		// experience; otherwise render the error boundary for this route.
+		if (await looksOffline()) {
+			await renderOfflinePage(router, match, container);
+			return;
+		}
 		const chunkErr = chunkErrorForNode(pageNode);
 		await renderErrorPage(
 			router,
@@ -869,6 +1031,7 @@ export function createRouter(
 		_currentSegments: null,
 		_depth: 0,
 		_routeDataCache: options.routeDataCache ?? 0,
+		_offlineUI: (options.offline ?? null) as OfflineEntry | null,
 
 		start() {
 			setCurrentRouter(this);
@@ -969,6 +1132,7 @@ export function createRouter(
 					throw e;
 				}
 				this._currentMatch = match!;
+				clearOfflineFlag(this);
 				handleScroll(url.pathname, opts.replace);
 			};
 
@@ -1089,6 +1253,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		_currentSegments: null,
 		_depth: 0,
 		_routeDataCache: options.routeDataCache ?? 0,
+		_offlineUI: (options.offline ?? null) as OfflineEntry | null,
 
 		start() {
 			setCurrentRouter(this);
@@ -1211,6 +1376,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					throw e;
 				}
 				router._currentMatch = match!;
+				clearOfflineFlag(router);
 				handleScroll(url.pathname, opts.replace);
 			};
 
@@ -1248,6 +1414,19 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 			const pendingChunks = hasPendingChunks(match.matchChain);
 
+			// A navigation whose render blew up (typically an unwired lazy
+			// page throwing "c.page is not a function") must degrade to the
+			// offline experience when connectivity is the culprit.
+			const handleNavFailure = (err: unknown) => {
+				navDebug('handleNavFailure', String((err as Error)?.message || err).slice(0, 80));
+				if (navToken !== router._navToken) return;
+				looksOffline().then((offline) => {
+					navDebug('handleNavFailure verdict', offline ? 'offline' : 'online');
+					if (offline) return void renderOfflinePage(router, match!, container);
+					return void renderErrorPage(router, match!, container, err);
+				}).catch(() => {});
+			};
+
 			const doRenderWithChunks = pendingChunks.length > 0
 				? () => {
 					updateUrl();
@@ -1259,7 +1438,13 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						if (typeof router.__updateComponents === 'function') {
 							router.__updateComponents(match!.matchChain);
 						}
-						renderContent();
+						try {
+							renderContent();
+						} catch (e) {
+							handleNavFailure(e);
+						}
+					}, (e) => {
+						handleNavFailure(e);
 					});
 				}
 				: (() => {

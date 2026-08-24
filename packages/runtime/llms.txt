@@ -109,6 +109,9 @@ Non-index module exports: `createHydrateChildWalker`, `_FILTER_ACCEPT`,
 ```ts
 createRouter(routes: RouteNode[] | Record<string, Function>, options?: RouterOptions): RouterInstance
 createFileRouter(routeTree: RouteNode[], options?: FileRouterOptions): FileRouterInstance
+/* RouterOptions.offline?: Function | string — component ({ url, params, retry }) or HTML string
+   shown when an SPA nav fails offline; default panel + auto-recovery on `online`. Network
+   failures never render not-found. */
 defineRoute(path: string, config: Record<string, unknown>): RouteNode
 buildRouteTree(definitions: RouteNode[]): RouteNode[]
 ensureChunk(chunkUrl: string): Promise<void>

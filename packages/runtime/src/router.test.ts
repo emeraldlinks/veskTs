@@ -974,6 +974,121 @@ testAsync('late-resolving suspended page render must not clobber a newer navigat
 	}
 });
 
+// ── Offline navigation ───────────────────────────────────────────────────
+
+function setNavigatorOnline(online) {
+	if (typeof globalThis.navigator === 'undefined') {
+		globalThis.navigator = {};
+	}
+	try {
+		Object.defineProperty(globalThis.navigator, 'onLine', { value: online, configurable: true });
+	} catch {
+		globalThis.navigator = { onLine: online };
+	}
+}
+
+testAsync('network failure during SPA nav renders default offline UI, not 404', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	const prevOnline = globalThis.navigator ? globalThis.navigator.onLine : undefined;
+	setNavigatorOnline(false);
+	globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+	let nfCalled = false;
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => { const d = document.createElement('div'); d.textContent = 'home'; return d; } },
+			{ path: '/away', notFound: () => { nfCalled = true; const d = document.createElement('div'); d.textContent = 'nf-should-not-render'; return d; }, page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/', { replace: true });
+		await tick(5);
+		router.navigate('/away', { replace: true });
+		await tick(10);
+		expect(container.innerHTML).toContain('data-vesk-offline');
+		expect(router._showingOffline).toBeTruthy();
+		expect(nfCalled).toBeFalsy();
+	} finally {
+		globalThis.fetch = origFetch;
+		if (prevOnline === undefined && typeof globalThis.navigator === 'object') delete globalThis.navigator.onLine;
+		else setNavigatorOnline(prevOnline !== undefined ? prevOnline : true);
+	}
+});
+
+testAsync('custom offline component receives url and retry', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	let seenUrl = null;
+	let retryIsFunction = false;
+	setNavigatorOnline(false);
+	globalThis.fetch = async () => { throw new TypeError('Failed to fetch'); };
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => { const d = document.createElement('div'); d.textContent = 'home'; return d; } },
+			{ path: '/away', page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, {
+			container,
+			offline: (props) => {
+				seenUrl = props.url;
+				retryIsFunction = typeof props.retry === 'function';
+				const d = document.createElement('div');
+				d.textContent = 'custom-offline-ui';
+				return d;
+			},
+		});
+		router.navigate('/', { replace: true });
+		await tick(5);
+		router.navigate('/away', { replace: true });
+		await tick(10);
+		expect(seenUrl).toBe('/away');
+		expect(retryIsFunction).toBeTruthy();
+		const mounted = (container.children || []).some(c => c && c.textContent === 'custom-offline-ui');
+		expect(mounted).toBeTruthy();
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('coming back online re-navigates and recovers the page', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	setNavigatorOnline(false);
+	let offline = true;
+	globalThis.fetch = async () => {
+		if (offline) throw new TypeError('Failed to fetch');
+		return mockFetchResponse({ props: {} });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/conn', page: () => { const d = document.createElement('div'); d.textContent = 'connected-page'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+
+		router.navigate('/conn', { replace: true });
+		await tick(10);
+		expect(container.innerHTML).toContain('data-vesk-offline');
+
+		// Connectivity returns → the router's online handler must re-navigate.
+		offline = false;
+		setNavigatorOnline(true);
+		globalThis.window.location.pathname = '/conn';
+		const listeners = (globalThis.window._listeners && globalThis.window._listeners.online) || [];
+		expect(listeners.length).toBeGreaterThanOrEqual(1);
+		for (const fn of listeners) fn();
+		await tick(20);
+		const recovered = (container.children || []).some(c => c && c.textContent === 'connected-page')
+			|| container.textContent === 'connected-page';
+		expect(recovered).toBeTruthy();
+	} finally {
+		globalThis.fetch = origFetch;
+		setNavigatorOnline(true);
+	}
+});
+
 await asyncQueue;
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

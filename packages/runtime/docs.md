@@ -163,6 +163,13 @@ objects to their values on property access.
   'viewport' | 'idle' | 'interaction'`; `options.prefetch` defaults true.
 - `createFileRouter(routeTree, options)` adds `_hydrateStrategy`, optional
   middleware, and a custom `render`.
+- **Offline navigation**: when an SPA navigation fails due to loss of
+  connectivity (data fetch or chunk load), the router renders an offline
+  experience instead of the not-found page. Customize via
+  `options.offline`: a component `(props, registry, walker) => Node | string`
+  receiving `{ url, params, retry }`, or a raw HTML string. When omitted, a
+  built-in panel with a Retry button is shown; the router listens for the
+  browser `online` event and re-navigates automatically to recover.
 - Bridge primitives: `Link`, `NavLink`, `Outlet`, `useNavigate`,
   `useParams`, `usePathname`, `useSearchParams`, `useRouter`.
 - Guards: `Redirect`, `redirect(url, status?)`, `permanentRedirect(url)`,
