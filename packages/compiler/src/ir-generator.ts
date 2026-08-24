@@ -237,6 +237,19 @@ function processAttribute(source: string, attr: any): { name: string; value: str
   return { name, value: '' };
 }
 
+/**
+ * Recognizes a statement-mode `if (cond)` opening among JSX children.
+ * Returns the condition source, or null when `text` does not open an if
+ * header (keyword + balanced parens).
+ */
+function extractIfHeader(text: string): string | null {
+  if (!startsWithIdentifier(text, 'if')) return null;
+  let i = skipWhitespace(text, 2);
+  if (text[i] !== '(') return null;
+  const end = findBalancedEnd(text, i);
+  return text.slice(i + 1, end).trim();
+}
+
 function extractForHeader(text: string): string | null {
   if (!startsWithIdentifier(text, 'for')) return null;
   let i = skipWhitespace(text, 3);
@@ -265,6 +278,70 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
       const text = collapseNewlineWhitespace(child.value);
       const trimmed = text.trim();
       if (!trimmed || trimmed.startsWith('//')) { i++; continue; }
+
+      // ── statement-mode if / else-if / else among element children ──
+      const ifCond = extractIfHeader(trimmed);
+      const seqNext = children[i + 1];
+      if (
+        ifCond !== null &&
+        seqNext !== undefined &&
+        seqNext.type === 'JSXExpressionContainer' &&
+        seqNext.expression.type !== 'JSXEmptyExpression'
+      ) {
+        interface ChainLink { cond: Expression; nodes: IRNode[] }
+        const links: ChainLink[] = [];
+        let alternate: IRNode[] | null = null;
+
+        const containerToNodes = (container: any): IRNode[] => {
+          const exprNode = container.expression;
+          if (exprNode.type === 'JSXFragment') {
+            const inner: IRNode[] = [];
+            for (const c of exprNode.children) inner.push(...processJSXChildren(source, [c]));
+            return inner;
+          }
+          if (exprNode.type === 'JSXElement') return processJSXElement(source, exprNode);
+          return exprToIR(source, exprNode);
+        };
+
+        links.push({
+          cond: new Expression(ifCond, [], parseExprNode(ifCond), null),
+          nodes: containerToNodes(seqNext),
+        });
+
+        let j = i + 2;
+        while (j < children.length) {
+          const sep = children[j];
+          if (sep === undefined || sep.type !== 'JSXText') break;
+          const sv = sep.value.trim();
+          const cont = children[j + 1];
+          if (sv.startsWith('} else if') || sv.startsWith('else if')) {
+            const ifIdx = sv.indexOf('if');
+            const header = extractIfHeader(sv.slice(ifIdx));
+            if (header === null || cont === undefined || cont.type !== 'JSXExpressionContainer') break;
+            links.push({
+              cond: new Expression(header, [], parseExprNode(header), null),
+              nodes: containerToNodes(cont),
+            });
+            j += 2;
+            continue;
+          }
+          if (sv.startsWith('} else') || sv === 'else') {
+            if (cont === undefined || cont.type !== 'JSXExpressionContainer') break;
+            alternate = containerToNodes(cont);
+            j += 2;
+          }
+          break;
+        }
+
+        // Fold right-to-left: earlier conditions wrap later ones as alternate.
+        let tail: IRNode[] = alternate || [];
+        for (let k = links.length - 1; k >= 0; k--) {
+          tail = [new OpaqueDynamicRegion(links[k].cond, links[k].nodes, tail)];
+        }
+        result.push(...tail);
+        i = j;
+        continue;
+      }
 
       const forDecl = extractForHeader(trimmed);
       const nextChild = children[i + 1];

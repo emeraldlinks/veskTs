@@ -93,4 +93,14 @@ for (const target of TARGETS) {
 console.log('[refresh] installing test-app dependencies...');
 run('npm', ['install', '--no-audit', '--no-fund'], { cwd: testAppDir });
 
+// npm nests @vesk/* copies under vesk/node_modules when the tarball's
+// dependency range doesn't match the CI version pins — those nested copies
+// are pulled from the REGISTRY (stale) and shadow the fresh top-level
+// packages during sidecar resolution. Prune them after install.
+const nestedScope = join(testAppDir, 'node_modules', 'vesk', 'node_modules', '@vesk');
+if (existsSync(nestedScope)) {
+	rmSync(nestedScope, { recursive: true, force: true });
+	console.log('[refresh] pruned nested node_modules/vesk/node_modules/@vesk (registry shadows)');
+}
+
 console.log('[refresh] done — test-app now pins freshly built CI tarballs.');

@@ -12,11 +12,11 @@
     "start:vesk": "vesk start"
   },
   "dependencies": {
-    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.1.14-ci.1787555019049.tgz",
-    "vesk": "file:./tarballs/vesk-0.1.14-ci.1787555019049.tgz",
-    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.1.14-ci.1787555019049.tgz",
-    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.1.14-ci.1787555019049.tgz",
-    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.1.14-ci.1787555019049.tgz"
+    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.1.14-ci.1787569333311.tgz",
+    "vesk": "file:./tarballs/vesk-0.1.14-ci.1787569333311.tgz",
+    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.1.14-ci.1787569333311.tgz",
+    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.1.14-ci.1787569333311.tgz",
+    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.1.14-ci.1787569333311.tgz"
   },
   "optionalDependencies": {
     "@vesk/haul-linux-arm64": "file:./tarballs/vesk-haul-linux-x64-0.1.12.tgz"

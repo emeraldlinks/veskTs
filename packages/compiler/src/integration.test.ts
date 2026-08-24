@@ -1391,6 +1391,28 @@ component App {
   assert(html.includes('<strong>statement</strong>'), `stmt markdown missing: ${html}`);
 });
 
+it('[md][stmt] if / else-if / else chain inside element children', () => {
+  const source = `import { Md } from '@vesk/runtime';
+component App {
+  let &[mode] = track<number>(0)
+  <div>
+    <button onclick={() => mode = 1} class={mode === 0 ? 'on' : 'off'}>switch</button>
+    if (mode === 0) {
+      <Md content={'# alpha'} />
+    } else if (mode === 1) {
+      <Md content={'## beta'} />
+    } else {
+      <h3>gamma</h3>
+    }
+  </div>
+}`;
+  const html = render(source, 'App');
+  assert(html.includes('<button'), `button missing: ${html}`);
+  assert(html.includes('id="alpha"') && html.includes('>alpha</h1>'), `alpha branch missing: ${html}`);
+  const code = compileClient(source, 'App', { forceClient: true });
+  assert(code.includes('Md('), `client Md call missing: ${code.slice(0, 400)}`);
+});
+
 it('[md][stmt] for loop over markdown array renders each item', () => {
   const source = `import { Md } from '@vesk/runtime';
 component App {

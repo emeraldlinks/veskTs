@@ -1,6 +1,7 @@
 import { walk } from 'zimmerframe';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
+import tsx from 'esrap/languages/tsx';
 import type { IRNode, IRRoot, ComponentIR } from '@vesk/compiler/src/ir';
 import {
   StaticNode,
@@ -70,12 +71,30 @@ export function semicolonizeStatement(code: string): string {
   return code + ';';
 }
 
+function containsJsx(node: any, depth = 0): boolean {
+  if (!node || typeof node !== 'object' || depth > 40) return false;
+  if (Array.isArray(node)) {
+    for (const item of node) { if (containsJsx(item, depth + 1)) return true; }
+    return false;
+  }
+  if (typeof node.type === 'string' && (node.type === 'JSXElement' || node.type === 'JSXFragment')) return true;
+  for (const key of Object.keys(node)) {
+    const v = (node as any)[key];
+    if (v && typeof v === 'object' && containsJsx(v, depth + 1)) return true;
+  }
+  return false;
+}
+
+function printAst(ast: any): string {
+  return print(ast, containsJsx(ast) ? tsx() : ts()).code;
+}
+
 export function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
   const ast = (irNode as any).ast;
   if (!ast) return (irNode as any).raw;
   if (tracked.size === 0) {
     if (!hasTsSyntax(ast)) return (irNode as any).raw;
-    return print(stripTsTypes(ast), ts()).code;
+    return printAst(stripTsTypes(ast));
   }
   const stripped = stripTsTypes(ast);
 
@@ -173,7 +192,7 @@ export function transformTracked(irNode: Expression | RuntimeStatement | Dynamic
     },
   });
 
-  return print(transformed, ts()).code;
+  return print(transformed, containsJsx(transformed) ? tsx() : ts()).code;
 }
 
 import type { Node as ESTreeNode } from 'estree';

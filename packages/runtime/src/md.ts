@@ -1387,7 +1387,12 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 		if (className) el.className = className;
 		if (style) el.style.cssText = style;
 		wireCopyHandlers(el);
-		return document.createDocumentFragment();
+		// When the element came from SSR it is already in the document —
+		// return an empty fragment. When the walker handed us a FRESH
+		// element (dynamic branch that had no SSR markup), hand the element
+		// back so the caller places it.
+		if (el.parentNode) return document.createDocumentFragment();
+		return el;
 	}
 
 	const div = document.createElement('div');

@@ -1038,6 +1038,34 @@ describe('Client Codegen — Async Components', () => {
 	});
 });
 
+// ── JSX in dynamic expressions (esrap tsx fallback) ───────────
+
+{
+  const src = `import { Md } from '@vesk/runtime';
+let &[n] = track<number>(0)
+const presets = [{ md: '# a' }, { md: '# b' }];
+component X {
+	<button onclick={() => n = 1}
+		class={n === 0 ? 'on' : 'off'}>go</button>
+	if (n === 0) {
+		<Md content={presets[0].md} />
+	} else {
+		<Md content={presets[1].md} />
+	}
+}`;
+  try {
+    const code = compileClient(src, 'X', { forceClient: true });
+    passed++;
+    console.log('  ✓ component call inside tracked if/else compiles (tsx print path)');
+    if (!code.includes('Md(')) { failed++; console.log('    ✗ Md call missing from output'); }
+    if (/Not implemented/.test(code)) { failed++; console.log('    ✗ esrap not-implemented leaked into output'); }
+  } catch (e) {
+    failed++;
+    console.log(`  ✗ component call inside tracked if/else — ${e.message}`);
+  }
+}
+
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

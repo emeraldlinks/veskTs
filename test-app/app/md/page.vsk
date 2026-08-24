@@ -1,31 +1,172 @@
 import { Md } from '@vesk/runtime';
 
-const markdownDoc = `# Markdown in Vesk
+const featureDoc = `# Markdown in Vesk
 
-Use **<Md content={...} />** to render markdown — headings, lists, links and code blocks.
+Rendered by the tokenizer-based \`<Md>\` component — no regex, everything
+escaped, raw HTML never leaks through.
 
-- compiler-first
-- fine-grained reactivity
-- tokenizer-based parsing
+This page exercises the advanced pipeline: GFM tables, task lists,
+syntax-highlighted code with a copy button, heading anchors, autolinks
+and hard breaks.
 
-> Content is escaped, so raw HTML never leaks through.
+## Task list
+
+- [x] tables with column alignment
+- [x] fenced code highlighting (12+ languages)
+- [x] copy button on code blocks
+- [ ] footnotes (planned)
+- [ ] math blocks (needs KaTeX)
+
+## Languages
+
+### TypeScript
 
 \`\`\`ts
-const md = track('# hello');
+interface Post {
+	id: number;
+	title: string;
+}
+
+async function getPost(id: number): Promise<Post | null> {
+	const res = await fetch(\`/api/posts/\${id}\`);
+	if (!res.ok) return null;
+	return res.json();
+}
 \`\`\`
 
-## Feature matrix
+### Python
 
-1. SSR and hydration
-2. SPA navigation
-3. zero-JS pages
+\`\`\`python
+def fib(n: int):
+	a, b = 0, 1
+	for _ in range(n):
+		yield a
+		a, b = b, a + b
+
+print(list(fib(10)))  # [0, 1, 1, 2, 3, 5, 8, 13, 21, 34]
+\`\`\`
+
+### Bash + CSS
+
+\`\`\`bash
+# build all packages and run the dev server
+npm run build --workspaces
+npm run dev -- --port 3000
+\`\`\`
+
+\`\`\`css
+.vesk-md .md-code-bar {
+	display: flex;
+	justify-content: space-between; /* badge left, copy right */
+	background: #21262d;
+}
+\`\`\`
+
+### Diff
+
+\`\`\`diff
++ renderMarkdown(md, { highlight: true })
+- markdown(md)
+@@ md.ts @@
+\`\`\`
+
+## Tables
+
+| Feature | Status | Since |
+|:--------|:------:|------:|
+| tables | shipped | v0.2 |
+| task lists | shipped | v0.2 |
+| footnotes | planned | — |
+
+Inline markup works in cells too: \`code\`, **bold**, *italic*.
+
+## Lists
+
+5. ordered lists can start at any number
+6. like this one — see the \`start\` attribute
+7. and keep counting
+
+- nested structures
+  - blockquotes inside lists
+    > quoting works anywhere
+- autolinks: bare URLs like https://github.com/emeraldlinks/veskTs become links
+
+## Anchors & breaks
+
+Every heading gets a slug \`id\` so you can deep-link to it.
+Line one ends here with two spaces
+and line two follows after a hard break.
 `;
 
+const lineNumbersDoc = `\`\`\`ts
+import { Md } from '@vesk/runtime';
+
+// line numbers are pure CSS counters — no extra DOM columns
+export function demo(): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < 3; i++) {
+		out.push(\`line \${i + 1}\`);
+	}
+	return out;
+}
+\`\`\`
+`;
+
+const presets = [
+	{ id: 'table', label: 'Tables', md: '| Feature | Status |\n|:--------|-------:|\n| aligned left | right |\n| `code` in cells | **bold** |' },
+	{ id: 'tasks', label: 'Tasks', md: '- [x] ship renderer\n- [ ] write docs\n- [ ] add footnotes' },
+	{ id: 'diff', label: 'Diff', md: '```diff\n+ added in this release\n- removed legacy path\n  unchanged context\n```' },
+];
+
 component MdPage {
+	let &[presetIndex] = track<number>(0)
+	let &[live] = track<string>('# Live preview\n\nType markdown below.\n')
+
+	function setPreset(i: number): void { presetIndex = i }
+
+	<Head>
+		<title>Md — advanced markdown rendering</title>
+	</Head>
+
 	<h1 class="text-3xl font-bold mb-4">Markdown Demo</h1>
-	<Md content={markdownDoc} class="md prose" />
-	<div class="mt-8 border-t border-gray-200 pt-4">
-		<p class="text-gray-600">Dynamic content:</p>
-		<Md content="# Dynamic heading from a cell" />
+	<p class="text-gray-600 mb-6">
+		Tokenizer-based rendering — tables, task lists, highlighted code,
+		copy buttons, anchors, autolinks. Everything escaped; zero regex.
+	</p>
+
+	<section class="mb-10">
+		<Md content={featureDoc} css />
+	</section>
+
+	<div class="mt-8 border-t border-gray-200 pt-6">
+		<h2 class="text-xl font-semibold mb-3">Line numbers (CSS counters)</h2>
+		<Md content={lineNumbersDoc} css lineNumbers />
+	</div>
+
+	<div class="mt-8 border-t border-gray-200 pt-6">
+		<h2 class="text-xl font-semibold mb-3">Samples</h2>
+
+		<h3 class="font-semibold mb-2">Tables</h3>
+		<Md content={presets[0].md} />
+
+		<h3 class="font-semibold mb-2 mt-6">Tasks</h3>
+		<Md content={presets[1].md} />
+
+		<h3 class="font-semibold mb-2 mt-6">Diff</h3>
+		<Md content={presets[2].md} />
+	</div>
+
+	<div class="mt-8 border-t border-gray-200 pt-6">
+		<h2 class="text-xl font-semibold mb-3">Live editing</h2>
+		<textarea
+			oninput={(e: Event) => { live = (e.target as HTMLTextAreaElement).value }}
+			rows={5}
+			class="w-full font-mono text-sm border border-gray-300 rounded p-3 mb-4"
+		>{live}</textarea>
+		<p class="text-gray-500 text-sm mb-2">Raw preview (reactive):</p>
+		<pre class="bg-gray-100 rounded p-3 text-xs whitespace-pre-wrap">{live}</pre>
+		<p class="text-gray-400 text-xs mt-2">
+			Full per-keystroke markdown re-render lands with the reactive-props pass.
+		</p>
 	</div>
 }
