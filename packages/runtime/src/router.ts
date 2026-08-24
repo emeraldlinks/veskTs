@@ -400,7 +400,7 @@ function replacePageContent(container: HTMLElement, newContent: Node | string | 
 	return true;
 }
 
-function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement): void | Promise<void> {
+function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement, navToken?: number): void | Promise<void> {
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
@@ -572,6 +572,15 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	}
 
 	const mountDom = (dom: unknown): void => {
+		// Staleness guard: a suspended (async) page whose render resolves after
+		// a NEWER navigation must not clobber the newer page's DOM. The file
+		// router stamps the container with the latest nav token per navigation.
+		if (
+			navToken !== undefined &&
+			(container as HTMLElement & { __veskMountToken?: number }).__veskMountToken !== navToken
+		) {
+			return;
+		}
 		if (dom && typeof dom === 'object' && (dom as Node).nodeType) {
 			if (container.replaceChildren) container.replaceChildren(dom as Node);
 			else { container.innerHTML = ''; container.appendChild(dom as Node); }
@@ -1191,7 +1200,12 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					propsNode.props = undefined;
 				}
 				try {
-					renderFn(router, match!, container);
+					// Stamp this navigation's token on the container: a suspended
+					// (async) page whose render resolves after a newer navigation
+					// must not clobber the newer page's DOM (see renderMatch's
+					// mountDom staleness guard).
+					(container as HTMLElement & { __veskMountToken?: number }).__veskMountToken = navToken;
+					renderFn(router, match!, container, navToken);
 				} catch (e) {
 					firstRenderFailed = true;
 					throw e;

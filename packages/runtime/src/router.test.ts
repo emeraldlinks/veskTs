@@ -939,6 +939,41 @@ testAsync('stale route data response is dropped after rapid navigation', async (
 	}
 });
 
+testAsync('late-resolving suspended page render must not clobber a newer navigation', async () => {
+	const container = document.getElementById('root') || document.createElement('div');
+	let releaseAsync;
+	const gate = new Promise(resolve => { releaseAsync = resolve; });
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async () => mockFetchResponse({ props: {}, head: '' });
+	try {
+		// First page suspends (async component awaiting data); second renders sync.
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/slow', page: () => gate.then(() => {
+				const d = document.createElement('p');
+				d.textContent = 'slow-page-final';
+				return d;
+			}) },
+			{ path: '/fast', page: () => { const d = document.createElement('div'); d.textContent = 'fast-page'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+
+		router.navigate('/slow', { replace: true });
+		await tick(5);
+		router.navigate('/fast', { replace: true });
+		await tick(5);
+		expect(container.textContent).toBe('fast-page');
+		releaseAsync();
+		await tick(20);
+		// The suspended /slow render resolved AFTER /fast painted — mountDom
+		// must drop the stale paint instead of clobbering the newer page.
+		expect(container.textContent).toBe('fast-page');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
 await asyncQueue;
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
