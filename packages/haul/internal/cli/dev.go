@@ -219,8 +219,6 @@ func RunDev(ctx context.Context, args []string) error {
 
 	publicDir := filepath.Join(projectDir, "public")
 
-	fmt.Fprintf(os.Stderr, "[vesk haul] dev: app=%s public=%s port=%d\n", appDir, publicDir, port)
-
 	sidecar, err := StartSidecar(ctx, projectDir)
 	if err != nil {
 		return fmt.Errorf("starting compiler sidecar: %w", err)
