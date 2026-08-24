@@ -43,6 +43,33 @@
 - `.vsk` is a superset of TypeScript: every TS construct must parse, survive
   codegen, and pass through `vskToTsx` for `tsc`.
 
+## Commands
+
+```bash
+npx tsx packages/cli/src/build-packages.ts   # rebuild packages after compiler edits (required)
+npx tsx packages/compiler/src/<file>.test.ts # run one compiler test file
+npm run typecheck                            # tsc --noEmit for compiler + runtime + adapter
+node scripts/test.js                         # full suite: builds all packages first — not for iteration
+npm test                                     # unit suite + dev E2E (tests/dev-test.mjs)
+cd packages/haul && go build ./... && go vet ./... && go test ./...   # Go haul engine
+node hydration-test.mjs                      # production hydration path; needs test-app dev server
+                                             # on :3000 and CHROMIUM_PATH env (defaults to a Termux path;
+                                             # set to your chrome/chromium binary)
+```
+
+## Layout
+
+- Monorepo workspaces under `packages/`: adapter, cli, compiler, create-vesk,
+  plugin-tailwind, prettier-plugin, runtime, lsp — plus native `haul` (Go) and
+  per-platform `haul-*` binary packages.
+- Nested AGENTS.md files add module rules: `scripts/AGENTS.md` (ports, release
+  order, sentinel formats) and `packages/runtime/AGENTS.md` (barrel split,
+  no-batch rule). They extend this file — read both when touching those areas.
+- `hydration-test.mjs`, `production-hydration-test.mjs` etc. at repo root are
+  puppeteer-core probes against a running server; `joe/test/` holds the Joe app's
+  hydration/event/HMR tests.
+- TODO.md is the living task tracker — read at session start, update after work.
+
 ## Current focus (see TODO.md)
 
 Full TypeScript support in `.vsk` (tsc-in-.vsk), `generateVskDts` correctness,

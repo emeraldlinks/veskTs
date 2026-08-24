@@ -82,6 +82,7 @@
 - [x] **CLI `--router` flag** — scans `app/` directory, compiles all `.vsk` files, generates unified output with route tree and router bootstrap.
 - [x] **SSR route matching** — `matchUrl()` in compiler router matches URL path against route tree, extracts params. Full E2E demo with 5 routes (root, about, blog layout, blog/[slug]).
 - [x] **Dev server / HMR** — `vesk dev` with file watching, incremental HMR, WebSocket broadcast, floating dev menu, surgical component-update (eval + applyPageUpdate for page/component, full navigate for layout)
+- [x] **HMR latency pass (2026-08)** — content-only `.vsk` edits now hot-swap in ~90–150ms end-to-end (was ~700–800ms): incremental compile cache in `generateClientBundle` (`options.cache`, mtime+size keyed; `only` + `returnEditedSources` targeted mode stat-checks just the edited file), one parse/IR per edit via compiler `compileClientBoth` (comp+hyd+name share a single acorn pass; AST cloned per mode because stripTsTypes mutates), 12ms watcher debounce, Tailwind rescan parallelized with the JS build and `css-update` suppressed when output unchanged, keep-alive + `setNoDelay` on the haul↔sidecar RPC, diff-based `dev_rebuild` payload (patched chunks only). Follow-up: make `stripTsTypes` non-mutating to drop the per-edit clone.
 - [x] **Production demo** — `vesk build` + `vesk start` serving SSR with hydration, global CSS, static files, dynamic routes, API routes, 404
 - [x] **CSS pipeline** — global.css detection, build copy to static/, `<link>` tag in SSR HTML, dev server CSS watching + rebuild
 - [x] **npm packaging** — publish `@vesk/compiler` and `@vesk/runtime` (tarballs via `npm pack` + `create-vesk` scaffolder + local `file:` installs)
@@ -89,6 +90,7 @@
 - [ ] **Transitions / animations** — built-in transition directives on element mount/unmount
 - [x] **Portal** — `Portal` runtime component moves DOM nodes to `props.target`. Requires `{#client}` blocks for SSR-free content. 56 tests passing.
 - [x] **Form actions** — progressive enhancement form handling (server actions via `defineAction` + `Form`, client validation, `vsk-success`/`vsk-error` round-trips; hydration-test Test 15)
+- [x] **Offline navigation UX** — network failures during SPA nav (data fetch or chunk load) now render a dedicated offline experience instead of the app's 404 page or a raw `TypeError`. Router option `offline` accepts a component (`{ url, params, retry }`) or HTML string; built-in default panel has Retry + auto-recovery via the browser `online` event. Active connectivity probe (`looksOffline`) classifies failures where `navigator.onLine` is unreliable. 3 router tests + browser e2e probe.
 - [ ] **Headless component primitives** — Show, For, Switch/Match as components
 
 ### Considering (need research)
