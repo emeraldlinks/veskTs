@@ -349,7 +349,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         } else if (files.length > 0) {
           hmr.handleFileChange(files[0], doBuild, routeTree);
         }
-      }, 200);
+      }, 40);
     });
   } catch (e) {
     console.error('vesk dev: file watching unavailable');

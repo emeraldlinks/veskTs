@@ -25,6 +25,5 @@ packages/cli/*.tgz
 packages/runtime/*.tgz
 /*.tgz
 .vesk-cache/
-test-app/tarballs/*-ci.*.tgz
 test-app/.vesk-smoke/
 test-app/.vesk-hydr/
