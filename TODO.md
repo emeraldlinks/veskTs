@@ -4,7 +4,7 @@
 
 **Current phase:** haul
 
-**Total tests:** compiler 739 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 24 + parser 79 + server-codegen 99 + integration 111 + client-codegen 160 + ir-generator 9 + router 19 + ts-support 25), runtime 257 (10 files), hydration 121
+**Total tests:** compiler 739 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 24 + parser 79 + server-codegen 99 + integration 116 + client-codegen 160 + ir-generator 9 + router 22 + ts-support 25), runtime 257 (10 files), hydration 121
 **Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
 
 ---

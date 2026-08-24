@@ -69,7 +69,7 @@ All under `packages/runtime/src/`:
 | `isr.ts` | Incremental Static Regeneration: `isr`, `pageIsr`, `componentIsr`, `revalidatePath`/`revalidateTag`, cache clearing. |
 | `form.ts` | `Form` / `Field` components + validation rules (`required`, `email`, `minLength`, `maxLength`, `pattern`, `custom`). |
 | `action.ts` | Server actions: `defineAction`, registry lookup, input validation, form-action detection. |
-| `md.ts` | Tokenizer-based (no-regex) Markdown → HTML for `<Md>`; `renderMarkdown`, `escapeHtml`. |
+| `md.ts` | Tokenizer-based (no-regex) Markdown → HTML for `<Md>`: GFM tables, task lists, syntax-highlighted code (ts/js/json/css/html/py/go/rust/sql/bash/diff) with lang badge + copy button + optional line numbers, heading anchors, autolinks, hard breaks, safe URL schemes; `renderMarkdown(md, opts?)`, `highlightCode`, `sanitizeUrl`, `MD_BASE_CSS`. |
 | `seo.ts` | `JsonLd` + schema helpers (`ArticleSchema`, `ProductSchema`, `FAQPageSchema`, `BreadcrumbListSchema`, `OrganizationSchema`, `LocalBusinessSchema`, `VideoSchema`). |
 | `image.ts` | `Image` component (srcset/widths, responsive, placeholder). |
 | `portal.ts` | `Portal` component (render into another target). |

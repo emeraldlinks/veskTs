@@ -1333,8 +1333,8 @@ component App {
 A **bold** [link](https://vesk.dev) here" class="prose" />;
 }`;
   const html = show('html', render(source, 'App'));
-  assert(html.includes('<div class="prose">'), `wrapper class missing: ${html}`);
-  assert(html.includes('<h1>Title</h1>'), `heading missing: ${html}`);
+  assert(html.includes('<div class="vesk-md prose">'), `wrapper class missing: ${html}`);
+  assert(html.includes('<h1 id="title">Title</h1>'), `heading missing: ${html}`);
   assert(html.includes('<strong>bold</strong>'), `bold missing: ${html}`);
   assert(html.includes('<a href="https://vesk.dev">link</a>'), `link missing: ${html}`);
 });
@@ -1355,8 +1355,8 @@ component App {
   return <Md content="### Hi" />;
 }`;
   const r = renderPage(source, 'App', {}, new Map(), { hydrate: true }) as { body: string };
-  assert(r.body.startsWith('<!--vsk--><div><div>'), `hydrate wrapper missing: ${r.body}`);
-  assert(r.body.includes('<h3>Hi</h3>'), `markdown missing in hydrate output: ${r.body}`);
+  assert(r.body.startsWith('<!--vsk--><div><div class="vesk-md">'), `hydrate wrapper missing: ${r.body}`);
+  assert(r.body.includes('<h3 id="hi">Hi</h3>'), `markdown missing in hydrate output: ${r.body}`);
 });
 
 it('[md][expr] client code keeps explicit Md import and passes walker', () => {
@@ -1378,7 +1378,7 @@ component App {
   return <Md content={md} />;
 }`;
   const html = render(source, 'App');
-  assert(html.includes('<h1>dynamic</h1>'), `dynamic markdown missing: ${html}`);
+  assert(html.includes('<h1 id="dynamic">dynamic</h1>'), `dynamic markdown missing: ${html}`);
 });
 
 it('[md][stmt] bare JSX statement renders markdown', () => {
@@ -1400,9 +1400,8 @@ component App {
   }
 }`;
   const html = render(source, 'App');
-  assert(html.includes('<h1>one</h1>'), `first item missing: ${html}`);
-  assert(html.includes('<h2>two</h2>'), `second item missing: ${html}`);
-  assert(html.includes('<h3>three</h3>'), `third item missing: ${html}`);
+  assert(html.includes('<h1 id="one">one</h1>') && html.includes('<h2 id="two">two</h2>'), `first item missing: ${html}`);
+  assert(html.includes('<h3 id="three">three</h3>'), `second/third items missing: ${html}`);
 });
 
 it('[md][stmt] guard-clause early return works with Md', () => {
@@ -1413,7 +1412,7 @@ component App(props) {
 }`;
   assert(render(source, 'App', {}) === '<div>empty</div>', `guard return failed`);
   const html = render(source, 'App', { show: true });
-  assert(html.includes('<h1>visible</h1>'), `markdown missing after guard: ${html}`);
+  assert(html.includes('<h1 id="visible">visible</h1>'), `markdown missing after guard: ${html}`);
 });
 
 it('[md] Md is never auto-imported', () => {

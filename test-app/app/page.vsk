@@ -47,8 +47,8 @@ async component Home (){
 	
 	
 	<h1 class="text-4xl font-bold mb-2">Welcome to Vesk</h1>
-	<p class="text-gray-500 mb-4">
-		A compiler-first reactive UI framework for the post-VDOM web.
+	<p class="text-gray-500 mb-4 text-purple-500">
+		A compiler-first reactive UI framework for the post-VDOM web. I love to build technology people use everyday
 	</p>
 	<p>{count} </p>
 	if (2 > 3){
