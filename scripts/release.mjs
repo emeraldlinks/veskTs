@@ -107,7 +107,24 @@ for (const name of PUBLISH_ORDER) {
 }
 
 console.log(`\n\x1b[1mrelease: building all packages\x1b[0m`);
-for (const name of PUBLISH_ORDER) {
+// Build in dependency order — runtime/adapter before compiler/cli — so a
+// package's typecheck always sees its dependencies' freshly built dist/.
+const BUILD_ORDER = [
+  '@vesk/runtime',
+  '@vesk/plugin-tailwind',
+  '@vesk/adapter',
+  '@vesk/compiler',
+  '@vesk/prettier-plugin',
+  '@vesk/lsp',
+  '@vesk/haul-linux-x64',
+  '@vesk/haul-linux-arm64',
+  '@vesk/haul-darwin-x64',
+  '@vesk/haul-darwin-arm64',
+  '@vesk/haul-win32-x64',
+  '@vesk/vesk-cli',
+  'create-vesk',
+];
+for (const name of BUILD_ORDER) {
   const p = byName.get(name);
   if (!p) continue;
   const build = p.pkg.scripts && p.pkg.scripts.build;

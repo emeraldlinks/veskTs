@@ -1,5 +1,9 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
-import { setSsrSink, type SsrDataSink } from '@vesk/runtime/src/index-server';
+// Import the type from its defining module (not the barrel): on a fresh
+// checkout the compiler typechecks BEFORE @vesk/runtime's dist exists, and
+// resolving types through the barrel then fails.
+import { setSsrSink } from '@vesk/runtime/src/index-server';
+import type { SsrDataSink } from '@vesk/runtime/src/resource';
 
 const storage = new AsyncLocalStorage<Record<string, unknown>>();
 
