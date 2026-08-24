@@ -119,7 +119,12 @@ jobs:
 
       - name: Haul production build
         working-directory: test-app
-        run: npm run build
+        run: |
+          # haul build reuses .vesk-cache bundles without invalidating on
+          # dependency changes — a stale cached client runtime would defeat
+          # the refreshed deps above.
+          rm -rf .vesk-cache .vesk/static .vesk/server
+          npm run build
 
       - name: Start haul production server
         working-directory: test-app
