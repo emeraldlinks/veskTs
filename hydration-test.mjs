@@ -612,7 +612,19 @@ async function main() {
         await page.waitForFunction(() => document.querySelector('h1')?.textContent?.trim() === 'About Vesk', { timeout: 15000 });
       } catch (e) {
         const navLog = await page.evaluate(() => window.__veskNavDebug || []).catch(() => []);
-        await dumpNavDiag(page, { visit: i + 1, asyncDataRequests, navLog });
+        const rtProbe = await page.evaluate(async () => {
+          try {
+            const r = await fetch('/_vesk/runtime.js');
+            return { status: r.status, hasCrumb: (await r.text()).includes('__veskNavDebug') };
+          } catch (e) { return { err: String(e) }; }
+        }).catch(e => ({ err: String(e) }));
+        await dumpNavDiag(page, {
+          visit: i + 1,
+          asyncDataRequests,
+          navLog,
+          navDebugInstalled: await page.evaluate(() => '__veskNavDebug' in window).catch(() => null),
+          servedRuntime: rtProbe,
+        });
         throw e;
       }
       assert(await page.evaluate(() => window.__spaFlag === true), `navigated to /about on visit ${i + 1} (SPA)`);
