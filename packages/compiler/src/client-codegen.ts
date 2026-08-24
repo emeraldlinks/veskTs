@@ -1412,10 +1412,7 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
-export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean } = {}): string {
-  const ast = parse(source);
-  const ir = generateIR(ast, source);
-
+function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean }): string {
   const needsClient = ir.components.some((c) => c.isClient || !isStaticComponent(c));
   if (!options.forceClient && !needsClient) {
     return '';
@@ -1470,6 +1467,43 @@ ${componentMapCode}
 ${exportCode}
 `;
   return moduleCode.trim();
+}
+
+export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean } = {}): string {
+  const ast = parse(source);
+  const ir = generateIR(ast, source);
+  return emitClientFromIR(ir, options);
+}
+
+/**
+ * Compiles a component source in BOTH client modes (plain + hydrate)
+ * sharing a single parse/IR pass. Used by the dev-server hot path, where
+ * every edit otherwise pays the full acorn+TS parse twice. Also returns
+ * the resolved component name using the exact selection order of
+ * `resolveComponentName`, so callers don't need a second full parse just
+ * to learn the name.
+ */
+export function compileClientBoth(source: string, _componentName: string | null): { comp: string; hyd: string; name: string | null } {
+  const ast = parse(source);
+  // Downstream type-stripping mutates AST nodes in place (stripTsTypes),
+  // so each emit mode needs its own tree. Cloning is far cheaper than the
+  // second full acorn+TS parse this replaces.
+  const hydAst = structuredClone(ast);
+  const ir = generateIR(ast, source);
+  const irHyd = generateIR(hydAst, source);
+  const defaultComp = ir.components.find((c) => c.defaultExport);
+  let name: string | null = null;
+  if (defaultComp) name = defaultComp.name;
+  else if (ir.components.length > 0) name = ir.components[0].name;
+  else {
+    const exportedComp = ir.components.find((c) => c.exported);
+    if (exportedComp) name = exportedComp.name;
+  }
+  return {
+    comp: emitClientFromIR(ir, { forceClient: true }),
+    hyd: emitClientFromIR(irHyd, { forceClient: true, hydrate: true, includeTopLevel: false }),
+    name,
+  };
 }
 
 export { compileClient as compile, isStaticIR };

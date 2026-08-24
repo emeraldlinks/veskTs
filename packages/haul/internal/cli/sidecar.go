@@ -16,9 +16,12 @@ import (
 )
 
 type SidecarClient struct {
-	Port   int
-	Cmd    *exec.Cmd
-	Stdout io.ReadCloser
+	Port int
+	Cmd  *exec.Cmd
+	// httpClient is shared across calls so the loopback TCP connection to
+	// the sidecar is reused (keep-alive) instead of re-dialing per RPC —
+	// per-call dials add measurable latency to every HMR rebuild.
+	httpClient *http.Client
 }
 
 type JsonRpcRequest struct {
@@ -78,9 +81,9 @@ func StartSidecar(ctx context.Context, projectDir string) (*SidecarClient, error
 	}
 
 	return &SidecarClient{
-		Port:   portMsg["port"],
-		Cmd:    cmd,
-		Stdout: stdout,
+		Port:       portMsg["port"],
+		Cmd:        cmd,
+		httpClient: &http.Client{Timeout: 5 * time.Minute},
 	}, nil
 }
 
@@ -103,7 +106,10 @@ func (c *SidecarClient) Call(method string, params []any) (JsonRpcResponse, erro
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := c.httpClient
+	if client == nil {
+		client = &http.Client{Timeout: 5 * time.Minute}
+	}
 	resp, err := client.Do(httpReq)
 	if err != nil {
 		return JsonRpcResponse{}, err

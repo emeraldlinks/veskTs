@@ -1134,29 +1134,36 @@ function readRawCss(projectDir: string): { raw: string; cssPath: string } {
   return { raw: '', cssPath: cssPath };
 }
 
-async function rebuildTailwindCss(): Promise<void> {
+async function rebuildTailwindCss(): Promise<boolean> {
   const { rawCss, cssPath, plugins } = devState;
   if (!rawCss) {
     devState.cssGlobal = '';
     devState.cssTailwind = '';
-    return;
+    return false;
   }
   try {
-    devState.cssGlobal = stripTailwindDirectives(rawCss);
-    devState.cssTailwind = rawCss;
+    let nextGlobal = stripTailwindDirectives(rawCss);
+    let nextTailwind = rawCss;
     for (const plugin of plugins) {
       if (typeof plugin.onCSS === 'function') {
         const result = await plugin.onCSS(rawCss, cssPath);
         if (result !== null && typeof result === 'string') {
-          devState.cssTailwind = result;
+          nextTailwind = result;
         }
       }
     }
-    if (devState.cssGlobal === devState.cssTailwind || devState.cssGlobal === rawCss) {
-      devState.cssTailwind = devState.cssGlobal;
+    if (nextGlobal === nextTailwind || nextGlobal === rawCss) {
+      nextTailwind = nextGlobal;
     }
+    const changed = nextGlobal !== devState.lastCssGlobal || nextTailwind !== devState.lastCssTailwind;
+    devState.cssGlobal = nextGlobal;
+    devState.cssTailwind = nextTailwind;
+    devState.lastCssGlobal = nextGlobal;
+    devState.lastCssTailwind = nextTailwind;
+    return changed;
   } catch (e) {
     console.error('sidecar: CSS rebuild error:', e);
+    return false;
   }
 }
 
@@ -1186,7 +1193,7 @@ async function bundleRuntime(): Promise<void> {
 
 async function buildClientBundle(): Promise<void> {
   const { routeTree, appDirPath, config } = devState;
-  const opts: Record<string, unknown> = { importRuntime: true, hmr: true, codeSplit: true };
+  const opts: Record<string, unknown> = { importRuntime: true, hmr: true, codeSplit: true, cache: devState.bundleCache };
   if (config.routeDataCache !== undefined) opts.routeDataCache = config.routeDataCache;
   const { main, chunks } = await devMods.generateClientBundle(routeTree, appDirPath, new Map(), opts);
   devState.clientBundle = main;
@@ -1201,20 +1208,29 @@ async function buildClientBundle(): Promise<void> {
  * previous chunk map is kept and the error is reported so the dev overlay
  * shows it; the HMR fnSources path still hot-swaps the edited component.
  */
-async function buildClientChunks(): Promise<Error | null> {
+/**
+ * Targeted hot-path chunk rebuild for the haul dev server: stat-checks only
+ * the edited file, reuses every other cached file without filesystem access,
+ * and returns the stripped component source so the HMR update message needs
+ * no second compileClient pass.
+ */
+async function buildClientChunks(fullPath: string): Promise<{ err: Error | null; editedSource: string | null; actualName: string | null }> {
   const { routeTree, appDirPath } = devState;
   try {
-    const { chunks } = await devMods.generateClientBundle(routeTree, appDirPath, new Map(), {
+    const { chunks, editedSources, editedNames } = await devMods.generateClientBundle(routeTree, appDirPath, new Map(), {
       importRuntime: true,
       hmr: true,
       codeSplit: true,
+      cache: devState.bundleCache,
+      only: [fullPath],
+      returnEditedSources: true,
     });
     const next = new Map<string, string>();
     for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
     devState.clientChunks = next;
-    return null;
+    return { err: null, editedSource: editedSources?.get(fullPath) ?? null, actualName: editedNames?.get(fullPath) ?? null };
   } catch (e) {
-    return e as Error;
+    return { err: e as Error, editedSource: null, actualName: null };
   }
 }
 
@@ -1309,10 +1325,13 @@ async function devInit(params: any): Promise<any> {
     hmrClientJs: '',
     cssGlobal: '',
     cssTailwind: '',
+    lastCssGlobal: '',
+    lastCssTailwind: '',
     sourceToComponents: new Map<string, string[]>(),
     apiWatchCache: new Map<string, number>(),
     ssrDataStore: new Map<string, SsrDataPayload>(),
     runtimeDir: resolveRuntimeDir(projectDir) || runtimeDir,
+    bundleCache: { files: new Map() },
   };
 
   devState.routeTree = devMods.scanRoutes(appDir);
@@ -1347,7 +1366,27 @@ async function devRebuild(params: any): Promise<any> {
   const filename = basename(fullPath);
   const fileExists = existsSync(fullPath);
   const messages: Record<string, unknown>[] = [];
-  const assets: Record<string, string> = {};
+  const assets: Record<string, unknown> = {};
+
+  // Snapshot previous assets so the RPC reply can carry a diff instead of
+  // the full bundle on every keystroke.
+  const prevClientBundle: string = state.clientBundle || '';
+  const prevChunks: Map<string, string> = state.clientChunks instanceof Map ? state.clientChunks : new Map();
+
+  const collectAssetDiff = (): { clientBundleChanged: boolean; removedChunkNames: string[] } => {
+    const patched: Record<string, string> = {};
+    for (const [name, code] of state.clientChunks instanceof Map ? state.clientChunks : []) {
+      if (prevChunks.get(name) !== code) patched[name] = code;
+    }
+    const removedChunkNames: string[] = [];
+    for (const name of prevChunks.keys()) {
+      if (!(state.clientChunks as Map<string, string>).has(name)) removedChunkNames.push(name);
+    }
+    const clientBundleChanged = (state.clientBundle || '') !== prevClientBundle;
+    if (clientBundleChanged) assets.clientBundle = state.clientBundle;
+    assets.clientChunks = patched;
+    return { clientBundleChanged, removedChunkNames };
+  };
 
   const isApiFile = /\/api\//.test(fullPath.replace(/\\/g, '/')) && (filename.endsWith('.ts') || filename.endsWith('.js') || filename.endsWith('.tsx'));
 
@@ -1362,7 +1401,14 @@ async function devRebuild(params: any): Promise<any> {
       const changedComponents = state.sourceToComponents.get(fullPath) || [];
       const treeChanged = prevTree !== stripAnnots(state.routeTree);
 
+      // CSS rescan runs concurrently with the JS build: a .vsk edit cannot
+      // change src/global.css, so there is no ordering dependency, and the
+      // reply no longer waits for two serial compile passes.
+      const cssPromise = rebuildTailwindCss();
+
       let bundleError: Error | null = null;
+      let hotEditedSource: string | null = null;
+      let hotActualName: string | null = null;
       if (treeChanged) {
         // Route structure changed: rebuild main bundle + chunks. A failure
         // here blanks the main bundle only transiently; the HMR overlay
@@ -1374,17 +1420,27 @@ async function devRebuild(params: any): Promise<any> {
           bundleError = e as Error;
         }
       } else {
-        // Content-only change: rebuild chunks (keeping the previous chunk
-        // map on error) and leave the main bundle untouched, so a broken
-        // route can never take the rest of the app down with it.
-        const chunkErr = await buildClientChunks();
-        if (chunkErr) bundleError = chunkErr;
+        // Content-only change: targeted chunk rebuild (keeping the previous
+        // chunk map on error) and leave the main bundle untouched, so a
+        // broken route can never take the rest of the app down with it.
+        const hot = await buildClientChunks(fullPath);
+        bundleError = hot.err;
+        hotEditedSource = hot.editedSource;
+        hotActualName = hot.actualName;
       }
 
       if (changedComponents.length > 0) {
         let fnSources: Record<string, string> | undefined;
         let errorMessage = bundleError ? bundleError.message : '';
-        if (fileExists && !bundleError) {
+        if (!treeChanged && !bundleError && hotEditedSource !== null) {
+          let compCode = hotEditedSource;
+          for (const cname of changedComponents) {
+            if (hotActualName && hotActualName !== cname) {
+              compCode += `\nObject.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __components[${JSON.stringify(hotActualName)}], configurable: true });\n`;
+            }
+          }
+          if (compCode.trim()) fnSources = { _raw: compCode };
+        } else if (fileExists && !bundleError) {
           try {
             const src = readFileSync(fullPath, 'utf-8');
             let compCode = devMods.compileClient(src, null, { forceClient: true });
@@ -1404,8 +1460,7 @@ async function devRebuild(params: any): Promise<any> {
             errorMessage = (e as Error).message;
           }
         }
-        if (fnSources) {
-          messages.push({
+        if (fnSources) {          messages.push({
             type: 'update',
             time: Date.now() - t0,
             components: Object.fromEntries(changedComponents.map(name => [name, true])),
@@ -1420,16 +1475,17 @@ async function devRebuild(params: any): Promise<any> {
         messages.push({ type: 'reload' });
       }
 
-      await rebuildTailwindCss();
-      messages.push({ type: 'css-update' });
-      assets.clientBundle = state.clientBundle;
-      assets.clientChunks = Object.fromEntries(state.clientChunks);
-      assets.cssGlobal = state.cssGlobal;
-      assets.cssTailwind = state.cssTailwind;
-      return { messages, assets };
+      const cssChanged = await cssPromise;
+      if (cssChanged) messages.push({ type: 'css-update' });
+      const { clientBundleChanged, removedChunkNames } = collectAssetDiff();
+      if (cssChanged) {
+        assets.cssGlobal = state.cssGlobal;
+        assets.cssTailwind = state.cssTailwind;
+      }
+      return { messages, assets, clientBundleChanged, cssChanged, removedChunkNames };
     } catch (e) {
       messages.push({ type: 'error', message: (e as Error).message, file: filename });
-      return { messages, assets };
+      return { messages, assets, clientBundleChanged: false, cssChanged: false };
     }
   }
 
@@ -1440,11 +1496,13 @@ async function devRebuild(params: any): Promise<any> {
         state.rawCss = content;
       }
     }
-    await rebuildTailwindCss();
-    messages.push({ type: 'css-update' });
-    assets.cssGlobal = state.cssGlobal;
-    assets.cssTailwind = state.cssTailwind;
-    return { messages, assets };
+    const cssChanged = await rebuildTailwindCss();
+    if (cssChanged) {
+      messages.push({ type: 'css-update' });
+      assets.cssGlobal = state.cssGlobal;
+      assets.cssTailwind = state.cssTailwind;
+    }
+    return { messages, assets, clientBundleChanged: false, cssChanged };
   }
 
   if (isApiFile && fileExists) {
@@ -1473,13 +1531,14 @@ async function devRebuild(params: any): Promise<any> {
   updateSourceMapping();
   await buildClientBundle();
   await bundleRuntime();
-  await rebuildTailwindCss();
+  const cssChanged = await rebuildTailwindCss();
   messages.push({ type: 'reload', reason: `${filename} changed` });
-  assets.clientBundle = state.clientBundle;
-  assets.clientChunks = Object.fromEntries(state.clientChunks);
-  assets.cssGlobal = state.cssGlobal;
-  assets.cssTailwind = state.cssTailwind;
-  return { messages, assets };
+  if (cssChanged) {
+    assets.cssGlobal = state.cssGlobal;
+    assets.cssTailwind = state.cssTailwind;
+  }
+  const { clientBundleChanged, removedChunkNames } = collectAssetDiff();
+  return { messages, assets, clientBundleChanged, cssChanged, removedChunkNames };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2226,6 +2285,9 @@ const server = createServer((req, res) => {
 });
 
 const port = process.env.VESK_SIDECAR_PORT ? Number(process.env.VESK_SIDECAR_PORT) : 0;
+server.on('connection', (socket) => {
+  socket.setNoDelay(true);
+});
 server.listen(port, () => {
   const addr = server.address();
   const actualPort = typeof addr === 'object' && addr ? addr.port : port;

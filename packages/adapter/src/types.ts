@@ -100,6 +100,44 @@ export interface ClientBundleOptions {
   hmr?: boolean;
   importRuntime?: boolean;
   routeDataCache?: number;
+  /**
+   * Incremental compile cache for dev rebuilds. Pass the same object across
+   * calls; unchanged files (matched by mtime + size) reuse their previously
+   * compiled output instead of re-running compileClient, and the main bundle
+   * is reused when its inputs (route tree + runtime import names) are
+   * unchanged.
+   */
+  cache?: ClientBundleCache;
+  /**
+   * Hot-path restriction for dev rebuilds: only these absolute paths are
+   * checked against the filesystem; every other cached file is reused
+   * WITHOUT a stat call. Correct under the dev-watcher assumption that any
+   * change to a file surfaces as a watch event naming that file.
+   */
+  only?: string[];
+  /**
+   * When set together with `only`, the result carries the raw compiled
+   * component source for each restricted path (imports/wrappers stripped),
+   * so callers building HMR fnSources don't need a second compileClient
+   * pass.
+   */
+  returnEditedSources?: boolean;
+}
+
+export interface ClientBundleFileEntry {
+  mtimeMs: number;
+  size: number;
+  compCode: string;
+  hydCode: string;
+  actualName: string | null;
+  runtimeNames: string[];
+  /** Absolute paths of this file's .vsk imports, in emission order. */
+  imports: string[];
+}
+
+export interface ClientBundleCache {
+  files: Map<string, ClientBundleFileEntry>;
+  mainBundle?: { key: string; code: string };
 }
 
 export interface ChunkEntry {
@@ -110,6 +148,16 @@ export interface ChunkEntry {
 export interface ClientBundleResult {
   main: string;
   chunks: ChunkEntry[];
+  /** Present when a cache was passed: files served from the incremental cache. */
+  cachedFileHits?: number;
+  /** Present when a cache was passed: files actually recompiled this call. */
+  compiledFiles?: number;
+  /** Present when a cache was passed: true when the main bundle was reused. */
+  mainFromCache?: boolean;
+  /** Present when returnEditedSources was set: path → stripped component source. */
+  editedSources?: Map<string, string>;
+  /** Present when returnEditedSources was set: path → resolved component name. */
+  editedNames?: Map<string, string | null>;
 }
 
 export interface ManifestRouteEntry {

@@ -34,11 +34,19 @@ type devInitResult struct {
 
 type devRebuildResult struct {
 	Messages []json.RawMessage `json:"messages"`
-	Assets   struct {
-		ClientBundle string            `json:"clientBundle"`
-		ClientChunks map[string]string `json:"clientChunks"`
-		CssGlobal    string            `json:"cssGlobal"`
-		CssTailwind  string            `json:"cssTailwind"`
+	// ClientBundleChanged: Assets.ClientBundle carries a fresh main bundle.
+	ClientBundleChanged bool `json:"clientBundleChanged"`
+	// CssChanged: Assets.CssGlobal/CssTailwind carry fresh CSS.
+	CssChanged bool `json:"cssChanged"`
+	// RemovedChunkNames: chunk URLs dropped since the last rebuild.
+	RemovedChunkNames []string `json:"removedChunkNames,omitempty"`
+	// Assets.ClientChunks is a PATCH map: only entries whose code changed
+	// (or that are new) since the previous rebuild.
+	Assets struct {
+		ClientBundle string            `json:"clientBundle,omitempty"`
+		ClientChunks map[string]string `json:"clientChunks,omitempty"`
+		CssGlobal    string            `json:"cssGlobal,omitempty"`
+		CssTailwind  string            `json:"cssTailwind,omitempty"`
 	} `json:"assets"`
 }
 
@@ -47,6 +55,11 @@ type devRenderResult struct {
 	Headers [][]string `json:"headers"`
 	BodyB64 string     `json:"bodyB64"`
 }
+
+// hmrDebounce is the settle window between a file event and the rebuild.
+// Kept small so edits feel instant while still coalescing editor
+// multi-write bursts (write + chmod, atomic-save renames, etc.).
+const hmrDebounce = 12 * time.Millisecond
 
 type devAssets struct {
 	mu            sync.RWMutex
@@ -368,32 +381,48 @@ func RunDev(ctx context.Context, args []string) error {
 
 	rebuild := func(fullPath string) {
 		hub.broadcast(map[string]any{"type": "compiling"})
+		tRPC := time.Now()
 		resp, err := sidecar.CallResult("dev_rebuild", []any{map[string]any{"filePath": fullPath}})
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "[vesk haul] dev: rebuild error: %v\n", err)
 			return
 		}
+		rpcMs := time.Since(tRPC).Milliseconds()
 		var result devRebuildResult
 		if err := json.Unmarshal(resp, &result); err != nil {
 			fmt.Fprintf(os.Stderr, "[vesk haul] dev: decode rebuild: %v\n", err)
 			return
 		}
-		assets.setClientBundle(result.Assets.ClientBundle)
-		if result.Assets.ClientChunks != nil {
-			assets.setClientChunks(result.Assets.ClientChunks)
+		tApply := time.Now()
+		if result.ClientBundleChanged {
+			assets.setClientBundle(result.Assets.ClientBundle)
 		}
-		assets.setCssGlobal(result.Assets.CssGlobal)
-		assets.setCssTailwind(result.Assets.CssTailwind)
+		if result.Assets.ClientChunks != nil || len(result.RemovedChunkNames) > 0 {
+			next := assets.snapshot().clientChunks
+			for name, code := range result.Assets.ClientChunks {
+				next[name] = code
+			}
+			for _, name := range result.RemovedChunkNames {
+				delete(next, name)
+			}
+			assets.setClientChunks(next)
+		}
+		if result.CssChanged {
+			assets.setCssGlobal(result.Assets.CssGlobal)
+			assets.setCssTailwind(result.Assets.CssTailwind)
+		}
 		for _, msg := range result.Messages {
 			hub.broadcast(json.RawMessage(msg))
 		}
+		fmt.Fprintf(os.Stderr, "[vesk haul] dev: rebuilt %s — rpc %dms (wire %dKB), apply %dms, %d patched chunk(s)\n",
+			filepath.Base(fullPath), rpcMs, len(resp)/1024, time.Since(tApply).Milliseconds(), len(result.Assets.ClientChunks))
 	}
 
 	scheduleRebuild := func(fullPath string) {
 		debounceMu.Lock()
 		pendingPath = fullPath
 		if debounceTimer == nil {
-			debounceTimer = time.AfterFunc(200*time.Millisecond, func() {
+			debounceTimer = time.AfterFunc(hmrDebounce, func() {
 				debounceMu.Lock()
 				path := pendingPath
 				pendingPath = ""
@@ -404,7 +433,7 @@ func RunDev(ctx context.Context, args []string) error {
 				}
 			})
 		} else {
-			debounceTimer.Reset(200 * time.Millisecond)
+			debounceTimer.Reset(hmrDebounce)
 		}
 		debounceMu.Unlock()
 	}

@@ -1,13 +1,22 @@
-import { readFileSync, existsSync, writeFileSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build, transformSync } from './esbuild-fallback.js';
-import { compileClient } from '@vesk/compiler/src/client-codegen';
+import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function fileUnchanged(filePath: string, cached: { mtimeMs: number; size: number }): boolean {
+  try {
+    const st = statSync(filePath);
+    return st.mtimeMs === cached.mtimeMs && st.size === cached.size;
+  } catch {
+    return false;
+  }
+}
 
 function buildRouterOpts(options?: ClientBundleOptions): string {
   const ttl = options?.routeDataCache;
@@ -43,6 +52,18 @@ export async function generateClientBundle(
   const seen = new Set<string>();
   const chunks: ChunkEntry[] = [];
   const runtimeImportNames = new Set<string>();
+  const cache = options?.cache;
+  const only = options?.only && options.only.length > 0 ? new Set(options.only) : null;
+  const returnEdited = !!options?.returnEditedSources && !!only;
+  const editedSources = returnEdited ? new Map<string, string>() : undefined;
+  const editedNames = returnEdited ? new Map<string, string | null>() : undefined;
+  let cachedFileHits = 0;
+  let compiledFiles = 0;
+  let mainFromCache = false;
+
+  function mustReuseWithoutStat(filePath: string): boolean {
+    return !!only && !only.has(filePath);
+  }
 
   function collectRuntimeImports(code: string): void {
     const re = /^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm;
@@ -66,17 +87,23 @@ export async function generateClientBundle(
     return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"][^'"]*\.vsk['"];?\s*\n?/gm, '');
   }
 
-  function resolveVskImports(filePath: string, compile: (path: string, resolvedName: string | null) => void): void {
+  function resolveVskImports(filePath: string, compile: (path: string, resolvedName: string | null) => void): string[] {
     const src = readFileSync(filePath, 'utf-8');
+    const resolved: string[] = [];
     for (const importPath of collectVskImportPaths(vskImportLines(src), filePath)) {
-      let importedName: string | null = null;
       try {
-        importedName = resolveComponentName(readFileSync(importPath, 'utf-8'));
+        readFileSync(importPath);
       } catch {
         continue;
       }
-      compile(importPath, importedName);
+      // resolvedName is intentionally null: compileFile derives the same
+      // name from its own IR pass, and the alias branch is unreachable
+      // when resolvedName matches — this avoids a second full parse of
+      // every imported file.
+      resolved.push(importPath);
+      compile(importPath, null);
     }
+    return resolved;
   }
 
   function stripExports(code: string): string {
@@ -85,32 +112,72 @@ export async function generateClientBundle(
       .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
   }
 
-  function compileFile(filePath: string, resolvedName: string, output: string[]): void {
+  function compileFile(filePath: string, resolvedName: string | null, output: string[]): void {
     if (seen.has(filePath)) return;
     seen.add(filePath);
+
+    // Cache-hit fast path: replay the entry's recorded contribution with no
+    // file reads or parses. Deps recurse through the same path so each hit
+    // costs one stat call (zero with `only`).
+    const cached = cache?.files.get(filePath);
+    if (cached && (mustReuseWithoutStat(filePath) || fileUnchanged(filePath, cached))) {
+      cachedFileHits++;
+      for (const dep of cached.imports) compileFile(dep, cache?.files.get(dep)?.actualName ?? '', output);
+      if (cached.compCode) output.push(cached.compCode);
+      if (cached.hydCode) output.push(cached.hydCode);
+      for (const n of cached.runtimeNames) runtimeImportNames.add(n);
+      if (cached.actualName && resolvedName !== null && cached.actualName !== resolvedName) {
+        output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(cached.actualName)}], configurable: true });`);
+        output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(cached.actualName)}], configurable: true });`);
+      }
+      return;
+    }
+
+    compiledFiles++;
     const src = readFileSync(filePath, 'utf-8');
+    const namesBefore = cache ? new Set(runtimeImportNames) : null;
 
-    resolveVskImports(filePath, (p, n) => compileFile(p, n || '', output));
+    const importedPaths = resolveVskImports(filePath, (p, n) => compileFile(p, n || '', output));
 
-    const compCode = compileClient(src, null, { forceClient: true });
-    if (compCode) {
-      collectRuntimeImports(compCode);
-      const stripped = stripExports(stripVskImports(stripRuntimeImport(compCode)));
-      output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
+    // One parse/IR pass feeds both client modes AND the component-name
+    // lookup — the dev hot path pays the acorn+TS parse once per edit
+    // instead of three times.
+    const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null);
+    const compCode = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const hydCode = rawHyd ? stripExports(stripVskImports(stripRuntimeImport(rawHyd))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    if (rawComp) collectRuntimeImports(rawComp);
+    if (rawHyd) collectRuntimeImports(rawHyd);
+
+    if (returnEdited && only!.has(filePath)) {
+      // Mirrors the HMR fnSources preparation in the dev servers: drop every
+      // remaining top-level import so the snippet can be eval'd in the page
+      // context where runtime globals already exist.
+      const bare = rawComp
+        ? stripExports(stripVskImports(stripRuntimeImport(rawComp)))
+            .replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '')
+        : '';
+      editedSources!.set(filePath, bare);
+      editedNames!.set(filePath, actualName);
     }
 
-    const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
-    if (hydCode) {
-      collectRuntimeImports(hydCode);
-      const stripped = stripExports(stripVskImports(stripRuntimeImport(hydCode)))
-        .replace(/__components/g, '__hydrators');
-      output.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
-    }
-
-    const actualName = resolveComponentName(src);
-    if (actualName && actualName !== resolvedName) {
+    if (compCode) output.push(compCode);
+    if (hydCode) output.push(hydCode);
+    if (actualName && resolvedName !== null && actualName !== resolvedName) {
       output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
       output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
+    }
+
+    if (cache && namesBefore) {
+      const st = statSync(filePath);
+      cache.files.set(filePath, {
+        mtimeMs: st.mtimeMs,
+        size: st.size,
+        compCode,
+        hydCode,
+        actualName,
+        runtimeNames: [...runtimeImportNames].filter((n) => !namesBefore.has(n)),
+        imports: importedPaths,
+      });
     }
   }
 
@@ -186,8 +253,16 @@ export async function generateClientBundle(
     }
     annotate(routeTree);
 
-    const main = await buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
-    return { main, chunks };
+    const mainKey = JSON.stringify(routeTree) + '|' + [...runtimeImportNames].sort().join(',') + `|${!!options?.hmr}|${!!options?.importRuntime}|${options?.routeDataCache ?? ''}`;
+    let main: string;
+    if (cache?.mainBundle && cache.mainBundle.key === mainKey) {
+      mainFromCache = true;
+      main = cache.mainBundle.code;
+    } else {
+      main = await buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
+      if (cache) cache.mainBundle = { key: mainKey, code: main };
+    }
+    return { main, chunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
   } else {
     let componentLines: string[] = [];
     let hydratorLines: string[] = [];
@@ -248,6 +323,7 @@ export async function generateClientBundle(
     const main = await buildMainBundle(routeTree, runtimeDir, false, {
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
     }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
+    // Mono (non-codeSplit) builds are the production path — no incremental cache.
     return { main, chunks: [] };
   }
 }

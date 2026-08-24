@@ -12,7 +12,7 @@ import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router'
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
-import type { ChunkEntry } from '@vesk/adapter/src/types';
+import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
@@ -65,6 +65,10 @@ const LOG = {
 
 type SsrDataPayload = { props?: Record<string, unknown>; ssrData?: Record<string, unknown> };
 const ssrDataStore = new Map<string, SsrDataPayload>();
+
+// HMR settle window: small enough to feel instant, large enough to coalesce
+// editor multi-write bursts (write + chmod, atomic-save renames).
+const HMR_DEBOUNCE_MS = 12;
 
 function storeDataScript(payload: SsrDataPayload): string | null {
   if (!payload.props && !payload.ssrData) return null;
@@ -125,6 +129,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
   let devUserCssContent = '';
   let devTailwindCssContent = '';
+  let lastServedCssGlobal = '';
+  let lastServedCssTailwind = '';
   const srcDir = join(projectDir, 'src');
   const cssPath = join(srcDir, 'global.css');
   const altCssPath = join(srcDir, 'app.css');
@@ -153,12 +159,15 @@ export async function startDevServer(port: number, projectDir: string, config: R
     if (devUserCssContent === devTailwindCssContent || devUserCssContent === rawCss) {
       devTailwindCssContent = devUserCssContent;
     }
+    lastServedCssGlobal = devUserCssContent;
+    lastServedCssTailwind = devTailwindCssContent;
   }
 
   let routeTree: RouteNode[] = scanRoutes(appDirPath);
   let clientBundle = '';
   let clientChunks = new Map<string, string>();
   let runtimeBundle = '';
+  const bundleCache: ClientBundleCache = { files: new Map() };
 
   function runtimeImportNamesFrom(clientJs: string): string[] | null {
     const m = clientJs.match(/^import\s*\{([^}]*)\}\s*from\s*['"]\/_vesk\/runtime\.js['"];?\s*$/m);
@@ -188,6 +197,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         importRuntime: true,
         hmr: true,
         codeSplit: true,
+        cache: bundleCache,
         ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
       clientBundle = main;
@@ -199,23 +209,28 @@ export async function startDevServer(port: number, projectDir: string, config: R
   }
 
   /**
-   * Rebuilds only the route chunks. The main bundle is left untouched so a
-   * broken route can never blank the client app; on error the previous chunk
-   * map is kept and the error is broadcast over HMR.
+   * Targeted hot-path rebuild: regenerates route chunks with the incremental
+   * cache, stat-checking ONLY the edited file and reusing every other cached
+   * file without filesystem access. Also returns the compiled component
+   * source for the edited file so callers can build HMR fnSources without a
+   * second compileClient pass.
    */
-  async function buildClientChunks(): Promise<Error | null> {
+  async function buildClientChunks(fullPath: string): Promise<{ err: Error | null; editedSource: string | null; actualName: string | null }> {
     try {
-      const { chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
+      const { chunks, editedSources, editedNames } = await generateClientBundle(routeTree, appDirPath, new Map(), {
         importRuntime: true,
         hmr: true,
         codeSplit: true,
+        cache: bundleCache,
+        only: [fullPath],
+        returnEditedSources: true,
         ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
       storeChunks(chunks);
-      return null;
+      return { err: null, editedSource: editedSources?.get(fullPath) ?? null, actualName: editedNames?.get(fullPath) ?? null };
     } catch (e) {
       LOG.err(`client chunks build error:`, (e as Error).message);
-      return e as Error;
+      return { err: e as Error, editedSource: null, actualName: null };
     }
   }
 
@@ -234,21 +249,31 @@ export async function startDevServer(port: number, projectDir: string, config: R
   }
   updateSourceMapping();
 
-  async function rebuildTailwindCss() {
-    if (!rawCss) return;
+  async function rebuildTailwindCss(): Promise<boolean> {
+    if (!rawCss) return false;
     try {
-      devUserCssContent = stripTailwindDirectives(rawCss);
-      devTailwindCssContent = rawCss;
+      let nextUser = stripTailwindDirectives(rawCss);
+      let nextTailwind = rawCss;
       for (const plugin of devPlugins) {
         if (typeof plugin.onCSS === 'function') {
           const result = await plugin.onCSS(rawCss, cssPath);
           if (result !== null && typeof result === 'string') {
-            devTailwindCssContent = result;
+            nextTailwind = result;
           }
         }
       }
+      if (nextUser === nextTailwind || nextUser === rawCss) {
+        nextTailwind = nextUser;
+      }
+      const changed = nextUser !== lastServedCssGlobal || nextTailwind !== lastServedCssTailwind;
+      devUserCssContent = nextUser;
+      devTailwindCssContent = nextTailwind;
+      lastServedCssGlobal = nextUser;
+      lastServedCssTailwind = nextTailwind;
+      return changed;
     } catch (e) {
       LOG.err(`CSS rebuild error:`, (e as Error).message);
+      return false;
     }
   }
 
@@ -286,13 +311,23 @@ export async function startDevServer(port: number, projectDir: string, config: R
               const changedComponents = sourceToComponents.get(fullPath) || [];
               const treeChanged = prevTree !== stripAnnots(routeTree);
 
+              // CSS rescan runs concurrently with the JS build (a .vsk edit
+              // cannot change src/global.css) so the hot-swap broadcast is
+              // not queued behind a second compile pass.
+              const cssPromise = rebuildTailwindCss();
+
               let bundleError: Error | null = null;
+              let hotEditedSource: string | null = null;
+              let hotActualName: string | null = null;
               try {
                 if (treeChanged) {
                   await buildClientBundle();
                   await bundleRuntime();
                 } else {
-                  bundleError = await buildClientChunks();
+                  const hot = await buildClientChunks(fullPath);
+                  bundleError = hot.err;
+                  hotEditedSource = hot.editedSource;
+                  hotActualName = hot.actualName;
                 }
               } catch (e) {
                 bundleError = e as Error;
@@ -303,7 +338,18 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 if (changedComponents.length > 0) {
                   let fnSources: Record<string, string> | undefined;
                   let errorMessage = bundleError ? bundleError.message : '';
-                  if (fileExists && !bundleError) {
+                  if (!treeChanged && !bundleError && hotEditedSource !== null) {
+                    // Fast path: the targeted chunk rebuild already produced
+                    // the stripped component source — just add route-name
+                    // aliases.
+                    let compCode = hotEditedSource;
+                    for (const cname of changedComponents) {
+                      if (hotActualName && hotActualName !== cname) {
+                        compCode += `\nObject.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __components[${JSON.stringify(hotActualName)}], configurable: true });\n`;
+                      }
+                    }
+                    if (compCode.trim()) fnSources = { _raw: compCode };
+                  } else if (fileExists && !bundleError) {
                     try {
                       const src = readFileSync(fullPath, 'utf-8');
                       let compCode = compileClient(src, null, { forceClient: true });
@@ -323,7 +369,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                       errorMessage = (e as Error).message;
                       LOG.err(`HMR compile error for ${filename}:`, (e as Error).message);
                     }
-                  } else {
+                  } else if (!fileExists) {
                     LOG.warn(`HMR source not found: ${fullPath}`);
                   }
                   if (fnSources) {
@@ -395,15 +441,15 @@ export async function startDevServer(port: number, projectDir: string, config: R
                   ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({ type: 'reload' });
                 }
               }
-              await rebuildTailwindCss();
-              if (typeof (globalThis as Record<string, unknown>).__vesk_broadcastHmr === 'function') {
+              const cssChanged = await cssPromise;
+              if (cssChanged && typeof (globalThis as Record<string, unknown>).__vesk_broadcastHmr === 'function') {
                 ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({ type: 'css-update' });
               }
               LOG.info(`rebuilt (${filename}) — ${Date.now() - t0}ms`);
             } catch (e) {
               LOG.err(`rebuild error:`, (e as Error).message);
             }
-          }, 200);
+          }, HMR_DEBOUNCE_MS);
         } else if (isCss) {
           if (cssDebounceTimer) clearTimeout(cssDebounceTimer);
           cssDebounceTimer = setTimeout(async () => {
@@ -411,15 +457,15 @@ export async function startDevServer(port: number, projectDir: string, config: R
               if (fileExists) {
                 rawCss = readFileSync(fullPath, 'utf-8');
               }
-              await rebuildTailwindCss();
-              if (typeof (globalThis as Record<string, unknown>).__vesk_broadcastHmr === 'function') {
+              const cssChanged = await rebuildTailwindCss();
+              if (cssChanged && typeof (globalThis as Record<string, unknown>).__vesk_broadcastHmr === 'function') {
                 ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({ type: 'css-update' });
               }
               LOG.info('CSS rebuilt');
             } catch (e) {
               LOG.err(`CSS rebuild error:`, (e as Error).message);
             }
-          }, 200);
+          }, HMR_DEBOUNCE_MS);
         } else if (isApiRoute) {
           const isInApi = fullPath.includes('/api/');
           if (isInApi && fileExists) {
