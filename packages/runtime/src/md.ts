@@ -1298,7 +1298,9 @@ export const MD_BASE_CSS = `
  */
 export function renderMarkdown(md: string, options: MarkdownOptions = {}): string {
 	const ctx = ctxOf(options);
-	const lines = String(md == null ? '' : md).split('\n');
+	// Normalize CRLF/CR so pasted content parses identically to typed input.
+	const normalized = String(md == null ? '' : md).split('\r\n').join('\n').split('\r').join('\n');
+	const lines = normalized.split('\n');
 	return renderBlocks(parseBlocks(lines), ctx);
 }
 

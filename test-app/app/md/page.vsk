@@ -164,7 +164,10 @@ component MdPage {
 			class="w-full font-mono text-sm border border-gray-300 rounded p-3 mb-4"
 		>
 			</textarea>
-		<p class="text-gray-500 text-sm mb-2">Raw preview (reactive):</p>
+		<p class="text-gray-500 text-sm mb-2">
+			Raw preview (reactive). Tip: close your <code>\`\`\`</code> fences —
+			an open fence turns everything below it into one code block.
+		</p>
 		
 		<pre class="bg-gray-100 rounded p-3 text-xs whitespace-pre-wrap"> {live} </pre>
 		<p class="text-gray-400 text-xs mt-2">
