@@ -150,9 +150,9 @@
 - [x] **Intraword underscores wrongly emphasized** — `some_var_with_underscores` produced `<em>var</em>`. CommonMark flanking rules implemented for `_` (openers/closers must not touch alphanumerics); asterisks keep allowing intraword.
 - [x] **Angle autolinks added** — `<https://…>`, `<mailto:…>`, `<user@host.tld>` render as links when `autolink` is on (Md default); non-URLs stay escaped; hrefs still pass sanitizeUrl. Legacy `renderMarkdown()` without options keeps byte-compatible output.
 - [x] Tests: md.test.ts 80 → 96 (titles incl. escapes/parens/images, angle autolinks + safety, underscore flanking, URL-with-quote regression).
-- [ ] **Reference links/images** (`[text][ref]` + definitions) — rendered literally today; definitions leak as paragraphs.
-- [ ] **Setext headings** (`Title\n===`) — currently paragraph mush.
-- [ ] **Entity decoding** (`&copy;` shows literally — safe-side deviation from CommonMark).
+- [x] **Reference links/images** (`[text][ref]`, collapsed `[text][]`, shortcut `[text]`) — definitions (`[label]: dest "title"`, incl. `<angle>` dests) collected outside fences and stripped from output; failed inline links never re-interpreted as shortcuts; labels case-insensitive.
+- [x] **Setext headings** (`Title\n===` → h1, `---` → h2); standalone `---` still a thematic break.
+- [x] **Entity decoding** in prose — ~45 common named entities + decimal/hex numeric refs, decoded then re-escaped (so `&lt;` still renders visible `<`); code spans/blocks untouched.
 - [ ] **Raw HTML policy decision** — everything HTML-ish is escaped by design (XSS-safe; documented in md.ts header). If passthrough is wanted, needs an allowlist sanitizer (a/img/br/strong/em/code/blockquote?) with URL sanitization — deliberate feature, not a bug fix.
 
 ### Focus: pure-TS pipeline everywhere + @vesk/types
