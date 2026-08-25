@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-const BIN = join(import.meta.dirname, 'node_modules', '@vesk', 'haul-linux-arm64', 'bin', 'haul');
+const BIN = join(import.meta.dirname, 'node_modules', '.bin', 'vesk');
 let failures = 0;
 let running = [];
 
@@ -40,14 +40,14 @@ function spawnHaul(args) {
 
 const startBare = spawnHaul(['start', '3994']);
 const okBare = await waitPort(3994, 90000);
-if (!okBare) fail(`haul start 3994 (bare positional port) never served — log:\n${startBare.getLog()}`);
-else console.log('ok: haul start 3994 (bare positional port)');
+if (!okBare) fail(`vesk start 3994 (bare positional port) never served — log:\n${startBare.getLog()}`);
+else console.log('ok: vesk start 3994 (bare positional port)');
 killAll(); running = [];
 
 const startEquals = spawnHaul(['start', '--port=3992']);
 const okEquals = await waitPort(3992, 90000);
-if (!okEquals) fail(`haul start --port=3992 never served — log:\n${startEquals.getLog()}`);
-else console.log('ok: haul start --port=3992 (equals form)');
+if (!okEquals) fail(`vesk start --port=3992 never served — log:\n${startEquals.getLog()}`);
+else console.log('ok: vesk start --port=3992 (equals form)');
 killAll(); running = [];
 
 const npmRun = spawn('npm', ['run', 'dev', '-p', '3991'], { stdio: ['ignore', 'pipe', 'pipe'], cwd: import.meta.dirname });
@@ -66,9 +66,9 @@ const badOut = await new Promise((resolve) => {
   setTimeout(() => { killAll(); resolve({ code: -1, log: badArg.getLog() }); }, 15000);
 });
 if (badOut.code === 0 || !badOut.log.includes('unexpected argument')) {
-  fail(`haul start --bogus should error with 'unexpected argument' (exit=${badOut.code}) — log:\n${badOut.log}`);
+  fail(`vesk start --bogus should error with 'unexpected argument' (exit=${badOut.code}) — log:\n${badOut.log}`);
 } else {
-  console.log('ok: haul start --bogus rejected with unexpected argument');
+  console.log('ok: vesk start --bogus rejected with unexpected argument');
 }
 killAll(); running = [];
 

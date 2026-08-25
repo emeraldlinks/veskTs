@@ -11,21 +11,18 @@ const PACKAGES_DIR = join(ROOT, 'packages');
 const INTERNAL_NAMES = new Set([
   '@vesk/adapter',
   '@vesk/compiler',
-  '@vesk/haul-darwin-arm64',
-  '@vesk/haul-darwin-x64',
-  '@vesk/haul-linux-arm64',
-  '@vesk/haul-linux-x64',
-  '@vesk/haul-win32-x64',
   '@vesk/lsp',
   '@vesk/plugin-tailwind',
   '@vesk/prettier-plugin',
   '@vesk/runtime',
+  '@vesk/types',
   '@vesk/vesk-cli',
   'create-vesk',
   'vite-plugin-vesk',
 ]);
 
 const PUBLISH_ORDER = [
+  '@vesk/types',
   '@vesk/compiler',
   '@vesk/runtime',
   '@vesk/plugin-tailwind',
@@ -33,11 +30,6 @@ const PUBLISH_ORDER = [
   '@vesk/adapter',
   'vite-plugin-vesk',
   '@vesk/lsp',
-  '@vesk/haul-linux-x64',
-  '@vesk/haul-linux-arm64',
-  '@vesk/haul-darwin-x64',
-  '@vesk/haul-darwin-arm64',
-  '@vesk/haul-win32-x64',
   '@vesk/vesk-cli',
   'create-vesk',
 ];
@@ -119,6 +111,7 @@ console.log(`\n\x1b[1mrelease: building all packages\x1b[0m`);
 // Build in dependency order — runtime/adapter before compiler/cli — so a
 // package's typecheck always sees its dependencies' freshly built dist/.
 const BUILD_ORDER = [
+  '@vesk/types',
   '@vesk/runtime',
   '@vesk/plugin-tailwind',
   '@vesk/adapter',
@@ -126,11 +119,6 @@ const BUILD_ORDER = [
   '@vesk/compiler',
   '@vesk/prettier-plugin',
   '@vesk/lsp',
-  '@vesk/haul-linux-x64',
-  '@vesk/haul-linux-arm64',
-  '@vesk/haul-darwin-x64',
-  '@vesk/haul-darwin-arm64',
-  '@vesk/haul-win32-x64',
   '@vesk/vesk-cli',
   'create-vesk',
 ];

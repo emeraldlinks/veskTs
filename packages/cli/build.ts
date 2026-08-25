@@ -2,7 +2,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
 import * as esbuild from 'esbuild';
-import { buildPackages, buildSidecar } from './src/build-packages';
+import { buildPackages } from './src/build-packages';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 buildPackages();
 await esbuild.build({
@@ -29,8 +29,3 @@ await esbuild.build({
     },
   }],
 });
-
-// Sidecar bundle (packages/haul/internal/sidecar/server.ts -> dist/sidecar.js)
-// is produced by buildSidecar() in build-packages.ts; force a rebuild here so
-// `npm run build` always ships a fresh sidecar.
-buildSidecar(true);

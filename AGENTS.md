@@ -9,11 +9,13 @@
   + `vesk-plugin.ts`). If a regex exists in `packages/compiler/src`, replace it with an
   AST-based equivalent. (The only exception: compile-time-inert tooling like error
   message matching in tests.)
-- **NEVER use regex in the Go haul engine.** Source-text manipulation and syntax
-  analysis under `packages/haul` must go through the sidecar's acorn AST/tokenizer
-  RPCs (`compile_client` postprocess, `rewrite_runtime_imports`, `strip_types`) or
-  plain string/line scanning. If a regex exists in a non-test `.go` file under
-  `packages/haul`, replace it. (The only exception: regex in test assertions.)
+- **haul is parked.** The native Go engine was unplugged from the framework; its
+  source lives on the `haul-parked` branch. Do not reference, build, or ship it from
+  main. If a change would require reviving it (e.g. touching `VESK_SIDECAR`), stop and
+  reconsider — the pure-TS pipeline plus esbuild-wasm fallback covers all platforms.
+- **All public framework types live in `@vesk/types`.** Add new shared types to
+  `packages/types/src/index.ts`; `@vesk/compiler/src/types` and `@vesk/adapter/src/types`
+  re-export them for compatibility. Never redeclare a shape locally.
 - Every source edit under `packages/compiler/src` must be followed by
   `npx tsx packages/cli/src/build-packages.ts` — tests and probes resolve the
   package's `dist/` via the exports map.
@@ -48,10 +50,9 @@
 ```bash
 npx tsx packages/cli/src/build-packages.ts   # rebuild packages after compiler edits (required)
 npx tsx packages/compiler/src/<file>.test.ts # run one compiler test file
-npm run typecheck                            # tsc --noEmit for compiler + runtime + adapter
+npm run typecheck                            # tsc --noEmit for types + compiler + runtime + adapter
 node scripts/test.js                         # full suite: builds all packages first — not for iteration
 npm test                                     # unit suite + dev E2E (tests/dev-test.mjs)
-cd packages/haul && go build ./... && go vet ./... && go test ./...   # Go haul engine
 node hydration-test.mjs                      # production hydration path; needs test-app dev server
                                              # on :3000 and CHROMIUM_PATH env (defaults to a Termux path;
                                              # set to your chrome/chromium binary)
@@ -59,9 +60,8 @@ node hydration-test.mjs                      # production hydration path; needs 
 
 ## Layout
 
-- Monorepo workspaces under `packages/`: adapter, cli, compiler, create-vesk,
-  plugin-tailwind, prettier-plugin, runtime, lsp — plus native `haul` (Go) and
-  per-platform `haul-*` binary packages.
+- Monorepo workspaces under `packages/`: types, adapter, cli, compiler,
+  create-vesk, plugin-tailwind, prettier-plugin, runtime, lsp.
 - Nested AGENTS.md files add module rules: `scripts/AGENTS.md` (ports, release
   order, sentinel formats) and `packages/runtime/AGENTS.md` (barrel split,
   no-batch rule). They extend this file — read both when touching those areas.

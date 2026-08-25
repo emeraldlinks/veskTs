@@ -20,6 +20,7 @@ const tarballsDir = join(testAppDir, 'tarballs');
 
 // dir in packages/, and the dependency NAME test-app references.
 const TARGETS = [
+	{ dir: 'types', name: '@vesk/types' },
 	{ dir: 'compiler', name: '@vesk/compiler' },
 	{ dir: 'runtime', name: '@vesk/runtime' },
 	{ dir: 'adapter', name: '@vesk/adapter' },

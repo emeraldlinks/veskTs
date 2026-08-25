@@ -1041,7 +1041,7 @@ async function main() {
       // must surface that error state. Observed engine behaviors:
       //  · TS dev/adapter servers: route error component renders the payload
       //    message ("Data layer unavailable during SSR").
-      //  · haul dev: the optimistic client render may win the race — the real
+      //  · dev server: the optimistic client render may win the race — the real
       //    page paints (client-side render succeeds because `window` exists)
       //    and the payload message never becomes visible.
       // Either way the navigation must land, isolate the failure to the page

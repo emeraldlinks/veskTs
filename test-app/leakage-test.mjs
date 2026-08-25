@@ -1,5 +1,5 @@
 /**
- * Leakage isolation test for the haul production engine:
+ * Leakage isolation test for the production server (pure-TS pipeline):
  *   A. Error leakage   — errors from one component/page/layout/API/middleware
  *                        must never appear on another page's response.
  *   B. Data leakage    — serialized SSR data, route params, and middleware
@@ -146,12 +146,12 @@ async function isUp() {
 writeFixtures();
 
 console.log('[leakage] building with fixtures...');
-execSync(`${resolve(appDir, 'node_modules', '.bin', 'haul')} build`, {
+execSync(`${resolve(appDir, 'node_modules', '.bin', 'vesk')} build`, {
   cwd: appDir, stdio: 'inherit', timeout: 300000,
 });
 
 console.log('[leakage] starting prod server on port', PORT);
-server = spawn(resolve(appDir, 'node_modules', '.bin', 'haul'), ['start', '-p', String(PORT)], {
+server = spawn(resolve(appDir, 'node_modules', '.bin', 'vesk'), ['start', '-p', String(PORT)], {
   cwd: appDir, stdio: 'ignore',
 });
 let up = false;
@@ -362,7 +362,7 @@ server.kill('SIGKILL');
 cleanupFixtures();
 // Rebuild without fixtures so .vesk output is back to the clean state.
 console.log('[leakage] rebuilding without fixtures...');
-execSync(`${resolve(appDir, 'node_modules', '.bin', 'haul')} build`, {
+execSync(`${resolve(appDir, 'node_modules', '.bin', 'vesk')} build`, {
   cwd: appDir, stdio: 'inherit', timeout: 300000,
 });
 process.exit(failed > 0 ? 1 : 0);

@@ -1,8 +1,8 @@
 {
-  "name": "@vesk/compiler",
+  "name": "@vesk/types",
   "version": "0.2.6",
   "type": "module",
-  "description": "Vesk compiler — lexer, parser, semantic analysis, IR, codegen",
+  "description": "Vesk shared type definitions — the single source for all public framework types",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -15,20 +15,8 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "build": "tsc -p tsconfig.build.json && node -e \"require('node:fs').cpSync('src/acorn-ts-plugin', 'dist/acorn-ts-plugin', { recursive: true })\"",
+    "build": "tsc -p tsconfig.build.json",
     "prepublishOnly": "npm run build"
-  },
-  "dependencies": {
-    "@sveltejs/acorn-typescript": "^1.0.0",
-    "@vesk/types": "^0.2.6",
-    "acorn": "^8.15.0",
-    "esrap": "^2.3.0",
-    "is-reference": "^3.0.0",
-    "source-map": "^0.7.4",
-    "zimmerframe": "^1.1.0"
-  },
-  "devDependencies": {
-    "typescript": "^5.8.0"
   },
   "license": "MIT",
   "author": "emeraldlinks",

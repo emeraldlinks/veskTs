@@ -1,8 +1,7 @@
 # CLI Commands
 
 The `vesk` CLI (`packages/cli/src/index.ts`) orchestrates the compiler,
-adapter, and runtime. `haul` is the native Go engine with equivalent
-commands. Scaffolding is separate: `npx create-vesk@latest <project-name>`.
+adapter, and runtime. Scaffolding is separate: `npx create-vesk@latest <project-name>`.
 
 ## vesk commands
 
@@ -18,25 +17,8 @@ commands. Scaffolding is separate: `npx create-vesk@latest <project-name>`.
 Port parsing accepts `-p 3000`, `--port 3000`, and `--port=3000`; invalid
 values fall back to 3000.
 
-## haul (native engine)
-
-`haul` is a single static Go binary that replaces esbuild and the JS
-dev-server orchestration:
-
-| Command | Replaces |
-| --- | --- |
-| `haul build` | `vesk build` orchestration (esbuild) — native |
-| `haul dev` | `vesk dev` — native HTTP server, watcher, HMR |
-| `haul start` | `vesk start` — native static+server preview |
-| `haul seo` | `vesk seo` — native |
-| `haul typecheck` | `vesk typecheck` — runs via the **sidecar** (TS semantics are a JS/TS problem) |
-
-- The npm bin shim (`bin/haul.js`) resolves the platform package
-  `@vesk/haul-<os>-<cpu>` and spawns it with `VESK_SIDECAR` pointing at
-  the bundled sidecar.
-- The sidecar is a Node process speaking JSON-RPC to `@vesk/compiler` and
-  `@vesk/runtime` (acorn AST/tokenizer, route scans, client bundles).
-- See `docs/haul.md` for the engine architecture.
+> **Note:** the native Go engine ("haul") is parked on the `haul-parked`
+> branch and is not part of the shipped framework.
 
 ## Config loading
 

@@ -14,7 +14,7 @@ concurrency:
 
 jobs:
   test:
-    name: Test (typecheck, go, unit + e2e, hydration, crawl)
+    name: Test (typecheck, unit + e2e, hydration, crawl)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,11 +22,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache: false
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund
@@ -45,13 +40,6 @@ jobs:
 
       - name: Typecheck packages
         run: npm run typecheck
-
-      - name: Build haul engine + Go tests
-        working-directory: packages/haul
-        run: |
-          go build ./...
-          go vet ./...
-          go test ./...
 
       - name: Unit + E2E suite (scripts/test.js)
         env:
@@ -82,15 +70,15 @@ jobs:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
         run: node crawl.mjs
 
-      - name: Dump haul dev server log (always)
+      - name: Dump dev server log (always)
         if: always()
         run: |
           echo "===== /tmp/dev.log ====="
           cat /tmp/dev.log
           echo "===== end /tmp/dev.log ====="
 
-  haul-prod:
-    name: Haul prod engine (leakage isolation, build + start, hydration, crawl)
+  prod:
+    name: Production (leakage isolation, build + start, hydration, crawl)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -114,47 +102,43 @@ jobs:
       - name: Refresh test-app deps from latest workspace build
         run: node scripts/refresh-testapp-deps.mjs
 
-      - name: Leakage isolation suite (haul build + prod server)
+      - name: Leakage isolation suite (build + prod server)
         run: node test-app/leakage-test.mjs
 
-      - name: Haul production build
+      - name: Production build
         working-directory: test-app
         run: |
-          # haul build reuses .vesk-cache bundles without invalidating on
-          # dependency changes — a stale cached client runtime would defeat
-          # the refreshed deps above.
-          rm -rf .vesk-cache .vesk/static .vesk/server
           npm run build
 
-      - name: Start haul production server
+      - name: Start production server
         working-directory: test-app
         run: |
-          (setsid nohup npm run start > /tmp/haul-start.log 2>&1 < /dev/null &)
+          (setsid nohup npm run start > /tmp/start.log 2>&1 < /dev/null &)
           for i in $(seq 1 60); do
             curl -s -o /dev/null http://localhost:3000/ && break
             sleep 1
           done
-          curl -s -o /dev/null -w "haul start: %{http_code}\n" http://localhost:3000/
+          curl -s -o /dev/null -w "start: %{http_code}\n" http://localhost:3000/
 
-      - name: Hydration test against haul prod
+      - name: Hydration test against prod
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
           BASE: http://localhost:3000
         run: node hydration-test.mjs
 
-      - name: SSR crawl against haul prod
+      - name: SSR crawl against prod
         if: always()
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
           BASE: http://localhost:3000
         run: node crawl.mjs
 
-      - name: Dump haul start log (always)
+      - name: Dump prod server log (always)
         if: always()
         run: |
-          echo "===== /tmp/haul-start.log ====="
-          cat /tmp/haul-start.log || true
-          echo "===== end /tmp/haul-start.log ====="
+          echo "===== /tmp/start.log ====="
+          cat /tmp/start.log || true
+          echo "===== end /tmp/start.log ====="
 
   deploy-targets:
     name: Platform deployment targets (vercel/netlify/cloudflare/deno/aws)
@@ -212,7 +196,7 @@ jobs:
 
   release:
     name: Publish to npm + GitHub tag & release
-    needs: [test, haul-prod, deploy-targets]
+    needs: [test, prod, deploy-targets]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       contains(github.event.head_commit.message, 'publish')
@@ -226,11 +210,6 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version: 'stable'
-          cache: false
 
       - name: Install dependencies
         run: npm install --no-audit --no-fund

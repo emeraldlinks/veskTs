@@ -4,8 +4,7 @@
   "type": "module",
   "description": "Vesk — compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
   "bin": {
-    "vesk": "./dist/cli.js",
-    "haul": "./bin/haul.js"
+    "vesk": "./dist/cli.js"
   },
   "main": "./dist/cli.js",
   "dependencies": {
@@ -44,12 +43,8 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@vesk/haul-darwin-arm64": "^0.2.6",
-    "@vesk/haul-darwin-x64": "^0.2.6",
-    "@vesk/haul-linux-arm64": "^0.2.6",
-    "@vesk/haul-linux-x64": "^0.2.6",
-    "@vesk/haul-win32-x64": "^0.2.6",
     "esbuild": "^0.25.0",
+    "esbuild-wasm": "^0.25.0",
     "sharp": "^0.35.3"
   }
 }

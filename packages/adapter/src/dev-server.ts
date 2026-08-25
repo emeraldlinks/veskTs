@@ -2,7 +2,7 @@ import { readFileSync, existsSync, watch, statSync } from 'node:fs';
 import { resolve, extname, dirname } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { transformSync } from './esbuild-fallback.js';
+import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { build } from '@vesk/adapter/src/index';
 import { createHmrServer } from '@vesk/adapter/src/hmr';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
@@ -118,7 +118,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       if (hmrPath) {
         let hmrContent = readFileSync(hmrPath, 'utf-8');
         if (hmrPath.endsWith('.ts')) {
-          hmrContent = transformSync(hmrContent, { loader: 'ts' }).code;
+          hmrContent = stripCodeTypes(hmrContent);
         }
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(hmrContent);

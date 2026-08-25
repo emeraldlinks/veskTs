@@ -4,7 +4,7 @@ import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
-import { transformSync } from 'esbuild';
+import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol } from '@vesk/compiler/src/server-codegen';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
@@ -598,7 +598,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       if (hmrClientPath) {
         let hmrContent = readFileSync(hmrClientPath, 'utf-8');
         if (hmrClientPath.endsWith('.ts')) {
-          hmrContent = transformSync(hmrContent, { loader: 'ts' }).code;
+          hmrContent = stripCodeTypes(hmrContent);
         }
         res.writeHead(200, { 'Content-Type': 'application/javascript' });
         res.end(hmrContent);
@@ -642,9 +642,19 @@ export async function startDevServer(port: number, projectDir: string, config: R
           try {
             const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
               plugins: (config.plugins || []) as VeskPlugin[],
-              onLast: async () => new Response(null),
+              onLast: async () => null,
             });
+            if (mwResult.response) {
+              logRequest(mwResult.response.status);
+              res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
+              res.end(await mwResult.response.text());
+              return;
+            }
             apiLocals = mwResult.locals || {};
+            // Propagate rewrite if any
+            if (mwResult.rewriteUrl) {
+              url.pathname = mwResult.rewriteUrl;
+            }
           } catch (e) {
             const err = e as Error & { name: string };
             if (err.name === 'NotFoundError') {
@@ -854,10 +864,16 @@ export async function startDevServer(port: number, projectDir: string, config: R
         });
         const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
           plugins: (config.plugins || []) as VeskPlugin[],
-          onLast: async (rewrite: string | null) => {
+          onLast: async (rewrite: string | null, mwCtx: any) => {
             if (rewrite) url.pathname = rewrite;
+            // mwCtx is the middleware context with correct locals/cookies/url.
+            // executeMiddlewareChain already sets globalThis.__vesk_request to mwCtx
+            // during the call, so we just render without overriding it.
+            // Fall back to ctx only if mwCtx is missing (backward compat).
             const prev = (globalThis as Record<string, unknown>).__vesk_request;
-            (globalThis as Record<string, unknown>).__vesk_request = ctx;
+            if (mwCtx && !(prev as any)?.locals) {
+              (globalThis as Record<string, unknown>).__vesk_request = mwCtx;
+            }
             try {
               try {
                 const rendered = await renderSSR();

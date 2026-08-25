@@ -90,7 +90,9 @@ export async function loadMiddleware(sourcePath: string): Promise<((ctx: any, ne
   }
   if (sourcePath.endsWith('.js') || sourcePath.endsWith('.ts')) {
     try {
-      const mod = await import(sourcePath) as Record<string, unknown>;
+      const url = new URL('file://' + sourcePath);
+      url.searchParams.set('t', String(Date.now()) + Math.random().toString(36).slice(2));
+      const mod = await import(url.href) as Record<string, unknown>;
       return (mod.middleware || mod.default || null) as ((ctx: any, next: any) => any) | null;
     } catch {
       return null;
@@ -153,15 +155,25 @@ export async function executeMiddlewareChain(
   let rewriteUrl: string | null = null;
 
   if (chain.length === 0) {
+    if (onLast) {
+      const prev = (globalThis as Record<string, unknown>).__vesk_request;
+      (globalThis as Record<string, unknown>).__vesk_request = ctx as unknown as Record<string, unknown>;
+      try {
+        const loneResponse = await onLast(rewriteUrl, ctx as MiddlewareContext);
+        return { response: loneResponse ?? null, redirected: !!loneResponse && loneResponse.status >= 300 && loneResponse.status < 400, locals, rewriteUrl };
+      } finally {
+        (globalThis as Record<string, unknown>).__vesk_request = prev;
+      }
+    }
     return { response: null, redirected: false, locals, rewriteUrl: null };
   }
 
-  async function runMiddleware(index: number): Promise<Response> {
+  async function runMiddleware(index: number): Promise<Response | null> {
     if (index >= chain.length) {
       if (onLast) {
-        return onLast(rewriteUrl);
+        return onLast(rewriteUrl, ctx as MiddlewareContext);
       }
-      return new Response(null, { status: 204 });
+      return null;
     }
 
     const { sourcePath } = chain[index];
@@ -170,7 +182,11 @@ export async function executeMiddlewareChain(
       return runMiddleware(index + 1);
     }
 
+    let nextCalled = false;
+    let nextResult: Response | null = null;
     async function next(rewrite?: string): Promise<Response> {
+      if (nextCalled) return null as unknown as Response;
+      nextCalled = true;
       if (rewrite) {
         rewriteUrl = rewrite;
         try {
@@ -181,7 +197,8 @@ export async function executeMiddlewareChain(
           ctx.url = new URL(rewrite, base.origin);
         }
       }
-      return runMiddleware(index + 1);
+      nextResult = await runMiddleware(index + 1);
+      return nextResult as Response;
     }
 
     try {
@@ -189,7 +206,13 @@ export async function executeMiddlewareChain(
       if (result instanceof Response) {
         return result;
       }
-      return new Response(null, { status: 204 });
+      if (nextResult !== null && (nextResult as unknown) instanceof Response) {
+        return nextResult;
+      }
+      if (!nextCalled) {
+        return runMiddleware(index + 1);
+      }
+      return null;
     } catch (e: unknown) {
       const err = e as Error & { name: string; status?: number; url?: string };
       if (err.name === 'Redirect') {
@@ -202,6 +225,15 @@ export async function executeMiddlewareChain(
     }
   }
 
-  const response = await runMiddleware(0);
-  return { response, redirected: response?.status >= 300 && response?.status < 400, locals, rewriteUrl };
+  // Ensure the outermost ctx is available as __vesk_request during the chain,
+  // so that server locals / onLast rendering sees middleware locals.
+  const prevOuter = (globalThis as Record<string, unknown>).__vesk_request;
+  (globalThis as Record<string, unknown>).__vesk_request = ctx as unknown as Record<string, unknown>;
+  let response: Response | null;
+  try {
+    response = await runMiddleware(0);
+  } finally {
+    (globalThis as Record<string, unknown>).__vesk_request = prevOuter;
+  }
+  return { response, redirected: !!response && response.status >= 300 && response.status < 400, locals, rewriteUrl };
 }

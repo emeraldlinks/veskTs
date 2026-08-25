@@ -30,13 +30,13 @@ the source files and commit used to verify its claims.
 
 ## CLI
 
-- [commands.md](cli/commands.md) — every `vesk` and `haul` command, flags, config loading
+- [commands.md](cli/commands.md) — every `vesk` command, flags, config loading
 - [plugin-api.md](cli/plugin-api.md) — the plugin contract and `@vesk/plugin-tailwind`
 
 ## Supporting docs
 
 - `packages/cli/llms.txt` — machine-oriented reference for LLM agents
-- `docs/haul.md` — the native Go haul engine
+- ~~`docs/haul.md`~~ — native Go engine (parked on the `haul-parked` branch)
 - `FEATURES.md` — internal feature inventory vs React/Qwik/Astro (not public docs)
 
 ## Glossary

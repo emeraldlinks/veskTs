@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { transformSync } from './esbuild-fallback.js';
+import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import type { ApiRouteNode, ApiFunctionOptions } from '@vesk/adapter/src/types';
 
 function apiRouteName(fullPath: string): string {
@@ -19,6 +19,7 @@ export function generateApiFunction(
   const funcPath = resolve(outDir, 'server', 'api', `${name}.js`);
 
   const routeFilePath = apiNode.filePath;
+  if (!routeFilePath) throw new Error(`api route ${apiNode.fullPath} has no filePath`);
   let routeSrc = readFileSync(routeFilePath, 'utf-8');
 
   routeSrc = routeSrc
@@ -29,8 +30,7 @@ export function generateApiFunction(
 
   if (routeFilePath.endsWith('.ts')) {
     try {
-      const result = transformSync(routeSrc, { loader: 'ts' });
-      routeSrc = result.code;
+      routeSrc = stripCodeTypes(routeSrc);
     } catch {
       // fall back to original source if stripping fails
     }

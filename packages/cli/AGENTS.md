@@ -10,7 +10,12 @@ Module-specific agent rules. Extends the repo-level `/root/vesk/AGENTS.md`.
 4. **Every reactivity/hydration change ships with `node hydration-test.mjs`** (repo root), not just unit tests.
 5. **ESM-only.** All source is ESM; no CJS.
 6. **`batch` does not exist in the runtime** — never import it.
-7. **haul ships via npm platform packages.** `vesk`'s `optionalDependencies` reference `@vesk/haul-<os>-<cpu>` (version-locked in lockstep), the `bin/haul.js` shim sets `VESK_SIDECAR` (Go prefers it over repo-relative sidecar discovery in `packages/haul/internal/cli/sidecar.go`), and the sidecar must resolve `@vesk/compiler`/`@vesk/runtime` through node_modules (`createRequire` candidates in `packages/haul/internal/sidecar/server.ts`). After any `packages/haul` change, rebuild `packages/haul-platforms/build-platform.mjs` outputs for all six binaries.
+7. **haul is parked — do not revive it.** The native Go engine and its platform
+   packages live only on the `haul-parked` branch. main ships the pure-TS
+   pipeline; esbuild is an optionalDependency with an automatic esbuild-wasm
+   fallback (`packages/adapter/src/esbuild-fallback.ts`), and synchronous
+   TS-stripping uses the compiler's `stripCodeTypes` (no esbuild). Never add a
+   hard esbuild/`transformSync` dependency or a `VESK_SIDECAR` code path.
 
 ## Commands
 
@@ -42,9 +47,8 @@ npx tsc --noEmit -p packages/cli/tsconfig.json
 | `src/action-handler.ts` | Server action HTTP handler. |
 | `src/build-packages.ts` | Incremental monorepo build for runtime/compiler/adapter. |
 | `bin.js` | ESM bin shim. |
-| `bin/haul.js` | npm `haul` bin shim — resolves the `@vesk/haul-<platform>` optional dep and spawns it with `VESK_SIDECAR` pointed at `dist/sidecar.js`. |
-| `build.ts` | Also bundles `packages/haul/internal/sidecar/server.ts` → `dist/sidecar.js` (externals: `typescript`, `@vesk/compiler*`, `@vesk/runtime*`). |
-| `packages/haul-platforms/build-platform.mjs` | Cross-compiles the native haul binary for all platforms into `packages/haul-<os>-<cpu>/bin` (release: run before `npm publish` of `vesk`). |
+| `build.ts` | Bundles `src/index.ts` → `dist/cli.js` (externals: `typescript`, `ws`, `esbuild`, `sharp`, `zimmerframe`, `esrap`). |
+| `packages/types` | Shared type definitions (`@vesk/types`) — all public framework types live here. |
 
 ## Do / Don't
 

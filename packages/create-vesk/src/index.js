@@ -38,35 +38,26 @@ const dirs = [
 for (const d of dirs) mkdirSync(d, { recursive: true })
 
 // ── package.json ──
-// haul is the default engine: `haul dev` / `haul build` / `haul start` run the
-// native binary (embedded compiler sidecar, no VESK_SIDECAR needed). The
-// `vesk` package provides both the `haul` dispatcher and the JS `vesk` CLI.
+// `vesk dev` / `vesk build` / `vesk start` run the pure-TypeScript pipeline.
+// esbuild is an optionalDependency: when its native binary cannot run on a
+// machine, vesk falls back to esbuild-wasm automatically.
 writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
 	name: pkgName,
 	private: true,
 	type: 'module',
 	scripts: {
-		dev: 'haul dev',
-		build: 'haul build',
-		start: 'haul start',
+		dev: 'vesk dev',
+		build: 'vesk build',
+		start: 'vesk start',
 		typecheck: 'tsc --noEmit',
-		'dev:vesk': 'vesk dev',
-		'build:vesk': 'vesk build',
-		'start:vesk': 'vesk start',
 	},
 	dependencies: {
 		'@vesk/compiler': '^0.2.6',
 		'@vesk/runtime': '^0.2.6',
+		'@vesk/types': '^0.2.6',
 		'@vesk/vesk-cli': '^0.2.6',
 		'@vesk/adapter': '^0.2.6',
 		'@vesk/plugin-tailwind': '^0.2.6',
-	},
-	optionalDependencies: {
-		'@vesk/haul-darwin-arm64': '^0.2.6',
-		'@vesk/haul-darwin-x64': '^0.2.6',
-		'@vesk/haul-linux-arm64': '^0.2.6',
-		'@vesk/haul-linux-x64': '^0.2.6',
-		'@vesk/haul-win32-x64': '^0.2.6',
 	},
 	devDependencies: {
 		tailwindcss: '^4.0.0',
@@ -115,7 +106,6 @@ writeFileSync(join(targetDir, 'tsconfig.json'), JSON.stringify({
 		jsx: 'preserve',
 		jsxImportSource: '@vesk/compiler',
 		lib: ['ES2022', 'DOM', 'DOM.Iterable'],
-		baseUrl: '.',
 		paths: {
 			'@/*': ['./src/*'],
 			'@app/*': ['./app/*'],
@@ -137,9 +127,14 @@ writeFileSync(join(srcDir, 'global.css'), [
 
 // ── app/layout.vsk ──
 writeFileSync(join(appDirPath, 'layout.vsk'), [
+	`import type { Component } from '@vesk/types';`,
 	`import { NavLink } from '@vesk/runtime';`,
-	``,
-	`component Layout(props) {`,
+	'',
+	`interface LayoutProps {`,
+	`\tchildren?: Component`,
+	`}`,
+	'',
+	`component Layout(props: LayoutProps) {`,
 	`\t<nav class="flex gap-6 px-8 py-4 border-b border-gray-200 bg-white">`,
 	`\t\t<NavLink href="/" class="text-gray-500 hover:text-black font-medium no-underline">Home</NavLink>`,
 	`\t\t<NavLink href="/about" class="text-gray-500 hover:text-black font-medium no-underline">About</NavLink>`,
@@ -373,6 +368,7 @@ writeFileSync(join(appDirPath, 'middleware.ts'), [
 	`// next() — passes to next middleware or page render`,
 	`// next('/rewrite') — rewrites URL in place`,
 	`// Short-circuit: return Response without calling next()`,
+	`// Types come from @vesk/types (import type { MiddlewareContext }).`,
 	``,
 	`export async function middleware(ctx, next) {`,
 	`\tctx.set('startTime', Date.now());`,
@@ -413,7 +409,8 @@ writeFileSync(join(appDirPath, 'error.vsk'), [
 
 // ── app/api/posts/route.ts ──
 writeFileSync(join(appDirPath, 'api', 'posts', 'route.ts'), [
-	`import { VeskRequest, VeskResponse } from '@vesk/runtime/server';`,
+	`import type { VeskRequest } from '@vesk/types';`,
+	`import { VeskResponse } from '@vesk/runtime/server';`,
 	``,
 	`export interface Post {`,
 	`\tid: number;`,
@@ -469,7 +466,8 @@ writeFileSync(join(appDirPath, 'api', 'posts', 'route.ts'), [
 
 // ── app/api/hello/route.ts ──
 writeFileSync(join(appDirPath, 'api', 'hello', 'route.ts'), [
-	`import { VeskRequest, VeskResponse } from '@vesk/runtime/server';`,
+	`import type { VeskRequest } from '@vesk/types';`,
+	`import { VeskResponse } from '@vesk/runtime/server';`,
 	``,
 	`export async function GET(req: VeskRequest) {`,
 	`\treturn VeskResponse.json({ message: 'Hello from Vesk!' })`,
@@ -541,11 +539,10 @@ writeFileSync(join(targetDir, 'README.md'), [
 	'',
 	'## Scripts',
 	'',
-	`- \`npm run dev\` — dev server with HMR at http://localhost:3000 (native \`haul\` engine)`,
+	`- \`npm run dev\` — dev server with HMR at http://localhost:3000`,
 	`- \`npm run build\` — production build (SSG + SSR) into \`.vesk/\``,
 	`- \`npm run start\` — run the production server`,
 	`- \`npm run typecheck\` — typecheck \`app/\` and \`src/\``,
-	`- \`npm run dev:vesk\` / \`build:vesk\` / \`start:vesk\` — same commands via the JS \`vesk\` CLI instead of \`haul\``,
 	'',
 	'## Project structure',
 	'',

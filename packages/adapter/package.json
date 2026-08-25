@@ -24,7 +24,8 @@
   },
   "dependencies": {
     "@vesk/compiler": "^0.2.6",
-    "@vesk/runtime": "^0.2.6"
+    "@vesk/runtime": "^0.2.6",
+    "@vesk/types": "^0.2.6"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

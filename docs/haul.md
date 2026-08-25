@@ -1,6 +1,11 @@
 # haul — the native vesk engine and CLI
 
-**Status:** proposal
+> **PARKED:** haul is unplugged from the framework. The full source lives on
+> the `haul-parked` branch (`git checkout haul-parked`); main ships the
+> pure-TS pipeline with esbuild + esbuild-wasm fallback. This doc is kept for
+> historical/design reference.
+
+**Status:** parked (was: proposal)
 **Owner:** vesk core
 **Depends on:** Phase 0 (optional deps + esbuild-wasm fallback)
 

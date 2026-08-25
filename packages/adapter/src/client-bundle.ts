@@ -1,7 +1,8 @@
 import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { build, transformSync } from './esbuild-fallback.js';
+import { build } from './esbuild-fallback.js';
+import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
@@ -356,7 +357,7 @@ export async function generateClientBundle(
 }
 
 function stripTypes(code: string): string {
-  return transformSync(code, { loader: 'ts' }).code;
+  return stripCodeTypes(code);
 }
 
 export function buildRuntimeCode(runtimeDir: string): string {

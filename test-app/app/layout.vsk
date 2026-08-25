@@ -1,4 +1,4 @@
-import { NavLink } from '@vesk/runtime';
+import type { Component } from '@vesk/types';
 
 interface NavItem {
 	label: string
@@ -6,12 +6,9 @@ interface NavItem {
 }
 
 interface LayoutProps {
-	children: unknown
+	children?: Component
 }
 
-type kk = {
-	
-}
 const navItems: NavItem[] = [
 	{ label: 'Home', href: '/' },
 	{ label: 'About', href: '/about' },

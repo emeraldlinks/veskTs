@@ -2,9 +2,9 @@
 
 > Living task tracker. Read at start of every session. Update after every unit of work.
 
-**Current phase:** haul
+**Current phase:** pure-TS pipeline (haul parked)
 
-**Total tests:** compiler 739 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 24 + parser 79 + server-codegen 99 + integration 116 + client-codegen 160 + ir-generator 9 + router 22 + ts-support 25), runtime 257 (10 files), hydration 121
+**Total tests:** compiler 750 (api-routes 13 + cli 14 + components-scan 6 + config 14 + head-merge 14 + scan 31 + server-utils 90 + ssg 8 + track-codegen 8 + vsk-imports 15 + vsk-tsx 24 + parser 79 + server-codegen 99 + integration 116 + client-codegen 160 + ir-generator 9 + router 22 + middleware 11 + ts-support 25), runtime 257 (10 files), hydration 121
 **Joe test app (joe/test/):** 56 tests (26 hydration + 8 event hydration + 22 HMR)
 
 ---
@@ -122,17 +122,35 @@
 
 ## Current Session Work
 
+### Focus: middleware chain fixes (dev + prod parity)
+- [x] **Middleware edits never took effect (stale ESM cache)** — `loadMiddleware` used a bare `await import(sourcePath)`; Node caches the module forever, so adding `console.log` to `app/middleware.ts` while the server ran silently kept executing the old module. Now every load cache-busts via a `?t=` query param (packages/compiler/src/middleware.ts).
+- [x] **`await next()` without `return` discarded the rendered response** — the compiler chain synthesized an empty 204 whenever a middleware returned non-Response, throwing away onLast's rendered page. Chain now captures next()'s response and propagates it; same fix applied to the adapter's generated runners (`compileMiddleware`, `compileMiddlewareCode`) and the haul sidecar RPC codegen so dev/prod/haul behave identically.
+- [x] **Middleware Responses were swallowed on API routes** — dev servers passed `onLast: async () => new Response(null)`, so even a legit `return new Response(401)` from middleware was ignored and the API handler still ran. Both dev-server.ts and haul's handleDevApi now honor middleware responses, propagate rewrites, and pass locals into `executeApiRoute`.
+- [x] **Middleware locals now visible during SSR render** — `executeMiddlewareChain` sets `globalThis.__vesk_request` to the middleware ctx for the duration of the chain/onLast render, so pages calling `locals()` see what middleware set (previously only API routes received locals). `onLast` receives `(rewriteUrl, ctx)` (types updated).
+- [x] Tests: new `packages/compiler/src/middleware.test.ts` (11 tests: collection order, TS loading, stale-cache reload, return/await-next semantics, short-circuit, redirect, rewrite, empty chain).
+
 ### Focus: LSP — Volar revival + self-contained packaging (36/36 smoke)
 - [x] **Volar LSP revived, heuristic modules deleted** — packages/lsp restored from 718f7a0; smoke suite `node packages/lsp/tests/lsp-smoke.mjs` 36/36. Root causes fixed: (1) language-id mismatch — VS Code grammar sends `vsk`, plugin only accepted `vesk` → no virtual code ever created (`isVeskLanguage` accepts both); (2) plugins receive the **virtual** TSX document (`volar-embedded-content://…`), so knowledge scans must run on `sourceScript.snapshot` while answers stay in virtual coords (hover.ts); (3) `VeskVirtualCode.languageId = 'typescriptreact'` (was `'vesk'`) so volar-service-typescript's `isTsDocument()` gates pass — fixed null `documentSymbol`; (4) hover wrapper merges real TS hovers (contents may be MarkupContent, array, or string) with vesk overlays: reactive-binding markers, HTML element docs, event-handler docs, inferred component props; (5) `stripDocumentFormatting` also strips `documentOnTypeFormattingProvider` (client-side autoclose).
 - [x] **Fully bundled server** — `scripts/build-lsp.js` (`external: []`) inlines typescript + @volar/* + volar-service-typescript; `stripShebang()` fixes rollup hoisting bin.ts's shebang mid-file; `ensureModuleFilename()` injects `const __filename = fileURLToPath(import.meta.url)` for TS's node-system probe. `typescriptService.ts` converted from runtime `require('volar-service-typescript')` to static imports — the monkey-patch of `getUserPreferences` stays live because all consumers call through the shared CJS exports object inside one bundle.
 - [x] **Self-contained vsix (0.2.0)** — client bundled with esbuild (`vscode-languageclient` inlined, only `vscode` external); runtime deps removed from extension package.json (moved to devDeps). **0.1.2/0.1.3 vsixes were silently broken**: packaged without node_modules but dist/extension.js still required vscode-languageclient at runtime (would crash on activation). Standalone extraction test verified: unzip outside repo, spawn lsp-server/index.mjs from /tmp cwd → init/hover/symbols all work.
 
-### Focus: haul — native engine + CLI replacement
-- [ ] **Phase 0** — Make `esbuild` + `sharp` optionalDependencies; wire esbuild-wasm fallback; verify `npm install` never SIGILLs
-- [ ] **Phase 1** — Native `haul` Go binary (build/dev/start/seo/typecheck); embed esbuild-Go tree-shaker + minifier (`GOAMD64=v1`, `GOARM=7`); native TS stripper; Node sidecar for `.vsk` transforms + typecheck only; remove all 6 JS esbuild call sites; differential fuzz gate vs current esbuild output
-- [ ] **Phase 2** — Persistent `.vesk-cache/`, parallel module graph, lazy dev compilation, shared-chunk code-splitting
-- [ ] **Phase 3** — Security hardening: import allowlists, hashed assets + SRI, eval-free scanner (`haul audit`), dev-server hardening, secret redaction
-- [ ] **Phase 4** — Native `.vsk` parser/IR port (drop sidecar); optional vesk-owned tree-shaker/minifier behind differential gate
+### Focus: haul — native engine + CLI replacement (PARKED on `haul-parked` branch)
+> Haul was unplugged from main: esbuild-wasm fallback + the compiler's own TS
+> stripper cover the old-device cases it existed for, and it added a whole
+> second engine to maintain. Restore with `git checkout haul-parked`.
+- [x] **Unplugged from main** — packages/haul + haul-* platform binaries live only on `haul-parked`; CLI bin shim, sidecar bundling, release publishing, CI job and create-vesk scaffolding all removed. test-app defaults to the pure-TS `vesk` CLI.
+- [ ] **(was Phase 0)** Make `esbuild` + `sharp` optionalDependencies; wire esbuild-wasm fallback; verify `npm install` never SIGILLs
+- [ ] **(was Phase 1)** Native `haul` Go binary (build/dev/start/seo/typecheck); embed esbuild-Go tree-shaker + minifier; native TS stripper; Node sidecar for `.vsk` transforms + typecheck only
+- [ ] **(was Phase 2)** Persistent `.vesk-cache/`, parallel module graph, lazy dev compilation, shared-chunk code-splitting
+- [ ] **(was Phase 3)** Security hardening: import allowlists, hashed assets + SRI, eval-free scanner (`haul audit`), dev-server hardening, secret redaction
+- [ ] **(was Phase 4)** Native `.vsk` parser/IR port (drop sidecar); optional vesk-owned tree-shaker/minifier behind differential gate
+
+### Focus: pure-TS pipeline everywhere + @vesk/types
+- [x] **haul unplugged, verified E2E on the pure-TS path** — `vesk dev` (middleware log fires, locals reach API routes), `vesk build` (full output incl. SEO/manifest) and `vesk start` (page 200 + JSON API + SSR h1) all green from `dist/cli.js`; compiler suites green (middleware 11, router 22, integration 119, parser 95, server-codegen 106, client-codegen 161, config 17, scan 39); typecheck incl. @vesk/types green.
+- [x] **esbuild decoupled from sync paths** — all four `transformSync` call sites (adapter api-function, client-bundle stripTypes, adapter dev-server HMR, cli dev-server HMR) now use the compiler's dependency-free acorn-based `stripCodeTypes`; `esbuild-fallback.ts` reduced to async `build()` only, with SIGILL-triggered permanent wasm fallback. `esbuild-wasm` is now a declared optionalDependency of the CLI so the fallback is real.
+- [x] **`Component` type + typed layout children** — canonical `Component` (renderable content: string|number|boolean|null|undefined|nested arrays) and `LayoutProps { children?: Component }` added to @vesk/types; test-app `app/layout.vsk` and the create-vesk scaffold layout both import it (verified: no conflict with typecheck's injected ambient declarations). create-vesk templates also updated: tsconfig drops deprecated `baseUrl` (paths resolve config-relative since TS 4.1), API route templates split `import type { VeskRequest } from '@vesk/types'` from the runtime value import.
+- [x] **@vesk/types created** — single source of truth for every public framework type (config/plugin/security/middleware/route nodes/build options/manifest/request-response shapes). Compiler + adapter `types.ts` are re-export shims; drifted duplicates (`VeskPlugin`, `VeskSecurity`, `RouteNode` differed between compiler and adapter) unified. Wired into workspaces, build-packages (built first — leaf), tsconfig paths, release publish order, test-app tarball pin + refresh-testapp-deps TARGETS.
+- [ ] **Route remaining user-facing type imports through @vesk/types** — test-app/joe app files still `import type { MiddlewareContext } from '@vesk/compiler'` / request types from runtime (works via back-compat re-exports, but new code should use '@vesk/types').
 
 ### Focus: async components + error isolation + hydration error reporting
 - [x] **Async component breaks hydration silently** — fixed. Async-child propagation in client codegen (`async` parent scope + `await`, resolved fragment appended) + SSR awaits async children; `/async` full-page-reload hydration verified (data persists, markers claimed, zero errors) via hydration-test 12/13 + browser probes.

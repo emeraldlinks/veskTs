@@ -5,6 +5,7 @@
       "@vesk/adapter/src/*": ["./src/*"],
       "@vesk/compiler": ["../compiler/src/index.ts"],
       "@vesk/compiler/src/*": ["../compiler/src/*"],
+      "@vesk/types": ["../types/src/index.ts"],
       "@vesk/runtime": ["../runtime/src/index-client.ts"],
       "@vesk/runtime/server": ["../runtime/src/index-server.ts"],
       "@vesk/runtime/src/*": ["../runtime/src/*"]
