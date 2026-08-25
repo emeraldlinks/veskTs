@@ -28,6 +28,8 @@ function expect(actual) {
     toContain(sub) {
       if (!actual.includes(sub)) throw new Error(`Expected "${actual}" to contain "${sub}"`);
     },
+    toBeTruthy() { if (!actual) throw new Error(`expected truthy, got ${actual}`); },
+    toBeLessThan(expected) { if (!(actual < expected)) throw new Error(`expected ${actual} < ${expected}`); },
     notToContain(sub) {
       if (typeof actual === 'string' && actual.includes(sub)) throw new Error(`Expected "${actual}" not to contain "${sub}"`);
     },
@@ -429,6 +431,70 @@ describe('Tracked-cell content', () => {
   it('renderMarkdown still rejects non-strings gracefully', () => {
     const html = renderMarkdown(null as never);
     expect(html).toBe('');
+  });
+});
+
+describe('Fence meta params', () => {
+  it('bg=none strips the background', () => {
+    const html = Md({ content: '```javascript bg=none\nconst a = 1;\n```' }) as string;
+    expect(html).toContain('data-lang="javascript"');
+    expect(html).toContain('--md-code-bg:transparent');
+    expect(html).toContain('<span class="tok-kw">const</span>');
+  });
+
+  it('bg accepts hex, names and rgb()', () => {
+    const hex = Md({ content: '```js bg=#0b1220\nx\n```' }) as string;
+    expect(hex).toContain('--md-code-bg:#0b1220');
+    const named = Md({ content: '```js bg=mistyrose\nx\n```' }) as string;
+    expect(named).toContain('--md-code-bg:mistyrose');
+    const fn = Md({ content: '```js bg=rgba(12,34,56,.7)\nx\n```' }) as string;
+    expect(fn).toContain('--md-code-bg:rgba(12,34,56,.7)');
+  });
+
+  it('fg sets the code text color variable', () => {
+    const html = Md({ content: '```js fg=navy bg=white\nx\n```' }) as string;
+    expect(html).toContain('--md-code-fg:navy');
+    expect(html).toContain('--md-code-bg:white');
+  });
+
+  it('unsafe values are dropped', () => {
+    const html = Md({ content: '```js bg=url(evil)\nx\n```' }) as string;
+    expect(html).notToContain('url(');
+  });
+
+  it('default theme stays light when no params given', () => {
+    const html = Md({ content: '```js\nx\n```' }) as string;
+    expect(html).notToContain('--md-code-bg');
+  });
+});
+
+describe('Component-level code theming', () => {
+  it('codeBg/codeFg set wrapper vars inherited by blocks', () => {
+    const html = Md({ content: '```js\nx\n```', codeBg: 'green', codeFg: 'navy' }) as string;
+    expect(html).toContain('--md-code-bg:green');
+    expect(html).toContain('--md-code-fg:navy');
+    expect(html).toContain('class="vesk-md');
+  });
+
+  it('theme=dark adds the dark scope class', () => {
+    const html = Md({ content: '```js\nx\n```', theme: 'dark' }) as string;
+    expect(html).toContain('vesk-md-dark');
+    expect(MD_BASE_CSS).toContain('.vesk-md-dark { --md-code-bg: #0d1117');
+  });
+
+  it('fence bg= overrides component codeBg (content wins)', () => {
+    const html = Md({ content: '```js bg=red\nx\n```', codeBg: 'green' }) as string;
+    expect(html).toContain('--md-code-bg:red');   // per-block
+    expect(html).toContain('--md-code-bg:green'); // wrapper default still there
+    const blockStyle = html.slice(html.indexOf('<div class="md-code"'));
+    const perBlockWins = blockStyle.indexOf('--md-code-bg:red') !== -1
+      && blockStyle.indexOf('--md-code-bg:red') < blockStyle.indexOf('md-code-bar');
+    expect(perBlockWins).toBeTruthy();
+  });
+
+  it('unsafe codeBg prop is dropped', () => {
+    const html = Md({ content: 'x', codeBg: 'url(evil)' }) as string;
+    expect(html).notToContain('url(');
   });
 });
 

@@ -107,6 +107,75 @@ function fenceLang(info: string): string {
 	return info.slice(0, i).toLowerCase();
 }
 
+interface FenceMeta {
+	lang: string;
+	params: Record<string, string>;
+}
+
+/**
+ * Parses a fenced info string: the first token is the language, remaining
+ * whitespace-separated tokens are key=value params. Values may contain
+ * parentheses (rgb()/rgba()) without breaking the split. Unknown keys are
+ * preserved so callers can extend.
+ */
+function parseFenceMeta(info: string): FenceMeta {
+	const tokens: string[] = [];
+	let cur = '';
+	let depth = 0;
+	for (let i = 0; i < info.length; i++) {
+		const ch = info[i];
+		if (ch === '(') depth++;
+		if (ch === ')') depth = Math.max(0, depth - 1);
+		if ((ch === ' ' || ch === '\t') && depth === 0) {
+			if (cur) { tokens.push(cur); cur = ''; }
+			continue;
+		}
+		cur += ch;
+	}
+	if (cur) tokens.push(cur);
+
+	const lang = tokens.length > 0 ? tokens[0].toLowerCase() : '';
+	const params: Record<string, string> = {};
+	for (let k = 1; k < tokens.length; k++) {
+		const eq = tokens[k].indexOf('=');
+		if (eq === -1) continue;
+		const key = tokens[k].slice(0, eq).toLowerCase();
+		let val = tokens[k].slice(eq + 1);
+		// tolerate shell-ish quoting from pasted examples
+		if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
+			val = val.slice(1, -1);
+		}
+		if (key) params[key] = val;
+	}
+	return { lang, params };
+}
+
+/** Color functions permitted inside bg=/fg= values; anything else with
+ *  parentheses (url(), var(), expression tricks) is rejected. */
+const COLOR_FUNCS = new Set(['rgb', 'rgba', 'hsl', 'hsla', 'hwb', 'lab', 'lch', 'oklab', 'oklch', 'color', 'color-mix']);
+
+/** Allows only safe CSS color-ish characters into inline style output. */
+function safeColorValue(v: string): string | null {
+	if (v === '' || v.length > 64) return null;
+	const out: string[] = [];
+	let word = '';
+	for (const ch of v) {
+		const ok =
+			(ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') ||
+			ch === '#' || ch === '%' || ch === '(' || ch === ')' || ch === ',' || ch === '.' ||
+			ch === '-' || ch === ' ';
+		if (!ok) return null;
+		if (isIdentStart(ch) || isDigit(ch)) word += ch.toLowerCase();
+		if (ch === '(') {
+			const fnName = word.slice(0, -1);
+			if (!COLOR_FUNCS.has(fnName)) return null;
+		}
+		if (!isIdentPart(ch)) word = '';
+		out.push(ch);
+	}
+	return out.join('').trim() || null;
+}
+
 function isFenceClose(line: string, char: string, len: number): boolean {
 	const t = line.trim();
 	if (t[0] !== char) return false;
@@ -1185,10 +1254,21 @@ function renderCodeBlock(b: Extract<Block, { type: 'code' }>, ctx: RenderCtx): s
 		return `<pre><code${codeCls ? ` class="${codeCls}"` : ''}>${body}</code></pre>`;
 	}
 
-	const langLabel = b.lang ? `<span class="md-code-lang">${escapeHtml(b.lang)}</span>` : '<span class="md-code-lang"></span>';
+	const meta = parseFenceMeta(b.info || b.lang);
+	const styleParts: string[] = [];
+	if (meta.params.bg !== undefined) {
+		const v = safeColorValue(meta.params.bg);
+		styleParts.push(`--md-code-bg:${v === 'none' ? 'transparent' : (v || 'transparent')}`);
+	}
+	if (meta.params.fg !== undefined) {
+		const v = safeColorValue(meta.params.fg);
+		if (v && v !== 'none') styleParts.push(`--md-code-fg:${v}`);
+	}
+	const styleAttr = styleParts.length > 0 ? ` style="${escapeHtml(styleParts.join(';'))}"` : '';
+	const langLabel = meta.lang ? `<span class="md-code-lang">${escapeHtml(meta.lang)}</span>` : '<span class="md-code-lang"></span>';
 	const copyBtn = ctx.copy ? '<button type="button" class="md-copy" data-md-copy aria-label="Copy code">Copy</button>' : '';
 	return (
-		`<div class="md-code"${b.lang ? ` data-lang="${escapeHtml(b.lang)}"` : ''}>` +
+		`<div class="md-code"${meta.lang ? ` data-lang="${escapeHtml(meta.lang)}"` : ''}${styleAttr}>` +
 		`<div class="md-code-bar">${langLabel}${copyBtn}</div>` +
 		`<pre><code${codeCls ? ` class="${codeCls}"` : ''}${lineAttr}>${body}</code></pre>` +
 		`</div>`
@@ -1273,22 +1353,36 @@ export const MD_BASE_CSS = `
 .vesk-md .md-table th,.vesk-md .md-table td { border: 1px solid #d0d7de; padding: 6px 13px; }
 .vesk-md .md-table th { background: #f6f8fa; font-weight: 650; }
 .vesk-md .md-table tr:nth-child(2n) td { background: #f6f8fa80; }
-.vesk-md .md-code { margin: 1em 0; border-radius: 8px; overflow: hidden; background: #161b22; border: 1px solid #30363d; }
-.vesk-md .md-code-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: #21262d; border-bottom: 1px solid #30363d; }
-.vesk-md .md-code-lang { font-family: ui-monospace,monospace; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #8b949e; }
-.vesk-md .md-copy { all: unset; cursor: pointer; font: 11px ui-monospace,monospace; color: #8b949e; padding: 2px 8px; border-radius: 6px; }
-.vesk-md .md-copy:hover { color: #c9d1d9; background: #30363d; }
-.vesk-md .md-copy.md-copied { color: #3fb950; }
+.vesk-md .md-code { --md-code-bg: #f6f8fa; margin: 1em 0; border-radius: 8px; overflow: hidden; background: var(--md-code-bg); border: 1px solid #d1d9e0; }
+.vesk-md .md-code-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--md-code-bg); border-bottom: 1px solid #d1d9e0; }
+.vesk-md .md-code-lang { font-family: ui-monospace,monospace; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #59636e; }
+.vesk-md .md-copy { all: unset; cursor: pointer; font: 11px ui-monospace,monospace; color: #59636e; padding: 2px 8px; border-radius: 6px; }
+.vesk-md .md-copy:hover { color: #1f2328; background: #eaeef2; }
+.vesk-md .md-copy.md-copied { color: #1a7f37; }
 .vesk-md .md-code pre { margin: 0; overflow-x: auto; padding: 14px 16px; }
-.vesk-md .md-code code { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 13.5px; line-height: 1.55; color: #c9d1d9; background: none; padding: 0; }
+.vesk-md .md-code code { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 13.5px; line-height: 1.55; color: var(--md-code-fg,#1f2328); background: none; padding: 0; }
 .vesk-md code[md-lines] { counter-reset: ln; display: block; }
 .vesk-md code[md-lines] .tok-line { display: block; counter-increment: ln; padding-left: 3.2em; position: relative; }
-.vesk-md code[md-lines] .tok-line::before { content: counter(ln); position: absolute; left: 0; width: 2.4em; text-align: right; color: #484f58; user-select: none; }
-.tok-kw { color: #ff7b72; } .tok-lit { color: #79c0ff; } .tok-str { color: #a5d6ff; }
-.tok-num { color: #f2cc60; } .tok-com { color: #8b949e; font-style: italic; }
-.tok-fn { color: #d2a8ff; } .tok-attr { color: #79c0ff; } .tok-prop { color: #79c0ff; }
-.tok-sel { color: #7ee787; } .tok-add { color: #aff5b4; background: rgba(46,160,67,.15); display: inline-block; width: 100%; }
-.tok-del { color: #ffdcd7; background: rgba(248,81,73,.15); display: inline-block; width: 100%; }
+.vesk-md code[md-lines] .tok-line::before { content: counter(ln); position: absolute; left: 0; width: 2.4em; text-align: right; color: #8c959f; user-select: none; }
+.tok-kw { color: #cf222e; } .tok-lit { color: #0550ae; } .tok-str { color: #0a3069; }
+.tok-num { color: #0550ae; } .tok-com { color: #59636e; font-style: italic; }
+.tok-fn { color: #8250df; } .tok-attr { color: #0550ae; } .tok-prop { color: #0550ae; }
+.tok-sel { color: #116329; } .tok-add { color: #116329; background: #dafbe1; display: inline-block; width: 100%; }
+.tok-del { color: #cf222e; background: #ffebe9; display: inline-block; width: 100%; }
+.vesk-md-dark { --md-code-bg: #0d1117; --md-code-fg: #c9d1d9; }
+.vesk-md-dark .md-code-bar { border-bottom-color: #30363d; }
+.vesk-md-dark .md-code-lang { color: #8b949e; }
+.vesk-md-dark .md-copy { color: #8b949e; }
+.vesk-md-dark .md-copy:hover { color: #c9d1d9; background: #30363d; }
+.vesk-md-dark .md-copy.md-copied { color: #3fb950; }
+.vesk-md-dark code[md-lines] .tok-line::before { color: #484f58; }
+.vesk-md-dark .tok-kw { color: #ff7b72; } .vesk-md-dark .tok-lit { color: #79c0ff; }
+.vesk-md-dark .tok-str { color: #a5d6ff; } .vesk-md-dark .tok-num { color: #f2cc60; }
+.vesk-md-dark .tok-com { color: #8b949e; font-style: italic; }
+.vesk-md-dark .tok-fn { color: #d2a8ff; } .vesk-md-dark .tok-attr { color: #79c0ff; }
+.vesk-md-dark .tok-prop { color: #79c0ff; } .vesk-md-dark .tok-sel { color: #7ee787; }
+.vesk-md-dark .tok-add { color: #aff5b4; background: rgba(46,160,67,.15); }
+.vesk-md-dark .tok-del { color: #ffdcd7; background: rgba(248,81,73,.15); }
 `;
 
 // ── Public entry points ──────────────────────────────────────
@@ -1309,6 +1403,12 @@ export function renderMarkdown(md: string, options: MarkdownOptions = {}): strin
 export interface MdProps {
 	/** Markdown source — a plain string or a tracked cell (reactive on client). */
 	content?: string | { get: () => string };
+	/** Default background for all code blocks (CSS color or 'none'). Fence-level bg= wins. */
+	codeBg?: string;
+	/** Default code text color. Fence-level fg= wins. */
+	codeFg?: string;
+	/** Code theme preset: 'light' (default) or 'dark'. Per-fence bg=/fg= still win. */
+	theme?: 'light' | 'dark';
 	class?: string;
 	className?: string;
 	style?: string;
@@ -1395,8 +1495,18 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 	const content = String(unwrapMaybeCell(rawContent) ?? '');
 	const html = buildHtml(content, props);
 	const classNameRaw = props.className != null ? String(props.className) : props.class != null ? String(props.class) : '';
-	const className = classNameRaw ? `vesk-md ${classNameRaw}` : 'vesk-md';
+	const themeClass = props.theme === 'dark' ? ' vesk-md-dark' : '';
+	const className = `vesk-md${themeClass}${classNameRaw ? ' ' + classNameRaw : ''}`;
 	const style = props.style != null ? String(props.style) : '';
+
+	// Component-level code defaults; fence-level bg=/fg= emit the same
+	// custom properties on the block, overriding these by inheritance.
+	const wrapperParts: string[] = [];
+	const propBg = safeColorValue(String(props.codeBg ?? ''));
+	if (propBg) wrapperParts.push(`--md-code-bg:${propBg === 'none' ? 'transparent' : propBg}`);
+	const propFg = safeColorValue(String(props.codeFg ?? ''));
+	if (propFg && propFg !== 'none') wrapperParts.push(`--md-code-fg:${propFg}`);
+	const wrapperStyle = wrapperParts.length > 0 ? escapeHtml(wrapperParts.join(';')) : '';
 
 	// A tracked `content` cell re-renders the markdown reactively on the
 	// client (per-keystroke live editing works without any extra wiring).
@@ -1404,7 +1514,7 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 
 	if (mdIsSSR()) {
 		const attrs = className ? ` class="${escapeHtml(className)}"` : '';
-		const styleAttr = style ? ` style="${style.split('"').join('&quot;')}"` : '';
+		const styleAttr = style || wrapperStyle ? ` style="${[wrapperStyle, style.split('"').join('&quot;')].filter(Boolean).join(';')}"` : '';
 		return `<div${attrs}${styleAttr}>${html}</div>`;
 	}
 
@@ -1415,8 +1525,8 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 			if (existing) el = existing as HTMLElement;
 		}
 		el.innerHTML = html;
-		if (className) el.className = className;
-		if (style) el.style.cssText = style;
+		el.className = className;
+		el.style.cssText = [wrapperStyle, style].filter(Boolean).join(';');
 		wireCopyHandlers(el);
 		if (reactive) subscribeContent(el, rawContent, props);
 		// When the element came from SSR it is already in the document —
@@ -1429,8 +1539,8 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 
 	const div = document.createElement('div');
 	div.innerHTML = html;
-	if (className) div.className = className;
-	if (style) div.style.cssText = style;
+	div.className = className;
+	div.style.cssText = [wrapperStyle, style].filter(Boolean).join(';');
 	wireCopyHandlers(div);
 	if (reactive) subscribeContent(div, rawContent, props);
 	return div;

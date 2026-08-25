@@ -70,6 +70,23 @@ npm run dev -- --port 3000
 @@ md.ts @@
 \`\`\`
 
+## Theming
+
+Per-block background/text color right in the fence info string
+(hex, names, rgb() all work; \`bg=none\` goes flat):
+
+\`\`\`js bg=none
+// no background — blends into the page
+flat();
+\`\`\`
+
+\`\`\`ts bg=#0b1220 fg=#7dd3fc
+const dark = "mode";
+\`\`\`
+
+Component-wide defaults: use props on the component \u2014 set codeBg/codeFg
+(or theme=\"dark\") and every block inherits them. Fence params always win.
+
 ## Tables
  
 | Feature | Status | Since |
