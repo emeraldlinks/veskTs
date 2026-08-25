@@ -1,4 +1,5 @@
 import type { HydrateWalker } from '@vesk/runtime/src/hydrate';
+import { effect } from '@vesk/runtime/src/ripple-blocks';
 
 // =============================================================
 // Markdown rendering for <Md content={...} />.
@@ -11,7 +12,27 @@ import type { HydrateWalker } from '@vesk/runtime/src/hydrate';
 // <Md> opts into the advanced pipeline (syntax highlighting, code
 // chrome, heading anchors, autolinks, hard breaks) and can be tuned
 // via props (css / lineNumbers / copy / highlight / ids / autolink).
+//
+// `content` accepts a plain string or a tracked cell — cells are
+// unwrapped for rendering and, on the client, subscribed so the
+// rendered markdown updates reactively.
 // =============================================================
+
+/** Unwraps tracked cells passed as props (compiler emits the cell itself). */
+function unwrapMaybeCell(v: unknown): unknown {
+	if (v !== null && typeof v === 'object' && typeof (v as { get?: unknown }).get === 'function') {
+		try {
+			return (v as { get: () => unknown }).get();
+		} catch {
+			return v;
+		}
+	}
+	return v;
+}
+
+function isCell(v: unknown): boolean {
+	return v !== null && typeof v === 'object' && typeof (v as { get?: unknown }).get === 'function';
+}
 
 export function escapeHtml(s: string): string {
 	let out = '';
@@ -1282,7 +1303,8 @@ export function renderMarkdown(md: string, options: MarkdownOptions = {}): strin
 }
 
 export interface MdProps {
-	content?: string;
+	/** Markdown source — a plain string or a tracked cell (reactive on client). */
+	content?: string | { get: () => string };
 	class?: string;
 	className?: string;
 	style?: string;
@@ -1365,11 +1387,16 @@ function buildHtml(content: string, props: MdProps): string {
  * the css / lineNumbers / copy / highlight / ids / autolink / hardBreaks props.
  */
 export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string {
-	const content = props.content == null ? '' : String(props.content);
+	const rawContent = props.content;
+	const content = String(unwrapMaybeCell(rawContent) ?? '');
 	const html = buildHtml(content, props);
 	const classNameRaw = props.className != null ? String(props.className) : props.class != null ? String(props.class) : '';
 	const className = classNameRaw ? `vesk-md ${classNameRaw}` : 'vesk-md';
 	const style = props.style != null ? String(props.style) : '';
+
+	// A tracked `content` cell re-renders the markdown reactively on the
+	// client (per-keystroke live editing works without any extra wiring).
+	const reactive = isCell(rawContent);
 
 	if (mdIsSSR()) {
 		const attrs = className ? ` class="${escapeHtml(className)}"` : '';
@@ -1387,6 +1414,7 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 		if (className) el.className = className;
 		if (style) el.style.cssText = style;
 		wireCopyHandlers(el);
+		if (reactive) subscribeContent(el, rawContent, props);
 		// When the element came from SSR it is already in the document —
 		// return an empty fragment. When the walker handed us a FRESH
 		// element (dynamic branch that had no SSR markup), hand the element
@@ -1400,5 +1428,14 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 	if (className) div.className = className;
 	if (style) div.style.cssText = style;
 	wireCopyHandlers(div);
+	if (reactive) subscribeContent(div, rawContent, props);
 	return div;
+}
+
+function subscribeContent(el: HTMLElement, rawContent: unknown, props: MdProps): void {
+	effect(() => {
+		const value = String(unwrapMaybeCell(rawContent) ?? '');
+		el.innerHTML = buildHtml(value, props);
+		wireCopyHandlers(el);
+	});
 }

@@ -418,5 +418,19 @@ describe('Base CSS', () => {
   });
 });
 
+describe('Tracked-cell content', () => {
+  it('unwraps a cell for rendering (SSR)', () => {
+    const cell = { get: () => '# from cell' };
+    const html = Md({ content: cell as never }) as string;
+    expect(html).toContain('<h1 id="from-cell">from cell</h1>');
+    expect(html).notToContain('[object Object]');
+  });
+
+  it('renderMarkdown still rejects non-strings gracefully', () => {
+    const html = renderMarkdown(null as never);
+    expect(html).toBe('');
+  });
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

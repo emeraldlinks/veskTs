@@ -96,7 +96,7 @@
 - [x] **JSX in dynamic expressions prints via esrap tsx** — component calls inside tracked dynamic expressions (`<Md/>` in a region branch) hit esrap's TS printer which cannot print JSXElement; transformTracked now selects `esrap/languages/tsx` when the AST contains JSX. Regression test in client-codegen.test.ts.
 - [x] **Md hydration of hidden branches** — `<Md>` hydrate path returned an empty fragment when the walker handed it a FRESH element (dynamic branch with no SSR markup), so client-side branch swaps rendered nothing; now returns the built element for placement.
 - [ ] **Runtime: nested else-if swap on hydrated client** — flipping through chained regions whose alternate branches had no SSR markup mounts additively instead of replacing (visible as duplicated/appended content). Parallel guarded `if` regions work; needs OpaqueDynamicRegion hydrate-swap rework.
-- [ ] **Reactive per-keystroke <Md> re-render** — dynamic `content` prop updates don't re-invoke the Md component on the client yet (needs reactiveProps pass over component props); md demo shows a reactive raw preview meanwhile.
+- [x] **Reactive <Md> content cells** — the compiler passes tracked reads as cells for exact-match props; Md now unwraps them and, on the client, subscribes via effect() so `content={live}` re-renders markdown per keystroke (verified in browser: headings/task lists/highlighted code update live). Raw-preview fallback removed from the demo.
 - [ ] **Headless component primitives** — Show, For, Switch/Match as components
 
 ### Considering (need research)

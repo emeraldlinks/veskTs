@@ -71,7 +71,7 @@ npm run dev -- --port 3000
 \`\`\`
 
 ## Tables
-
+ 
 | Feature | Status | Since |
 |:--------|:------:|------:|
 | tables | shipped | v0.2 |
@@ -167,9 +167,10 @@ component MdPage {
 		<p class="text-gray-500 text-sm mb-2">Raw preview (reactive):</p>
 		
 		<pre class="bg-gray-100 rounded p-3 text-xs whitespace-pre-wrap"> {live} </pre>
-		<Md content={live} />
 		<p class="text-gray-400 text-xs mt-2">
 			Full per-keystroke markdown re-render lands with the reactive-props pass.
 		</p>
+		<Md content={live} />
+
 	</div>
 }
