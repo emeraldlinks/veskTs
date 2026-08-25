@@ -513,6 +513,7 @@ const KW_JS = new Set([
 	'interface','is','keyof','let','namespace','new','of','private','protected','public',
 	'readonly','return','satisfies','set','static','super','switch','this','throw','try',
 	'type','typeof','var','void','while','with','yield',
+	'string','number','boolean','any','unknown','never','object','symbol','bigint',
 ]);
 const KW_VSK = new Set([...KW_JS, 'component']);
 const LIT_JS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
@@ -621,6 +622,7 @@ export function highlightCode(code: string, lang: string): string {
 	let out = '';
 	let i = 0;
 	const n = code.length;
+	let prevKw: string | null = null;
 
 	const emit = (cls: string, text: string): void => {
 		out += `<span class="tok-${cls}">${escapeHtml(text)}</span>`;
@@ -700,13 +702,33 @@ export function highlightCode(code: string, lang: string): string {
 			while (j < n && isIdentPart(code[j])) j++;
 			const word = code.slice(i, j);
 			let k = j;
-			while (k < n && code[k] === ' ') k++;
-			if (p.keywords.has(word)) emit('kw', word);
-			else if (p.literals && p.literals.has(word)) emit('lit', word);
-			else if (code[k] === '(') emit('fn', word);
-			else emit('txt', word);
+			while (k < n && (code[k] === ' ' || code[k] === '\t')) k++;
+			const isProp = code[k] === ':' || (code[k] === '?' && code[k + 1] === ':');
+			const isTypeName = prevKw === 'type' || prevKw === 'interface';
+			if (p.keywords.has(word)) {
+				emit('kw', word);
+				prevKw = (word === 'type' || word === 'interface') ? word : null;
+			} else if (p.literals && p.literals.has(word)) {
+				emit('lit', word);
+				prevKw = null;
+			} else if (code[k] === '(') {
+				emit('fn', word);
+				prevKw = null;
+			} else if (isTypeName) {
+				emit('fn', word);
+				prevKw = null;
+			} else if (isProp) {
+				emit('prop', word);
+				prevKw = null;
+			} else {
+				emit('txt', word);
+				prevKw = null;
+			}
 			i = j;
 			continue;
+		} else {
+			// reset prevKw on non-identifier that isn't whitespace
+			if (ch !== ' ' && ch !== '\t' && ch !== '\n') prevKw = null;
 		}
 
 		if (ch === '\n') { out += '\n'; i++; continue; }

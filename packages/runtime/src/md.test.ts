@@ -251,7 +251,7 @@ describe('Syntax highlighting', () => {
     const html = highlightCode("const x: number = 'hi';", 'ts');
     expect(html).toContain('<span class="tok-kw">const</span>');
     expect(html).toContain('<span class="tok-str">\'hi\'</span>');
-    expect(html).notToContain('<span class="tok-kw">number</span>');
+    expect(html).toContain('<span class="tok-kw">number</span>');
   });
 
   it('escapes HTML inside highlighted code', () => {

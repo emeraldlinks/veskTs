@@ -69,8 +69,9 @@ declare namespace JSX {
     onchange?: VeskEventHandler<Event>;
     onsubmit?: VeskEventHandler<SubmitEvent>;
   }
+  type Component = string | number | boolean | null | undefined | Component[];
   interface VeskGlobalAttributes extends VeskCommonAttributes, VeskEventAttributes {
-    children?: unknown;
+    children?: Component;
   }
   interface VeskAnchorAttributes extends VeskGlobalAttributes {
     href?: string;
@@ -374,8 +375,10 @@ declare namespace JSX {
     // resolve through the index signature, known tags get the typed members.
     [elemName: string]: unknown;
   }
+  type Component = string | number | boolean | null | undefined | Component[];
 }
-declare const Head: (props: { children?: unknown }) => unknown;
+declare type Component = string | number | boolean | null | undefined | Component[];
+declare const Head: (props: { children?: Component }) => Component;
 declare class Cell<T> {
   get(): T;
   set(value: T): void;
@@ -435,28 +438,28 @@ declare function usePathname(): string;
 declare function useSearchParams(): URLSearchParams;
 declare function useNavigate(): (to: string) => void;
 declare function defineAction(...args: unknown[]): unknown;
-declare const Form: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Field: (props: { [k: string]: unknown; children?: unknown }) => unknown;
+declare const Form: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Field: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare function required(...args: unknown[]): unknown;
 declare function email(...args: unknown[]): unknown;
 declare function minLength(...args: unknown[]): unknown;
 declare function maxLength(...args: unknown[]): unknown;
 declare function pattern(...args: unknown[]): unknown;
 declare function custom(...args: unknown[]): unknown;
-declare const Link: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const NavLink: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Outlet: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Image: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Portal: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Experiment: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const JsonLd: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const ArticleSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const ProductSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const FAQPageSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const BreadcrumbListSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const OrganizationSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const LocalBusinessSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const VideoSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
+declare const Link: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const NavLink: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Outlet: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Image: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Portal: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Experiment: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const JsonLd: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const ArticleSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const ProductSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const FAQPageSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const BreadcrumbListSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const OrganizationSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const LocalBusinessSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const VideoSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare function redirect(...args: unknown[]): unknown;
 declare function permanentRedirect(...args: unknown[]): unknown;
 declare function notFound(...args: unknown[]): never;

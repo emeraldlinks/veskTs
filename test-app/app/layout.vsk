@@ -9,6 +9,9 @@ interface LayoutProps {
 	children: unknown
 }
 
+type kk = {
+	
+}
 const navItems: NavItem[] = [
 	{ label: 'Home', href: '/' },
 	{ label: 'About', href: '/about' },

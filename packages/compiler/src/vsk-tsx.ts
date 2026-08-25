@@ -1104,7 +1104,7 @@ export function compileVskCodegen(source: string, opts: VskCodegenOptions = {}):
 
   let code = g.code;
   if (isModuleAst(ast) && containsIdentifier(code, 'Head') && !isIdentifierImported(code, 'Head')) {
-    g.prepend('declare const Head: (props: { children?: unknown }) => unknown;\n');
+    g.prepend('declare const Head: (props: { children?: Component }) => Component;\n');
     code = g.code;
   }
 
@@ -1160,7 +1160,7 @@ export function generateVskDts(source: string): string {
     const hasType = propsType !== null && propsType !== undefined;
     const collision = typeDeclNames.has(typeName);
     const signature = hasType
-      ? (collision ? propsType : typeName) + ' & { children?: unknown }'
+      ? (collision ? propsType : typeName) + ' & { children?: Component }'
       : 'any';
     if (hasType && !collision) {
       lines.push(`export type ${typeName} = ${propsType};`, '');
@@ -1168,9 +1168,9 @@ export function generateVskDts(source: string): string {
       lines.push(`export type ${typeName} = any;`, '');
     }
     if (defaultExport) {
-      lines.push(`export default function ${name}(props: ${signature}): unknown;`, '');
+      lines.push(`export default function ${name}(props: ${signature}): Component;`, '');
     } else {
-      lines.push(`export declare function ${name}(props: ${signature}): unknown;`, '');
+      lines.push(`export declare function ${name}(props: ${signature}): Component;`, '');
     }
   }
 
