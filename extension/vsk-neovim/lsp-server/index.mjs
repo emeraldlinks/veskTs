@@ -295903,7 +295903,17 @@ function emitJSXElement(g, source, el, opts) {
         emitJSXAttr(g, source, attr);
         prev = attr.end;
     }
-    g.add(source.slice(prev, op.end), prev, op.end);
+    const tail = source.slice(prev, op.end);
+    if (op.selfClosing && !tail.includes('/')) {
+        const gt = tail.lastIndexOf('>');
+        const head = gt === -1 ? tail : tail.slice(0, gt);
+        if (head)
+            g.add(head, prev, prev + head.length);
+        g.addRaw('/>');
+    }
+    else {
+        g.add(tail, prev, op.end);
+    }
     if (op.selfClosing)
         return;
     emitJSXChildren(g, source, el.children ?? []);
@@ -296808,6 +296818,7 @@ declare namespace JSX {
       as?: string;
       crossOrigin?: string;
       integrity?: string;
+      type?: string;
     };
     style?: VeskGlobalAttributes & { media?: string };
     script?: VeskGlobalAttributes & {

@@ -299,6 +299,7 @@ declare namespace JSX {
       as?: string;
       crossOrigin?: string;
       integrity?: string;
+      type?: string;
     };
     style?: VeskGlobalAttributes & { media?: string };
     script?: VeskGlobalAttributes & {
