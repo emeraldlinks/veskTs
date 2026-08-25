@@ -286,7 +286,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     for (const watchDir of watchDirs) {
       watch(watchDir, { recursive: true }, (eventType, filename) => {
         if (!filename) return;
-        const isVsk = filename.endsWith('.vsk');
+        const isVsk = filename.endsWith('.vsk') || filename.endsWith('.md') || filename.endsWith('.markdown');
         const isCss = filename.endsWith('.css');
         const isApiRoute = filename.endsWith('.ts') || filename.endsWith('.js') || filename.endsWith('.tsx');
         if (!isVsk && !isCss && !isApiRoute) return;
@@ -352,7 +352,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                   } else if (fileExists && !bundleError) {
                     try {
                       const src = readFileSync(fullPath, 'utf-8');
-                      let compCode = compileClient(src, null, { forceClient: true });
+                      let compCode = compileClient(src, null, { forceClient: true, sourcePath: fullPath, mdRoots: [projectDir] });
                       compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
                       compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
                       compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');

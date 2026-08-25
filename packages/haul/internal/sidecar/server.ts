@@ -1443,7 +1443,7 @@ async function devRebuild(params: any): Promise<any> {
         } else if (fileExists && !bundleError) {
           try {
             const src = readFileSync(fullPath, 'utf-8');
-            let compCode = devMods.compileClient(src, null, { forceClient: true });
+            let compCode = devMods.compileClient(src, null, { forceClient: true, sourcePath: fullPath, mdRoots: [state.projectDir] });
             compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
             compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
             compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');

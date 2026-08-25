@@ -28,6 +28,7 @@ import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
 import { stripTrackGeneric } from '@vesk/compiler/src/scan';
+import { inlineMdImportsFrom } from '@vesk/compiler/src/md-inline';
 import { stripTsTypes, hasTsSyntax } from '@vesk/compiler/src/strip-ts';
 
 function memberExpr(object: string, property: string): Record<string, unknown> {
@@ -1488,7 +1489,10 @@ ${exportCode}
   return moduleCode.trim();
 }
 
-export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean } = {}): string {
+export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean; sourcePath?: string; mdRoots?: string[] } = {}): string {
+  if (options.sourcePath) {
+    source = inlineMdImportsFrom(source, options.sourcePath, options.mdRoots || []);
+  }
   const ast = parse(source);
   const ir = generateIR(ast, source);
   return emitClientFromIR(ir, options);

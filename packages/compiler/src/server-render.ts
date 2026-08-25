@@ -16,6 +16,7 @@ import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { collectVskImportPaths } from '@vesk/compiler/src/vsk-imports';
+import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 
 
@@ -24,6 +25,10 @@ export function compileFile(source: string, options?: { sourcePath?: string }): 
 }
 
 function compileFileInternal(source: string, sourcePath: string | undefined, seenImportFiles: Set<string>): CompileFileResult {
+  if (sourcePath) {
+    const dir = dirname(sourcePath);
+    source = inlineMdImportsFrom(source, sourcePath, guessProjectRoots(dir));
+  }
   const ast = parse(source);
   const ir = generateIR(ast, source);
   const componentMap = buildComponentMap(ir, true);

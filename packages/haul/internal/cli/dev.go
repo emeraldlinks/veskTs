@@ -440,6 +440,8 @@ func RunDev(ctx context.Context, args []string) error {
 		base := filepath.Base(name)
 		switch {
 		case strings.HasSuffix(name, ".vsk"),
+			strings.HasSuffix(name, ".md"),
+			strings.HasSuffix(name, ".markdown"),
 			strings.HasSuffix(name, ".css"),
 			strings.HasSuffix(name, ".ts"),
 			strings.HasSuffix(name, ".js"),

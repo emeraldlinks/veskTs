@@ -5,6 +5,7 @@ import { build, transformSync } from './esbuild-fallback.js';
 import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
+import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -119,8 +120,19 @@ export async function generateClientBundle(
     // Cache-hit fast path: replay the entry's recorded contribution with no
     // file reads or parses. Deps recurse through the same path so each hit
     // costs one stat call (zero with `only`).
-    const cached = cache?.files.get(filePath);
-    if (cached && (mustReuseWithoutStat(filePath) || fileUnchanged(filePath, cached))) {
+    const cachedEntry = cache?.files.get(filePath);
+    // If one of this file's .md dependencies was the edited target, its
+    // inlined content is stale by definition — force a recompile.
+    let dependsOnEdited = false;
+    if (cachedEntry && only && !only.has(filePath)) {
+      for (const p of only) {
+        if (cachedEntry.imports.includes(p)) { dependsOnEdited = true; break; }
+      }
+    }
+    const cacheUsable = !!cachedEntry && !dependsOnEdited &&
+      (mustReuseWithoutStat(filePath) || fileUnchanged(filePath, cachedEntry));
+    const cached = cacheUsable ? cachedEntry : undefined;
+    if (cached && cacheUsable) {
       cachedFileHits++;
       for (const dep of cached.imports) compileFile(dep, cache?.files.get(dep)?.actualName ?? '', output);
       if (cached.compCode) output.push(cached.compCode);
@@ -134,7 +146,10 @@ export async function generateClientBundle(
     }
 
     compiledFiles++;
-    const src = readFileSync(filePath, 'utf-8');
+    let src = readFileSync(filePath, 'utf-8');
+    if (/content=["'][^"']*\.md["']/i.test(src)) {
+      src = inlineMdContentAttrs(src, dirname(filePath), guessProjectRoots(appDir));
+    }
     const namesBefore = cache ? new Set(runtimeImportNames) : null;
 
     const importedPaths = resolveVskImports(filePath, (p, n) => compileFile(p, n || '', output));

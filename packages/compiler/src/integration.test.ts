@@ -8,6 +8,10 @@ import { render, renderPage, renderFullPage, ssg, compileFile, setVskHydrate } f
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve, dirname, sep } from 'node:path';
+
 
 let passed = 0;
 let failed = 0;
@@ -1324,6 +1328,49 @@ it('[island] {#client} block in non-island component throws', () => {
 // Md — markdown component (must be explicitly imported, never auto-imported)
 // =============================================================
 console.log('\n=== Md — Markdown Component ===');
+
+
+it('[md][file] content="../content/x.md" inlines the file (SSR + client)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vesk-md-'));
+  mkdirSync(join(dir, 'app'), { recursive: true });
+  mkdirSync(join(dir, 'content'), { recursive: true });
+  writeFileSync(join(dir, 'content', 'x.md'), '# From file\n\nbody **text**');
+  const pagePath = join(dir, 'app', 'page.vsk');
+  try {
+    const source = `import { Md } from '@vesk/runtime';
+component App {
+  <Md content="../content/x.md" />
+}`;
+    writeFileSync(pagePath, source);
+    const html = render(source, 'App', {}, new Map(), { sourcePath: pagePath }) as string;
+    assert(html.includes('From file'), `md file content missing: ${html.slice(0, 300)}`);
+    assert(html.includes('<strong>text</strong>'), `inline markdown not rendered: ${html.slice(0, 300)}`);
+
+    const code = compileClient(source, 'App', { forceClient: true, sourcePath: pagePath });
+    assert(code.includes('# From file'), `client chunk did not inline md`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+it('[md][file] public-root absolute path resolves via project walk-up', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vesk-md-pub-'));
+  mkdirSync(join(dir, 'app'), { recursive: true });
+  mkdirSync(join(dir, 'public'), { recursive: true });
+  writeFileSync(join(dir, 'public', 'about.md'), '## Public doc');
+  const pagePath = join(dir, 'app', 'page.vsk');
+  try {
+    const source = `import { Md } from '@vesk/runtime';
+component App {
+  <Md content="/about.md" />
+}`;
+    writeFileSync(pagePath, source);
+    const html = render(source, 'App', {}, new Map(), { sourcePath: pagePath }) as string;
+    assert(html.includes('Public doc'), `public md missing: ${html.slice(0, 300)}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 it('[md][expr] renders markdown to HTML on the server', () => {
   const source = `import { Md } from '@vesk/runtime';
