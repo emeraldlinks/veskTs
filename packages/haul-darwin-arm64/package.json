@@ -1,6 +1,6 @@
 {
   "name": "@vesk/haul-darwin-arm64",
-  "version": "0.1.14",
+  "version": "0.2.2",
   "description": "Vesk native engine (haul) for darwin-arm64",
   "os": [
     "darwin"

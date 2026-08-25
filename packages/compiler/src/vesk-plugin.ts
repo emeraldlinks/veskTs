@@ -25,11 +25,13 @@ declare module 'acorn' {
     exitScope(): void;
     semicolon(): void;
     raise(pos: number, message: string): void;
+    unexpected(pos?: number): void;
     next(): void;
     eat(token: any): boolean;
     jsx_parseElementAt(startPos: number, startLoc?: any): any;
     jsx_parseElement(): any;
     jsx_parseExpressionContainer(): any;
+    jsx_parseOpeningElementAt(startPos: number, startLoc?: any): any;
     jsx_parseClosingElementAt(pos: number, loc: any): any;
     jsx_parseElementName(): any;
     parseIdent(allowBinding?: boolean): any;
@@ -51,6 +53,30 @@ declare module 'acorn' {
 
 export interface VeskPluginConfig {
   [key: string]: unknown;
+}
+
+const VOID_ELEMENTS = new Set([
+  'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+  'link', 'meta', 'param', 'source', 'track', 'wbr',
+]);
+
+function getJSXElementName(node: any): string | null {
+  if (!node) return null;
+  if (node.type === 'JSXIdentifier') return node.name;
+  if (node.type === 'JSXNamespacedName' && node.namespace && node.name) {
+    return `${node.namespace.name}:${node.name.name}`;
+  }
+  if (node.type === 'JSXMemberExpression') {
+    const parts: string[] = [];
+    let cur: any = node;
+    while (cur && cur.type === 'JSXMemberExpression') {
+      if (cur.property && cur.property.name) parts.unshift(cur.property.name);
+      cur = cur.object;
+    }
+    if (cur && cur.type === 'JSXIdentifier' && cur.name) parts.unshift(cur.name);
+    return parts.join('.') || null;
+  }
+  return null;
 }
 
 function isWsChar(code: number): boolean {
@@ -453,6 +479,37 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           return this.parseStyleElement(startPos, startLoc);
         }
         return super.jsx_parseElementAt(startPos, startLoc);
+      }
+
+      jsx_parseOpeningElementAt(startPos: number, startLoc?: any): any {
+        // Manual implementation that treats HTML void elements as
+        // self-closing even without `/>`. Delegating to super would leave
+        // a stale tc_expr context (the `>` updateContext only pops the
+        // extra level when a `/` was present), so the following `}` is
+        // mis-read as JSX text: "Unexpected token `}`".
+        const node = this.startNodeAt(startPos, startLoc);
+        node.attributes = [];
+        const nodeName = (this as any).jsx_parseElementName();
+        if (nodeName) node.name = nodeName;
+        const nameStr = getJSXElementName(nodeName);
+        const isVoid = !!(nameStr && VOID_ELEMENTS.has(nameStr));
+        while (this.type !== tt.slash && this.type !== tstt.jsxTagEnd) {
+          node.attributes.push((this as any).jsx_parseAttribute());
+        }
+        const hasSlash = this.eat(tt.slash);
+        node.selfClosing = hasSlash || isVoid;
+        if (this.type !== tstt.jsxTagEnd) this.unexpected();
+        if (isVoid && !hasSlash) {
+          const stack: any[] = (this as any).context;
+          if (stack.length > 0 && stack[stack.length - 1].token === '<tag>...</tag>') {
+            stack.pop();
+            (this as any).exprAllowed = true;
+          }
+        }
+        // Consume `>`. For void `>` we already popped tc_expr above so the
+        // following `}` is read as a normal JS token, not JSX text.
+        this.next();
+        return this.finishNode(node, nodeName ? 'JSXOpeningElement' : 'JSXOpeningFragment');
       }
 
       parseStyleElement(startPos: number, startLoc?: any): any {

@@ -13,7 +13,7 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
-// packages/adapter/dist/esbuild-fallback.js
+// ../adapter/dist/esbuild-fallback.js
 async function loadNative() {
   if (_nativeBuild && _nativeTransform)
     return;
@@ -71,7 +71,7 @@ function transformSync(code, options) {
 }
 var _nativeBuild, _nativeTransform, _wasm, _wasmReady;
 var init_esbuild_fallback = __esm({
-  "packages/adapter/dist/esbuild-fallback.js"() {
+  "../adapter/dist/esbuild-fallback.js"() {
     "use strict";
     _nativeBuild = null;
     _nativeTransform = null;
@@ -80,7 +80,7 @@ var init_esbuild_fallback = __esm({
   }
 });
 
-// packages/adapter/dist/client-bundle.js
+// ../adapter/dist/client-bundle.js
 var client_bundle_exports = {};
 __export(client_bundle_exports, {
   buildRuntimeCode: () => buildRuntimeCode,
@@ -88,12 +88,21 @@ __export(client_bundle_exports, {
   generateClientBundle: () => generateClientBundle,
   runtimeExportNames: () => runtimeExportNames
 });
-import { readFileSync as readFileSync2, existsSync as existsSync2, writeFileSync, unlinkSync } from "node:fs";
+import { readFileSync as readFileSync2, existsSync as existsSync2, writeFileSync, unlinkSync, statSync } from "node:fs";
 import { resolve, join as join2, dirname as dirname2, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { compileClient } from "@vesk/compiler/src/client-codegen";
+import { compileClient, compileClientBoth } from "@vesk/compiler/src/client-codegen";
 import { resolveComponentName } from "@vesk/compiler/src/server-codegen";
 import { collectVskImportPaths, vskImportLines } from "@vesk/compiler/src/vsk-imports";
+import { inlineMdContentAttrs, guessProjectRoots } from "@vesk/compiler/src/md-inline";
+function fileUnchanged(filePath, cached) {
+  try {
+    const st = statSync(filePath);
+    return st.mtimeMs === cached.mtimeMs && st.size === cached.size;
+  } catch {
+    return false;
+  }
+}
 function buildRouterOpts(options) {
   const ttl = options?.routeDataCache;
   if (typeof ttl === "number" && ttl > 0) {
@@ -121,6 +130,17 @@ async function generateClientBundle(routeTree, appDir, componentMap, options) {
   const seen = /* @__PURE__ */ new Set();
   const chunks = [];
   const runtimeImportNames = /* @__PURE__ */ new Set();
+  const cache = options?.cache;
+  const only = options?.only && options.only.length > 0 ? new Set(options.only) : null;
+  const returnEdited = !!options?.returnEditedSources && !!only;
+  const editedSources = returnEdited ? /* @__PURE__ */ new Map() : void 0;
+  const editedNames = returnEdited ? /* @__PURE__ */ new Map() : void 0;
+  let cachedFileHits = 0;
+  let compiledFiles = 0;
+  let mainFromCache = false;
+  function mustReuseWithoutStat(filePath) {
+    return !!only && !only.has(filePath);
+  }
   function collectRuntimeImports(code) {
     const re = /^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm;
     for (const m of code.matchAll(re)) {
@@ -140,15 +160,17 @@ async function generateClientBundle(routeTree, appDir, componentMap, options) {
   }
   function resolveVskImports(filePath, compile) {
     const src = readFileSync2(filePath, "utf-8");
+    const resolved = [];
     for (const importPath of collectVskImportPaths(vskImportLines(src), filePath)) {
-      let importedName = null;
       try {
-        importedName = resolveComponentName(readFileSync2(importPath, "utf-8"));
+        readFileSync2(importPath);
       } catch {
         continue;
       }
-      compile(importPath, importedName);
+      resolved.push(importPath);
+      compile(importPath, null);
     }
+    return resolved;
   }
   function stripExports(code) {
     return code.replace(/^export\s+default\s+__components\[.*?\];?\s*\n?/gm, "").replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, "");
@@ -157,24 +179,72 @@ async function generateClientBundle(routeTree, appDir, componentMap, options) {
     if (seen.has(filePath))
       return;
     seen.add(filePath);
-    const src = readFileSync2(filePath, "utf-8");
-    resolveVskImports(filePath, (p, n) => compileFile(p, n || "", output));
-    const compCode = compileClient(src, null, { forceClient: true });
-    if (compCode) {
-      collectRuntimeImports(compCode);
-      const stripped = stripExports(stripVskImports(stripRuntimeImport(compCode)));
-      output.push(stripped.replace(/^\n+/, "").replace(/\n+$/, ""));
+    const cachedEntry = cache?.files.get(filePath);
+    let dependsOnEdited = false;
+    if (cachedEntry && only && !only.has(filePath)) {
+      for (const p of only) {
+        if (cachedEntry.imports.includes(p)) {
+          dependsOnEdited = true;
+          break;
+        }
+      }
     }
-    const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
-    if (hydCode) {
-      collectRuntimeImports(hydCode);
-      const stripped = stripExports(stripVskImports(stripRuntimeImport(hydCode))).replace(/__components/g, "__hydrators");
-      output.push(stripped.replace(/^\n+/, "").replace(/\n+$/, ""));
+    const cacheUsable = !!cachedEntry && !dependsOnEdited && (mustReuseWithoutStat(filePath) || fileUnchanged(filePath, cachedEntry));
+    const cached = cacheUsable ? cachedEntry : void 0;
+    if (cached && cacheUsable) {
+      cachedFileHits++;
+      for (const dep of cached.imports)
+        compileFile(dep, cache?.files.get(dep)?.actualName ?? "", output);
+      if (cached.compCode)
+        output.push(cached.compCode);
+      if (cached.hydCode)
+        output.push(cached.hydCode);
+      for (const n of cached.runtimeNames)
+        runtimeImportNames.add(n);
+      if (cached.actualName && resolvedName !== null && cached.actualName !== resolvedName) {
+        output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(cached.actualName)}], configurable: true });`);
+        output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(cached.actualName)}], configurable: true });`);
+      }
+      return;
     }
-    const actualName = resolveComponentName(src);
-    if (actualName && actualName !== resolvedName) {
+    compiledFiles++;
+    let src = readFileSync2(filePath, "utf-8");
+    if (/content=["'][^"']*\.md["']/i.test(src)) {
+      src = inlineMdContentAttrs(src, dirname2(filePath), guessProjectRoots(appDir));
+    }
+    const namesBefore = cache ? new Set(runtimeImportNames) : null;
+    const importedPaths = resolveVskImports(filePath, (p, n) => compileFile(p, n || "", output));
+    const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null);
+    const compCode = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))).replace(/^\n+/, "").replace(/\n+$/, "") : "";
+    const hydCode = rawHyd ? stripExports(stripVskImports(stripRuntimeImport(rawHyd))).replace(/__components/g, "__hydrators").replace(/^\n+/, "").replace(/\n+$/, "") : "";
+    if (rawComp)
+      collectRuntimeImports(rawComp);
+    if (rawHyd)
+      collectRuntimeImports(rawHyd);
+    if (returnEdited && only.has(filePath)) {
+      const bare = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))).replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, "") : "";
+      editedSources.set(filePath, bare);
+      editedNames.set(filePath, actualName);
+    }
+    if (compCode)
+      output.push(compCode);
+    if (hydCode)
+      output.push(hydCode);
+    if (actualName && resolvedName !== null && actualName !== resolvedName) {
       output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
       output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
+    }
+    if (cache && namesBefore) {
+      const st = statSync(filePath);
+      cache.files.set(filePath, {
+        mtimeMs: st.mtimeMs,
+        size: st.size,
+        compCode,
+        hydCode,
+        actualName,
+        runtimeNames: [...runtimeImportNames].filter((n) => !namesBefore.has(n)),
+        imports: importedPaths
+      });
     }
   }
   function buildChunkName(node) {
@@ -203,6 +273,14 @@ async function generateClientBundle(routeTree, appDir, componentMap, options) {
         const notFoundPath = resolve(appDir, node.sourceDir, "not-found.vsk");
         if (node.notFound && existsSync2(notFoundPath)) {
           compileFile(notFoundPath, node.notFound, chunkCode);
+        }
+        const offlinePath = resolve(appDir, node.sourceDir, "offline.vsk");
+        if (node.offline && existsSync2(offlinePath)) {
+          compileFile(offlinePath, node.offline, chunkCode);
+        }
+        const networkPath = resolve(appDir, node.sourceDir, "network.vsk");
+        if (node.network && existsSync2(networkPath)) {
+          compileFile(networkPath, node.network, chunkCode);
         }
         const loadingPath = resolve(appDir, node.sourceDir, "loading.vsk");
         if (node.loading && existsSync2(loadingPath)) {
@@ -248,8 +326,17 @@ ${entry.code}
       }
     }
     annotate2(routeTree);
-    const main = await buildMainBundle(routeTree, runtimeDir2, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
-    return { main, chunks };
+    const mainKey = JSON.stringify(routeTree) + "|" + [...runtimeImportNames].sort().join(",") + `|${!!options?.hmr}|${!!options?.importRuntime}|${options?.routeDataCache ?? ""}`;
+    let main;
+    if (cache?.mainBundle && cache.mainBundle.key === mainKey) {
+      mainFromCache = true;
+      main = cache.mainBundle.code;
+    } else {
+      main = await buildMainBundle(routeTree, runtimeDir2, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
+      if (cache)
+        cache.mainBundle = { key: mainKey, code: main };
+    }
+    return { main, chunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
   } else {
     let compileFileMono2 = function(filePath, resolvedName) {
       if (seen.has(filePath))
@@ -288,6 +375,12 @@ ${entry.code}
         const notFoundPath = resolve(appDir, node.sourceDir, "not-found.vsk");
         if (node.notFound && existsSync2(notFoundPath))
           compileFileMono2(notFoundPath, node.notFound);
+        const offlinePath = resolve(appDir, node.sourceDir, "offline.vsk");
+        if (node.offline && existsSync2(offlinePath))
+          compileFileMono2(offlinePath, node.offline);
+        const networkPath = resolve(appDir, node.sourceDir, "network.vsk");
+        if (node.network && existsSync2(networkPath))
+          compileFileMono2(networkPath, node.network);
         const loadingPath = resolve(appDir, node.sourceDir, "loading.vsk");
         if (node.loading && existsSync2(loadingPath))
           compileFileMono2(loadingPath, node.loading);
@@ -439,10 +532,10 @@ async function buildMainBundle(routeTree, runtimeDir2, codeSplit, mono, hmr, imp
 ` : runtimeCode + "\n";
   const cleanupFn = "function __cleanup(start, end) {\n	let n = start.nextSibling;\n	while (n && n !== end) {\n		const next = n.nextSibling;\n		n.remove();\n		n = next;\n	}\n}\n";
   const placeFn = "function __place(start, end, nodes, fallback) {\n	if (start.parentNode !== null) {\n		const p = start.parentNode;\n		for (let i = 0; i < nodes.length; i++) p.insertBefore(nodes[i], end);\n		return;\n	}\n	if (nodes.length > 0 && nodes[0].parentNode) {\n		const p = nodes[0].parentNode;\n		p.insertBefore(start, nodes[0]);\n		p.insertBefore(end, nodes[nodes.length - 1].nextSibling);\n		return;\n	}\n	fallback.appendChild(start);\n	fallback.appendChild(end);\n	for (let i = 0; i < nodes.length; i++) fallback.insertBefore(nodes[i], end);\n}\n";
-  const updateComponentsFn = "function __updateComponents(nodes) {\n  for (const n of nodes) {\n    if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName];\n    if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName];\n    if (n._errorName && __components[n._errorName]) n.error = __components[n._errorName];\n    if (n._notFoundName && __components[n._notFoundName]) n.notFound = __components[n._notFoundName];\n    if (n.children) __updateComponents(n.children);\n  }\n}\n";
+  const updateComponentsFn = "function __updateComponents(nodes) {\n  for (const n of nodes) {\n    if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName];\n    if (n._layoutName && __components[n._layoutName]) n.layout = __components[n._layoutName];\n    if (n._errorName && __components[n._errorName]) n.error = __components[n._errorName];\n    if (n._notFoundName && __components[n._notFoundName]) n.notFound = __components[n._notFoundName];\n    if (n._offlineName && __components[n._offlineName]) n.offline = __components[n._offlineName];\n    if (n._networkName && __components[n._networkName]) n.network = __components[n._networkName];\n    if (n.children) __updateComponents(n.children);\n  }\n}\n";
   const routeTreeJson = JSON.stringify(routeTree);
   if (codeSplit) {
-    const resolveNamesFn = "function __resolveNames(nodes) {\n  for (const n of nodes) {\n    if (n.chunk) n._chunk = n.chunk;\n    if (n.chunkError) n._chunkError = n.chunkError;\n    if (typeof n.page === 'string') n._pageName = n.page;\n    if (typeof n.layout === 'string') n._layoutName = n.layout;\n    if (typeof n.error === 'string') n._errorName = n.error;\n    if (typeof n.notFound === 'string') n._notFoundName = n.notFound;\n    if (n.children) __resolveNames(n.children);\n  }\n}\n";
+    const resolveNamesFn = "function __resolveNames(nodes) {\n  for (const n of nodes) {\n    if (n.chunk) n._chunk = n.chunk;\n    if (n.chunkError) n._chunkError = n.chunkError;\n    if (typeof n.page === 'string') n._pageName = n.page;\n    if (typeof n.layout === 'string') n._layoutName = n.layout;\n    if (typeof n.error === 'string') n._errorName = n.error;\n    if (typeof n.notFound === 'string') n._notFoundName = n.notFound;\n    if (typeof n.offline === 'string') n._offlineName = n.offline;\n    if (typeof n.network === 'string') n._networkName = n.network;\n    if (n.children) __resolveNames(n.children);\n  }\n}\n";
     const pendCode = "const __pendChunks = [];\nconst __currentPath = typeof window !== 'undefined' ? window.location.pathname : '/';\nif (typeof matchRoute === 'function') {\n  const __currentMatch = matchRoute(__routeTree, __currentPath);\n  if (__currentMatch) {\n    for (const n of __currentMatch.matchChain) {\n      if (n._chunk && !__pendChunks.includes(n._chunk)) __pendChunks.push(n._chunk);\n    }\n  }\n}\n";
     const routerOpts2 = buildRouterOpts({ routeDataCache });
     const startRouterCode = `const __startRouter = function() {
@@ -496,7 +589,7 @@ if (__pendChunks.length > 0 && typeof ensureChunk === 'function') {
   const aliasCode = aliasLines.length > 0 ? aliasLines.join("\n") + "\n" : "";
   const hydratorAliasCode = hydratorAliasLines.length > 0 ? hydratorAliasLines.join("\n") + "\n" : "";
   const routerOpts = buildRouterOpts({ routeDataCache });
-  const code = preamble + "const __components = {};\nconst __hydrators = {};\nconst __runtime_comps = __components;\n\n" + componentLines.join("\n\n") + "\n" + aliasCode + hydratorLines.join("\n\n") + "\n" + hydratorAliasCode + cleanupFn + placeFn + "globalThis.__components = __components;\nfunction __resolveNames(nodes) {\n  for (const n of nodes) {\n    if (typeof n.page === 'string') {\n      n._pageName = n.page;\n      n.page = __components[n.page];\n    }\n    if (typeof n.layout === 'string') {\n      n._layoutName = n.layout;\n      n.layout = __components[n.layout];\n    }\n    if (typeof n.error === 'string') n.error = __components[n.error];\n    if (typeof n.notFound === 'string') n.notFound = __components[n.notFound];\n    if (n.children) __resolveNames(n.children);\n  }\n}\n" + updateComponentsFn + "const __routeTree = " + routeTreeJson + `;
+  const code = preamble + "const __components = {};\nconst __hydrators = {};\nconst __runtime_comps = __components;\n\n" + componentLines.join("\n\n") + "\n" + aliasCode + hydratorLines.join("\n\n") + "\n" + hydratorAliasCode + cleanupFn + placeFn + "globalThis.__components = __components;\nfunction __resolveNames(nodes) {\n  for (const n of nodes) {\n    if (typeof n.page === 'string') {\n      n._pageName = n.page;\n      n.page = __components[n.page];\n    }\n    if (typeof n.layout === 'string') {\n      n._layoutName = n.layout;\n      n.layout = __components[n.layout];\n    }\n    if (typeof n.error === 'string') n.error = __components[n.error];\n    if (typeof n.notFound === 'string') n.notFound = __components[n.notFound];\n    if (typeof n.offline === 'string') n.offline = __components[n.offline];\n    if (typeof n.network === 'string') n.network = __components[n.network];\n    if (n.children) __resolveNames(n.children);\n  }\n}\n" + updateComponentsFn + "const __routeTree = " + routeTreeJson + `;
 __resolveNames(__routeTree);
 const __router = createFileRouter(__routeTree${routerOpts});
 globalThis.__vesk_router = __router;
@@ -508,7 +601,7 @@ if (typeof document !== 'undefined') __router.start();
 }
 var __dirname, runtimeEntryId;
 var init_client_bundle = __esm({
-  "packages/adapter/dist/client-bundle.js"() {
+  "../adapter/dist/client-bundle.js"() {
     "use strict";
     init_esbuild_fallback();
     __dirname = dirname2(fileURLToPath(import.meta.url));
@@ -516,16 +609,16 @@ var init_client_bundle = __esm({
   }
 });
 
-// packages/haul/internal/sidecar/server.ts
+// ../haul/internal/sidecar/server.ts
 import { createServer } from "node:http";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync2, mkdirSync, statSync, readdirSync } from "node:fs";
+import { readFileSync as readFileSync3, existsSync as existsSync3, writeFileSync as writeFileSync2, mkdirSync, statSync as statSync2, readdirSync } from "node:fs";
 import { resolve as resolve2, dirname as dirname3, extname, join as join3, basename } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 import { extractMiddlewareParts } from "@vesk/compiler/src/router";
 import { createRequire } from "node:module";
 
-// node_modules/acorn/dist/acorn.mjs
+// ../../node_modules/acorn/dist/acorn.mjs
 var astralIdentifierCodes = [509, 0, 227, 0, 150, 4, 294, 9, 1368, 2, 2, 1, 6, 3, 41, 2, 5, 0, 166, 1, 574, 3, 9, 9, 7, 9, 32, 4, 318, 1, 78, 5, 71, 10, 50, 3, 123, 2, 54, 14, 32, 10, 3, 1, 11, 3, 46, 10, 8, 0, 46, 9, 7, 2, 37, 13, 2, 9, 6, 1, 45, 0, 13, 2, 49, 13, 9, 3, 2, 11, 83, 11, 7, 0, 3, 0, 158, 11, 6, 9, 7, 3, 56, 1, 2, 6, 3, 1, 3, 2, 10, 0, 11, 1, 3, 6, 4, 4, 68, 8, 2, 0, 3, 0, 2, 3, 2, 4, 2, 0, 15, 1, 83, 17, 10, 9, 5, 0, 82, 19, 13, 9, 214, 6, 3, 8, 28, 1, 83, 16, 16, 9, 82, 12, 9, 9, 7, 19, 58, 14, 5, 9, 243, 14, 166, 9, 71, 5, 2, 1, 3, 3, 2, 0, 2, 1, 13, 9, 120, 6, 3, 6, 4, 0, 29, 9, 41, 6, 2, 3, 9, 0, 10, 10, 47, 15, 199, 7, 137, 9, 54, 7, 2, 7, 17, 9, 57, 21, 2, 13, 123, 5, 4, 0, 2, 1, 2, 6, 2, 0, 9, 9, 49, 4, 2, 1, 2, 4, 9, 9, 55, 9, 266, 3, 10, 1, 2, 0, 49, 6, 4, 4, 14, 10, 5350, 0, 7, 14, 11465, 27, 2343, 9, 87, 9, 39, 4, 60, 6, 26, 9, 535, 9, 470, 0, 2, 54, 8, 3, 82, 0, 12, 1, 19628, 1, 4178, 9, 519, 45, 3, 22, 543, 4, 4, 5, 9, 7, 3, 6, 31, 3, 149, 2, 1418, 49, 513, 54, 5, 49, 9, 0, 15, 0, 23, 4, 2, 14, 1361, 6, 2, 16, 3, 6, 2, 1, 2, 4, 101, 0, 161, 6, 10, 9, 357, 0, 62, 13, 499, 13, 245, 1, 2, 9, 233, 0, 3, 0, 8, 1, 6, 0, 475, 6, 110, 6, 6, 9, 4759, 9, 787719, 239];
 var astralIdentifierStartCodes = [0, 11, 2, 25, 2, 18, 2, 1, 2, 14, 3, 13, 35, 122, 70, 52, 268, 28, 4, 48, 48, 31, 14, 29, 6, 37, 11, 29, 3, 35, 5, 7, 2, 4, 43, 157, 19, 35, 5, 35, 5, 39, 9, 51, 13, 10, 2, 14, 2, 6, 2, 1, 2, 10, 2, 14, 2, 6, 2, 1, 4, 51, 13, 310, 10, 21, 11, 7, 25, 5, 2, 41, 2, 8, 70, 5, 3, 0, 2, 43, 2, 1, 4, 0, 3, 22, 11, 22, 10, 30, 66, 18, 2, 1, 11, 21, 11, 25, 7, 25, 39, 55, 7, 1, 65, 0, 16, 3, 2, 2, 2, 28, 43, 28, 4, 28, 36, 7, 2, 27, 28, 53, 11, 21, 11, 18, 14, 17, 111, 72, 56, 50, 14, 50, 14, 35, 39, 27, 10, 22, 251, 41, 7, 1, 17, 5, 57, 28, 11, 0, 9, 21, 43, 17, 47, 20, 28, 22, 13, 52, 58, 1, 3, 0, 14, 44, 33, 24, 27, 35, 30, 0, 3, 0, 9, 34, 4, 0, 13, 47, 15, 3, 22, 0, 2, 0, 36, 17, 2, 24, 20, 1, 64, 6, 2, 0, 2, 3, 2, 14, 2, 9, 8, 46, 39, 7, 3, 1, 3, 21, 2, 6, 2, 1, 2, 4, 4, 0, 19, 0, 13, 4, 31, 9, 2, 0, 3, 0, 2, 37, 2, 0, 26, 0, 2, 0, 45, 52, 19, 3, 21, 2, 31, 47, 21, 1, 2, 0, 185, 46, 42, 3, 37, 47, 21, 0, 60, 42, 14, 0, 72, 26, 38, 6, 186, 43, 117, 63, 32, 7, 3, 0, 3, 7, 2, 1, 2, 23, 16, 0, 2, 0, 95, 7, 3, 38, 17, 0, 2, 0, 29, 0, 11, 39, 8, 0, 22, 0, 12, 45, 20, 0, 19, 72, 200, 32, 32, 8, 2, 36, 18, 0, 50, 29, 113, 6, 2, 1, 2, 37, 22, 0, 26, 5, 2, 1, 2, 31, 15, 0, 24, 43, 261, 18, 16, 0, 2, 12, 2, 33, 125, 0, 80, 921, 103, 110, 18, 195, 2637, 96, 16, 1071, 18, 5, 26, 3994, 6, 582, 6842, 29, 1763, 568, 8, 30, 18, 78, 18, 29, 19, 47, 17, 3, 32, 20, 6, 18, 433, 44, 212, 63, 33, 24, 3, 24, 45, 74, 6, 0, 67, 12, 65, 1, 2, 0, 15, 4, 10, 7381, 42, 31, 98, 114, 8702, 3, 2, 6, 2, 1, 2, 290, 16, 0, 30, 2, 3, 0, 15, 3, 9, 395, 2309, 106, 6, 12, 4, 8, 8, 9, 5991, 84, 2, 70, 2, 1, 3, 0, 3, 1, 3, 3, 2, 11, 2, 0, 2, 6, 2, 64, 2, 3, 3, 7, 2, 6, 2, 27, 2, 3, 2, 4, 2, 0, 4, 6, 2, 339, 3, 24, 2, 24, 2, 30, 2, 24, 2, 30, 2, 24, 2, 30, 2, 24, 2, 30, 2, 24, 2, 7, 1845, 30, 7, 5, 262, 61, 147, 44, 11, 6, 17, 0, 322, 29, 19, 43, 485, 27, 229, 29, 3, 0, 208, 30, 2, 2, 2, 1, 2, 6, 3, 4, 10, 1, 225, 6, 2, 3, 2, 1, 2, 14, 2, 196, 60, 67, 8, 0, 1205, 3, 2, 26, 2, 1, 2, 0, 3, 0, 2, 9, 2, 3, 2, 0, 2, 0, 7, 0, 5, 0, 2, 0, 2, 0, 2, 2, 2, 1, 2, 0, 3, 0, 2, 0, 2, 0, 2, 0, 2, 0, 2, 1, 2, 0, 3, 3, 2, 6, 2, 3, 2, 3, 2, 0, 2, 9, 2, 16, 6, 2, 2, 4, 2, 16, 4421, 42719, 33, 4381, 3, 5773, 3, 7472, 16, 621, 2467, 541, 1507, 4938, 6, 8489];
 var nonASCIIidentifierChars = "\u200C\u200D\xB7\u0300-\u036F\u0387\u0483-\u0487\u0591-\u05BD\u05BF\u05C1\u05C2\u05C4\u05C5\u05C7\u0610-\u061A\u064B-\u0669\u0670\u06D6-\u06DC\u06DF-\u06E4\u06E7\u06E8\u06EA-\u06ED\u06F0-\u06F9\u0711\u0730-\u074A\u07A6-\u07B0\u07C0-\u07C9\u07EB-\u07F3\u07FD\u0816-\u0819\u081B-\u0823\u0825-\u0827\u0829-\u082D\u0859-\u085B\u0897-\u089F\u08CA-\u08E1\u08E3-\u0903\u093A-\u093C\u093E-\u094F\u0951-\u0957\u0962\u0963\u0966-\u096F\u0981-\u0983\u09BC\u09BE-\u09C4\u09C7\u09C8\u09CB-\u09CD\u09D7\u09E2\u09E3\u09E6-\u09EF\u09FE\u0A01-\u0A03\u0A3C\u0A3E-\u0A42\u0A47\u0A48\u0A4B-\u0A4D\u0A51\u0A66-\u0A71\u0A75\u0A81-\u0A83\u0ABC\u0ABE-\u0AC5\u0AC7-\u0AC9\u0ACB-\u0ACD\u0AE2\u0AE3\u0AE6-\u0AEF\u0AFA-\u0AFF\u0B01-\u0B03\u0B3C\u0B3E-\u0B44\u0B47\u0B48\u0B4B-\u0B4D\u0B55-\u0B57\u0B62\u0B63\u0B66-\u0B6F\u0B82\u0BBE-\u0BC2\u0BC6-\u0BC8\u0BCA-\u0BCD\u0BD7\u0BE6-\u0BEF\u0C00-\u0C04\u0C3C\u0C3E-\u0C44\u0C46-\u0C48\u0C4A-\u0C4D\u0C55\u0C56\u0C62\u0C63\u0C66-\u0C6F\u0C81-\u0C83\u0CBC\u0CBE-\u0CC4\u0CC6-\u0CC8\u0CCA-\u0CCD\u0CD5\u0CD6\u0CE2\u0CE3\u0CE6-\u0CEF\u0CF3\u0D00-\u0D03\u0D3B\u0D3C\u0D3E-\u0D44\u0D46-\u0D48\u0D4A-\u0D4D\u0D57\u0D62\u0D63\u0D66-\u0D6F\u0D81-\u0D83\u0DCA\u0DCF-\u0DD4\u0DD6\u0DD8-\u0DDF\u0DE6-\u0DEF\u0DF2\u0DF3\u0E31\u0E34-\u0E3A\u0E47-\u0E4E\u0E50-\u0E59\u0EB1\u0EB4-\u0EBC\u0EC8-\u0ECE\u0ED0-\u0ED9\u0F18\u0F19\u0F20-\u0F29\u0F35\u0F37\u0F39\u0F3E\u0F3F\u0F71-\u0F84\u0F86\u0F87\u0F8D-\u0F97\u0F99-\u0FBC\u0FC6\u102B-\u103E\u1040-\u1049\u1056-\u1059\u105E-\u1060\u1062-\u1064\u1067-\u106D\u1071-\u1074\u1082-\u108D\u108F-\u109D\u135D-\u135F\u1369-\u1371\u1712-\u1715\u1732-\u1734\u1752\u1753\u1772\u1773\u17B4-\u17D3\u17DD\u17E0-\u17E9\u180B-\u180D\u180F-\u1819\u18A9\u1920-\u192B\u1930-\u193B\u1946-\u194F\u19D0-\u19DA\u1A17-\u1A1B\u1A55-\u1A5E\u1A60-\u1A7C\u1A7F-\u1A89\u1A90-\u1A99\u1AB0-\u1ABD\u1ABF-\u1ADD\u1AE0-\u1AEB\u1B00-\u1B04\u1B34-\u1B44\u1B50-\u1B59\u1B6B-\u1B73\u1B80-\u1B82\u1BA1-\u1BAD\u1BB0-\u1BB9\u1BE6-\u1BF3\u1C24-\u1C37\u1C40-\u1C49\u1C50-\u1C59\u1CD0-\u1CD2\u1CD4-\u1CE8\u1CED\u1CF4\u1CF7-\u1CF9\u1DC0-\u1DFF\u200C\u200D\u203F\u2040\u2054\u20D0-\u20DC\u20E1\u20E5-\u20F0\u2CEF-\u2CF1\u2D7F\u2DE0-\u2DFF\u302A-\u302F\u3099\u309A\u30FB\uA620-\uA629\uA66F\uA674-\uA67D\uA69E\uA69F\uA6F0\uA6F1\uA802\uA806\uA80B\uA823-\uA827\uA82C\uA880\uA881\uA8B4-\uA8C5\uA8D0-\uA8D9\uA8E0-\uA8F1\uA8FF-\uA909\uA926-\uA92D\uA947-\uA953\uA980-\uA983\uA9B3-\uA9C0\uA9D0-\uA9D9\uA9E5\uA9F0-\uA9F9\uAA29-\uAA36\uAA43\uAA4C\uAA4D\uAA50-\uAA59\uAA7B-\uAA7D\uAAB0\uAAB2-\uAAB4\uAAB7\uAAB8\uAABE\uAABF\uAAC1\uAAEB-\uAAEF\uAAF5\uAAF6\uABE3-\uABEA\uABEC\uABED\uABF0-\uABF9\uFB1E\uFE00-\uFE0F\uFE20-\uFE2F\uFE33\uFE34\uFE4D-\uFE4F\uFF10-\uFF19\uFF3F\uFF65";
@@ -6225,7 +6318,7 @@ function tokenizer2(input, options) {
   return Parser.tokenizer(input, options);
 }
 
-// packages/haul/internal/sidecar/mini-bundler.ts
+// ../haul/internal/sidecar/mini-bundler.ts
 import { readFileSync, existsSync } from "node:fs";
 import { join, dirname } from "node:path";
 var MiniBundleError = class extends Error {
@@ -7030,7 +7123,7 @@ function bundleServerRuntime(runtimeDir2, compilerDir2, entryPath) {
   return lines.join("\n");
 }
 
-// packages/haul/internal/sidecar/client-postprocess.ts
+// ../haul/internal/sidecar/client-postprocess.ts
 import { parse as parse4 } from "@vesk/compiler/src/parser";
 function postprocessClientCode(source) {
   const tokens = tokenize(source);
@@ -7387,7 +7480,7 @@ function rewriteRuntimeImportsViaAst(source) {
   return code;
 }
 
-// packages/haul/internal/sidecar/server.ts
+// ../haul/internal/sidecar/server.ts
 var __dirname2 = dirname3(fileURLToPath2(import.meta.url));
 var require2 = createRequire(import.meta.url);
 function resolveInstalledPackage(spec) {
@@ -7492,6 +7585,10 @@ async function processCssWithPlugins(css, filePath, projectDir) {
     }
   }
   return result;
+}
+function errorStatusCode(e) {
+  const s = e?.statusCode ?? e?.status;
+  return typeof s === "number" && s >= 100 && s < 600 ? s : 500;
 }
 function err(id, message) {
   return { jsonrpc: "2.0", id, error: { code: 1, message } };
@@ -8182,7 +8279,8 @@ ${devMods.prettifyHtml(body)}
             } catch (e) {
               const msg = e instanceof Error ? e.message : String(e);
               if (forData) {
-                return new Response(JSON.stringify({ error: msg }), { status: 500, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Vary": "x-vesk-data" } });
+                const code = errorStatusCode(e);
+                return new Response(JSON.stringify({ error: msg, statusCode: code }), { status: code, headers: { "Content-Type": "application/json", "Cache-Control": "no-store", "Vary": "x-vesk-data" } });
               }
               throw e;
             }
@@ -8265,7 +8363,7 @@ ${devMods.prettifyHtml(body)}
             try {
               const errSrc = readFileSync3(errPath, "utf-8");
               const errCompName = extractCompName(errSrc) || node.error;
-              const errProps = { error: err2.message, stack: err2.stack, statusCode: 500, url: url.pathname };
+              const errProps = { error: err2.message, stack: err2.stack, statusCode: errorStatusCode(err2), url: url.pathname };
               const html = await devMods.renderFullPage(errSrc, errCompName, errProps, /* @__PURE__ */ new Map(), {
                 hydrate: true,
                 cssUrls: ["/_vesk/static/_tailwind.css", "/_vesk/static/global.css"],
@@ -8283,10 +8381,11 @@ ${devMods.prettifyHtml(body)}
     }
     const message = err2.message || String(e);
     const stack = err2.stack || "";
+    const errCode = errorStatusCode(err2);
     return {
-      status: 500,
+      status: errCode,
       headers: [["Content-Type", "text/html"]],
-      bodyB64: Buffer.from(errorHtml || `<!DOCTYPE html><html><body><h1>500</h1><pre>${message}
+      bodyB64: Buffer.from(errorHtml || `<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${message}
 ${stack}</pre></body></html>`).toString("base64")
     };
   }
@@ -8305,8 +8404,7 @@ async function handleDevRequest(p) {
     const headers = Object.entries({ ...corsAllowed, "Content-Length": "0" });
     return { status: 204, headers, bodyB64: "" };
   }
-  const proto = p.headers["x-forwarded-proto"] && state.security?.trustProxy ? p.headers["x-forwarded-proto"] : "http";
-  globalThis.__vesk_ssr_base_url = `${proto}://${reqHost}`;
+  globalThis.__vesk_ssr_base_url = `http://127.0.0.1:${p.port || state.port}`;
   const req = {
     method: p.method,
     url: url.pathname + url.search,
@@ -8360,24 +8458,31 @@ async function rebuildTailwindCss() {
   if (!rawCss) {
     devState.cssGlobal = "";
     devState.cssTailwind = "";
-    return;
+    return false;
   }
   try {
-    devState.cssGlobal = stripTailwindDirectives(rawCss);
-    devState.cssTailwind = rawCss;
+    let nextGlobal = stripTailwindDirectives(rawCss);
+    let nextTailwind = rawCss;
     for (const plugin of plugins) {
       if (typeof plugin.onCSS === "function") {
         const result = await plugin.onCSS(rawCss, cssPath);
         if (result !== null && typeof result === "string") {
-          devState.cssTailwind = result;
+          nextTailwind = result;
         }
       }
     }
-    if (devState.cssGlobal === devState.cssTailwind || devState.cssGlobal === rawCss) {
-      devState.cssTailwind = devState.cssGlobal;
+    if (nextGlobal === nextTailwind || nextGlobal === rawCss) {
+      nextTailwind = nextGlobal;
     }
+    const changed = nextGlobal !== devState.lastCssGlobal || nextTailwind !== devState.lastCssTailwind;
+    devState.cssGlobal = nextGlobal;
+    devState.cssTailwind = nextTailwind;
+    devState.lastCssGlobal = nextGlobal;
+    devState.lastCssTailwind = nextTailwind;
+    return changed;
   } catch (e) {
     console.error("sidecar: CSS rebuild error:", e);
+    return false;
   }
 }
 function runtimeImportNamesFrom(clientJs) {
@@ -8397,7 +8502,7 @@ async function bundleRuntime() {
 }
 async function buildClientBundle() {
   const { routeTree, appDirPath, config } = devState;
-  const opts = { importRuntime: true, hmr: true, codeSplit: true };
+  const opts = { importRuntime: true, hmr: true, codeSplit: true, cache: devState.bundleCache };
   if (config.routeDataCache !== void 0) opts.routeDataCache = config.routeDataCache;
   const { main, chunks } = await devMods.generateClientBundle(routeTree, appDirPath, /* @__PURE__ */ new Map(), opts);
   devState.clientBundle = main;
@@ -8405,20 +8510,23 @@ async function buildClientBundle() {
   for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
   devState.clientChunks = next;
 }
-async function buildClientChunks() {
+async function buildClientChunks(fullPath) {
   const { routeTree, appDirPath } = devState;
   try {
-    const { chunks } = await devMods.generateClientBundle(routeTree, appDirPath, /* @__PURE__ */ new Map(), {
+    const { chunks, editedSources, editedNames } = await devMods.generateClientBundle(routeTree, appDirPath, /* @__PURE__ */ new Map(), {
       importRuntime: true,
       hmr: true,
-      codeSplit: true
+      codeSplit: true,
+      cache: devState.bundleCache,
+      only: [fullPath],
+      returnEditedSources: true
     });
     const next = /* @__PURE__ */ new Map();
     for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
     devState.clientChunks = next;
-    return null;
+    return { err: null, editedSource: editedSources?.get(fullPath) ?? null, actualName: editedNames?.get(fullPath) ?? null };
   } catch (e) {
-    return e;
+    return { err: e, editedSource: null, actualName: null };
   }
 }
 function hmrClientJs() {
@@ -8506,10 +8614,13 @@ async function devInit(params) {
     hmrClientJs: "",
     cssGlobal: "",
     cssTailwind: "",
+    lastCssGlobal: "",
+    lastCssTailwind: "",
     sourceToComponents: /* @__PURE__ */ new Map(),
     apiWatchCache: /* @__PURE__ */ new Map(),
     ssrDataStore: /* @__PURE__ */ new Map(),
-    runtimeDir: resolveRuntimeDir(projectDir) || runtimeDir
+    runtimeDir: resolveRuntimeDir(projectDir) || runtimeDir,
+    bundleCache: { files: /* @__PURE__ */ new Map() }
   };
   devState.routeTree = devMods.scanRoutes(appDir);
   updateSourceMapping();
@@ -8540,6 +8651,22 @@ async function devRebuild(params) {
   const fileExists = existsSync3(fullPath);
   const messages = [];
   const assets = {};
+  const prevClientBundle = state.clientBundle || "";
+  const prevChunks = state.clientChunks instanceof Map ? state.clientChunks : /* @__PURE__ */ new Map();
+  const collectAssetDiff = () => {
+    const patched = {};
+    for (const [name, code] of state.clientChunks instanceof Map ? state.clientChunks : []) {
+      if (prevChunks.get(name) !== code) patched[name] = code;
+    }
+    const removedChunkNames2 = [];
+    for (const name of prevChunks.keys()) {
+      if (!state.clientChunks.has(name)) removedChunkNames2.push(name);
+    }
+    const clientBundleChanged2 = (state.clientBundle || "") !== prevClientBundle;
+    if (clientBundleChanged2) assets.clientBundle = state.clientBundle;
+    assets.clientChunks = patched;
+    return { clientBundleChanged: clientBundleChanged2, removedChunkNames: removedChunkNames2 };
+  };
   const isApiFile = /\/api\//.test(fullPath.replace(/\\/g, "/")) && (filename.endsWith(".ts") || filename.endsWith(".js") || filename.endsWith(".tsx"));
   if (filename.endsWith(".vsk")) {
     const t0 = Date.now();
@@ -8550,7 +8677,10 @@ async function devRebuild(params) {
       updateSourceMapping();
       const changedComponents = state.sourceToComponents.get(fullPath) || [];
       const treeChanged = prevTree !== stripAnnots(state.routeTree);
+      const cssPromise = rebuildTailwindCss();
       let bundleError = null;
+      let hotEditedSource = null;
+      let hotActualName = null;
       if (treeChanged) {
         try {
           await buildClientBundle();
@@ -8559,16 +8689,28 @@ async function devRebuild(params) {
           bundleError = e;
         }
       } else {
-        const chunkErr = await buildClientChunks();
-        if (chunkErr) bundleError = chunkErr;
+        const hot = await buildClientChunks(fullPath);
+        bundleError = hot.err;
+        hotEditedSource = hot.editedSource;
+        hotActualName = hot.actualName;
       }
       if (changedComponents.length > 0) {
         let fnSources;
         let errorMessage = bundleError ? bundleError.message : "";
-        if (fileExists && !bundleError) {
+        if (!treeChanged && !bundleError && hotEditedSource !== null) {
+          let compCode = hotEditedSource;
+          for (const cname of changedComponents) {
+            if (hotActualName && hotActualName !== cname) {
+              compCode += `
+Object.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __components[${JSON.stringify(hotActualName)}], configurable: true });
+`;
+            }
+          }
+          if (compCode.trim()) fnSources = { _raw: compCode };
+        } else if (fileExists && !bundleError) {
           try {
             const src = readFileSync3(fullPath, "utf-8");
-            let compCode = devMods.compileClient(src, null, { forceClient: true });
+            let compCode = devMods.compileClient(src, null, { forceClient: true, sourcePath: fullPath, mdRoots: [state.projectDir] });
             compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, "");
             compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, "");
             compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, "");
@@ -8602,16 +8744,17 @@ Object.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __com
       } else {
         messages.push({ type: "reload" });
       }
-      await rebuildTailwindCss();
-      messages.push({ type: "css-update" });
-      assets.clientBundle = state.clientBundle;
-      assets.clientChunks = Object.fromEntries(state.clientChunks);
-      assets.cssGlobal = state.cssGlobal;
-      assets.cssTailwind = state.cssTailwind;
-      return { messages, assets };
+      const cssChanged2 = await cssPromise;
+      if (cssChanged2) messages.push({ type: "css-update" });
+      const { clientBundleChanged: clientBundleChanged2, removedChunkNames: removedChunkNames2 } = collectAssetDiff();
+      if (cssChanged2) {
+        assets.cssGlobal = state.cssGlobal;
+        assets.cssTailwind = state.cssTailwind;
+      }
+      return { messages, assets, clientBundleChanged: clientBundleChanged2, cssChanged: cssChanged2, removedChunkNames: removedChunkNames2 };
     } catch (e) {
       messages.push({ type: "error", message: e.message, file: filename });
-      return { messages, assets };
+      return { messages, assets, clientBundleChanged: false, cssChanged: false };
     }
   }
   if (filename.endsWith(".css")) {
@@ -8621,11 +8764,13 @@ Object.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __com
         state.rawCss = content;
       }
     }
-    await rebuildTailwindCss();
-    messages.push({ type: "css-update" });
-    assets.cssGlobal = state.cssGlobal;
-    assets.cssTailwind = state.cssTailwind;
-    return { messages, assets };
+    const cssChanged2 = await rebuildTailwindCss();
+    if (cssChanged2) {
+      messages.push({ type: "css-update" });
+      assets.cssGlobal = state.cssGlobal;
+      assets.cssTailwind = state.cssTailwind;
+    }
+    return { messages, assets, clientBundleChanged: false, cssChanged: cssChanged2 };
   }
   if (isApiFile && fileExists) {
     state.apiWatchCache.set(fullPath, Date.now());
@@ -8651,13 +8796,14 @@ Object.defineProperty(__components, ${JSON.stringify(cname)}, { get: () => __com
   updateSourceMapping();
   await buildClientBundle();
   await bundleRuntime();
-  await rebuildTailwindCss();
+  const cssChanged = await rebuildTailwindCss();
   messages.push({ type: "reload", reason: `${filename} changed` });
-  assets.clientBundle = state.clientBundle;
-  assets.clientChunks = Object.fromEntries(state.clientChunks);
-  assets.cssGlobal = state.cssGlobal;
-  assets.cssTailwind = state.cssTailwind;
-  return { messages, assets };
+  if (cssChanged) {
+    assets.cssGlobal = state.cssGlobal;
+    assets.cssTailwind = state.cssTailwind;
+  }
+  const { clientBundleChanged, removedChunkNames } = collectAssetDiff();
+  return { messages, assets, clientBundleChanged, cssChanged, removedChunkNames };
 }
 var prodState = null;
 function prodMatchPath(pattern, pathname) {
@@ -8698,7 +8844,7 @@ function prodMime(ext) {
   return mime[ext] || "application/octet-stream";
 }
 function prodStaticResponse(filePath) {
-  if (!existsSync3(filePath) || !statSync(filePath).isFile()) return null;
+  if (!existsSync3(filePath) || !statSync2(filePath).isFile()) return null;
   const ext = extname(filePath);
   return { status: 200, headers: [["Content-Type", prodMime(ext)]], bodyB64: readFileSync3(filePath).toString("base64") };
 }
@@ -8777,7 +8923,7 @@ var prodRtModMtime = 0;
 async function getProdRtMod() {
   const state = prodState;
   const p = join3(state.outDir, "server", "runtime.js");
-  const mtime = statSync(p).mtimeMs;
+  const mtime = statSync2(p).mtimeMs;
   if (prodRtMod && prodRtModMtime === mtime) return prodRtMod;
   prodRtMod = await import(p);
   prodRtModMtime = mtime;
@@ -9110,10 +9256,10 @@ async function handleProdRequest(p) {
             console.error("haul ssr error:", err2.message);
             let errorHtml = null;
             try {
-              errorHtml = await prodRenderError({ error: err2.message, stack: err2.stack, statusCode: 500, url: url.pathname });
+              errorHtml = await prodRenderError({ error: err2.message, stack: err2.stack, statusCode: errorStatusCode(err2), url: url.pathname });
             } catch {
             }
-            return withSec({ status: 500, headers: [["Content-Type", "text/html"]], bodyB64: Buffer.from(errorHtml || '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/_vesk/static/_tailwind.css" /><link rel="stylesheet" href="/_vesk/static/global.css" /></head><body><div style="font-family:system-ui;padding:2rem"><h1>500 \u2014 Internal Server Error</h1><pre>' + String(err2.message).replace(/</g, "&lt;") + '</pre></div><script type="module" src="/_vesk/static/client.js"></script></body></html>').toString("base64") });
+            return withSec({ status: errorStatusCode(err2), headers: [["Content-Type", "text/html"]], bodyB64: Buffer.from(errorHtml || '<!DOCTYPE html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><link rel="stylesheet" href="/_vesk/static/_tailwind.css" /><link rel="stylesheet" href="/_vesk/static/global.css" /></head><body><div style="font-family:system-ui;padding:2rem"><h1>' + errorStatusCode(err2) + " \u2014 Internal Server Error</h1><pre>" + String(err2.message).replace(/</g, "&lt;") + '</pre></div><script type="module" src="/_vesk/static/client.js"></script></body></html>').toString("base64") });
           }
         }
       }
@@ -9356,6 +9502,9 @@ ${extracted.body}
   });
 });
 var port = process.env.VESK_SIDECAR_PORT ? Number(process.env.VESK_SIDECAR_PORT) : 0;
+server.on("connection", (socket) => {
+  socket.setNoDelay(true);
+});
 server.listen(port, () => {
   const addr = server.address();
   const actualPort = typeof addr === "object" && addr ? addr.port : port;

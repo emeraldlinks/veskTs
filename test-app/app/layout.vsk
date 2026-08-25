@@ -24,7 +24,7 @@ const navItems: NavItem[] = [
 
 component Layout(props: LayoutProps) {
 	<Head>
-	
+	<link rel="shortcut icon" href="/favicon.svg" type="image/x-icon">
 	</Head>
 	<nav class="flex nav gap-6 px-8 py-4 border-b border-gray-200 bg-white">
 		for (const item of navItems) {

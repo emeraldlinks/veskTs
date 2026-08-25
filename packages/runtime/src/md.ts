@@ -514,6 +514,7 @@ const KW_JS = new Set([
 	'readonly','return','satisfies','set','static','super','switch','this','throw','try',
 	'type','typeof','var','void','while','with','yield',
 ]);
+const KW_VSK = new Set([...KW_JS, 'component']);
 const LIT_JS = new Set(['true', 'false', 'null', 'undefined', 'NaN', 'Infinity']);
 
 const KW_PY = new Set([
@@ -557,6 +558,9 @@ function kwSet(items: string[]): Set<string> {
 
 function profileFor(lang: string): LangProfile | null {
 	if (lang === '' ) return null;
+	if (lang === 'vsk' || lang === 'vesk') {
+		return { keywords: KW_VSK, literals: LIT_JS, lineComments: ['//'], blockComments: [['/*', '*/']], strings: ['"', "'", '`'] };
+	}
 	if (lang === 'js' || lang === 'javascript' || lang === 'mjs' || lang === 'cjs'
 		|| lang === 'ts' || lang === 'typescript' || lang === 'tsx' || lang === 'jsx') {
 		return { keywords: KW_JS, literals: LIT_JS, lineComments: ['//'], blockComments: [['/*', '*/']], strings: ['"', "'", '`'] };
@@ -604,7 +608,7 @@ function isHexDigit(ch: string): boolean {
 /**
  * Highlights `code` as `lang` into class-tokenized HTML. Everything is
  * escaped; unknown languages fall back to escaped plain text. Supported:
- * js/ts/jsx/tsx family, json, python, go, rust, sql, bash/shell, yaml/toml,
+ * js/ts/jsx/tsx/vsk/vesk family, json, python, go, rust, sql, bash/shell, yaml/toml,
  * css/scss, html/xml/svg/vue/svelte, diff/patch.
  */
 export function highlightCode(code: string, lang: string): string {
