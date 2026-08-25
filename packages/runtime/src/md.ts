@@ -1254,8 +1254,8 @@ function renderBlocks(blocks: Block[], ctx: RenderCtx): string {
 export const MD_BASE_CSS = `
 .vesk-md { color: #24292f; font-size: 16px; line-height: 1.7; word-wrap: break-word; }
 .vesk-md h1,.vesk-md h2,.vesk-md h3,.vesk-md h4,.vesk-md h5,.vesk-md h6 { margin: 1.4em 0 .6em; font-weight: 650; line-height: 1.25; }
-.vesk-md h1 { font-size: 2em; border-bottom: 1px solid #d0d7de; padding-bottom: .3em; }
-.vesk-md h2 { font-size: 1.5em; border-bottom: 1px solid #d8dee4; padding-bottom: .3em; }
+.vesk-md h1 { font-size: 2em; }
+.vesk-md h2 { font-size: 1.5em; }
 .vesk-md h3 { font-size: 1.25em; } .vesk-md h4 { font-size: 1em; }
 .vesk-md p { margin: .8em 0; }
 .vesk-md a { color: #0969da; text-decoration: none; } .vesk-md a:hover { text-decoration: underline; }
@@ -1263,6 +1263,8 @@ export const MD_BASE_CSS = `
 .vesk-md hr { border: 0; height: 1px; background: #d0d7de; margin: 1.6em 0; }
 .vesk-md blockquote { margin: .8em 0; padding: .2em 1em; color: #57606a; border-left: .25em solid #d0d7de; }
 .vesk-md ul,.vesk-md ol { margin: .8em 0; padding-left: 2em; }
+.vesk-md ul { list-style: disc; } .vesk-md ul ul { list-style: circle; } .vesk-md ul ul ul { list-style: square; }
+.vesk-md ol { list-style: decimal; } .vesk-md ol ol { list-style: lower-alpha; }
 .vesk-md li { margin: .25em 0; }
 .vesk-md li.md-task { list-style: none; margin-left: -1.4em; display: flex; gap: .5em; align-items: baseline; }
 .vesk-md code:not(pre code) { background: rgba(175,184,193,.2); padding: .15em .35em; border-radius: 5px; font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 85%; }
