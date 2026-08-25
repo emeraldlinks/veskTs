@@ -40,6 +40,7 @@ run('npx', ['tsx', 'packages/cli/src/build-packages.ts'], { cwd: root });
 run('npm', ['run', 'build'], { cwd: join(root, 'packages', 'plugin-tailwind') });
 
 const epoch = Date.now();
+const ciVersions = new Map();
 mkdirSync(tarballsDir, { recursive: true });
 
 // Remove previously generated CI tarballs so the directory stays tidy.
@@ -63,11 +64,24 @@ for (const target of TARGETS) {
 	rmSync(join(tmp, 'node_modules'), { recursive: true, force: true });
 
 	const packedName = `${target.name.replace(/^@/, '').replace('/', '-')}-${ciVersion}.tgz`;
+	const outPkg = { ...srcPkg, name: target.name, version: ciVersion };
+	// CI/local installs resolve @vesk/* via the exact `file:` pins in
+	// test-app/package.json. Intra-workspace ranges like ^0.2.0 would make
+	// npm hit the REGISTRY for a non-prerelease version that doesn't exist
+	// yet (ENOTARGET), so relax every internal range to '*' in the packed
+	// tarball.
+	for (const fld of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+		if (!outPkg[fld]) continue;
+		for (const depName of Object.keys(outPkg[fld])) {
+			if (/^@vesk\//.test(depName) || depName === 'vesk') outPkg[fld][depName] = '*';
+		}
+	}
 	writeFileSync(
 		join(tmp, 'package.json'),
-		JSON.stringify({ ...srcPkg, name: target.name, version: ciVersion }, null, 2) + '\n',
+		JSON.stringify(outPkg, null, 2) + '\n',
 	);
 
+	ciVersions.set(target.name, ciVersion);
 	console.log(`[refresh] packing ${target.name}@${ciVersion}`);
 	run('npm', ['pack', '--pack-destination', tarballsDir], { cwd: tmp });
 	if (!existsSync(join(tarballsDir, packedName))) {
@@ -102,5 +116,27 @@ if (existsSync(nestedScope)) {
 	rmSync(nestedScope, { recursive: true, force: true });
 	console.log('[refresh] pruned nested node_modules/vesk/node_modules/@vesk (registry shadows)');
 }
+
+// Freshness gate: assert every installed package carries the exact CI
+// version we just packed, so npm cache/lock reuse can never silently win.
+let stale = false;
+for (const target of TARGETS) {
+	const nmPkgPath = target.name.startsWith('@')
+		? join(testAppDir, 'node_modules', target.name.split('/')[0], target.name.split('/')[1], 'package.json')
+		: join(testAppDir, 'node_modules', target.name, 'package.json');
+	if (!existsSync(nmPkgPath)) {
+		console.error(`[refresh] MISSING installed package ${target.name}`);
+		stale = true;
+		continue;
+	}
+	const inst = JSON.parse(readFileSync(nmPkgPath, 'utf-8'));
+	const want = ciVersions.get(target.name);
+	if (inst.version !== want) {
+		console.error(`[refresh] STALE ${target.name}: installed ${inst.version}, expected ${want}`);
+		stale = true;
+	}
+}
+if (stale) process.exit(1);
+console.log('[refresh] all installed versions match freshly packed CI tarballs');
 
 console.log('[refresh] done — test-app now pins freshly built CI tarballs.');
