@@ -498,5 +498,161 @@ describe('Component-level code theming', () => {
   });
 });
 
+describe('Links: titles, angle autolinks, intraword underscores', () => {
+  it('double-quoted title becomes a title attribute, not part of the href', () => {
+    const html = renderMarkdown('See [docs](https://x.com/a "The Docs") here');
+    expect(html).toContain('<a href="https://x.com/a" title="The Docs">');
+  });
+
+  it("single-quoted title works too", () => {
+    const html = renderMarkdown("See [docs](https://x.com/a 'Docs') here");
+    expect(html).toContain('<a href="https://x.com/a" title="Docs">');
+  });
+
+  it('title content is escaped', () => {
+    const html = renderMarkdown('[a](https://x.com "<b>x</b>")');
+    expect(html).toContain('title="&lt;b&gt;x&lt;/b&gt;"');
+  });
+
+  it('escaped quote inside title does not end it early', () => {
+    const html = renderMarkdown('[a](https://x.com "say \\"hi\\"")');
+    expect(html).toContain('title="say &quot;hi&quot;"');
+  });
+
+  it('parenthesized title works', () => {
+    const html = renderMarkdown('[a](https://x.com (nested))');
+    expect(html).toContain('<a href="https://x.com" title="nested">');
+  });
+
+  it('links without titles are unchanged', () => {
+    const html = renderMarkdown('[a](https://x.com)');
+    expect(html).toBe('<p><a href="https://x.com">a</a></p>');
+  });
+
+  it('image with title gets the attribute', () => {
+    const html = renderMarkdown('![pic](/p.png "the pic")');
+    expect(html).toContain('alt="pic" title="the pic"');
+  });
+
+  it('angle autolink <https://…> renders a link when autolink is on', () => {
+    const html = renderMarkdown('Visit <https://example.com/x> now', { autolink: true });
+    expect(html).toContain('<a href="https://example.com/x">https://example.com/x</a>');
+  });
+
+  it('angle email autolink renders mailto:', () => {
+    const html = renderMarkdown('Mail <me@example.com> ok', { autolink: true });
+    expect(html).toContain('<a href="mailto:me@example.com">me@example.com</a>');
+  });
+
+  it('angle non-url stays escaped', () => {
+    const html = renderMarkdown('x <not a url> y', { autolink: true });
+    expect(html).toContain('&lt;not a url&gt;');
+  });
+
+  it('angle javascript-ish scheme is not linkified (escaped instead)', () => {
+    const html = renderMarkdown('<javascript:alert(1)>', { autolink: true });
+    expect(html).toBe('<p>&lt;javascript:alert(1)&gt;</p>');
+  });
+
+  it('quotes that are part of the URL stay in the destination', () => {
+    const html = renderMarkdown('[x](https://a.test/?q="1")');
+    expect(html).toContain('href="https://a.test/?q=&quot;1&quot;"');
+  });
+
+  it('intraword underscores do not emphasize (CommonMark flanking)', () => {
+    const html = renderMarkdown('config uses some_var_with_underscores here');
+    expect(html).toBe('<p>config uses some_var_with_underscores here</p>');
+  });
+
+  it('underscore emphasis still works at word boundaries', () => {
+    const html = renderMarkdown('this is _real_ stuff');
+    expect(html).toContain('<em>real</em>');
+  });
+
+  it('intraword asterisks still emphasize', () => {
+    const html = renderMarkdown('a*mid*dle stays emphasized-capable: *yes*', { });
+    expect(html).toContain('<em>yes</em>');
+  });
+
+  it('legacy renderMarkdown keeps angle brackets escaped without autolink opt-in', () => {
+    const html = renderMarkdown('<https://example.com>');
+    expect(html).toBe('<p>&lt;https://example.com&gt;</p>');
+  });
+});
+
+describe('Reference links, setext headings, entities', () => {
+  it('full reference form resolves with definition title', () => {
+    const html = renderMarkdown('Read [the docs][1] now\n\n[1]: https://a.com "Docs"');
+    expect(html).toContain('<a href="https://a.com" title="Docs">the docs</a>');
+    expect(html).notToContain('[1]:');
+  });
+
+  it('collapsed [text][] resolves through the text', () => {
+    const html = renderMarkdown('See [vesk][] here\n\n[vesk]: https://v.dev');
+    expect(html).toContain('<a href="https://v.dev">vesk</a>');
+  });
+
+  it('shortcut [text] resolves when defined, stays literal otherwise', () => {
+    const ok = renderMarkdown('go [home] now\n\n[home]: /');
+    expect(ok).toContain('<a href="/">home</a>');
+    const no = renderMarkdown('array[0] access');
+    expect(no).toBe('<p>array[0] access</p>');
+  });
+
+  it('labels are case-insensitive', () => {
+    const html = renderMarkdown('[Docs][DOCS]\n\n[docs]: https://d.io');
+    expect(html).toContain('href="https://d.io"');
+  });
+
+  it('reference image works', () => {
+    const html = renderMarkdown('![pic][p]\n\n[p]: /p.png');
+    expect(html).toContain('<img src="/p.png" alt="pic"');
+  });
+
+  it('failed inline link is not hijacked as shortcut', () => {
+    const html = renderMarkdown('[a](broken\n\n[home]: /');
+    expect(html).notToContain('<a ');
+  });
+
+  it('angle-bracket destinations are supported', () => {
+    const html = renderMarkdown('[x][r]\n\n[r]: <https://q.example/x> "T"');
+    expect(html).toContain('<a href="https://q.example/x" title="T">x</a>');
+  });
+
+  it('setext h1 (=) and h2 (-) under a paragraph line', () => {
+    const html = renderMarkdown('Title One\n=\n\nTitle Two\n-------\nbody');
+    expect(html).toContain('<h1>Title One</h1>');
+    expect(html).toContain('<h2>Title Two</h2>');
+    expect(html).toContain('<p>body</p>');
+  });
+
+  it('standalone hr is unaffected by setext support', () => {
+    const html = renderMarkdown('a\n\n---\n\nb');
+    expect(html).toContain('<hr />');
+  });
+
+  it('named entities decode and re-escape safely', () => {
+    const html = renderMarkdown('&copy; &amp; &lt;tag&gt;');
+    expect(html).toContain('\u00a9');
+    expect(html).toContain('&amp;');
+    expect(html).toContain('&lt;tag&gt;');
+  });
+
+  it('numeric decimal and hex entities decode', () => {
+    const html = renderMarkdown('&#169; &#xA9; &#8212;');
+    expect(html).toContain('\u00a9 \u00a9 \u2014');
+  });
+
+  it('unknown entities stay literal', () => {
+    const html = renderMarkdown('bad&nosuch; end');
+    expect(html).toContain('bad&amp;nosuch;');
+  });
+
+  it('code spans/blocks do NOT decode entities', () => {
+    const html = renderMarkdown('`&copy;`');
+    expect(html).toContain('<code>&amp;copy;</code>');
+  });
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
 process.exit(failed > 0 ? 1 : 0);

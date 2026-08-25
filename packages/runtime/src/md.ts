@@ -304,6 +304,22 @@ type Block =
 	| { type: 'list'; ordered: boolean; start: number; items: Array<{ blocks: Block[]; task: boolean | null }> }
 	| { type: 'table'; head: string[]; align: Align[]; rows: string[][] };
 
+/** Setext underline: a row of '=' (h1) or '-' (h2) directly under a paragraph. */
+function setextLevel(line: string): number {
+	const t = line.trim();
+	if (t.length === 0) return 0;
+	let allEq = true;
+	let allDash = true;
+	for (let i = 0; i < t.length; i++) {
+		if (t[i] !== '=') allEq = false;
+		if (t[i] !== '-') allDash = false;
+		if (!allEq && !allDash) return 0;
+	}
+	if (allEq) return 1;
+	if (allDash) return 2;
+	return 0;
+}
+
 function parseBlocks(lines: string[]): Block[] {
 	const blocks: Block[] = [];
 	let i = 0;
@@ -456,6 +472,7 @@ function parseBlocks(lines: string[]): Block[] {
 			const l = lines[i];
 			if (isBlank(l)) break;
 			const t = l.trim();
+			if (setextLevel(t) > 0) break;
 			if (headingLevel(l) > 0) break;
 			if (isHr(l)) break;
 			if (fenceInfo(t)) break;
@@ -466,6 +483,15 @@ function parseBlocks(lines: string[]): Block[] {
 			i++;
 		}
 		const joined = paraLines.join(' ');
+		// Setext heading: the underline directly terminates the paragraph.
+		if (i < lines.length && paraLines.length > 0) {
+			const lv = setextLevel(lines[i].trim());
+			if (lv > 0) {
+				blocks.push({ type: 'heading', level: lv, text: joined });
+				i++;
+				continue;
+			}
+		}
 		blocks.push({ type: 'paragraph', text: joined, lines: paraLines });
 	}
 	return blocks;
@@ -492,6 +518,120 @@ export function sanitizeUrl(url: string): string {
 		if (ch === '/' || ch === '?' || ch === '#' || ch === '&') break;
 	}
 	return u;
+}
+
+// ── Reference link definitions ───────────────────────────────
+
+interface RefDef {
+	url: string;
+	title: string;
+}
+
+function normalizeRefLabel(label: string): string {
+	return label.trim().toLowerCase();
+}
+
+/**
+ * Parses one `[label]: destination "title"` definition line (single-line form).
+ * Returns null when the line is not a definition.
+ */
+function parseRefDefinitionLine(rawLine: string): { label: string; def: RefDef } | null {
+	const line = rawLine.trim();
+	if (line.length < 4 || line[0] !== '[') return null;
+	let depth = 1;
+	let j = 1;
+	while (j < line.length) {
+		const c = line[j];
+		if (c === '\\') { j += 2; continue; }
+		if (c === '[') depth++;
+		else if (c === ']') {
+			depth--;
+			if (depth === 0) break;
+		}
+		j++;
+	}
+	if (j >= line.length || line[j] !== ']') return null;
+	const label = line.slice(1, j);
+	if (label.trim() === '') return null;
+	if (line[j + 1] !== ':') return null;
+	let rest = line.slice(j + 2);
+	// optional whitespace incl. up to one newline equivalent (we are single-line)
+	while (rest.length > 0 && (rest[0] === ' ' || rest[0] === '\t')) rest = rest.slice(1);
+	if (rest === '') return null;
+
+	let dest: string;
+	if (rest[0] === '<') {
+		const close = rest.indexOf('>');
+		if (close === -1) return null;
+		dest = rest.slice(1, close);
+		rest = rest.slice(close + 1);
+		if (dest.includes('<')) return null;
+	} else {
+		let e = 0;
+		while (e < rest.length && rest[e] !== ' ' && rest[e] !== '\t') e++;
+		dest = rest.slice(0, e);
+		rest = rest.slice(e);
+	}
+	if (dest === '') return null;
+
+	let title = '';
+	const trimmedRest = rest.trim();
+	if (trimmedRest !== '') {
+		// Definition tail is a bare title: "…", '…' or (…) occupying the rest.
+		const open = trimmedRest[0];
+		if (open !== '"' && open !== '\'' && open !== '(') return null;
+		const close = open === '(' ? ')' : open;
+		let m = 1;
+		const titleChars: string[] = [];
+		let closed = false;
+		while (m < trimmedRest.length) {
+			const c = trimmedRest[m];
+			if (c === '\\' && m + 1 < trimmedRest.length) { titleChars.push(trimmedRest[m + 1]); m += 2; continue; }
+			if (c === close) { closed = true; m++; break; }
+			titleChars.push(c);
+			m++;
+		}
+		if (!closed) return null;
+		while (m < trimmedRest.length && (trimmedRest[m] === ' ' || trimmedRest[m] === '\t')) m++;
+		if (m < trimmedRest.length) return null;
+		title = titleChars.join('');
+	}
+	return { label, def: { url: dest, title } };
+}
+
+/**
+ * Collects top-level reference definitions and returns the remaining lines
+ * with those definitions removed. Fenced code contents are never treated as
+ * definitions.
+ */
+function extractRefDefinitions(lines: string[]): { lines: string[]; defs: Map<string, RefDef> } {
+	const defs = new Map<string, RefDef>();
+	const out: string[] = [];
+	let i = 0;
+	while (i < lines.length) {
+		const line = lines[i];
+		const fence = fenceInfo(line.trim());
+		if (fence) {
+			out.push(line);
+			i++;
+			while (i < lines.length) {
+				out.push(lines[i]);
+				const isClose = isFenceClose(lines[i], fence.char, fence.len);
+				i++;
+				if (isClose) break;
+			}
+			continue;
+		}
+		const parsed = parseRefDefinitionLine(line);
+		if (parsed && !defs.has(normalizeRefLabel(parsed.label))) {
+			defs.set(normalizeRefLabel(parsed.label), parsed.def);
+			i++;
+			continue;
+		}
+		out.push(line);
+		i++;
+	}
+	return { lines: out, defs };
 }
 
 // ── Syntax highlighting (tokenizer, no regex) ────────────────
@@ -940,11 +1080,66 @@ function tryAutolink(text: string, i: number): { html: string; end: number } | n
 	return { html: `<a href="${escapeHtml(sanitizeUrl(href))}">${escapeHtml(raw)}</a>`, end: lastGood };
 }
 
+// ── Entities ─────────────────────────────────────────────────
+
+const NAMED_ENTITIES: Record<string, string> = {
+	amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0',
+	copy: '\u00a9', reg: '\u00ae', trade: '\u2122', hellip: '\u2026',
+	mdash: '\u2014', ndash: '\u2013', lsquo: '\u2018', rsquo: '\u2019',
+	ldquo: '\u201c', rdquo: '\u201d', laquo: '\u00ab', raquo: '\u00bb',
+	times: '\u00d7', divide: '\u00f7', plusmn: '\u00b1', deg: '\u00b0',
+	middot: '\u00b7', bull: '\u2022', dagger: '\u2020', sect: '\u00a7',
+	para: '\u00b6', euro: '\u20ac', pound: '\u00a3', yen: '\u00a5',
+	cent: '\u00a2', sup2: '\u00b2', sup3: '\u00b3', frac12: '\u00bd',
+	frac14: '\u00bc', frac34: '\u00be', micro: '\u00b5', agrave: '\u00e0',
+	eacute: '\u00e9', egrave: '\u00e8', uuml: '\u00fc', ouml: '\u00f6',
+	auml: '\u00e4', szlig: '\u00df', ntilde: '\u00f1', ccedil: '\u00e7',
+};
+
+/**
+ * Decodes an entity reference at text[i] and returns it re-escaped, so
+ * `&copy;` renders © while `&lt;` still renders as visible "<" (the decoded
+ * char goes back through escapeHtml). Returns null when there is no valid
+ * reference — the caller escapes the '&' literally.
+ */
+function tryEntity(text: string, i: number): { html: string; end: number } | null {
+	if (text[i] !== '&') return null;
+	const n = text.length;
+	if (text[i + 1] === '#') {
+		let j = i + 2;
+		let value = 0;
+		if (text[j] === 'x' || text[j] === 'X') {
+			j++;
+			while (j < n && isHexDigit(text[j])) {
+				value = value * 16 + parseInt(text[j], 16);
+				j++;
+			}
+			if (j === i + 3) return null;
+		} else {
+			while (j < n && isDigit(text[j])) {
+				value = value * 10 + (text.charCodeAt(j) - 48);
+				j++;
+			}
+			if (j === i + 2) return null;
+		}
+		if (text[j] !== ';' || value === 0 || value > 0x10ffff) return null;
+		return { html: escapeHtml(String.fromCodePoint(value)), end: j + 1 };
+	}
+	let j = i + 1;
+	while (j < n && j <= i + 32 && isIdentPart(text[j])) j++;
+	if (j === i + 1 || text[j] !== ';') return null;
+	const name = text.slice(i + 1, j);
+	const decoded = NAMED_ENTITIES[name];
+	if (decoded === undefined) return null;
+	return { html: escapeHtml(decoded), end: j + 1 };
+}
+
 // ── Inline rendering ─────────────────────────────────────────
 
 interface LinkResult {
 	text: string;
 	url: string;
+	title: string;
 	alt: string;
 	image: boolean;
 	end: number;
@@ -994,9 +1189,49 @@ function parseLink(text: string, start: number): LinkResult | null {
 		j++;
 	}
 	if (urlEnd === -1) return null;
-	const url = text.slice(urlStart, urlEnd).trim();
-	if (url === '') return null;
-	return { text: label, url, alt: label, image: isImage, end: urlEnd + 1 };
+	const rawDest = text.slice(urlStart, urlEnd);
+	const parts = splitLinkTitle(rawDest);
+	if (!parts || parts.url === '') return null;
+	return { text: label, url: parts.url, title: parts.title, alt: label, image: isImage, end: urlEnd + 1 };
+}
+
+/**
+ * Splits an inline link destination into URL + optional title. A title must be
+ * separated from the URL by whitespace ("double quoted", 'single quoted' or
+ * (parenthesized)); quotes that are part of the URL itself (e.g. ?q="1") stay
+ * in the destination. A backslash escapes the quote character inside.
+ */
+function splitLinkTitle(dest: string): { url: string; title: string } | null {
+	// Find the first quote/paren that follows whitespace — that starts a title.
+	let titleStart = -1;
+	for (let i = 1; i < dest.length; i++) {
+		const c = dest[i];
+		if ((c === '"' || c === '\'' || c === '(') && (dest[i - 1] === ' ' || dest[i - 1] === '\t')) {
+			titleStart = i;
+			break;
+		}
+	}
+	if (titleStart === -1) return { url: dest.trim(), title: '' };
+
+	let k = titleStart;
+	while (k > 0 && (dest[k - 1] === ' ' || dest[k - 1] === '\t')) k--;
+	const url = dest.slice(0, k).trim();
+	const open = dest[titleStart];
+	const close = open === '(' ? ')' : open;
+	let m = titleStart + 1;
+	const titleChars: string[] = [];
+	let closed = false;
+	while (m < dest.length) {
+		const c = dest[m];
+		if (c === '\\' && m + 1 < dest.length) { titleChars.push(dest[m + 1]); m += 2; continue; }
+		if (c === close) { closed = true; m++; break; }
+		titleChars.push(c);
+		m++;
+	}
+	if (!closed) return null;
+	while (m < dest.length && (dest[m] === ' ' || dest[m] === '\t')) m++;
+	if (m < dest.length) return null; // trailing garbage after the title
+	return { url, title: titleChars.join('') };
 }
 
 function findDelimiter(text: string, from: number, delim: string): number {
@@ -1005,6 +1240,7 @@ function findDelimiter(text: string, from: number, delim: string): number {
 
 export interface InlineOptions {
 	autolink?: boolean;
+	defs?: Map<string, RefDef>;
 }
 
 function renderInline(text: string, opts: InlineOptions = {}): string {
@@ -1073,14 +1309,34 @@ function renderInline(text: string, opts: InlineOptions = {}): string {
 		}
 
 		if (ch === '[' || (ch === '!' && text[i + 1] === '[')) {
-			const link = parseLink(text, i);
+			let link = parseLink(text, i);
+			if (!link) link = parseRefLink(text, i, opts.defs);
 			if (link) {
+				const titleAttr = link.title !== '' ? ` title="${escapeHtml(link.title)}"` : '';
 				if (link.image) {
-					out += `<img src="${escapeHtml(sanitizeUrl(link.url))}" alt="${escapeHtml(link.alt)}" loading="lazy" />`;
+					out += `<img src="${escapeHtml(sanitizeUrl(link.url))}" alt="${escapeHtml(link.alt)}"${titleAttr} loading="lazy" />`;
 				} else {
-					out += `<a href="${escapeHtml(sanitizeUrl(link.url))}">${renderInline(link.text, opts)}</a>`;
+					out += `<a href="${escapeHtml(sanitizeUrl(link.url))}"${titleAttr}>${renderInline(link.text, opts)}</a>`;
 				}
 				i = link.end;
+				continue;
+			}
+		}
+
+		if (ch === '<' && opts.autolink) {
+			const angle = tryAngleAutolink(text, i);
+			if (angle) {
+				out += angle.html;
+				i = angle.end;
+				continue;
+			}
+		}
+
+		if (ch === '&') {
+			const ent = tryEntity(text, i);
+			if (ent) {
+				out += ent.html;
+				i = ent.end;
 				continue;
 			}
 		}
@@ -1091,12 +1347,112 @@ function renderInline(text: string, opts: InlineOptions = {}): string {
 	return out;
 }
 
+/**
+ * CommonMark angle autolinks: `<https://…>`, `<http://…>`, `<mailto:…>` and
+ * bare `<user@host.tld>` emails. Everything else returns null so the `<` is
+ * escaped as before. Hrefs still pass through sanitizeUrl.
+ */
+function tryAngleAutolink(text: string, start: number): { html: string; end: number } | null {
+	let end = -1;
+	for (let j = start + 1; j < text.length && j <= start + 512; j++) {
+		const c = text[j];
+		if (c === ' ' || c === '\t' || c === '\n' || c === '<') return null;
+		if (c === '>') { end = j; break; }
+	}
+	if (end === -1) return null;
+	const inner = text.slice(start + 1, end);
+	let href: string | null = null;
+	if (inner.startsWith('https://') || inner.startsWith('http://') || inner.startsWith('mailto:')) {
+		href = inner;
+	} else if (isEmailLike(inner)) {
+		href = 'mailto:' + inner;
+	}
+	if (!href) return null;
+	return { html: `<a href="${escapeHtml(sanitizeUrl(href))}">${escapeHtml(inner)}</a>`, end: end + 1 };
+}
+
+function isEmailLike(s: string): boolean {
+	const at = s.indexOf('@');
+	if (at <= 0 || at !== s.lastIndexOf('@')) return false;
+	const domain = s.slice(at + 1);
+	const dot = domain.lastIndexOf('.');
+	if (dot < 1 || dot === domain.length - 1) return false;
+	const okChar = (c: string): boolean =>
+		isIdentPart(c) || c === '.' || c === '-' || c === '+' || c === '%' || c === '_' || c === '@';
+	for (const c of s) {
+		if (!okChar(c)) return false;
+	}
+	return true;
+}
+
+/**
+ * Reference links/images: full `[text][label]`, collapsed `[text][]` and
+ * shortcut `[text]` forms, resolved against the document's definition map.
+ * A failed inline link (`[a](no close`) is never re-interpreted as shortcut —
+ * it stays literal.
+ */
+function parseRefLink(text: string, start: number, defs?: Map<string, RefDef>): LinkResult | null {
+	if (!defs || defs.size === 0) return null;
+	let i = start;
+	let isImage = false;
+	if (text[i] === '!' && text[i + 1] === '[') { isImage = true; i++; }
+	if (text[i] !== '[') return null;
+	i++;
+	let depth = 1;
+	let labelEnd = -1;
+	let j = i;
+	while (j < text.length) {
+		if (text[j] === '\\') { j += 2; continue; }
+		if (text[j] === '[') depth++;
+		else if (text[j] === ']') {
+			depth--;
+			if (depth === 0) { labelEnd = j; break; }
+		}
+		j++;
+	}
+	if (labelEnd === -1) return null;
+	const label = text.slice(i, labelEnd);
+
+	let refLabel: string;
+	let end: number;
+	const next = text[labelEnd + 1];
+	if (next === '[') {
+		const close = text.indexOf(']', labelEnd + 2);
+		if (close === -1) return null;
+		refLabel = text.slice(labelEnd + 2, close);
+		end = close + 1;
+		// Collapsed form `[text][]` resolves through the text itself.
+		if (refLabel.trim() === '') refLabel = label;
+	} else if (next === '(') {
+		return null; // inline-form attempt already failed → literal
+	} else {
+		refLabel = label; // collapsed / shortcut
+		end = labelEnd + 1;
+	}
+
+	const def = defs.get(normalizeRefLabel(refLabel));
+	if (!def) return null;
+	return { text: label, url: def.url, title: def.title, alt: label, image: isImage, end };
+}
+
+function isAlphaNum(ch: string | undefined): boolean {
+	if (ch === undefined) return false;
+	return isIdentPart(ch);
+}
+
 function tryEmphasis(
 	text: string,
 	start: number,
 	opts: InlineOptions = {},
 ): { html: string; end: number } | null {
 	const ch = text[start];
+	// CommonMark flanking rules for `_`: intraword emphasis (`some_var_name`)
+	// never applies. Asterisks keep allowing it.
+	const underscoreOk = (open: boolean, pos: number): boolean => {
+		if (ch !== '_') return true;
+		return open ? !isAlphaNum(text[pos - 1]) : !isAlphaNum(text[pos + 1]);
+	};
+	if (!underscoreOk(true, start)) return null;
 	if (text[start + 1] === ch) {
 		let j = start + 2;
 		while (j < text.length) {
@@ -1105,6 +1461,7 @@ function tryEmphasis(
 					j += 2;
 					continue;
 				}
+				if (!underscoreOk(false, j)) { j++; continue; }
 				return { html: `<strong>${renderInline(text.slice(start + 2, j), opts)}</strong>`, end: j + 2 };
 			}
 			j++;
@@ -1117,6 +1474,7 @@ function tryEmphasis(
 				j++;
 				continue;
 			}
+			if (!underscoreOk(false, j)) { j++; continue; }
 			return { html: `<em>${renderInline(text.slice(start + 1, j), opts)}</em>`, end: j + 1 };
 		}
 		j++;
@@ -1145,6 +1503,7 @@ export interface MarkdownOptions {
 
 interface RenderCtx extends Required<MarkdownOptions> {
 	headings: Map<string, number>;
+	refs: Map<string, RefDef>;
 }
 
 function ctxOf(o: MarkdownOptions): RenderCtx {
@@ -1157,11 +1516,12 @@ function ctxOf(o: MarkdownOptions): RenderCtx {
 		autolink: o.autolink === true,
 		hardBreaks: o.hardBreaks === true,
 		headings: new Map(),
+		refs: new Map(),
 	};
 }
 
 function inlineOpts(ctx: RenderCtx): InlineOptions {
-	return { autolink: ctx.autolink };
+	return { autolink: ctx.autolink, defs: ctx.refs };
 }
 
 function renderListItem(item: { blocks: Block[]; task: boolean | null }, ctx: RenderCtx): string {
@@ -1422,8 +1782,9 @@ export function renderMarkdown(md: string, options: MarkdownOptions = {}): strin
 	const ctx = ctxOf(options);
 	// Normalize CRLF/CR so pasted content parses identically to typed input.
 	const normalized = String(md == null ? '' : md).split('\r\n').join('\n').split('\r').join('\n');
-	const lines = normalized.split('\n');
-	return renderBlocks(parseBlocks(lines), ctx);
+	const extracted = extractRefDefinitions(normalized.split('\n'));
+	ctx.refs = extracted.defs;
+	return renderBlocks(parseBlocks(extracted.lines), ctx);
 }
 
 export interface MdProps {

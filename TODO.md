@@ -145,6 +145,16 @@
 - [ ] **(was Phase 3)** Security hardening: import allowlists, hashed assets + SRI, eval-free scanner (`haul audit`), dev-server hardening, secret redaction
 - [ ] **(was Phase 4)** Native `.vsk` parser/IR port (drop sidecar); optional vesk-owned tree-shaker/minifier behind differential gate
 
+### Focus: markdown (Md) — anchors, links, HTML audit
+- [x] **Link titles corrupted the href** — `[docs](url "Title")` glued the title into the URL. Now parsed (`splitLinkTitle`, whitespace-before-quote required so `?q="1"` stays in the destination) and emitted as a proper escaped `title="…"` on `<a>` and `<img>`.
+- [x] **Intraword underscores wrongly emphasized** — `some_var_with_underscores` produced `<em>var</em>`. CommonMark flanking rules implemented for `_` (openers/closers must not touch alphanumerics); asterisks keep allowing intraword.
+- [x] **Angle autolinks added** — `<https://…>`, `<mailto:…>`, `<user@host.tld>` render as links when `autolink` is on (Md default); non-URLs stay escaped; hrefs still pass sanitizeUrl. Legacy `renderMarkdown()` without options keeps byte-compatible output.
+- [x] Tests: md.test.ts 80 → 96 (titles incl. escapes/parens/images, angle autolinks + safety, underscore flanking, URL-with-quote regression).
+- [ ] **Reference links/images** (`[text][ref]` + definitions) — rendered literally today; definitions leak as paragraphs.
+- [ ] **Setext headings** (`Title\n===`) — currently paragraph mush.
+- [ ] **Entity decoding** (`&copy;` shows literally — safe-side deviation from CommonMark).
+- [ ] **Raw HTML policy decision** — everything HTML-ish is escaped by design (XSS-safe; documented in md.ts header). If passthrough is wanted, needs an allowlist sanitizer (a/img/br/strong/em/code/blockquote?) with URL sanitization — deliberate feature, not a bug fix.
+
 ### Focus: pure-TS pipeline everywhere + @vesk/types
 - [x] **haul unplugged, verified E2E on the pure-TS path** — `vesk dev` (middleware log fires, locals reach API routes), `vesk build` (full output incl. SEO/manifest) and `vesk start` (page 200 + JSON API + SSR h1) all green from `dist/cli.js`; compiler suites green (middleware 11, router 22, integration 119, parser 95, server-codegen 106, client-codegen 161, config 17, scan 39); typecheck incl. @vesk/types green.
 - [x] **esbuild decoupled from sync paths** — all four `transformSync` call sites (adapter api-function, client-bundle stripTypes, adapter dev-server HMR, cli dev-server HMR) now use the compiler's dependency-free acorn-based `stripCodeTypes`; `esbuild-fallback.ts` reduced to async `build()` only, with SIGILL-triggered permanent wasm fallback. `esbuild-wasm` is now a declared optionalDependency of the CLI so the fallback is real.
