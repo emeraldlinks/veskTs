@@ -79,6 +79,72 @@ function getJSXElementName(node: any): string | null {
   return null;
 }
 
+function isIdentStartCode(code: number): boolean {
+  return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95 || code === 36;
+}
+function isIdentCharCode(code: number): boolean {
+  return isIdentStartCode(code) || (code >= 48 && code <= 57);
+}
+
+function looksLikeGenericArrowAt(input: string, pos: number): boolean {
+  let i = pos + 1;
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  if (i >= input.length || !isIdentStartCode(input.charCodeAt(i))) return false;
+  while (i < input.length && isIdentCharCode(input.charCodeAt(i))) i++;
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  if (input.charCodeAt(i) !== 44) return false; // ','
+  i++;
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  if (input.charCodeAt(i) !== 62) return false; // '>'
+  i++;
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  if (input.charCodeAt(i) !== 40) return false; // '('
+  return true;
+}
+
+const TS_PRIMITIVE_TYPES = new Set(['number','string','boolean','any','unknown','never','void','object','symbol','bigint','undefined','null']);
+const HTML_TAGS = new Set(['a','abbr','address','area','article','aside','audio','b','base','bdi','bdo','blockquote','body','br','button','canvas','caption','cite','code','col','colgroup','data','datalist','dd','del','details','dfn','dialog','div','dl','dt','em','embed','fieldset','figcaption','figure','footer','form','h1','h2','h3','h4','h5','h6','head','header','hgroup','hr','html','i','iframe','img','input','ins','kbd','label','legend','li','link','main','map','mark','menu','meta','meter','nav','noscript','object','ol','optgroup','option','output','p','picture','pre','progress','q','rp','rt','ruby','s','samp','script','section','select','slot','small','source','span','strong','style','sub','summary','sup','table','tbody','td','template','textarea','tfoot','th','thead','time','title','tr','track','u','ul','var','video','wbr']);
+
+function looksLikeTypeAssertionAt(input: string, pos: number): boolean {
+  let i = pos + 1;
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  const nameStart = i;
+  if (i >= input.length || !isIdentStartCode(input.charCodeAt(i))) return false;
+  while (i < input.length && isIdentCharCode(input.charCodeAt(i))) i++;
+  const name = input.slice(nameStart, i);
+  // If it's a known HTML tag (lowercase), it's JSX, not a type assertion
+  if (HTML_TAGS.has(name) || VOID_ELEMENTS.has(name)) return false;
+  // Only treat as type assertion if name is a TS primitive or capitalized type
+  const isPrimitive = TS_PRIMITIVE_TYPES.has(name);
+  const isCapitalized = name[0] >= 'A' && name[0] <= 'Z';
+  if (!isPrimitive && !isCapitalized) return false;
+  // allow qualified type like `ns.Type` or `Array<string>`? For now only single identifier, skip generics check
+  // If next is '<', skip balanced <...>
+  if (input.charCodeAt(i) === 60) {
+    let depth = 0;
+    let j = i;
+    while (j < input.length) {
+      const c = input.charCodeAt(j);
+      if (c === 60) depth++;
+      else if (c === 62) {
+        depth--;
+        if (depth === 0) { i = j + 1; break; }
+      }
+      j++;
+      if (j - i > 100) break;
+    }
+  }
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  if (input.charCodeAt(i) !== 62) return false; // '>'
+  i++;
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  if (i >= input.length) return false;
+  const c = input.charCodeAt(i);
+  // expression start: identifier, (, [, {, ", ', `, !, ~, +, -, number, this/super etc.
+  if (isIdentStartCode(c) || c === 40 || c === 91 || c === 123 || c === 34 || c === 39 || c === 96 || c === 33 || c === 126 || c === 43 || c === 45 || (c >= 48 && c <= 57)) return true;
+  return false;
+}
+
 function isWsChar(code: number): boolean {
   return code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
 }
@@ -139,6 +205,10 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
             };
             if (inType) {
               if (startsNewStatement) {
+                if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
+                  this.#jsxStartsStatement = false;
+                  return super.readToken(code);
+                }
                 this.#jsxStartsStatement = true;
                 ++this.pos;
                 return this.finishToken(tstt.jsxTagStart);
@@ -151,6 +221,10 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
                 prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
                 prev === tt._null || prev === tt.jsxTagEnd;
               if (!canEndExpr || startsNewStatement) {
+                if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
+                  this.#jsxStartsStatement = false;
+                  return super.readToken(code);
+                }
                 this.#jsxStartsStatement = true;
                 return forceJsx();
               }

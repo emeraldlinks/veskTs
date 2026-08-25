@@ -1,6 +1,6 @@
 {
   "name": "@vesk/haul-linux-arm64",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Vesk native engine (haul) for linux-arm64",
   "os": [
     "linux"

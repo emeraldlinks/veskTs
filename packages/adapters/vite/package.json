@@ -1,8 +1,8 @@
 {
-  "name": "@vesk/plugin-tailwind",
+  "name": "vite-plugin-vesk",
   "version": "0.2.4",
   "type": "module",
-  "description": "Tailwind CSS v4 plugin for Vesk",
+  "description": "Vite plugin for Vesk — compiles .vsk components to TSX/JS",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -16,8 +16,10 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@tailwindcss/node": "^4.0.0",
-    "@tailwindcss/oxide": "^4.0.0"
+    "@vesk/compiler": "^0.2.4"
+  },
+  "peerDependencies": {
+    "vite": "^5.0.0 || ^6.0.0"
   },
   "license": "MIT",
   "author": "emeraldlinks",

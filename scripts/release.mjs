@@ -22,6 +22,7 @@ const INTERNAL_NAMES = new Set([
   '@vesk/runtime',
   '@vesk/vesk-cli',
   'create-vesk',
+  'vite-plugin-vesk',
 ]);
 
 const PUBLISH_ORDER = [
@@ -30,6 +31,7 @@ const PUBLISH_ORDER = [
   '@vesk/plugin-tailwind',
   '@vesk/prettier-plugin',
   '@vesk/adapter',
+  'vite-plugin-vesk',
   '@vesk/lsp',
   '@vesk/haul-linux-x64',
   '@vesk/haul-linux-arm64',
@@ -55,8 +57,15 @@ const dryRun = process.argv.includes('--dry-run');
 const packages = [];
 for (const dir of readdirSync(PACKAGES_DIR)) {
   const pkgPath = join(PACKAGES_DIR, dir, 'package.json');
-  if (!existsSync(pkgPath)) continue;
-  packages.push({ dir, path: pkgPath, pkg: JSON.parse(readFileSync(pkgPath, 'utf8')) });
+  if (existsSync(pkgPath)) {
+    packages.push({ dir, path: pkgPath, pkg: JSON.parse(readFileSync(pkgPath, 'utf8')) });
+  } else {
+    // Check for nested adapters like packages/adapters/vite
+    const nested = join(PACKAGES_DIR, dir, 'vite', 'package.json');
+    if (existsSync(nested)) {
+      packages.push({ dir: `${dir}/vite`, path: nested, pkg: JSON.parse(readFileSync(nested, 'utf8')) });
+    }
+  }
 }
 
 const byName = new Map(packages.map((p) => [p.pkg.name, p]));
@@ -113,6 +122,7 @@ const BUILD_ORDER = [
   '@vesk/runtime',
   '@vesk/plugin-tailwind',
   '@vesk/adapter',
+  'vite-plugin-vesk',
   '@vesk/compiler',
   '@vesk/prettier-plugin',
   '@vesk/lsp',

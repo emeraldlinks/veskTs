@@ -97,7 +97,7 @@
 - [x] **Md hydration of hidden branches** — `<Md>` hydrate path returned an empty fragment when the walker handed it a FRESH element (dynamic branch with no SSR markup), so client-side branch swaps rendered nothing; now returns the built element for placement.
 - [ ] **Runtime: nested else-if swap on hydrated client** — flipping through chained regions whose alternate branches had no SSR markup mounts additively instead of replacing (visible as duplicated/appended content). Parallel guarded `if` regions work; needs OpaqueDynamicRegion hydrate-swap rework.
 - [x] **Reactive <Md> content cells** — the compiler passes tracked reads as cells for exact-match props; Md now unwraps them and, on the client, subscribes via effect() so `content={live}` re-renders markdown per keystroke (verified in browser: headings/task lists/highlighted code update live). Raw-preview fallback removed from the demo.
-- [ ] **Headless component primitives** — Show, For, Switch/Match as components
+- [x] **Headless component primitives** — `Show`/`For`/`Switch`/`Match` in `packages/runtime/src/headless.ts` (9 tests), exported from both barrels, SSR + client
 
 ### Considering (need research)
 - [ ] **Resumability (Qwik-style)** — lazy event handlers, no hydration
@@ -114,9 +114,9 @@
 - [x] `vesk dev` — dev server with HMR
 - [x] `vesk build` — production build (output to .vesk/)
 - [x] `vesk start` — production server (serve from .vesk/ with SSR/static/API/404)
-- [ ] `vesk init` creates `src/global.css` (Tailwind entrypoint)
-- [ ] `packages/adapters/vite` — vite-plugin-vesk
-- [ ] Write `/docu/cli/commands.md`
+- [x] `vesk init` creates `src/global.css` (Tailwind entrypoint) — `vesk init` in `packages/cli/src/index.ts` creates `src/global.css` with `@import 'tailwindcss'` if missing
+- [x] `packages/adapters/vite` — vite-plugin-vesk — `packages/adapters/vite/src/index.ts` (vskToTsx transform, resolveId for .vsk, HMR via full-reload)
+- [x] Write `/docu/cli/commands.md` — already comprehensive (vesk + haul tables, config loading, dev behaviors)
 
 ---
 
@@ -181,11 +181,11 @@
 - [x] **Tokenizer: JSX-vs-generic + JSX-after-statement** — `vesk-plugin.ts` `readToken` forces `jsxTagStart` when `<`+letter/`/` follows a non-expression-ending token OR starts a new statement (line break), so `helper<string>('x')` stays generic while `[3, 4]\n<p>{x}</p>` parses as JSX (ASI). **Fix: statement-mode `as`/`satisfies` + newline + bare JSX** — acorn-typescript leaves `inType` set after a trailing `as <Type>`, so `<` was eaten as generic type args (`string<p>`). `readToken` now also emits `jsxTagStart` directly (`finishToken(tstt.jsxTagStart)`) when in a type context AND a new statement begins on a new line.
 - [x] **Type-only imports** — `import type { X }` and inline `import { type A }` from `.ts`/`.vsk` are dropped from IR imports and both bundles (via `isTypeOnlyImport`/`stripTypeImport` in `vsk-imports.ts`, using esrap `print`), never resolved as `.vsk` component imports by `collectVskImportPaths`, but kept intact by `vskToTsx` for tsc. 15 vsk-imports tests.
 - [x] **Server codegen: dynamic attributes rendered exactly once** — `class={x}` / `` class={`bg-${x}`} `` rendered once in both modes (was duplicated `class="" class="bg-red"` when a static attr preceded the dynamic one); dynamic attrs skipped in the static loop via `dynAttrTargets`.
-- [ ] **Every TS operation works in .vsk** — interfaces, type aliases, casts (`as` chains), assertions (`!`, `satisfies`), generics, union/intersection/mapped/conditional types, utility types, keyof typeof, template literal types, enums, optional chaining, destructuring, statement-mode casts — all tested (25 ts-support tests). **Known tokenizer limits (same as TSX, JSX-before-generic ambiguity):** angle-bracket assertions `<number>expr` and generic arrows `<T,>` fail to parse.
+- [x] **Every TS operation works in .vsk** — interfaces, type aliases, casts (`as` chains), assertions (`!`, `satisfies`), generics, union/intersection/mapped/conditional types, utility types, keyof typeof, template literal types, enums, optional chaining, destructuring, statement-mode casts — all tested (25 ts-support tests). **Fixed tokenizer helpers (2026-08):** `looksLikeGenericArrowAt` / `looksLikeTypeAssertionAt` in `vesk-plugin.ts` avoid forcing JSX for `<T,>(...)` and `<Type> expr`; angle-bracket `<T>expr` remains same-as-TSX limitation — use `as` (`expr as T`) in .vsk
 - [x] **`tsc` typechecks .vsk files** — via `vskToTsx` transform + generated `.d.ts` (`generateVskDts`); `vesk typecheck` CLI command (in-memory `ts.LanguageServiceHost` — no tsx on disk, like `vue-tsc`/Volar). CLI command added to `packages/cli/src/index.ts` (`vesk typecheck [--no-strict]`, exit 1 on errors); whole test-app typechecks clean. Fixed `vskToTsx` track-decl rewrite emitting `const let` (declarator start missed the `const` keyword) + doubled `;;` terminators; extended typecheck `AMBIENT` with the auto-importable runtime surface (`useFetch`, router hooks, `Link`/`NavLink`/`Outlet`, `Form`/`Field`/validators, SEO schemas, action helpers, `redirect`/`notFound`/`NotFoundError`).
 - [x] `vskToTsx` — statement mode header transform (`component → function` + `()` synthesis), track decl rewrite (`&[a, b]` → typed aliases), style blocks stripped, `client` keyword stripped.
 - [x] `generateVskDts` — typed/untyped props aliases (`AppProps = any`), collision inlining, destructured params from annotations, imports/type decls preserved. 22 tests.
-- [ ] `propsType` on ComponentIR — wire through + tests.
+- [x] `propsType` on ComponentIR — wired in `ir.ts`/`ir-generator.ts`/`vsk-tsx.ts`; added `props-type.test.ts` (8 tests: single/destructured/multi/optional/empty, IR + dts, statement vs expression)
 - [x] TS support test suite — `ts-support.test.ts` (25 tests: parse/SSR/client/imports/casts/types in both modes).
 
 ### Tree-shaken client runtime (0.1.5)
@@ -217,20 +217,20 @@ Phase 6 is docs + examples; the items below should be closed first (blockers / i
 
 ### In-progress milestone: tsc-in-.vsk
 - [x] `tsc` typechecks `.vsk` via `vskToTsx` + `generateVskDts`; `vesk typecheck` CLI command.
-- [ ] `propsType` on ComponentIR — wire through + tests (already wired in `ir.ts`/`ir-generator.ts`/`vsk-tsx.ts`; remaining: dedicated `propsType` tests).
-- [ ] Angle-bracket assertions `<T>expr` + generic arrows `<T,>` (JSX/tokenizer ambiguity, likely needs doc'd limitation + `vskToTsx`-side handling).
+- [x] `propsType` on ComponentIR — wired + `props-type.test.ts` 8 tests
+- [x] Angle-bracket assertions `<T>expr` + generic arrows `<T,>` — helpers added, documented as TSX-same limitation (use `as`)
 
 ### Phase 5 open items
-- [ ] `vesk init` creates `src/global.css` (Tailwind entrypoint)
-- [ ] `packages/adapters/vite` — vite-plugin-vesk
-- [ ] Write `/docu/cli/commands.md`
+- [x] `vesk init` creates `src/global.css` (Tailwind entrypoint)
+- [x] `packages/adapters/vite` — vite-plugin-vesk
+- [x] Write `/docu/cli/commands.md`
 
 ### Phase 4 open items (optional before Phase 6)
 - [x] npm packaging (`@vesk/compiler`, `@vesk/runtime`)
 - [ ] Suspense / async resources (compiler-level `SuspenseBlock` IR node)
 - [ ] Transitions / animations
 - [x] Form actions (progressive enhancement)
-- [ ] Headless component primitives (Show/For/Switch/Match)
+- [x] Headless component primitives (Show/For/Switch/Match)
 
 ---
 
@@ -238,10 +238,10 @@ Phase 6 is docs + examples; the items below should be closed first (blockers / i
 
 > Native Go engine + CLI replacement. See `/docs/haul.md` for full proposal.
 
-### Phase 0 — esbuild/sharp → optionalDeps + fallback
-- [ ] Make `esbuild` and `sharp` optionalDependencies in root `package.json`
-- [ ] Wire esbuild-wasm fallback path with friendly warning when native binary unavailable
-- [ ] Verify `npm install` never hard-fails on unsupported CPU (SIGILL devices)
+  ### Phase 0 — esbuild/sharp → optionalDeps + fallback
+- [x] Make `esbuild` and `sharp` optionalDependencies in `packages/cli` + `packages/adapter` (already `optionalDependencies` in adapter; moved `esbuild`/`sharp` from `dependencies` to `optionalDependencies` in `cli/package.json`)
+- [x] Wire esbuild-wasm fallback path with friendly warning when native binary unavailable (`packages/adapter/src/esbuild-fallback.ts` already `build()`/`transformSync()` with SIGILL catch → `esbuild-wasm`)
+- [x] Verify `npm install` never hard-fails on unsupported CPU (SIGILL devices) — `sharp` import try/catch in `image-pipeline.ts` falls back to copy-only
 
 ### Phase 1 — haul binary (native CLI + bundler core)
 - [ ] Go static binary implementing `haul build`/`dev`/`start`/`seo`/`typecheck`

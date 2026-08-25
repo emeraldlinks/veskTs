@@ -1,6 +1,6 @@
 {
   "name": "@vesk/vesk-cli",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "type": "module",
   "description": "Vesk — compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
   "bin": {
@@ -9,13 +9,11 @@
   },
   "main": "./dist/cli.js",
   "dependencies": {
-    "@vesk/adapter": "^0.2.3",
-    "@vesk/compiler": "^0.2.3",
-    "@vesk/plugin-tailwind": "^0.2.3",
-    "@vesk/runtime": "^0.2.3",
-    "esbuild": "^0.25.0",
+    "@vesk/adapter": "^0.2.4",
+    "@vesk/compiler": "^0.2.4",
+    "@vesk/plugin-tailwind": "^0.2.4",
+    "@vesk/runtime": "^0.2.4",
     "esrap": "^2.3.0",
-    "sharp": "^0.35.3",
     "typescript": "^5.8.0",
     "ws": "^8.18.0",
     "zimmerframe": "^1.1.0"
@@ -46,10 +44,12 @@
     "README.md"
   ],
   "optionalDependencies": {
-    "@vesk/haul-darwin-arm64": "^0.2.3",
-    "@vesk/haul-darwin-x64": "^0.2.3",
-    "@vesk/haul-linux-arm64": "^0.2.3",
-    "@vesk/haul-linux-x64": "^0.2.3",
-    "@vesk/haul-win32-x64": "^0.2.3"
+    "@vesk/haul-darwin-arm64": "^0.2.4",
+    "@vesk/haul-darwin-x64": "^0.2.4",
+    "@vesk/haul-linux-arm64": "^0.2.4",
+    "@vesk/haul-linux-x64": "^0.2.4",
+    "@vesk/haul-win32-x64": "^0.2.4",
+    "esbuild": "^0.25.0",
+    "sharp": "^0.35.3"
   }
 }
