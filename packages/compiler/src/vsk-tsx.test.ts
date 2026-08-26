@@ -111,7 +111,7 @@ test('style block stripped', () => {
 
 test('Head ambient injected when used in a module', () => {
   const tsx = vskToTsx(`import { track } from '@vesk/runtime'\ncomponent C { <Head><title>T</title></Head> <div>hi</div> }`);
-  has(tsx, 'declare const Head: (props: { children?: unknown }) => unknown;', 'Head ambient');
+  has(tsx, 'declare const Head: (props: { children?: Component }) => Component;', 'Head ambient');
 });
 
 test('no Head ambient for script files (global ambient covers it)', () => {
@@ -136,7 +136,7 @@ test('vsk import kept', () => {
 test('dts: typed single props param', () => {
   const dts = generateVskDts(fixture('with-props'));
   has(dts, 'export type CardProps = { title: string };', 'props alias');
-  has(dts, 'export declare function Card(props: CardProps & { children?: unknown }): unknown;', 'card signature');
+  has(dts, 'export declare function Card(props: CardProps & { children?: Component }): Component;', 'card signature');
 });
 
 test('dts: positional params synthesized', () => {
@@ -147,13 +147,13 @@ test('dts: positional params synthesized', () => {
 test('dts: untyped props → any', () => {
   const dts = generateVskDts(fixture('simple'));
   has(dts, 'export type AppProps = any;', 'any props');
-  has(dts, 'export declare function App(props: any): unknown;', 'app signature');
+  has(dts, 'export declare function App(props: any): Component;', 'app signature');
   has(dts, `import { Button } from './Button.vsk';`, 'imported component kept');
 });
 
 test('dts: default export', () => {
   const dts = generateVskDts(fixture('export-default'));
-  has(dts, 'export default function App(props: any): unknown;', 'default function');
+  has(dts, 'export default function App(props: any): Component;', 'default function');
 });
 
 test('dts: interface declarations included', () => {
@@ -166,7 +166,7 @@ test('dts: collision with user Props type inlines instead', () => {
   const dts = generateVskDts(`type AppProps = { custom: boolean }\nexport component App(props: { label: string }) { <p>x</p> }`);
   has(dts, 'type AppProps = { custom: boolean }', 'user type kept');
   notHas(dts, 'export type AppProps', 'no duplicate alias');
-  has(dts, 'export declare function App(props: { label: string } & { children?: unknown }): unknown;', 'inlined type');
+  has(dts, 'export declare function App(props: { label: string } & { children?: Component }): Component;', 'inlined type');
 });
 
 test('dts: css imports filtered, js imports kept', () => {

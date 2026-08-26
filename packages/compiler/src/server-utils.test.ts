@@ -1,10 +1,11 @@
 import {
-	escapeHtml, raw, csrfToken, verifyCsrfToken, csrfGuard,
+	escapeHtml, raw, csrfToken, verifyCsrfToken, csrfGuard, csrfHmac,
 	signCookie, unsignCookie, setSignedCookie, readSignedCookie,
 	securityHeaders, corsHeaders, corsPreflight,
 	createRateLimiter, getClientIp, getClientProtocol, applyTrustProxy,
 	redactLog, setRedactLogging, securityComment,
 	prettifyHtml, extractTopLevelNames, extractRuntimeNames, evalTopLevelCode,
+	safeJsonForScript, quoteAttr, randomToken, assertSameOrigin, DEFAULT_MAX_BODY_BYTES,
 } from '@vesk/compiler/src/server-utils';
 
 let passed = 0;
@@ -351,10 +352,21 @@ describe('trustProxy', () => {
 		expect(getClientIp(req, true)).toBe('198.51.100.7');
 	});
 
-	it('getClientIp returns unknown when trustProxy is false', () => {
+	it('getClientIp ignores x-forwarded-for when trustProxy is false (no spoofing)', () => {
 		const req = { headers: { 'x-forwarded-for': '203.0.113.42' } };
 		const ip = getClientIp(req, false);
-		expect(ip).toBe('203.0.113.42');
+		expect(ip).toBe('unknown');
+	});
+
+	it('getClientIp honors cf-connecting-ip only with trustProxy', () => {
+		const req = { headers: { 'cf-connecting-ip': '198.51.100.9' } };
+		expect(getClientIp(req, true)).toBe('198.51.100.9');
+		expect(getClientIp(req, false)).toBe('unknown');
+	});
+
+	it('getClientProtocol ignores x-forwarded-proto without trustProxy', () => {
+		const req = { headers: { 'x-forwarded-proto': 'https' } };
+		expect(getClientProtocol(req, false)).toBe('http');
 	});
 
 	it('getClientProtocol returns https from x-forwarded-proto', () => {
@@ -624,6 +636,189 @@ describe('evalTopLevelCode', () => {
 		const scope = {};
 		evalTopLevelCode(['const broken = (;'], scope);
 		expect(scope.broken).toBeUndefined();
+	});
+});
+
+// ── Script-safe serialization (XSS regression) ───────────────────
+
+describe('safeJsonForScript', () => {
+
+	it('escapes </script> breakouts', () => {
+		const json = JSON.stringify({ bio: '</script><script>alert(1)</script>' });
+		const safe = safeJsonForScript(json);
+		expect(safe.includes('</script>')).toBe(false);
+		expect(safe.includes('\\u003c')).toBe(true);
+		expect(JSON.parse(safe)).toEqual({ bio: '</script><script>alert(1)</script>' });
+	});
+
+	it('escapes U+2028/U+2029 line separators', () => {
+		const ls = String.fromCharCode(0x2028);
+		const ps = String.fromCharCode(0x2029);
+		const json = JSON.stringify({ note: 'a' + ls + 'b' + ps + 'c' });
+		const safe = safeJsonForScript(json);
+		expect(safe.includes(ls)).toBe(false);
+		expect(safe.includes(ps)).toBe(false);
+		expect(JSON.parse(safe).note).toBe('a' + ls + 'b' + ps + 'c');
+	});
+
+	it('escapes every < while leaving other JSON syntax intact', () => {
+		const json = '{"tag":"<b>","rest":"a>b & c"}';
+		expect(safeJsonForScript(json)).toBe('{"tag":"\\u003cb>","rest":"a>b & c"}');
+	});
+});
+
+function isHexOf(s, len) {
+	if (s.length !== len) return false;
+	for (const c of s) { if (!'0123456789abcdef'.includes(c)) return false; }
+	return true;
+}
+
+describe('quoteAttr / randomToken / DEFAULT_MAX_BODY_BYTES', () => {
+	it('quoteAttr escapes double quotes only', () => {
+		expect(quoteAttr('a"b c')).toBe('a&quot;b c');
+	});
+
+	it('randomToken is hex, long and unique', () => {
+		const a = randomToken(16);
+		const b = randomToken(16);
+		expect(a.length).toBe(32);
+		expect(isHexOf(a, 32)).toBe(true);
+		expect(a === b).toBe(false);
+	});
+
+	it('DEFAULT_MAX_BODY_BYTES is 1 MiB', () => {
+		expect(DEFAULT_MAX_BODY_BYTES).toBe(1024 * 1024);
+	});
+});
+
+// ── CSRF crypto strength ─────────────────────────────────────────
+
+function throwsWithStatus(fn, wantStatus) {
+	try { fn(); return false; }
+	catch (e) { return wantStatus === undefined ? true : e.status === wantStatus; }
+}
+
+describe('csrfHmac (HMAC-SHA256)', () => {
+
+	it('produces a full-length deterministic digest', () => {
+		const a = csrfHmac('session123', 'secret');
+		const b = csrfHmac('session123', 'secret');
+		expect(a).toBe(b);
+		expect(a.length).toBe(64);
+		expect(isHexOf(a, 64)).toBe(true);
+	});
+
+	it('differs per value and per secret', () => {
+		expect(csrfHmac('a', 's') === csrfHmac('b', 's')).toBe(false);
+		expect(csrfHmac('a', 's') === csrfHmac('a', 't')).toBe(false);
+	});
+
+	it('matches the RFC 4231 HMAC-SHA256 test vector', () => {
+		// HMAC-SHA256(key='key', msg='The quick brown fox jumps over the lazy dog')
+		expect(csrfHmac('The quick brown fox jumps over the lazy dog', 'key'))
+			.toBe('f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8');
+	});
+
+	it('tokens have value:hex-signature shape', () => {
+		const token = csrfToken('sess', 'h');
+		const colon = token.indexOf(':');
+		const value = token.slice(0, colon);
+		const sig = token.slice(colon + 1);
+		expect(value).toBe('sess');
+		expect(sig.length).toBe(64);
+		expect(isHexOf(sig, 64)).toBe(true);
+		expect(verifyCsrfToken(token, 'h')).toBe(true);
+	});
+});
+
+// ── Same-origin CSRF defense ─────────────────────────────────────
+
+describe('assertSameOrigin', () => {
+
+	const post = (headers) => ({ method: 'POST', headers });
+
+	it('allows safe methods regardless of headers', () => {
+		expect(throwsWithStatus(() => assertSameOrigin({ method: 'GET', headers: { origin: 'https://evil.com' } }))).toBe(false);
+		expect(throwsWithStatus(() => assertSameOrigin({ method: 'HEAD', headers: { origin: 'https://evil.com' } }))).toBe(false);
+		expect(throwsWithStatus(() => assertSameOrigin({ method: 'OPTIONS', headers: { origin: 'https://evil.com' } }))).toBe(false);
+	});
+
+	it('allows POST without Origin/Referer (non-browser client)', () => {
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com' })))).toBe(false);
+	});
+
+	it('allows same-origin POST via Origin header', () => {
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com', origin: 'https://app.com' })))).toBe(false);
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'localhost:3000', origin: 'http://localhost:3000' })))).toBe(false);
+	});
+
+	it('allows same-origin POST via Referer when Origin missing', () => {
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com', referer: 'https://app.com/page?x=1' })))).toBe(false);
+	});
+
+	it('blocks cross-site POST with mismatched Origin (403)', () => {
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com', origin: 'https://evil.com' })), 403)).toBe(true);
+	});
+
+	it('blocks cross-site POST with mismatched Referer', () => {
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com', referer: 'https://evil.com/csrf' })))).toBe(true);
+	});
+
+	it('tolerates one-sided port presence but never a different hostname', () => {
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com', origin: 'http://app.com:8080' })))).toBe(false);
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com:8080', origin: 'https://app.com' })))).toBe(false);
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com:8080', origin: 'https://app.com:9090' })))).toBe(true);
+		expect(throwsWithStatus(() => assertSameOrigin(post({ host: 'app.com', origin: 'https://eviller.com' })))).toBe(true);
+	});
+
+	it('accepts Headers-like objects (web Request style)', () => {
+		const ok = new Headers({ host: 'app.com', origin: 'https://app.com' });
+		const bad = new Headers({ host: 'app.com', origin: 'https://evil.com' });
+		expect(throwsWithStatus(() => assertSameOrigin({ method: 'POST', headers: ok }))).toBe(false);
+		expect(throwsWithStatus(() => assertSameOrigin({ method: 'POST', headers: bad }))).toBe(true);
+	});
+});
+
+// ── CORS credentials opt-in ──────────────────────────────────────
+
+describe('corsHeaders credentials default', () => {
+
+	it('does not send Allow-Credentials by default', () => {
+		const h = corsHeaders({ cors: { origin: ['https://other.com'] } }, 'https://other.com', 'app.com');
+		expect(h['Access-Control-Allow-Credentials']).toBeUndefined();
+	});
+
+	it('sends Allow-Credentials only when explicitly enabled', () => {
+		const h = corsHeaders({ cors: { origin: ['https://other.com'], credentials: true } }, 'https://other.com', 'app.com');
+		expect(h['Access-Control-Allow-Credentials']).toBe('true');
+	});
+
+	it('never combines credentials with wildcard origin', () => {
+		const h = corsHeaders({ cors: { origin: ['*'], credentials: true } }, 'https://x.com', 'app.com');
+		expect(h['Access-Control-Allow-Credentials']).toBeUndefined();
+	});
+});
+
+// ── Rate limiter trustProxy ──────────────────────────────────────
+
+describe('createRateLimiter trustProxy', () => {
+
+	it('ignores spoofed x-forwarded-for by default (all clients share key "unknown")', () => {
+		const rl = createRateLimiter({ windowMs: 1000, max: 2, cleanupIntervalMs: 10000 });
+		const spoofed = { headers: { 'x-forwarded-for': '1.2.3.4' } };
+		expect(rl.middleware(spoofed)).toBe(true);
+		expect(rl.middleware(spoofed)).toBe(true);
+		expect(rl.middleware(spoofed)).toBe(false); // limited — header ignored
+	});
+
+	it('honors proxy headers only with trustProxy', () => {
+		const rl = createRateLimiter({ windowMs: 1000, max: 2, cleanupIntervalMs: 10000, trustProxy: true });
+		const a = { headers: { 'x-forwarded-for': '1.1.1.1' } };
+		const b = { headers: { 'x-forwarded-for': '2.2.2.2' } };
+		expect(rl.middleware(a)).toBe(true);
+		expect(rl.middleware(a)).toBe(true);
+		expect(rl.middleware(a)).toBe(false);
+		expect(rl.middleware(b)).toBe(true); // separate bucket
 	});
 });
 

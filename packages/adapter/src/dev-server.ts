@@ -3,9 +3,11 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
 import { createHmrServer } from '@vesk/adapter/src/hmr';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
+import { resolveWithin } from '@vesk/adapter/src/paths';
 import type { RouteNode, DevServerOptions, Manifest } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,20 +19,41 @@ interface ExtendedRequest extends Request {
   clone(): ExtendedRequest;
 }
 
-async function readBody(req: AsyncIterable<Uint8Array>): Promise<Buffer> {
+export function bodyTooLarge(maxBytes: number): Error & { status: number } {
+  const err = new Error(`Request body exceeds limit (${maxBytes} bytes)`) as Error & { status: number };
+  err.status = 413;
+  return err;
+}
+
+function errorStatus(e: unknown, fallback: number): number {
+  const s = (e as { status?: unknown } | null)?.status ?? (e as { statusCode?: unknown } | null)?.statusCode;
+  return typeof s === 'number' && s >= 400 && s < 600 ? s : fallback;
+}
+
+async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAULT_MAX_BODY_BYTES): Promise<Buffer> {
   const chunks: Uint8Array[] = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.byteLength;
+    if (total > maxBytes) throw bodyTooLarge(maxBytes);
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks);
 }
 
-function makeWebRequest(nodeReq: IncomingMessage, url: string): ExtendedRequest {
+function makeWebRequest(nodeReq: IncomingMessage, url: string, maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES): ExtendedRequest {
   const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
   const method = nodeReq.method || 'GET';
   let _bodyBuffer: Buffer | null = null;
   async function getBody(): Promise<Buffer> {
     if (_bodyBuffer) return _bodyBuffer;
     const chunks: Buffer[] = [];
-    for await (const chunk of nodeReq) chunks.push(Buffer.from(chunk));
+    let total = 0;
+    for await (const chunk of nodeReq) {
+      total += chunk.byteLength;
+      if (total > maxBodyBytes) throw bodyTooLarge(maxBodyBytes);
+      chunks.push(Buffer.from(chunk));
+    }
     _bodyBuffer = Buffer.concat(chunks);
     return _bodyBuffer;
   }
@@ -63,6 +86,9 @@ const MIME: Record<string, string> = {
 
 export async function startDevServer(appDir: string, options?: DevServerOptions): Promise<Server | void> {
   const port = options?.port || 3000;
+  const host = options?.host || '127.0.0.1';
+  const maxBodyBytes = options?.maxBodyBytes || DEFAULT_MAX_BODY_BYTES;
+  if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
   const devDir = resolve(appDir, '..', '.vesk', 'dev');
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
 
@@ -133,9 +159,9 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     }
 
     if (url.pathname.startsWith('/_vesk/static/')) {
-      const relPath = url.pathname.replace('/_vesk/static/', '').replace(/\.\./g, '');
-      const staticPath = resolve(devDir, 'static', relPath);
-      if (!staticPath.startsWith(resolve(devDir, 'static'))) {
+      const relPath = url.pathname.slice('/_vesk/static/'.length);
+      const staticPath = resolveWithin(resolve(devDir, 'static'), relPath);
+      if (!staticPath) {
         res.writeHead(403); res.end('Forbidden'); return;
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
@@ -147,10 +173,9 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     }
 
     if (url.pathname !== '/') {
-      const sanitized = url.pathname.replace(/\.\./g, '');
 
-      const sourcePath = resolve(publicDir, sanitized.slice(1));
-      if (sourcePath.startsWith(publicDir) && existsSync(sourcePath) && statSync(sourcePath).isFile()) {
+      const sourcePath = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
+      if (sourcePath && existsSync(sourcePath) && statSync(sourcePath).isFile()) {
         const ext = extname(sourcePath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
         res.end(readFileSync(sourcePath));
@@ -158,8 +183,8 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       }
 
       const buildPublicDir = resolve(devDir, 'static', 'public');
-      const buildPath = resolve(buildPublicDir, sanitized.slice(1));
-      if (buildPath.startsWith(buildPublicDir) && existsSync(buildPath) && statSync(buildPath).isFile()) {
+      const buildPath = url.pathname.length > 1 ? resolveWithin(buildPublicDir, url.pathname.slice(1)) : null;
+      if (buildPath && existsSync(buildPath) && statSync(buildPath).isFile()) {
         const ext = extname(buildPath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
         res.end(readFileSync(buildPath));
@@ -176,7 +201,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
           try {
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handleAction?: (req: Request, id: string) => Promise<Response> };
             if (mod.handleAction) {
-              const webRequest = makeWebRequest(req, url.href);
+              const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
               const response = await mod.handleAction(webRequest, actionId);
               const body = await response.text();
               const headers = Object.fromEntries(response.headers);
@@ -193,7 +218,8 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
               return;
             }
           } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
+            const status = errorStatus(e, 500);
+            res.writeHead(status, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
             return;
           }
@@ -211,7 +237,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         if (existsSync(handlerPath)) {
           try {
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const webRequest = makeWebRequest(req, url.href);
+            const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
             const body = await response.text();
             res.writeHead(response.status, Object.fromEntries(response.headers));
@@ -233,7 +259,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         if (existsSync(handlerPath)) {
           try {
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const webRequest = makeWebRequest(req, url.href);
+            const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
             const body = await response.text();
 
@@ -264,7 +290,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         if (existsSync(handlerPath)) {
           try {
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const webRequest = makeWebRequest(req, url.href);
+            const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
             const body = await response.text();
             const headers = Object.fromEntries(response.headers);
@@ -356,8 +382,8 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   }
 
   await new Promise<void>(resolve => {
-    server.listen(port, () => {
-      console.error(`vesk dev server at http://localhost:${port}`);
+    server.listen(port, host, () => {
+      console.error(`vesk dev server at http://localhost:${port} (listening on ${host})`);
       resolve();
     });
   });

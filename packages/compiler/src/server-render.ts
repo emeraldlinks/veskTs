@@ -11,6 +11,7 @@ import {
   loadRuntimeImports, evalTopLevelCode,
   callStaticProps, callLoadFunction,
   securityHeaders, securityComment,
+  safeJsonForScript, quoteAttr,
 } from '@vesk/compiler/src/server-utils';
 import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
@@ -218,7 +219,7 @@ export async function ssg(
     ? compileClient(source, null, { hydrate: true })
     : '';
 
-  const serializedProps = JSON.stringify(props);
+  const serializedProps = safeJsonForScript(JSON.stringify(props));
   const hasClient = clientCode.length > 0;
 
   const scriptBlock = hasClient
@@ -272,8 +273,8 @@ export function buildDataScripts(
     if (src) return [`\t<script src="${src}"></script>`];
   }
   const scripts: string[] = [];
-  if (hasProps) scripts.push(`\t<script>const __vesk_props = ${JSON.stringify(payload.props)};</script>`);
-  if (hasData) scripts.push(`\t<script>globalThis.__vsk_ssr_data = ${JSON.stringify(ssrData)};</script>`);
+  if (hasProps) scripts.push(`\t<script>const __vesk_props = ${safeJsonForScript(JSON.stringify(payload.props))};</script>`);
+  if (hasData) scripts.push(`\t<script>globalThis.__vsk_ssr_data = ${safeJsonForScript(JSON.stringify(ssrData))};</script>`);
   return scripts;
 }
 
@@ -332,8 +333,8 @@ export async function renderFullPage(
 
     if (options.security) {
       const sec = options.security;
-      if (sec.referrerPolicy !== false) headLines.push(`\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />`);
-      if (sec.contentSecurityPolicy !== false) headLines.push(`\t<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />`);
+      if (sec.referrerPolicy !== false) headLines.push(`\t<meta name="referrer" content="${quoteAttr(sec.referrerPolicy || 'strict-origin-when-cross-origin')}" />`);
+      if (sec.contentSecurityPolicy !== false) headLines.push(`\t<meta http-equiv="Content-Security-Policy" content="${quoteAttr(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'")}" />`);
       if (sec.autoEscape !== false) headLines.push(`\t<!-- vesk: auto-escape enabled -->`);
     }
 
@@ -393,8 +394,8 @@ export function renderPageStream(
   if (cssLink) yield cssLink;
   if (options.security) {
     const sec = options.security;
-    if (sec.referrerPolicy !== false) yield `\t<meta name="referrer" content="${sec.referrerPolicy || 'strict-origin-when-cross-origin'}" />\n`;
-    if (sec.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
+    if (sec.referrerPolicy !== false) yield `\t<meta name="referrer" content="${quoteAttr(sec.referrerPolicy || 'strict-origin-when-cross-origin')}" />\n`;
+    if (sec.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${quoteAttr(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'")}" />\n`;
     if (sec.autoEscape !== false) yield `\t<!-- vesk: auto-escape enabled -->\n`;
   }
   if (targetComp) {

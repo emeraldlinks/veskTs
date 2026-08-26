@@ -3,17 +3,34 @@ import { resolve, extname, dirname } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { createRateLimiter, resolveComponentName } from '@vesk/compiler/src/server-codegen';
-import { securityHeaders, getClientProtocol } from '@vesk/compiler/src/server-utils';
+import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
+import { securityHeaders } from '@vesk/compiler/src/server-utils';
+import { resolveWithin } from '@vesk/adapter/src/paths';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const _require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-async function readBody(req: AsyncIterable<Uint8Array>): Promise<Buffer> {
+async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAULT_MAX_BODY_BYTES): Promise<Buffer> {
   const chunks: Uint8Array[] = [];
-  for await (const chunk of req) chunks.push(chunk);
+  let total = 0;
+  for await (const chunk of req) {
+    total += chunk.byteLength;
+    if (total > maxBytes) throw bodyTooLarge(maxBytes);
+    chunks.push(chunk);
+  }
   return Buffer.concat(chunks);
+}
+
+export function bodyTooLarge(maxBytes: number): Error & { status: number } {
+  const err = new Error(`Request body exceeds limit (${maxBytes} bytes)`) as Error & { status: number };
+  err.status = 413;
+  return err;
+}
+
+function errorStatus(e: unknown, fallback: number): number {
+  const s = (e as { status?: unknown } | null)?.status ?? (e as { statusCode?: unknown } | null)?.statusCode;
+  return typeof s === 'number' && s >= 400 && s < 600 ? s : fallback;
 }
 
 interface ExtendedRequest extends Request {
@@ -25,14 +42,19 @@ interface ExtendedRequest extends Request {
   query: Record<string, string>;
 }
 
-function makeWebRequest(nodeReq: IncomingMessage, url: string): ExtendedRequest {
+function makeWebRequest(nodeReq: IncomingMessage, url: string, maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES): ExtendedRequest {
   const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
   const method = nodeReq.method || 'GET';
   let _bodyBuffer: Buffer | null = null;
   async function getBody(): Promise<Buffer> {
     if (_bodyBuffer) return _bodyBuffer;
     const chunks: Buffer[] = [];
-    for await (const chunk of nodeReq) chunks.push(Buffer.from(chunk));
+    let total = 0;
+    for await (const chunk of nodeReq) {
+      total += chunk.byteLength;
+      if (total > maxBodyBytes) throw bodyTooLarge(maxBodyBytes);
+      chunks.push(Buffer.from(chunk));
+    }
     _bodyBuffer = Buffer.concat(chunks);
     return _bodyBuffer;
   }
@@ -96,8 +118,12 @@ interface MatchPathResult {
   [key: string]: string;
 }
 
-export async function startProdServer(outDir: string, options?: { port?: number }): Promise<Server> {
+export async function startProdServer(outDir: string, options?: { port?: number; host?: string; maxBodyBytes?: number }): Promise<Server> {
   const port = options?.port || 3000;
+  const host = options?.host || '127.0.0.1';
+  const maxBodyBytes = options?.maxBodyBytes || DEFAULT_MAX_BODY_BYTES;
+  // Production default: generated handlers consult this to gate error details.
+  if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production';
   const staticDir = resolve(outDir, 'static');
   const configPath = resolve(outDir, 'config.json');
 
@@ -127,14 +153,16 @@ export async function startProdServer(outDir: string, options?: { port?: number 
     if (typeof rawConfig === 'function') rawConfig = rawConfig();
     const configObj = rawConfig as Record<string, unknown>;
     securityConfig = { security: configObj.security as SecurityConfig['security'] };
-  } catch {
-    // ignore config load errors
+  } catch (e) {
+    // Fail closed: keep the secure defaults above and warn loudly — a broken
+    // config must never silently disable the app's chosen security policy.
+    console.error('vesk start: failed to load vesk.config — falling back to secure defaults:', e instanceof Error ? e.message : e);
   }
 
   let rateLimiter: { check: (ip: string) => boolean } | null = null;
   if (securityConfig?.rateLimit) {
     const rlConfig = securityConfig.rateLimit;
-    rateLimiter = createRateLimiter({ windowMs: rlConfig.windowMs || 60000, max: rlConfig.max || 100 });
+    rateLimiter = createRateLimiter({ windowMs: rlConfig.windowMs || 60000, max: rlConfig.max || 100, trustProxy: !!securityConfig?.trustProxy });
   }
 
   let securityHeadersFn: ((config: Record<string, unknown>) => Record<string, string>) | null = null;
@@ -231,9 +259,8 @@ export async function startProdServer(outDir: string, options?: { port?: number 
     }) as typeof res.writeHead;
 
     const publicDir = resolve(staticDir, 'public');
-    const sanitized = url.pathname.replace(/\.\./g, '');
-    const rootFile = resolve(publicDir, sanitized.slice(1));
-    if (rootFile.startsWith(publicDir) && existsSync(rootFile) && statSync(rootFile).isFile()) {
+    const rootFile = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
+    if (rootFile && existsSync(rootFile) && statSync(rootFile).isFile()) {
       const ext = extname(rootFile);
       res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
       res.end(readFileSync(rootFile));
@@ -246,8 +273,9 @@ export async function startProdServer(outDir: string, options?: { port?: number 
       const payload = store?.[token];
       if (payload) delete store[token];
       const lines: string[] = [];
-      if (payload?.props) lines.push(`globalThis.__vesk_props = ${JSON.stringify(payload.props)};`);
-      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${JSON.stringify(payload.ssrData)};`);
+      // script-safe serialization: props may contain user data
+      if (payload?.props) lines.push(`globalThis.__vesk_props = ${safeJsonForScript(JSON.stringify(payload.props))};`);
+      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${safeJsonForScript(JSON.stringify(payload.ssrData))};`);
       res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
       res.end(lines.join('\n') || '// no ssr data');
       return;
@@ -263,9 +291,9 @@ export async function startProdServer(outDir: string, options?: { port?: number 
     }
 
     if (url.pathname.startsWith('/_vesk/static/')) {
-      const relPath = url.pathname.replace('/_vesk/static/', '').replace(/\.\./g, '');
-      const staticPath = resolve(staticDir, relPath);
-      if (!staticPath.startsWith(staticDir)) {
+      const relPath = url.pathname.slice('/_vesk/static/'.length);
+      const staticPath = resolveWithin(staticDir, relPath);
+      if (!staticPath) {
         res.writeHead(403); res.end('Forbidden'); return;
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
@@ -324,13 +352,16 @@ export async function startProdServer(outDir: string, options?: { port?: number 
         return;
       }
       try {
-        const webRequest = makeWebRequest(req, url.href);
+        const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
         const response = await mod.handleAction(webRequest, actionId);
         const body = await response.text();
         res.writeHead(response.status, Object.fromEntries(response.headers));
         res.end(body);      } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        res.writeHead(500, { 'Content-Type': 'application/json' });
+        const status = errorStatus(e, 500);
+        const message = status === 500 && process.env.NODE_ENV === 'production'
+          ? 'Internal Server Error'
+          : e instanceof Error ? e.message : String(e);
+        res.writeHead(status, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: message }));
       }
       return;
@@ -344,16 +375,16 @@ export async function startProdServer(outDir: string, options?: { port?: number 
             const mod = await loadFunction(route.function);
             if (mod) {
               try {
-                const webRequest = makeWebRequest(req, url.href);
+                const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
                 const response = await mod.handle(webRequest);
                 const body = await response.text();
                 res.writeHead(response.status, Object.fromEntries(response.headers));
                 res.end(body);
                 return;
               } catch (e) {
-                const message = e instanceof Error ? e.message : String(e);
-                res.writeHead(500, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: message }));
+                const status = errorStatus(e, 500);
+                res.writeHead(status, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: status === 500 ? 'Internal Server Error' : e instanceof Error ? e.message : String(e) }));
                 return;
               }
             }
@@ -382,8 +413,7 @@ export async function startProdServer(outDir: string, options?: { port?: number 
           const mod = await loadFunction(route.function);
             if (mod) {
             try {
-              const webRequest = makeWebRequest(req, url.href);
-
+              const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
               let cachedResult: { html: string; headers: Record<string, string> } | null = null;
               if (route.revalidate && route.revalidate > 0) {
                 const { pageIsr } = await import('@vesk/runtime/src/index-server') as unknown as { pageIsr: (path: string, fn: () => Promise<{ html: string; headers: Record<string, string> }>, opts: { revalidate: number; tags: string[] }) => Promise<{ html: string; headers: Record<string, string> } | null> };
@@ -436,7 +466,9 @@ export async function startProdServer(outDir: string, options?: { port?: number 
                   const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
                   const src = readFileSync(errPath, 'utf-8');
                   const compName = resolveComponentName(src) || 'Error';
-                  errorHtml = await renderFullPage(src, compName, { error: err.message, stack: err.stack, statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: errPath });
+                  // never leak stack traces / internal messages to prod error pages
+                  const expose = process.env.NODE_ENV !== 'production';
+                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: errPath });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });
@@ -452,8 +484,8 @@ export async function startProdServer(outDir: string, options?: { port?: number 
     res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
   });
 
-  server.listen(port, () => {
-    console.error(`vesk production server at http://localhost:${port}`);
+  server.listen(port, host, () => {
+    console.error(`vesk production server at http://localhost:${port} (listening on ${host})`);
   });
 
   return server;

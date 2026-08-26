@@ -870,21 +870,23 @@ async function main() {
       return {
         pageH1: h1 ? h1.textContent.trim() : '',
         hasH1: mdContent.includes('Markdown in Vesk'),
-        hasLi: mdContent.includes('compiler-first'),
-        hasBlockquote: mdContent.includes('Content is escaped'),
-        hasCode: mdContent.includes('const md = track'),
-        hasOrdered: mdContent.includes('SSR and hydration'),
-        hasLink: mdContent.includes('Md content'),
+        hasLi: mdContent.includes('tables with column alignment'),
+        hasBlockquote: mdContent.includes('quoting works anywhere'),
+        hasCode: mdContent.includes('interface Post'),
+        hasTable: !!mdDiv && mdDiv.querySelector('table') !== null,
+        hasStrong: !!mdDiv && mdDiv.querySelector('strong') !== null,
+        hasAutolink: !!mdDiv && Array.from(mdDiv.querySelectorAll('a')).some(a => (a.href || '').includes('github.com')),
         hasRawScriptLeak: mdContent.includes('<script>'),
       };
     });
     assert(md.pageH1 === 'Markdown Demo', 'page h1: ' + md.pageH1);
     assert(md.hasH1, 'markdown h1 rendered');
-    assert(md.hasLi, 'markdown list item rendered');
+    assert(md.hasLi, 'markdown task-list item rendered');
     assert(md.hasBlockquote, 'markdown blockquote rendered');
     assert(md.hasCode, 'markdown code block rendered');
-    assert(md.hasOrdered, 'markdown ordered list rendered');
-    assert(md.hasLink, 'markdown inline formatting rendered');
+    assert(md.hasTable, 'markdown table rendered');
+    assert(md.hasStrong, 'markdown bold rendered');
+    assert(md.hasAutolink, 'markdown autolink rendered');
     assert(md.hasRawScriptLeak === false, 'no raw <script> leaked');
 
     // SPA-navigate away and back — Md must re-render in client-only mode

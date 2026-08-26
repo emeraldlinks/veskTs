@@ -209,11 +209,50 @@ describe('matchApiUrl', () => {
 			'users/route.ts': '',
 		});
 		const tree = scanApiRoutes(d);
-		const match = matchApiUrl(tree, '/api/products');
-		expect(match).not.toBeNull();
-		cleanup();
-	});
+    const match = matchApiUrl(tree, '/api/products');
+    expect(match).not.toBeNull();
+    cleanup();
+  });
 });
 
-console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-process.exit(failed > 0 ? 1 : 0);
+// ── buildWebRequest body cap ─────────────────────────────────────
+
+function makeBody(buf) {
+	return { [Symbol.asyncIterator]: async function* () { yield buf; } };
+}
+
+(async () => {
+  console.log('\nbuildWebRequest body limit');
+  try {
+    const { buildWebRequest, tooLargeError } = await import('@vesk/compiler/src/api-routes');
+    // under the cap: json() works
+    const small = buildWebRequest(
+      { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, ...makeBody(Buffer.from('{"a":1}')) },
+      'http://localhost/x',
+      undefined,
+      { maxBodyBytes: 1024 }
+    );
+    expect(await small.json()).toEqual({ a: 1 });
+
+    // over the cap: getBody throws a 413
+    let status = 0;
+    const big = buildWebRequest(
+      { method: 'POST', headers: { host: 'localhost' }, ...makeBody(Buffer.alloc(2048, 7)) },
+      'http://localhost/x',
+      undefined,
+      { maxBodyBytes: 1024 }
+    );
+    try { await big.text(); } catch (e) { status = e.status || 0; }
+    expect(status).toBe(413);
+
+    const err = tooLargeError(1024);
+    expect(err.status).toBe(413);
+    passed += 3;
+    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected)');
+  } catch (e) {
+    failed++;
+    console.log(`  ✗ body cap — ${e.message}`);
+  }
+  console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+  process.exit(failed > 0 ? 1 : 0);
+})();

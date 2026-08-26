@@ -421,9 +421,15 @@ export class VeskRequest extends ServerRequest {
 
 	get ip(): string {
 		if (!this._ip) {
-			const fwd = this.headers?.get('x-forwarded-for');
-			if (fwd) this._ip = fwd.split(',')[0].trim();
-			else this._ip = 'unknown';
+			// Proxy headers are only trusted when explicitly enabled via
+			// setTrustProxy() — otherwise any client could spoof its IP.
+			if (this._security.trustProxy) {
+				const fwd = this.headers?.get('x-forwarded-for');
+				if (fwd) this._ip = fwd.split(',')[0].trim();
+				else this._ip = this.headers?.get('x-real-ip') || 'unknown';
+			} else {
+				this._ip = 'unknown';
+			}
 		}
 		return this._ip;
 	}
@@ -431,8 +437,12 @@ export class VeskRequest extends ServerRequest {
 
 	get protocol(): string {
 		if (!this._protocol) {
-			const proto = this.headers?.get('x-forwarded-proto');
-			this._protocol = proto ? proto.split(',')[0].trim() : 'http';
+			if (this._security.trustProxy) {
+				const proto = this.headers?.get('x-forwarded-proto');
+				this._protocol = proto ? proto.split(',')[0].trim() : (this.parsedUrl.protocol === 'https:' ? 'https' : 'http');
+			} else {
+				this._protocol = this.parsedUrl.protocol === 'https:' ? 'https' : 'http';
+			}
 		}
 		return this._protocol;
 	}

@@ -4,8 +4,9 @@ import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
-import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
+import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
 import { resolveErrorFile } from '@vesk/adapter/src/ssr-function';
+import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
 import type { RouteNode, AncestorLayout } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -297,8 +298,25 @@ export function createHmrServer(
   devDir: string,
   componentMap?: Map<string, string>,
 ): { broadcast: (type: string, data?: Record<string, unknown>) => void; handleFileChange: (filename: string | null, doFullBuild: () => Promise<void>, routeTree: RouteNode[]) => Promise<void> } {
-  const wss = new WebSocketServer({ server: httpServer, path: '/_vesk/hmr' });
+  // Per-session nonce gating the client-side HMR eval hook (see
+  // appendHmrGlobals in client-bundle.ts). Broadcast with every update.
+  const hmrNonce = randomToken(16);
+  (globalThis as Record<string, unknown>).__vesk_hmr_nonce = hmrNonce;
+
+  const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<import('ws').WebSocket>();
+
+  // Origin-checked upgrade: cross-site pages always attach an Origin header
+  // to WebSocket handshakes, so a mismatch means a CSWS attempt — destroy it.
+  httpServer.on('upgrade', (req, socket, head) => {
+    if (req.url !== '/_vesk/hmr' || !isAllowedWsUpgrade(req.headers as Record<string, unknown>)) {
+      socket.destroy();
+      return;
+    }
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      wss.emit('connection', ws, req);
+    });
+  });
 
   wss.on('connection', (ws: import('ws').WebSocket) => {
     clients.add(ws);
@@ -307,7 +325,7 @@ export function createHmrServer(
   });
 
   function broadcast(type: string, data?: Record<string, unknown>): void {
-    const msg = JSON.stringify({ type, ...data });
+    const msg = JSON.stringify({ type, nonce: hmrNonce, ...data });
     for (const ws of clients) {
       try { ws.send(msg); } catch { clients.delete(ws); }
     }

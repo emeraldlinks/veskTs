@@ -1,5 +1,6 @@
 import { mkdirSync, copyFileSync, readdirSync, statSync, existsSync, writeFileSync, readFileSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
+import { resolveWithin } from '@vesk/adapter/src/paths';
 import type { RouteNode, SsgRouteResult } from '@vesk/adapter/src/types';
 
 export function copyStaticAssets(publicDir: string, outDir: string): void {
@@ -62,7 +63,14 @@ export async function generateSsgRoutes(routeTree: RouteNode[], appDir: string, 
                 const params: Record<string, string> = (entry as Record<string, unknown>).params as Record<string, string> || {};
                 const result = await ssg(src, null, params, {});
                 const urlPath = (entry as Record<string, unknown>).path as string || node.fullPath;
-                const htmlPath = resolve(prerenderDir, urlPath === '/' ? 'index.html' : `${urlPath.replace(/^\//, '')}.html`);
+                // getStaticPaths output is app-controlled but must never write
+                // outside the prerender output dir
+                const relName = urlPath === '/' ? 'index.html' : `${urlPath.replace(/^\//, '')}.html`;
+                const htmlPath = resolveWithin(prerenderDir, relName);
+                if (!htmlPath) {
+                  console.error(`vesk: SSG path escaped output dir — skipping ${pagePath} (path: ${urlPath})`);
+                  continue;
+                }
                 mkdirSync(resolve(htmlPath, '..'), { recursive: true });
                 writeFileSync(htmlPath, result.html);
                 results.push({ path: urlPath, html: htmlPath, static: result.static, params });

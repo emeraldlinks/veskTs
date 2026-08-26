@@ -86,7 +86,7 @@ test('ComponentIR propsType propagates to vsk-tsx dts', () => {
   const src = `export component Card(props: { title: string }) { <div>{props.title}</div> }`;
   const dts = generateVskDts(src);
   expect(dts).toContain('export type CardProps = { title: string };');
-  expect(dts).toContain('CardProps & { children?: unknown }');
+  expect(dts).toContain('CardProps & { children?: Component }');
   const ir = irFor(src);
   expect(ir.propsType).toBe('{ title: string }');
 });

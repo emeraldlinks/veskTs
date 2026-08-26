@@ -20,8 +20,8 @@
 					switch (msg.type) {
 						case 'update':
 							if (msg.fnSources) {
-								var _eval: (c: string) => unknown = ((globalThis as Record<string, unknown>).__vesk_hmr_eval as ((c: string) => unknown) | undefined) || function(c: string) { try { return eval(c) } catch(ex) { console.error('HMR eval error:', ex) } };
-								Object.values(msg.fnSources as Record<string, string>).forEach(function(fn: string) { _eval(fn) });
+								var _eval: (c: string, n?: string) => unknown = ((globalThis as Record<string, unknown>).__vesk_hmr_eval as ((c: string, n?: string) => unknown) | undefined) || function(c: string) { try { return eval(c) } catch(ex) { console.error('HMR eval error:', ex) } };
+								Object.values(msg.fnSources as Record<string, string>).forEach(function(fn: string) { _eval(fn, msg.nonce as string | undefined) });
 							}
 							(globalThis as Record<string, unknown>).__updatedComponents = new Set(Object.keys((msg.components || {}) as Record<string, unknown>));
 							var router = (globalThis as Record<string, unknown>).__vesk_router as { hmrUpdate?: () => void } | undefined;
@@ -176,7 +176,7 @@
 			var shownHeader = false;
 			for (var t = 0; t < (msg.tips as string[]).length; t++) {
 				if (!shownHeader) { tipsHtml += '<div class="__vo_tips_title">Debug Tips</div>'; shownHeader = true; }
-				tipsHtml += '<div class="__vo_tip">' + (msg.tips as string[])[t] + '</div>';
+				tipsHtml += '<div class="__vo_tip">' + escapeHtml((msg.tips as string[])[t]) + '</div>';
 			}
 		}
 		if (msg.suggestions && (msg.suggestions as string[]).length > 0) {

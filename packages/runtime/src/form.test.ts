@@ -131,6 +131,12 @@ describe('Field SSR', () => {
     expect(html).toContain('<label>Your Name</label>');
   });
 
+  it('escapes HTML in SSR labels (XSS regression)', () => {
+    const html = Field({ name: 'bio', label: '<script>alert(1)</script>', children: '<input />' });
+    if (html.includes('<script>alert(1)</script>')) throw new Error('label markup injected unescaped');
+    expect(html).toContain('&lt;script&gt;');
+  });
+
   it('renders error placeholder hidden', () => {
     const html = Field({ name: 'x', children: '<input />' });
     expect(html).toContain('data-vsk-error');

@@ -1,6 +1,8 @@
 import { readdirSync, statSync, existsSync } from 'fs';
 import { join, extname } from 'path';
 import type { ApiRouteNode } from '@vesk/compiler/src/types';
+import { collapseSlashes } from '@vesk/compiler/src/router';
+import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 
 function basename(p: string): string {
   const idx = p.lastIndexOf('/');
@@ -67,7 +69,7 @@ function scanApiDir(rootDir: string, dir: string, parentPath: string): ApiRouteN
 
   const node: ApiRouteNode = {
     path: seg,
-    fullPath: fullPath.replace(/\/+/g, '/') || '/',
+    fullPath: collapseSlashes(fullPath) || '/',
     isDynamic,
     isCatchAll,
     filePath: hasRoute && routeFileName ? join(dir, routeFileName) : null,
@@ -92,7 +94,13 @@ function scanApiDir(rootDir: string, dir: string, parentPath: string): ApiRouteN
 }
 
 export function matchApiUrl(tree: ApiRouteNode[], pathname: string): { node: ApiRouteNode; params: Record<string, string> } | null {
-  const normalized = (pathname.split('?')[0].split('#')[0]).replace(/^\/api(\/|$)/, '/');
+  let normalized = pathname.split('?')[0].split('#')[0];
+  // strip a leading /api segment (exact or followed by /) without regex
+  if (normalized === '/api') {
+    normalized = '/';
+  } else if (normalized.startsWith('/api/') && !normalized.startsWith('//')) {
+    normalized = normalized.slice(4);
+  }
   const parts = normalized.split('/').filter(Boolean);
   const params: Record<string, string> = {};
 
@@ -177,7 +185,8 @@ export type BuildWebRequestInput = {
 export function buildWebRequest(
   nodeReq: BuildWebRequestInput,
   url: string,
-  body?: BodyInit | null
+  body?: BodyInit | null,
+  options?: { maxBodyBytes?: number }
 ): Request & { cookies: Record<string, string>; query: Record<string, string> } {
   const parsedUrl = new URL(url, `http://${nodeReq.headers?.host || 'localhost'}`);
   const method = nodeReq.method || 'GET';
@@ -193,7 +202,14 @@ export function buildWebRequest(
     const getBody = async (): Promise<Buffer> => {
       if (_bodyBuffer) return _bodyBuffer;
       const chunks: Uint8Array[] = [];
-      for await (const chunk of nodeReq) chunks.push(chunk as Uint8Array);
+      let total = 0;
+      const max = options?.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+      for await (const chunk of nodeReq) {
+        const bytes = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
+        total += bytes.byteLength;
+        if (total > max) throw tooLargeError(max);
+        chunks.push(bytes as Uint8Array);
+      }
       _bodyBuffer = Buffer.concat(chunks as Buffer[]);
       return _bodyBuffer;
     };
@@ -217,6 +233,12 @@ export function buildWebRequest(
   return webRequest as Request & { cookies: Record<string, string>; query: Record<string, string> };
 }
 
+export function tooLargeError(max: number): Error & { status: number } {
+  const err = new Error(`Request body exceeds limit (${max} bytes)`) as Error & { status: number };
+  err.status = 413;
+  return err;
+}
+
 export async function executeApiRoute(
   filePath: string,
   method: string,
@@ -236,12 +258,34 @@ export async function executeApiRoute(
       mod = await import(filePath) as Record<string, unknown>;
     }
   } catch (e: unknown) {
-    return new Response(JSON.stringify({ error: 'Failed to load route module', details: (e as Error).message }), {
+    // details only in dev (devCache present); prod gets a generic message
+    const body = devCache
+      ? { error: 'Failed to load route module', details: (e as Error).message }
+      : { error: 'Failed to load route module' };
+    return new Response(JSON.stringify(body), {
       status: 500, headers: { 'Content-Type': 'application/json' },
     });
   }
 
   const routeConfig = (mod.config || {}) as Record<string, unknown>;
+
+  // Default CSRF defense for mutating API calls: same-origin check unless the
+  // route opts out via `config.csrf = false`.
+  {
+    const methodUpper = method.toUpperCase();
+    if (routeConfig.csrf !== false && methodUpper !== 'GET' && methodUpper !== 'HEAD' && methodUpper !== 'OPTIONS') {
+      try {
+        assertSameOrigin({
+          method: methodUpper,
+          headers: Object.fromEntries([...request.headers.entries()].map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v])),
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Cross-origin request blocked' }), {
+          status: 403, headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+  }
 
   const handler = mod[method] as ((req: Request, ctx: { params: Promise<Record<string, string>> }) => Response | Promise<Response>) | undefined;
   if (!handler) {
@@ -348,7 +392,9 @@ export async function executeApiRoute(
         status: 404, headers: { 'Content-Type': 'application/json' },
       });
     }
-    return new Response(JSON.stringify({ error: err.message }), {
+    // never leak internal error messages in production responses
+    const body = devCache ? { error: err.message } : { error: 'Internal Server Error' };
+    return new Response(JSON.stringify(body), {
       status: 500, headers: { 'Content-Type': 'application/json' },
     });
   } finally {

@@ -47,6 +47,17 @@ function parsePortArg(args: string[], def = 3000): number {
   return def;
 }
 
+// Bind address for dev/start servers. Loopback by default — exposing a dev
+// server on all interfaces must be an explicit opt-in (`--host 0.0.0.0`).
+function parseHostArg(args: string[]): string | undefined {
+  for (let i = 1; i < args.length; i++) {
+    const a = args[i];
+    if (a.startsWith('--host=')) return a.slice('--host='.length);
+    if ((a === '-H' || a === '--host') && args[i + 1]) return args[i + 1];
+  }
+  return undefined;
+}
+
 if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
   usage(args.length === 0 ? 1 : 0);
 }
@@ -201,8 +212,9 @@ if (cmd === 'start') {
   const projectDir = process.cwd();
   const outDir = join(projectDir, '.vesk');
   const port = parsePortArg(args);
+  const host = parseHostArg(args);
 
-  startProdServer(outDir, { port });
+  startProdServer(outDir, { port, host });
   await new Promise(() => {});
 }
 
@@ -231,6 +243,7 @@ if (cmd === 'dev') {
   const projectDir = process.cwd();
   const appDirPath = join(projectDir, 'app');
   const port = parsePortArg(args);
+  const host = parseHostArg(args);
 
   if (!existsSync(appDirPath)) {
     console.error(`vesk: no app/ directory found in ${projectDir}`);
@@ -240,5 +253,5 @@ if (cmd === 'dev') {
 
   const config = (await loadConfig(projectDir)) as Record<string, unknown>;
   setRuntimeModule(__veskRuntime);
-  await startDevServer(port, projectDir, config);
+  await startDevServer(port, projectDir, config, host);
 }

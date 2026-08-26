@@ -37,8 +37,8 @@ const originalLayoutSrc = readFileSync(layoutPath, 'utf-8');
 if (!process.env.VESK_E2E) {
   startDevServer(appDir, { port: PORT, publicDir });
   // The initial build (SSR functions + esbuild client bundle) can take several
-  // seconds. Poll for the client bundle instead of sleeping a fixed amount so
-  // the assertions below don't race the build.
+  // seconds. Poll for the client bundle AND a live TCP connection instead of
+  // sleeping a fixed amount so the assertions below don't race the build.
   const deadline = Date.now() + 30000;
   while (!existsSync(clientBundlePath)) {
     if (Date.now() > deadline) {
@@ -48,12 +48,26 @@ if (!process.env.VESK_E2E) {
     }
     await new Promise(r => setTimeout(r, 250));
   }
+  let up = false;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/_vesk/runtime.js`);
+      if (res.ok) { up = true; break; }
+    } catch {}
+    await new Promise(r => setTimeout(r, 250));
+  }
+  if (!up) {
+    console.log('  \u2717 timed out waiting for dev server to accept connections');
+    failed++;
+    process.exit(1);
+  }
 }
 
 try {
   const clientCode = existsSync(clientBundlePath) ? readFileSync(clientBundlePath, 'utf-8') : '';
   assert(existsSync(clientBundlePath), 'Client bundle exists');
   assert(clientCode.includes('__vesk_hmr_eval'), 'HMR eval helper defined in client bundle');
+  assert(clientCode.includes('__vesk_hmr_nonce'), 'HMR eval helper is nonce-gated');
   assert(clientCode.includes('__vesk_router'), 'Router exposed on globalThis');
 
   const hmrCode = existsSync(hmrClientPath) ? readFileSync(hmrClientPath, 'utf-8') : '';
@@ -62,6 +76,7 @@ try {
   assert(hmrCode.includes('WebSocket'), 'HMR WebSocket connection code present');
   assert(hmrCode.includes("'update'") || hmrCode.includes('"update"'), 'HMR client handles update messages');
   assert(hmrCode.includes("'reload'") || hmrCode.includes('"reload"'), 'HMR client handles reload messages');
+  assert(hmrCode.includes('nonce'), 'HMR client forwards the update nonce to the eval hook');
 
   const ws = new WebSocket(`ws://localhost:${PORT}/_vesk/hmr`);
   await new Promise((resolve, reject) => {
@@ -69,6 +84,39 @@ try {
     ws.onerror = reject;
   });
   assert(true, 'WebSocket connects to HMR endpoint');
+
+  // Browser-style connection sends an Origin header — same origin must pass.
+  try {
+    const sameOrigin = new WebSocket(`ws://127.0.0.1:${PORT}/_vesk/hmr`, {
+      headers: { origin: `http://localhost:${PORT}` },
+    });
+    await new Promise((resolve, reject) => {
+      sameOrigin.onopen = resolve;
+      sameOrigin.onerror = reject;
+      setTimeout(() => reject(new Error('timeout')), 4000);
+    });
+    sameOrigin.close();
+    assert(true, 'same-origin WebSocket (with Origin header) connects');
+  } catch {
+    assert(false, 'same-origin WebSocket (with Origin header) connects');
+  }
+
+  // Cross-site pages attach a mismatched Origin — must be destroyed.
+  let blocked = false;
+  try {
+    const evil = new WebSocket(`ws://127.0.0.1:${PORT}/_vesk/hmr`, {
+      headers: { origin: 'https://evil.example' },
+    });
+    await new Promise((resolve, reject) => {
+      evil.onopen = resolve;
+      evil.onerror = () => reject(new Error('rejected'));
+      setTimeout(() => reject(new Error('timeout')), 4000);
+    });
+    evil.close();
+  } catch {
+    blocked = true;
+  }
+  assert(blocked, 'cross-origin WebSocket upgrade is rejected');
 
   const messages = [];
   ws.onmessage = (e) => {

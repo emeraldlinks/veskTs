@@ -1425,11 +1425,11 @@ function hasKeyedMap(nodes: IRNode[]): boolean {
 
 export function escapeHtml(str: string): string {
   return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;')
+    .split('"').join('&quot;')
+    .split("'").join('&#39;');
 }
 
 function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean }): string {

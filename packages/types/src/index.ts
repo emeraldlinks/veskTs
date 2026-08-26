@@ -183,12 +183,20 @@ export interface BuildOptions {
 
 export interface DevServerOptions {
   port?: number;
+  /** Bind address. Defaults to 127.0.0.1 (loopback) — pass '0.0.0.0' to expose. */
+  host?: string;
   publicDir?: string;
   block?: boolean;
+  /** Request body size cap in bytes. Default 1 MiB. */
+  maxBodyBytes?: number;
 }
 
 export interface ProdServerOptions {
   port?: number;
+  /** Bind address. Defaults to 127.0.0.1 (loopback) — pass '0.0.0.0' to expose. */
+  host?: string;
+  /** Request body size cap in bytes. Default 1 MiB. */
+  maxBodyBytes?: number;
 }
 
 export interface SsrFunctionOptions {

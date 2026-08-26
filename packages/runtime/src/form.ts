@@ -92,7 +92,7 @@ export function Field(props: FieldProps, registry?: Map<string, unknown>, hydrat
 	const { name, label, rules = [], children, errorClass, class: className, style, ...rest } = props;
 
 	if (formIsSSR()) {
-		const labelHtml = label ? `<label>${label}</label>` : '';
+		const labelHtml = label ? `<label>${escapeHtml(String(label))}</label>` : '';
 		const serverErrors = readServerFieldErrors();
 		const serverErr = serverErrors[name] ? String(serverErrors[name]) : '';
 		const errStyle = serverErr ? '' : 'display:none';

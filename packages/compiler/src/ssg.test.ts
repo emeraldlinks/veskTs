@@ -134,6 +134,48 @@ function hasClientCode(html) {
 		}
 	});
 
+	// XSS: props containing </script> must be neutralized in the data script
+	const xssPayload = '</script><script>alert(1)</script>';
+	await test('[expr] props with </script> are script-safe in data script', async () => {
+		const src = `export component XssPage(props: { bio: string }) {
+			return <div>{props.bio}</div>
+		}`;
+		const result = await ssg(src, null, { bio: xssPayload });
+		const { html } = result;
+		if (html.includes('</script><script>alert(1)')) throw new Error('props broke out of script context — XSS');
+		if (!html.includes('\\u003c')) throw new Error('props not \\u003c-escaped in data script');
+		const data = extractDataScript(html);
+		if (!data || data.bio !== xssPayload) throw new Error('escaped props do not round-trip: ' + JSON.stringify(data));
+	});
+
+	await test('[stmt] props with </script> are script-safe in data script', async () => {
+		const src = `export component XssPage(props: { bio: string }) {
+			<div>{props.bio}</div>
+		}`;
+		const result = await ssg(src, null, { bio: xssPayload });
+		const { html } = result;
+		if (html.includes('</script><script>alert(1)')) throw new Error('props broke out of script context — XSS (statement mode)');
+		if (!html.includes('\\u003c')) throw new Error('props not \\u003c-escaped in data script (statement mode)');
+		const data = extractDataScript(html);
+		if (!data || data.bio !== xssPayload) throw new Error('escaped props do not round-trip (statement mode): ' + JSON.stringify(data));
+	});
+
+	await test('props with U+2028/2029 are script-safe', async () => {
+		const src = `export component SepPage(props: { note: string }) {
+			return <div>{props.note}</div>
+		}`;
+		const ls = String.fromCharCode(0x2028);
+		const ps = String.fromCharCode(0x2029);
+		const result = await ssg(src, null, { note: 'a' + ls + 'b' + ps + 'c' });
+		const { html } = result;
+		const scriptStart = html.indexOf('__vesk_props');
+		const scriptEnd = html.indexOf('</script>', scriptStart);
+		const dataScript = html.slice(scriptStart, scriptEnd);
+		if (dataScript.includes(ls) || dataScript.includes(ps)) throw new Error('raw U+2028/U+2029 leaked into inline script');
+		const data = extractDataScript(html);
+		if (!data || data.note !== 'a' + ls + 'b' + ps + 'c') throw new Error('line-separator props do not round-trip');
+	});
+
 	console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 	if (failed > 0) process.exit(1);
 	console.log('All SSG tests passed!');

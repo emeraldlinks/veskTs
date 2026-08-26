@@ -453,9 +453,22 @@ export async function buildTreeShakenRuntime(runtimeDir: string, usedNames: stri
   }
 }
 
+/**
+ * Appends the HMR eval hook to the dev client bundle.
+ *
+ * The gadget is gated by a per-server-session nonce: the dev server generates
+ * `globalThis.__vesk_hmr_nonce` at boot and broadcasts it inside every
+ * `update` message. The browser evaluates component sources only when the
+ * message nonce matches, so a cross-site WebSocket (or any other injection
+ * vector) cannot drive arbitrary eval without also reading the nonce from a
+ * same-origin page — which the WS origin check already blocks.
+ */
 function appendHmrGlobals(code: string): string {
   return code +
-    "globalThis.__vesk_hmr_eval = (code) => eval(code);\n";
+    "globalThis.__vesk_hmr_eval = (code, n) => {\n" +
+    "  if (!n || n !== globalThis.__vesk_hmr_nonce) throw new Error('vesk hmr: invalid nonce');\n" +
+    "  return (0, eval)(code);\n" +
+    "};\n";
 }
 
 async function buildMainBundle(

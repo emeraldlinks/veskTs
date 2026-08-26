@@ -10,6 +10,7 @@ import {
 } from '@vesk/compiler/src/server-codegen';
 import { matchUrl, type MatchResult } from '@vesk/compiler/src/router';
 import { buildWebRequest } from '@vesk/compiler/src/api-routes';
+import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { getAction, validateActionInput, issuesToFieldMap } from '@vesk/runtime/src/action';
 import type { RouteNode } from '@vesk/compiler/src/types';
@@ -19,6 +20,7 @@ export interface ActionHandlerContext {
   appDirPath: string;
   routeTree: RouteNode[];
   security?: Record<string, unknown>;
+  maxBodyBytes?: number;
 }
 
 function chainForPath(routeTree: RouteNode[], pathname: string): RouteNode[] {
@@ -186,10 +188,30 @@ export async function handleActionRequest(
   const { url, appDirPath, routeTree } = ctx;
   if (!url.pathname.startsWith('/_vesk/action/')) return false;
 
+  // CSRF defense: reject cross-site browser submissions before any work.
+  try {
+    assertSameOrigin({ method: req.method, headers: req.headers });
+  } catch {
+    res.writeHead(403, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: 'Cross-origin request blocked' }));
+    return true;
+  }
+
   const actionId = url.pathname.replace('/_vesk/action/', '');
 
   const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(chunk as Buffer);
+  let bodyTotal = 0;
+  let tooLarge = false;
+  for await (const chunk of req) {
+    bodyTotal += (chunk as Buffer).byteLength;
+    if (bodyTotal > (ctx.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES)) { tooLarge = true; break; }
+    chunks.push(chunk as Buffer);
+  }
+  if (tooLarge) {
+    res.writeHead(413, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ ok: false, error: `Request body exceeds limit (${ctx.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES} bytes)` }));
+    return true;
+  }
   const bodyBuffer = Buffer.concat(chunks);
 
   const webRequest = buildWebRequest(req, req.url || url.href, bodyBuffer.length ? bodyBuffer : null);

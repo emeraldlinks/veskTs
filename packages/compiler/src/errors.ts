@@ -34,12 +34,38 @@ export function didYouMean(name: string, candidates: string[], maxDistance: numb
 }
 
 function extractLineColumn(message: string): { line: number; column: number } {
-  const lineMatch = message.match(/(?:line|at\s+line)\s*(\d+)/i);
-  const colMatch = message.match(/(?:column|col)\s*(\d+)/i);
   return {
-    line: lineMatch ? parseInt(lineMatch[1]) : 0,
-    column: colMatch ? parseInt(colMatch[1]) : 0,
+    line: findKeywordNumber(message, ['at line', 'line']),
+    column: findKeywordNumber(message, ['column', 'col']),
   };
+}
+
+/**
+ * Finds `<keyword><whitespace>*<digits>` in `message`, trying longer keyword
+ * variants first so 'column' is not matched as 'col' + 'umn'. Char-scan only.
+ */
+function findKeywordNumber(message: string, keywords: string[]): number {
+  const lower = message.toLowerCase();
+  for (const kw of keywords) {
+    let from = 0;
+    while (from <= lower.length - kw.length) {
+      const idx = lower.indexOf(kw, from);
+      if (idx === -1) break;
+      // word boundary before the keyword
+      const before = idx > 0 ? lower[idx - 1] : ' ';
+      if (!(before >= 'a' && before <= 'z')) {
+        let j = idx + kw.length;
+        while (j < message.length && (message[j] === ' ' || message[j] === '\t')) j++;
+        if (message[j] >= '0' && message[j] <= '9') {
+          let end = j;
+          while (end < message.length && message[end] >= '0' && message[end] <= '9') end++;
+          return parseInt(message.slice(j, end));
+        }
+      }
+      from = idx + 1;
+    }
+  }
+  return 0;
 }
 
 export interface VeskErrorOptions {

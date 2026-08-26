@@ -5,13 +5,14 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol } from '@vesk/compiler/src/server-codegen';
+import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
+import { resolveWithin, isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { ensurePackagesBuilt } from './build-packages';
@@ -76,7 +77,8 @@ function storeDataScript(payload: SsrDataPayload): string | null {
     const oldest = ssrDataStore.keys().next().value as string | undefined;
     if (oldest) ssrDataStore.delete(oldest);
   }
-  const token = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  // CSPRNG token — this URL gates access to the page's hydration payload
+  const token = randomToken(12);
   ssrDataStore.set(token, payload);
   return '/_vesk/ssr-data.js?t=' + token;
 }
@@ -109,8 +111,12 @@ function countFilesNamed(dir: string, name: string): number {
   return n;
 }
 
-export async function startDevServer(port: number, projectDir: string, config: Record<string, unknown>): Promise<void> {
+export async function startDevServer(port: number, projectDir: string, config: Record<string, unknown>, host?: string): Promise<void> {
 
+  const bindHost = host || '127.0.0.1';
+  if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
+  const secCfg = (config.security || {}) as Record<string, unknown>;
+  const maxBodyBytes = (typeof secCfg.maxBodyBytes === 'number' ? secCfg.maxBodyBytes : undefined) || DEFAULT_MAX_BODY_BYTES;
   const appDirPath = join(projectDir, 'app');
   const publicDir = join(projectDir, 'public');
 
@@ -606,13 +612,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
 
-    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security })) {
+    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security, maxBodyBytes: maxBodyBytes })) {
       return;
     }
 
     if (url.pathname !== '/') {
-      const staticPath = join(publicDir, url.pathname);
-      if (existsSync(staticPath) && statSync(staticPath).isFile()) {
+      const staticPath = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
+      if (staticPath && existsSync(staticPath) && statSync(staticPath).isFile()) {
         const ext = extname(staticPath);
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
         res.end(readFileSync(staticPath));
@@ -628,7 +634,19 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const apiMatch = matchApiUrl(apiRoutes, req.url || url.pathname);
       if (apiMatch) {
         const bodyChunks: Buffer[] = [];
-        for await (const chunk of req) bodyChunks.push(chunk as Buffer);
+        let bodyTotal = 0;
+        let tooLarge = false;
+        for await (const chunk of req) {
+          bodyTotal += (chunk as Buffer).byteLength;
+          if (bodyTotal > maxBodyBytes) { tooLarge = true; break; }
+          bodyChunks.push(chunk as Buffer);
+        }
+        if (tooLarge) {
+          logRequest(413);
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: `Request body exceeds limit (${maxBodyBytes} bytes)` }));
+          return;
+        }
         const bodyBuffer = Buffer.concat(bodyChunks);
         const requestUrl = req.url ? `http://localhost:${port}${req.url.startsWith('/') ? req.url : '/' + req.url}` : url.href;
         const rawHeaders: Record<string, string> = {};
@@ -1007,8 +1025,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
     throw e;
   });
 
-  server.listen(port, () => {
-    LOG.ok(`dev server at http://localhost:${port}`);
+  server.listen(port, bindHost, () => {
+    LOG.ok(`dev server at http://localhost:${port} (listening on ${bindHost})`);
     const routes = collectRoutePaths(routeTree);
     const pageCount = countPages(routeTree);
     const apiCount = countFilesNamed(join(appDirPath, 'api'), 'route.ts');
@@ -1027,7 +1045,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
     ws.on('close', () => hmrClients.delete(ws));
   });
   server.on('upgrade', (req, socket, head) => {
-    if (req.url === '/_vesk/hmr') {
+    // Origin-checked: cross-site pages always attach Origin to WS handshakes
+    if (req.url === '/_vesk/hmr' && isAllowedWsUpgrade(req.headers as Record<string, unknown>)) {
       wss.handleUpgrade(req, socket, head, (ws) => {
         wss.emit('connection', ws, req);
       });
@@ -1036,8 +1055,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   });
 
+  // Nonce gating the client-side HMR eval hook (see appendHmrGlobals) — the
+  // nonce is broadcast with every update and checked before eval runs.
+  const hmrNonce = randomToken(16);
+  (globalThis as Record<string, unknown>).__vesk_hmr_nonce = hmrNonce;
+
   (globalThis as Record<string, unknown>).__vesk_broadcastHmr = (update: Record<string, unknown>) => {
-    const msg = JSON.stringify(update);
+    const msg = JSON.stringify({ ...update, nonce: hmrNonce });
     for (const ws of hmrClients) {
       if (ws.readyState === 1) ws.send(msg);
     }

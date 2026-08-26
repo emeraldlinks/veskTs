@@ -24,8 +24,23 @@ export interface MatchResult {
  * handled correctly; falls back to the old regex + brace balance when the
  * source does not parse.
  */
-export function extractMiddlewareParts(src: string): { params: string; body: string } | null {
-  try {
+/** Collapses runs of `/` into single slashes (no regex). */
+export function collapseSlashes(p: string): string {
+  let out = '';
+  let prevSlash = false;
+  for (const c of p) {
+    if (c === '/') {
+      if (!prevSlash) out += '/';
+      prevSlash = true;
+    } else {
+      out += c;
+      prevSlash = false;
+    }
+  }
+  return out;
+}
+
+export function extractMiddlewareParts(src: string): { params: string; body: string } | null {  try {
     let ast = parse(src, { filename: 'middleware.ts' });
     let target = findMiddlewareFn(ast);
     if (!target) return null;
@@ -212,7 +227,7 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
 
   const node: RouteNode = {
     path: seg,
-    fullPath: fullPath.replace(/\/+/g, '/') || '/',
+    fullPath: collapseSlashes(fullPath) || '/',
     isGroup,
     isDynamic,
     isCatchAll,

@@ -371,7 +371,7 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
   lines.push(`const __prev = __ga();`);
   lines.push(`__sa({ c: null, p: __prev });`);
   lines.push(`try {`);
-  lines.push(`const __escape = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\x22/g,'&quot;');`);
+  lines.push(`const __escape = (s) => { s = String(s); return s.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split(${JSON.stringify('"')}).join('&quot;'); };`);
   lines.push(`const raw = (s) => s == null ? '' : String(s);`);
   lines.push(`const __tk = globalThis.__vsk_ssr_token || '';`);
 

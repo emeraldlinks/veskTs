@@ -335,9 +335,19 @@ describe('VeskRequest', () => {
 			headers: { 'x-forwarded-for': '203.0.113.42', 'x-forwarded-proto': 'https', host: 'example.com:443' },
 		});
 		expect(req.query).toEqual({ page: '2', limit: '10' });
+		// proxy headers are ignored until explicitly trusted (anti-spoofing)
+		expect(req.ip).toBe('unknown');
+		expect(req.protocol).toBe('http');
+		expect(req.hostname).toBe('example.com');
+	});
+
+	it('ip/protocol honor x-forwarded-* only after setTrustProxy', () => {
+		const req = new VeskRequest('https://test/path', {
+			headers: { 'x-forwarded-for': '203.0.113.42', 'x-forwarded-proto': 'https' },
+		});
+		req.setTrustProxy(true);
 		expect(req.ip).toBe('203.0.113.42');
 		expect(req.protocol).toBe('https');
-		expect(req.hostname).toBe('example.com');
 	});
 
 	it('query falls back to empty object', () => {

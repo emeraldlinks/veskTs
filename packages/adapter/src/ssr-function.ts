@@ -176,16 +176,17 @@ export function generateSsrFunction(
       '  return withSsrStore(async () => {',
       '  let page;',
       '  let caughtError = null;',
+      "  const __expose = process.env.NODE_ENV !== 'production';",
       '  try {',
       '    page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled, sourcePath: _pagePath });',
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    caughtError = err;',
-      '    const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
-      '    const stack = err && typeof err === \'object\' && \'stack\' in err ? String(err.stack) : \'\';',
-      '    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: requestUrl || \'\' }), head: \'\' };',
+      "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
+      "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
+      "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' }), head: '' };",
       '  }',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      "  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : 'Internal Server Error') : '') + '-->' : '') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled" + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',
@@ -195,9 +196,10 @@ export function generateSsrFunction(
     htmlFnCode = [
       'async function __renderErrorFullPage(params, requestUrl, err) {',
       '  if (!_errorSrc) throw err;',
-      '  const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
-      '  const stack = err && typeof err === \'object\' && \'stack\' in err ? String(err.stack) : \'\';',
-      '  const props = { params, statusCode: 500, error: message, stack, url: requestUrl || \'\' };',
+      "  const __expose = process.env.NODE_ENV !== 'production';",
+      "  const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
+      "  const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
+      "  const props = { params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' };",
       '  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
       '}',
       '',
@@ -235,6 +237,7 @@ export function generateSsrFunction(
   }
 
   let dataCode: string;
+  const exposeErr = "process.env.NODE_ENV !== 'production'";
   if (hasLayout || hasAncestorLayout) {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
@@ -244,7 +247,7 @@ export function generateSsrFunction(
       '    } catch (err) {',
       '      if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
-      "      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });",
+      `      return new Response(JSON.stringify({ error: ${exposeErr} ? message : 'Internal Server Error' }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });`,
       '    }',
       '    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: \'\' }, __componentRegistry, { hydrate: true, cached: _layoutCompiled, sourcePath: _layoutPath });',
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
@@ -262,7 +265,7 @@ export function generateSsrFunction(
       '    } catch (err) {',
       '      if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
-      "      return new Response(JSON.stringify({ error: message }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });",
+      `      return new Response(JSON.stringify({ error: ${exposeErr} ? message : 'Internal Server Error' }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });`,
       '    }',
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: dataPage.head || '' }), {",
       "      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },",
@@ -327,6 +330,12 @@ export function generateSsrFunction(
 
   const actionCode = [
     'export async function handleAction(request, id) {',
+    '  // CSRF defense: cross-site browser POSTs always carry an Origin header.',
+    '  try {',
+    '    assertSameOrigin(request);',
+    '  } catch (e) {',
+    "    return new Response(JSON.stringify({ ok: false, error: 'Cross-origin request blocked' }), { status: (e && e.status) || 403, headers: { 'Content-Type': 'application/json' } });",
+    '  }',
     '  await __registerActions();',
     '  const action = getAction(id);',
     '  if (!action) {',
@@ -387,10 +396,11 @@ export function generateSsrFunction(
     "    return new Response(null, { status: 303, headers: { Location: location } });",
     '  } catch (err) {',
     "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : 'Action failed';",
+    `    const safeMessage = ${exposeErr} ? message : 'Action failed';`,
     '    if (isFetch) {',
-    "      return new Response(JSON.stringify({ ok: false, error: message }), { status: 500, headers: { 'Content-Type': 'application/json' } });",
+    "      return new Response(JSON.stringify({ ok: false, error: safeMessage }), { status: 500, headers: { 'Content-Type': 'application/json' } });",
     '    }',
-    "    return new Response(message, { status: 500, headers: { 'Content-Type': 'text/plain' } });",
+    "    return new Response(safeMessage, { status: 500, headers: { 'Content-Type': 'text/plain' } });",
     '  } finally {',
     '    globalThis.__vesk_request = prevReq;',
     '  }',
@@ -399,7 +409,7 @@ export function generateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,
