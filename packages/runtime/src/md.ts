@@ -1241,6 +1241,159 @@ function findDelimiter(text: string, from: number, delim: string): number {
 export interface InlineOptions {
 	autolink?: boolean;
 	defs?: Map<string, RefDef>;
+	htmlMode?: MdHtmlMode;
+	allowTags?: string[];
+	rawHtmlWarnings?: MdHtmlWarning[];
+}
+
+function isAsciiLetter(c: string): boolean {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+function isTagNameChar(c: string): boolean {
+	return isAsciiLetter(c) || (c >= '0' && c <= '9') || c === '-';
+}
+
+interface HtmlTagScan {
+	end: number;
+	tag: string;
+	closing: boolean;
+	selfClosing: boolean;
+	/** Attribute source slice between the tag name and the closing `>`/`/>`. */
+	attrSrc: string;
+}
+
+/**
+ * Scans an HTML tag starting at `text[start] === '<'`. Handles comments
+ * (`<!-- … -->`), quoted attribute values containing `>`, and self-closing
+ * tags. Returns null when this is not a well-formed tag.
+ */
+function scanHtmlTag(text: string, start: number): HtmlTagScan | null {
+	if (text[start] !== '<') return null;
+	if (text.startsWith('<!--', start)) {
+		const close = text.indexOf('-->', start + 4);
+		if (close === -1) return null;
+		return { end: close + 3, tag: '!--', closing: false, selfClosing: false, attrSrc: '' };
+	}
+	let i = start + 1;
+	let closing = false;
+	if (text[i] === '/') { closing = true; i++; }
+	if (!isAsciiLetter(text[i])) return null;
+	const nameStart = i;
+	while (i < text.length && isTagNameChar(text[i])) i++;
+	const tag = text.slice(nameStart, i).toLowerCase();
+	// find the terminating '>' honoring quotes
+	let k = i;
+	let quote = '';
+	while (k < text.length) {
+		const c = text[k];
+		if (quote !== '') {
+			if (c === quote) quote = '';
+		} else if (c === '"' || c === "'") {
+			quote = c;
+		} else if (c === '>') {
+			break;
+		}
+		k++;
+	}
+	if (k >= text.length) return null; // unterminated tag — treat as text
+	let selfClosing = false;
+	let attrEnd = k;
+	if (text[k - 1] === '/') {
+		selfClosing = true;
+		attrEnd = k - 1;
+	}
+	return { end: k + 1, tag, closing, selfClosing, attrSrc: text.slice(i, attrEnd) };
+}
+
+/** Emits one passthrough warning into the render's collector. */
+function recordRawHtml(warnings: MdHtmlWarning[] | undefined, tag: string, sample: string): void {
+	if (!warnings) return;
+	warnings.push({ tag, sample: sample.length > 60 ? sample.slice(0, 57) + '…' : sample });
+}
+
+const URL_ATTRS = new Set(['href', 'src', 'xlink:href', 'poster', 'formaction']);
+
+/** Escapes a value for embedding in a double-quoted attribute. */
+function escapeAttrValue(v: string): string {
+	return v.split('"').join('&quot;').split('&').join('&amp;');
+}
+
+/**
+ * Rebuilds an attribute source string under the allowlist policy:
+ * event-handler attributes (`on*`) are dropped, URL-bearing attributes are
+ * sanitized via sanitizeUrl, everything else is kept verbatim.
+ */
+function filterHtmlAttributes(attrSrc: string): string {
+	let out = '';
+	let i = 0;
+	const n = attrSrc.length;
+	while (i < n) {
+		// skip whitespace between attributes
+		while (i < n && (attrSrc[i] === ' ' || attrSrc[i] === '\t' || attrSrc[i] === '\n')) { out += attrSrc[i]; i++; }
+		if (i >= n) break;
+		const tokenStart = i;
+		// attribute name
+		while (i < n && attrSrc[i] !== '=' && attrSrc[i] !== ' ' && attrSrc[i] !== '\t' && attrSrc[i] !== '\n') i++;
+		const name = attrSrc.slice(tokenStart, i);
+		const nameLower = name.toLowerCase();
+		let rawValue: string | null = null;
+		if (attrSrc[i] === '=') {
+			i++;
+			while (i < n && (attrSrc[i] === ' ' || attrSrc[i] === '\t')) i++;
+			if (attrSrc[i] === '"' || attrSrc[i] === "'") {
+				const q = attrSrc[i];
+				const vStart = ++i;
+				while (i < n && attrSrc[i] !== q) i++;
+				rawValue = attrSrc.slice(vStart, i);
+				if (i < n) i++; // closing quote
+			} else {
+				const vStart = i;
+				while (i < n && attrSrc[i] !== ' ' && attrSrc[i] !== '\t' && attrSrc[i] !== '\n') i++;
+				rawValue = attrSrc.slice(vStart, i);
+			}
+		}
+		const tokenEnd = i;
+		if (nameLower.startsWith('on')) continue; // drop inline handlers
+		if (rawValue !== null && URL_ATTRS.has(nameLower)) {
+			out += `${name}="${escapeAttrValue(sanitizeUrl(rawValue))}"`;
+			continue;
+		}
+		out += attrSrc.slice(tokenStart, tokenEnd);
+	}
+	return out;
+}
+
+/**
+ * Renders a raw-HTML tag at `text[start]` according to the policy:
+ * - 'allow': verbatim.
+ * - 'allowlist': allowed tags only; attrs filtered; closing tags normalized.
+ * Returns null when the policy does not apply — the caller then falls back to
+ * escaping, so disallowed tags stay visible as literal text.
+ */
+function tryRawHtml(text: string, start: number, opts: InlineOptions): { html: string; end: number } | null {
+	const mode = opts.htmlMode;
+	if (mode !== 'allow' && mode !== 'allowlist') return null;
+	const scan = scanHtmlTag(text, start);
+	if (!scan) return null;
+
+	if (mode === 'allowlist') {
+		if (scan.tag === '!--') return null;
+		const allowedTags = opts.allowTags || MD_DEFAULT_ALLOW_TAGS;
+		if (!allowedTags.includes(scan.tag)) return null;
+		if (scan.closing) {
+			recordRawHtml(opts.rawHtmlWarnings, scan.tag, text.slice(start, scan.end));
+			return { html: `</${scan.tag}>`, end: scan.end };
+		}
+		recordRawHtml(opts.rawHtmlWarnings, scan.tag, text.slice(start, scan.end));
+		const filtered = filterHtmlAttributes(scan.attrSrc);
+		const tail = scan.selfClosing ? ' />' : '>';
+		return { html: `<${scan.tag}${filtered}${tail}`, end: scan.end };
+	}
+
+	// mode === 'allow': verbatim, but still record so callers can warn.
+	recordRawHtml(opts.rawHtmlWarnings, scan.tag, text.slice(start, scan.end));
+	return { html: text.slice(start, scan.end), end: scan.end };
 }
 
 function renderInline(text: string, opts: InlineOptions = {}): string {
@@ -1328,6 +1481,15 @@ function renderInline(text: string, opts: InlineOptions = {}): string {
 			if (angle) {
 				out += angle.html;
 				i = angle.end;
+				continue;
+			}
+		}
+
+		if (ch === '<' && opts.htmlMode && opts.htmlMode !== 'escape') {
+			const raw = tryRawHtml(text, i, opts);
+			if (raw) {
+				out += raw.html;
+				i = raw.end;
 				continue;
 			}
 		}
@@ -1499,14 +1661,43 @@ export interface MarkdownOptions {
 	autolink?: boolean;
 	/** Honor two-space / backslash hard line breaks in paragraphs. Default false. */
 	hardBreaks?: boolean;
+	/** Raw-HTML policy (see MdHtmlMode). Default 'escape' — every HTML-ish
+	 * construct renders as visible text. */
+	html?: MdHtmlMode;
+	/** Tag allowlist for html:'allowlist'. Defaults to MD_DEFAULT_ALLOW_TAGS. */
+	allowTags?: string[];
+}
+
+export type MdHtmlMode = 'escape' | 'allow' | 'allowlist';
+
+/**
+ * Tags allowed by default when html = 'allowlist'. Inline, formatting-level
+ * tags only — structural/embedding tags (script, iframe, img, div, …) must be
+ * opted into explicitly via allowTags. Keep in sync with
+ * packages/compiler/src/config.ts MD_DEFAULT_ALLOW_TAGS.
+ */
+export const MD_DEFAULT_ALLOW_TAGS = [
+	'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'del', 'dfn', 'em',
+	'i', 'ins', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small', 'span',
+	'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr',
+];
+
+/** One raw-HTML passthrough observed while rendering. */
+export interface MdHtmlWarning {
+	tag: string;
+	/** Short sample of the source snippet (bounded). */
+	sample: string;
 }
 
 interface RenderCtx extends Required<MarkdownOptions> {
 	headings: Map<string, number>;
 	refs: Map<string, RefDef>;
+	warnings: MdHtmlWarning[];
 }
 
 function ctxOf(o: MarkdownOptions): RenderCtx {
+	// Fall back to the process-wide policy (configureMd) per key, so direct
+	// renderMarkdown calls honor vesk.config.ts just like the <Md> component.
 	return {
 		highlight: o.highlight === true,
 		chrome: o.chrome === true,
@@ -1515,13 +1706,16 @@ function ctxOf(o: MarkdownOptions): RenderCtx {
 		ids: o.ids === true,
 		autolink: o.autolink === true,
 		hardBreaks: o.hardBreaks === true,
+		html: o.html || __globalMode,
+		allowTags: o.allowTags || __globalAllowTags || MD_DEFAULT_ALLOW_TAGS,
 		headings: new Map(),
 		refs: new Map(),
+		warnings: [],
 	};
 }
 
 function inlineOpts(ctx: RenderCtx): InlineOptions {
-	return { autolink: ctx.autolink, defs: ctx.refs };
+	return { autolink: ctx.autolink, defs: ctx.refs, htmlMode: ctx.html, allowTags: ctx.allowTags, rawHtmlWarnings: ctx.warnings };
 }
 
 function renderListItem(item: { blocks: Block[]; task: boolean | null }, ctx: RenderCtx): string {
@@ -1779,12 +1973,67 @@ export const MD_BASE_CSS = `
  * `{ highlight, chrome, lineNumbers, copy, ids, autolink, hardBreaks }`.
  */
 export function renderMarkdown(md: string, options: MarkdownOptions = {}): string {
+	return renderMarkdownEx(md, options).html;
+}
+
+/** Like renderMarkdown, but also returns the raw-HTML passthrough warnings. */
+export function renderMarkdownEx(md: string, options: MarkdownOptions = {}): { html: string; warnings: MdHtmlWarning[] } {
 	const ctx = ctxOf(options);
 	// Normalize CRLF/CR so pasted content parses identically to typed input.
 	const normalized = String(md == null ? '' : md).split('\r\n').join('\n').split('\r').join('\n');
 	const extracted = extractRefDefinitions(normalized.split('\n'));
 	ctx.refs = extracted.defs;
-	return renderBlocks(parseBlocks(extracted.lines), ctx);
+	const html = renderBlocks(parseBlocks(extracted.lines), ctx);
+	return { html, warnings: ctx.warnings };
+}
+
+// ── Global Md policy (configured from vesk.config.ts `md` key) ────
+
+let __globalMode: MdHtmlMode = 'escape';
+let __globalAllowTags: string[] | null = null;
+
+/**
+ * Sets the process-wide default raw-HTML policy for `<Md>`. Called by the CLI
+ * and servers with the `md` key from vesk.config.ts. Individual `<Md>` usages
+ * can still override per-instance via the `html` / `allowTags` props.
+ */
+export function configureMd(policy?: { html?: MdHtmlMode; allowTags?: string[] }): void {
+	if (!policy || typeof policy !== 'object') return;
+	if (policy.html) __globalMode = policy.html;
+	if (policy.allowTags) {
+		__globalAllowTags = policy.allowTags
+			.map((t) => String(t).toLowerCase().replace(/[^a-z0-9-]/g, ''))
+			.filter(Boolean);
+	}
+}
+
+/** The effective process-wide policy (after configureMd). */
+export function getMdPolicy(): { html: MdHtmlMode; allowTags: string[] } {
+	return { html: __globalMode, allowTags: (__globalAllowTags || MD_DEFAULT_ALLOW_TAGS).slice() };
+}
+
+// Bounded collector for build-time summaries (`vesk build` prints it).
+const __sessionWarnings: MdHtmlWarning[] = [];
+const __warnedKeys = new Set<string>();
+
+/** Test hook: silence per-render console warnings without changing policy. */
+let __suppressMdConsoleWarnings = false;
+export function setMdConsoleWarnings(enabled: boolean): void {
+	__suppressMdConsoleWarnings = !enabled;
+}
+
+function rememberSessionWarnings(warnings: MdHtmlWarning[]): void {
+	for (const w of warnings) {
+		if (__warnedKeys.has(w.tag)) continue;
+		__warnedKeys.add(w.tag);
+		__sessionWarnings.push(w);
+		if (__warnedKeys.size > 500) break; // bounded
+	}
+}
+
+/** Drains the collected passthrough samples (for build-time summaries). */
+export function drainMdHtmlWarnings(): MdHtmlWarning[] {
+	return __sessionWarnings.splice(0, __sessionWarnings.length);
 }
 
 export interface MdProps {
@@ -1809,6 +2058,10 @@ export interface MdProps {
 	ids?: boolean;
 	autolink?: boolean;
 	hardBreaks?: boolean;
+	/** Per-instance raw-HTML policy — overrides the global md.html config. */
+	html?: MdHtmlMode | string;
+	/** Per-instance tag allowlist — overrides the global md.allowTags config. */
+	allowTags?: string[];
 	[k: string]: unknown;
 }
 
@@ -1852,7 +2105,14 @@ function mdIsSSR(): boolean {
 }
 
 function buildHtml(content: string, props: MdProps): string {
-	const html = renderMarkdown(content, {
+	// Per-instance props override the process-wide policy from vesk.config.ts.
+	const global = getMdPolicy();
+	const mode: MdHtmlMode = (props.html as MdHtmlMode) || global.html;
+	const allowTags = Array.isArray(props.allowTags)
+		? (props.allowTags as string[]).map((t) => String(t).toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean)
+		: global.allowTags;
+
+	const { html, warnings } = renderMarkdownEx(content, {
 		highlight: props.highlight !== false,
 		chrome: props.highlight !== false,
 		lineNumbers: props.lineNumbers === true,
@@ -1860,7 +2120,22 @@ function buildHtml(content: string, props: MdProps): string {
 		ids: props.ids !== false,
 		autolink: props.autolink !== false,
 		hardBreaks: props.hardBreaks === true,
+		html: mode,
+		allowTags,
 	});
+
+	if (warnings.length > 0 && mode !== 'escape') {
+		rememberSessionWarnings(warnings);
+		if (!__suppressMdConsoleWarnings) {
+			const byTag = new Map<string, number>();
+			for (const w of warnings) byTag.set(w.tag, (byTag.get(w.tag) || 0) + 1);
+			const tags = [...byTag.entries()].map(([t, n]) => `<${t}>×${n}`).join(', ');
+			console.warn(
+				`[vesk-md] ${mode === 'allow' ? 'raw HTML rendered verbatim' : 'allowlisted HTML rendered'} — ${tags}. ` +
+				'Only use with trusted markdown content. Policy source: md.html in vesk.config.ts (or <Md html> prop).',
+			);
+		}
+	}
 	if (props.css === true) {
 		return `<style data-vesk-md-css>${MD_BASE_CSS}</style>${html}`;
 	}

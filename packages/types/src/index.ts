@@ -143,6 +143,20 @@ export interface SecurityConfig {
 // Config
 // ────────────────────────────────────────────────────────────────────────────
 
+/** Raw-HTML handling policy for the `<Md>` renderer.
+ * - `'escape'` (default): every HTML-ish construct renders as visible text.
+ * - `'allow'`: raw HTML passes through verbatim — only use with trusted content.
+ * - `'allowlist'`: only `allowTags` pass through; event-handler attributes are
+ *   dropped and `href`/`src` go through URL sanitization. */
+export type MdHtmlMode = 'escape' | 'allow' | 'allowlist';
+
+export interface MdConfig {
+  /** Raw-HTML policy for Markdown rendering. Default 'escape'. */
+  html?: MdHtmlMode;
+  /** Tag allowlist for `html: 'allowlist'`. Lowercased during validation. */
+  allowTags?: string[];
+}
+
 export interface VeskConfig {
   appDir?: string;
   outDir?: string;
@@ -154,6 +168,8 @@ export interface VeskConfig {
    * refetches a route's server data when it is older than this. Default 0 =
    * always fetch fresh data on every SPA visit. */
   routeDataCache?: number;
+  /** Markdown (`<Md>`) rendering options. */
+  md?: MdConfig;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -179,6 +195,8 @@ export interface BuildOptions {
   platform?: 'node' | 'vercel' | 'netlify' | 'cloudflare' | 'deno' | 'aws' | 'edge' | 'coxmos';
   /** Client router route-data freshness TTL (ms). Default 0 = always refetch. */
   routeDataCache?: number;
+  /** Markdown policy applied for the build (SSG prerender warnings). */
+  md?: MdConfig;
 }
 
 export interface DevServerOptions {

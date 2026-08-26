@@ -1,4 +1,5 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from '@vesk/runtime/src/router';
+import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
 let passed = 0;
 let failed = 0;
@@ -1208,6 +1209,50 @@ testAsync('router offline option applies when route has no boundary components',
 		router.navigate('/away', { replace: true });
 		await tick(10);
 		expect(container.innerHTML).toContain('data-opt-offline');
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('navigation drives the loading indicator (start on navigate, finish on settle)', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	useLoadingIndicator({ throttle: 0, hideDelay: 10, resetDelay: 10 });
+	globalThis.fetch = async () => mockFetchResponse({ props: {}, head: '' });
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/away', page: () => { const d = document.createElement('div'); d.textContent = 'away'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/away', { replace: true });
+		// start() fired synchronously inside navigate
+		expect(isLoadingActive()).toBeTruthy();
+		await tick(40);
+		// finish() ran after the navigation settled
+		expect(isLoadingActive()).toBeFalsy();
+	} finally {
+		globalThis.fetch = origFetch;
+	}
+});
+
+testAsync('failed route data finishes the indicator with the error flag', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	useLoadingIndicator({ throttle: 0, hideDelay: 5, resetDelay: 5, duration: 500 });
+	globalThis.fetch = async () => mockFetchResponse({ error: 'boom', statusCode: 500 });
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/boom', page: () => { const d = document.createElement('div'); d.textContent = 'x'; return d; } },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/boom', { replace: true });
+		await tick(30);
+		expect(getLoadingError()).toBeTruthy();
+		expect(isLoadingActive()).toBeFalsy();
 	} finally {
 		globalThis.fetch = origFetch;
 	}

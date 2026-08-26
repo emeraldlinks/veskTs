@@ -452,6 +452,38 @@ declare const Outlet: (props: { [k: string]: unknown; children?: Component }) =>
 declare const Image: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare const Portal: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare const Experiment: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare function useLoadingIndicator(options?: {
+  duration?: number;
+  throttle?: number;
+  hideDelay?: number;
+  resetDelay?: number;
+  estimatedProgress?: (duration: number, elapsed: number) => number;
+}): {
+  progress: Cell<number>;
+  isLoading: Cell<boolean>;
+  error: Cell<boolean>;
+  start(opts?: { force?: boolean }): void;
+  set(value: number, opts?: { force?: boolean }): void;
+  finish(opts?: { force?: boolean; error?: boolean }): void;
+  clear(): void;
+};
+declare const LoadingIndicator: (props: {
+  color?: string | false;
+  errorColor?: string;
+  height?: number | string;
+  position?: 'top' | 'bottom';
+  zIndex?: number;
+  duration?: number;
+  throttle?: number;
+  hideDelay?: number;
+  resetDelay?: number;
+  estimatedProgress?: (duration: number, elapsed: number) => number;
+  class?: string;
+  className?: string;
+  style?: string;
+  children?: Component;
+  [k: string]: unknown;
+}) => Component;
 declare const JsonLd: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare const ArticleSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare const ProductSchema: (props: { [k: string]: unknown; children?: Component }) => Component;

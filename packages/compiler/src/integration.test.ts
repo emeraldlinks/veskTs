@@ -1073,6 +1073,52 @@ it('[stmt] auto-imports Link and NavLink when used as JSX tags', () => {
   assert(ir.imports.some(i => i.includes('NavLink')), `NavLink import missing: ${JSON.stringify(ir.imports)}`);
 });
 
+it('auto-imports LoadingIndicator and useLoadingIndicator', () => {
+  const source = `component App() {
+    const li = useLoadingIndicator()
+    return <LoadingIndicator color="#f00" height={4} />
+  }`;
+  const ir = generateIR(parse(source), source);
+  const imp = ir.imports.find(i => i.includes('LoadingIndicator'));
+  assert(!!imp, `LoadingIndicator import missing: ${JSON.stringify(ir.imports)}`);
+  assert(imp!.includes('useLoadingIndicator'), `useLoadingIndicator not in import: ${imp}`);
+});
+
+it('[stmt] auto-imports LoadingIndicator and useLoadingIndicator', () => {
+  const source = `component App {
+    const li = useLoadingIndicator({ duration: 800 })
+    <LoadingIndicator />
+  }`;
+  const ir = generateIR(parse(source), source);
+  const imp = ir.imports.find(i => i.includes('LoadingIndicator'));
+  assert(!!imp, `LoadingIndicator import missing: ${JSON.stringify(ir.imports)}`);
+  assert(imp!.includes('useLoadingIndicator'), `useLoadingIndicator not in import: ${imp}`);
+});
+
+it('[stmt] does not double-import LoadingIndicator when user already imported', () => {
+  const source = `import { LoadingIndicator } from '@vesk/runtime';
+  component App {
+    <LoadingIndicator height={2} />
+  }`;
+  const ir = generateIR(parse(source), source);
+  const count = ir.imports.filter(i => i.includes('LoadingIndicator')).length;
+  assert(count === 1, `expected exactly 1 LoadingIndicator import, got ${count}: ${JSON.stringify(ir.imports)}`);
+});
+
+it('[stmt] LoadingIndicator SSR renders the indicator div in both modes', async () => {
+  for (const body of [
+    'return <LoadingIndicator color="#abc" height={5} />',
+    '<LoadingIndicator color="#abc" height={5} />',
+  ]) {
+    const source = `import { LoadingIndicator } from '@vesk/runtime';\ncomponent App() {\n  ${body}\n}`;
+    const r = await renderPage(source, 'App');
+    const html = typeof r === 'string' ? r : (r as { body?: string }).body || String(r);
+    assert(html.includes('data-vesk-loading-indicator'), `[${body}] indicator div missing: ${html.slice(0, 300)}`);
+    assert(html.includes('height:5px'), `[${body}] height prop missing: ${html.slice(0, 300)}`);
+    assert(html.toLowerCase().includes('background'), `[${body}] background missing`);
+  }
+});
+
 it('[stmt] auto-imports validation helpers when used in prop expressions', () => {
   const source = `component App {
     <Field name="email" rules={[required(), email()]}><input /></Field>

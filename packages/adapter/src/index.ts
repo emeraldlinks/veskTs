@@ -35,6 +35,13 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
   const plugins: VeskPlugin[] = options?.plugins || [];
 
+  // Apply the Markdown policy for this build so SSG prerendering renders
+  // (and warns about) raw HTML exactly like the running server will.
+  if (options?.md) {
+    const { configureMd } = await import('@vesk/runtime/src/md') as { configureMd: (p?: unknown) => void };
+    configureMd(options.md);
+  }
+
   for (const plugin of plugins) {
     if (typeof plugin.onBuildStart === 'function') {
       await plugin.onBuildStart();

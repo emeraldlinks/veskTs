@@ -141,8 +141,9 @@ client replaces call with `{ __veskAction:true, id, url }` stub (execute handler
 ## config (config.ts)
 
 `definePlugin(plugin)` (requires `name`), `defineConfig(config)` (resolves security preset strings/
-fns, defaults autoEscape+csrf=true, xFrameOptions=DENY, CSP, redactLogs), `validateConfig`,
-`preset(name, overrides?)`.
+fns, defaults autoEscape+csrf=true, xFrameOptions=DENY, CSP, redactLogs; normalizes `md` config —
+`md.html: 'escape'|'allow'|'allowlist'`, lowercased `md.allowTags`, unknown mode → configError),
+`validateConfig`, `preset(name, overrides?)`.
 
 ## errors (errors.ts)
 

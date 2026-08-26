@@ -149,12 +149,23 @@ if (cmd === 'build') {
 
   const config = await loadConfig(projectDir);
   const plugins = (config as Record<string, unknown>)?.plugins || [];
+  const mdCfg = (config as Record<string, unknown>)?.md;
   const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
+  if (mdCfg) opts.md = mdCfg;
   if (config.routeDataCache !== undefined) opts.routeDataCache = config.routeDataCache;
   if (platform) opts.platform = platform;
 
   try {
     await build(appDirPath, opts);
+    const { drainMdHtmlWarnings } = await import('@vesk/runtime/src/md') as { drainMdHtmlWarnings: () => Array<{ tag: string }> };
+    const drained = drainMdHtmlWarnings();
+    if (drained.length > 0) {
+      const byTag = new Map<string, number>();
+      for (const w of drained) byTag.set(w.tag, (byTag.get(w.tag) || 0) + 1);
+      const tags = [...byTag.entries()].map(([t, n]) => `<${t}>×${n}`).join(', ');
+      console.error(`vesk build: markdown raw-HTML passthrough — ${drained.length} occurrence(s): ${tags}`);
+      console.error('vesk build: only render trusted markdown as HTML. Policy: md.html in vesk.config.ts.');
+    }
     console.error('vesk build: done');
   } catch (e) {
     console.error(`vesk build: error — ${(e as Error).message}`);
@@ -253,5 +264,9 @@ if (cmd === 'dev') {
 
   const config = (await loadConfig(projectDir)) as Record<string, unknown>;
   setRuntimeModule(__veskRuntime);
+  try {
+    const { configureMd } = await import('@vesk/runtime/src/md') as { configureMd: (p?: unknown) => void };
+    configureMd(config.md as Record<string, unknown> | undefined);
+  } catch {}
   await startDevServer(port, projectDir, config, host);
 }

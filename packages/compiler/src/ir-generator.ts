@@ -1024,6 +1024,7 @@ export function generateIR(ast: any, source: string): IRRoot {
     'Link', 'NavLink', 'Outlet', 'Redirect',
     'Image', 'Portal',
     'Experiment',
+    'LoadingIndicator', 'useLoadingIndicator',
     'JsonLd', 'ArticleSchema', 'ProductSchema', 'FAQPageSchema', 'BreadcrumbListSchema',
     'OrganizationSchema', 'LocalBusinessSchema', 'VideoSchema',
     'effect', 'derived', 'untrack', 'peek', 'tick', 'flushSync', 'on_destroy',

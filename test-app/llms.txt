@@ -21,6 +21,7 @@
 | `/async` | `app/async/page.vsk` | page |
 | `/map` | `app/map/page.vsk` | page |
 | `/md` | `app/md/page.vsk` | page |
+| `/md-html` | `app/md-html/page.vsk` | page (raw-HTML allowlist demo) |
 | `/store` | `app/store/page.vsk` | page |
 | `/store/:item` | `app/store/[item]/page.vsk` | page (dynamic) |
 | `/empty` | `app/empty/page.vsk` | page |

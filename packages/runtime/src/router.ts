@@ -15,6 +15,7 @@ import {
 	NotFoundError, notFound,
 } from '@vesk/runtime/src/router-components';
 import { getNetworkState, watchNetwork } from '@vesk/runtime/src/network';
+import { loadingStart, loadingFinish } from '@vesk/runtime/src/loading-indicator';
 
 export {
 	Outlet, Link, NavLink,
@@ -1171,6 +1172,7 @@ export function createRouter(
 			const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
 			this._navToken = (this._navToken || 0) + 1;
 			const navToken = this._navToken;
+			loadingStart();
 
 			let firstRenderFailed = false;
 
@@ -1203,17 +1205,19 @@ export function createRouter(
 
 			const fetchData = () => {
 				if (firstRenderFailed) return;
-				if (!shouldFetchData(this, match!)) return;
+				if (!shouldFetchData(this, match!)) { loadingFinish(); return; }
 			getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
 				if (navToken !== this._navToken) return;
-				if (!data) return;
+				if (!data) { loadingFinish(); return; }
 				if (data.redirect) {
+					loadingFinish();
 					this.navigate(data.redirect, { replace: true });
 					return;
 				}
-				if (!hasRealPageData(data)) return;
+				if (!hasRealPageData(data)) { loadingFinish(); return; }
 				await applyRouteData(this, match!, data, this.container);
-			});
+				loadingFinish({ error: !!data.error });
+			}).catch(() => loadingFinish({ error: true }));
 			};
 
 			if (loadingFn) {
@@ -1398,6 +1402,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			router._navToken = (router._navToken || 0) + 1;
 			navDebug('navigate', url.pathname, 'token=' + router._navToken, 'pendingChunks', hasPendingChunks(match.matchChain));
 			const navToken = router._navToken;
+			loadingStart();
 
 			const middlewareFns: Function[] = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
 
@@ -1450,16 +1455,17 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			const fetchData = () => {
 				if (firstRenderFailed) return;
 				navDebug('fetchData?', url.pathname, String(shouldFetchData(router, match!)));
-				if (!shouldFetchData(router, match!)) return;
+				if (!shouldFetchData(router, match!)) { loadingFinish(); return; }
 				getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
 					navDebug('data arrived', url.pathname, 'token=' + navToken, 'current=' + router._navToken, 'realProps', JSON.stringify(data && hasRealPageData(data)));
 					if (navToken !== router._navToken) return;
-					if (!data) return;
+					if (!data) { loadingFinish(); return; }
 					if (data.redirect) {
+						loadingFinish();
 						router.navigate(data.redirect, { replace: true });
 						return;
 					}
-					if (!hasRealPageData(data)) return;
+					if (!hasRealPageData(data)) { loadingFinish(); return; }
 					const pending = hasPendingChunks(match!.matchChain);
 					if (pending.length > 0) {
 						await loadChunksQuietly(pending);
@@ -1469,7 +1475,8 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						}
 					}
 					await applyRouteData(router, match!, data, container, renderFn);
-				});
+					loadingFinish({ error: !!data.error });
+				}).catch(() => loadingFinish({ error: true }));
 			};
 
 			const pendingChunks = hasPendingChunks(match.matchChain);
@@ -1480,6 +1487,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			const handleNavFailure = (err: unknown) => {
 				navDebug('handleNavFailure', String((err as Error)?.message || err).slice(0, 80));
 				if (navToken !== router._navToken) return;
+				loadingFinish({ error: true });
 				looksOffline().then((offline) => {
 					navDebug('handleNavFailure verdict', offline ? 'offline' : 'online');
 					if (offline) return void renderOfflinePage(router, match!, container);
@@ -1495,14 +1503,18 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						// was still loading) may have superseded this one; don't
 						// paint the stale route over the current URL.
 						if (navToken !== router._navToken) return;
-						if (typeof router.__updateComponents === 'function') {
-							router.__updateComponents(match!.matchChain);
-						}
-						try {
-							renderContent();
-						} catch (e) {
-							handleNavFailure(e);
-						}
+					if (typeof router.__updateComponents === 'function') {
+						router.__updateComponents(match!.matchChain);
+					}
+					try {
+						renderContent();
+						// Chunks may resolve after fetchData's early-return already
+						// finished the indicator (prefetched data); a second finish
+						// here just re-schedules the hide, which is idempotent.
+						loadingFinish();
+					} catch (e) {
+						handleNavFailure(e);
+					}
 					}, (e) => {
 						handleNavFailure(e);
 					});

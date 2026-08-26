@@ -1,0 +1,36 @@
+import { Md } from '@vesk/runtime'
+
+interface MdHtmlProps {
+	[k: string]: unknown
+}
+
+const doc = `<a id="custom-target">d</a>
+This is the paragraph you want to jump to. Deep-link to it with
+[an anchor link](#custom-target) — the tag above is real HTML rendered
+through the allowlist.
+
+Inline **emphasis** stays markdown, and <em>raw emphasis</em> comes from
+the allowlisted <em> tag.
+
+Disallowed tags stay visible as text: <div>blocks are not allowed</div>
+Scripts never survive: <script>alert('nope')</script>
+`
+
+component MdHtml(props: MdHtmlProps) {
+	<div class="max-w-2xl mx-auto my-12 p-8 bg-white rounded-xl shadow-sm border border-gray-200">
+		<h1 class="text-2xl font-bold mb-4">Md raw-HTML policy</h1>
+		<p class="text-gray-600 mb-6">
+			This page renders with <code>md.html = "allowlist"</code> from
+			<code>vesk.config.ts</code> (allowing a, em). The custom anchor target
+			and raw tags below are real HTML — everything not allowlisted stays escaped.
+		</p>
+		<div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+			<Md content={doc} />
+		</div>
+		<p class="mt-6 text-sm text-gray-500">
+			SPA-navigate to <Link href="/async" class="text-sky-600 underline">/async</Link> and
+			watch the loading bar pinned under the nav — it is driven by the router through
+			loadingStart/loadingFinish and rendered by the LoadingIndicator in the layout.
+		</p>
+	</div>
+}

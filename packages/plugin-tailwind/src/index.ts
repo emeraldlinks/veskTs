@@ -195,7 +195,9 @@ interface TailwindCompile {
   (css: string, options: CompileOptions): Promise<CompileResult>
 }
 
-interface TailwindPlugin {
+// Type alias (not interface) so the object literal is assignable to
+// VeskPlugin's `[k: string]: unknown` index signature in user configs.
+type TailwindPlugin = {
   name: string
   dependencies: Set<string>
   onBuildStart: () => Promise<void>

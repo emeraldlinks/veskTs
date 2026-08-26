@@ -85,6 +85,7 @@ const VESK_BUILTINS = [
   'Form', 'Field', 'Link', 'NavLink', 'Outlet',
   'Image', 'Portal',
   'Experiment',
+  'LoadingIndicator', 'useLoadingIndicator',
   'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom',
   'track', 'get', 'set', 'derived', 'effect', 'batch', 'untrack',
   'cookies', 'headers', 'locals',

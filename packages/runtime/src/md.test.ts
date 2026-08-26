@@ -1,4 +1,4 @@
-import { renderMarkdown, Md, escapeHtml, highlightCode, sanitizeUrl, MD_BASE_CSS } from '@vesk/runtime/src/md';
+import { renderMarkdown, renderMarkdownEx, configureMd, getMdPolicy, drainMdHtmlWarnings, setMdConsoleWarnings, MD_DEFAULT_ALLOW_TAGS, Md, escapeHtml, highlightCode, sanitizeUrl, MD_BASE_CSS } from '@vesk/runtime/src/md';
 
 let passed = 0;
 let failed = 0;
@@ -651,6 +651,111 @@ describe('Reference links, setext headings, entities', () => {
   it('code spans/blocks do NOT decode entities', () => {
     const html = renderMarkdown('`&copy;`');
     expect(html).toContain('<code>&amp;copy;</code>');
+  });
+});
+
+// ── Raw-HTML policy (md.html escape / allow / allowlist) ─────────
+
+describe('Md raw HTML policy', () => {
+  const SRC = '<a id="custom-target">d</a>\nThis is the paragraph you want to jump to.';
+
+  it('default escapes raw HTML as visible text', () => {
+    const html = renderMarkdown(SRC);
+    expect(html).toContain('&lt;a id=&quot;custom-target&quot;&gt;');
+    expect(html).notToContain('<a id=');
+  });
+
+  it('html:"allow" passes raw HTML through verbatim', () => {
+    const { html, warnings } = renderMarkdownEx(SRC, { html: 'allow' });
+    expect(html).toContain('<a id="custom-target">d</a>');
+    expect(warnings.some(w => w.tag === 'a')).toBe(true);
+  });
+
+  it('html:"allowlist" renders allowed tags and escapes the rest', () => {
+    const src = 'keep <em>emphasis</em> and <b>bold</b>, drop <script>x</script> and <div>blocks</div>';
+    const { html } = renderMarkdownEx(src, { html: 'allowlist' });
+    expect(html).toContain('<em>emphasis</em>');
+    expect(html).toContain('<b>bold</b>');
+    expect(html).toContain('&lt;script&gt;x&lt;/script&gt;');
+    expect(html).toContain('&lt;div&gt;blocks&lt;/div&gt;');
+  });
+
+  it('allowlist drops on* handlers and sanitizes href/src', () => {
+    const src = '<a href="javascript:alert(1)" onclick="evil()" title="t">link</a>';
+    const { html } = renderMarkdownEx(src, { html: 'allowlist' });
+    expect(html).notToContain('onclick');
+    expect(html).notToContain('javascript:');
+    expect(html).toContain('title="t"');
+    expect(html).toContain('<a href="#"');
+  });
+
+  it('allowlist keeps non-url attributes like id verbatim', () => {
+    const { html } = renderMarkdownEx(SRC, { html: 'allowlist' });
+    expect(html).toContain('<a id="custom-target">d</a>');
+  });
+
+  it('handles quoted attribute values containing > and self-closing tags', () => {
+    const { html } = renderMarkdownEx('<span data-x="a > b" />next', { html: 'allow' });
+    expect(html).toContain('data-x="a > b"');
+    expect(html).toContain('/>next');
+  });
+
+  it('closing tags normalize under allowlist', () => {
+    const { html } = renderMarkdownEx('<em>x</em>', { html: 'allowlist' });
+    expect(html).toContain('<em>x</em>');
+  });
+
+  it('configureMd sets process-wide policy; props override it', () => {
+    configureMd({ html: 'allowlist' });
+    try {
+      expect(getMdPolicy().html).toBe('allowlist');
+      // default escape still applies when explicitly requested per instance
+      const escaped = renderMarkdownEx(SRC, { html: 'escape' }).html;
+      expect(escaped).toContain('&lt;a');
+      const allowed = renderMarkdownEx(SRC).html;
+      expect(allowed).toContain('<a id="custom-target">');
+      // per-instance allowTags override
+      const narrow = renderMarkdownEx('<em>e</em><b>b</b>', { allowTags: ['em'] }).html;
+      expect(narrow).toContain('<em>e</em>');
+      expect(narrow).toContain('&lt;b&gt;b&lt;/b&gt;');
+    } finally {
+      configureMd({ html: 'escape' });
+    }
+    expect(getMdPolicy().html).toBe('escape');
+  });
+
+  it('Md component honors the policy and warns on console', () => {
+    configureMd({ html: 'allowlist' });
+    let warned = '';
+    const origWarn = console.warn;
+    console.warn = (...args: unknown[]) => { warned = args.join(' '); };
+    try {
+      const html = Md({ content: SRC }) as string;
+      expect(html).toContain('<a id="custom-target">');
+      expect(warned).toContain('[vesk-md]');
+      expect(warned).toContain('<a>');
+    } finally {
+      console.warn = origWarn;
+      configureMd({ html: 'escape' });
+    }
+  });
+
+  it('drainMdHtmlWarnings collects passthrough samples', () => {
+    configureMd({ html: 'allow' });
+    try {
+      renderMarkdownEx(SRC, {});
+      const drained = drainMdHtmlWarnings();
+      expect(drained.some(w => w.tag === 'a')).toBe(true);
+    } finally {
+      configureMd({ html: 'escape' });
+      drainMdHtmlWarnings();
+    }
+  });
+
+  it('MD_DEFAULT_ALLOW_TAGS excludes script/iframe/img/div', () => {
+    for (const t of ['script', 'iframe', 'img', 'div', 'style']) {
+      if (MD_DEFAULT_ALLOW_TAGS.includes(t)) throw new Error('unsafe default tag: ' + t);
+    }
   });
 });
 

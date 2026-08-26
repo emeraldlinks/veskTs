@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join as join$2, dirname as dirname$2 } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { resolve, join as join$2, dirname as dirname$2 } from 'node:path';
 import { fileURLToPath as fileURLToPath$1 } from 'node:url';
 import require$$0$3 from 'node:util';
 import * as require$$0$1 from 'util';
@@ -95693,6 +95693,92 @@ function getJSXElementName(node) {
     }
     return null;
 }
+function isIdentStartCode$1(code) {
+    return (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || code === 95 || code === 36;
+}
+function isIdentCharCode$1(code) {
+    return isIdentStartCode$1(code) || (code >= 48 && code <= 57);
+}
+function looksLikeGenericArrowAt(input, pos) {
+    let i = pos + 1;
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    if (i >= input.length || !isIdentStartCode$1(input.charCodeAt(i)))
+        return false;
+    while (i < input.length && isIdentCharCode$1(input.charCodeAt(i)))
+        i++;
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    if (input.charCodeAt(i) !== 44)
+        return false; // ','
+    i++;
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    if (input.charCodeAt(i) !== 62)
+        return false; // '>'
+    i++;
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    if (input.charCodeAt(i) !== 40)
+        return false; // '('
+    return true;
+}
+const TS_PRIMITIVE_TYPES = new Set(['number', 'string', 'boolean', 'any', 'unknown', 'never', 'void', 'object', 'symbol', 'bigint', 'undefined', 'null']);
+const HTML_TAGS = new Set(['a', 'abbr', 'address', 'area', 'article', 'aside', 'audio', 'b', 'base', 'bdi', 'bdo', 'blockquote', 'body', 'br', 'button', 'canvas', 'caption', 'cite', 'code', 'col', 'colgroup', 'data', 'datalist', 'dd', 'del', 'details', 'dfn', 'dialog', 'div', 'dl', 'dt', 'em', 'embed', 'fieldset', 'figcaption', 'figure', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'head', 'header', 'hgroup', 'hr', 'html', 'i', 'iframe', 'img', 'input', 'ins', 'kbd', 'label', 'legend', 'li', 'link', 'main', 'map', 'mark', 'menu', 'meta', 'meter', 'nav', 'noscript', 'object', 'ol', 'optgroup', 'option', 'output', 'p', 'picture', 'pre', 'progress', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'script', 'section', 'select', 'slot', 'small', 'source', 'span', 'strong', 'style', 'sub', 'summary', 'sup', 'table', 'tbody', 'td', 'template', 'textarea', 'tfoot', 'th', 'thead', 'time', 'title', 'tr', 'track', 'u', 'ul', 'var', 'video', 'wbr']);
+function looksLikeTypeAssertionAt(input, pos) {
+    let i = pos + 1;
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    const nameStart = i;
+    if (i >= input.length || !isIdentStartCode$1(input.charCodeAt(i)))
+        return false;
+    while (i < input.length && isIdentCharCode$1(input.charCodeAt(i)))
+        i++;
+    const name = input.slice(nameStart, i);
+    // If it's a known HTML tag (lowercase), it's JSX, not a type assertion
+    if (HTML_TAGS.has(name) || VOID_ELEMENTS$2.has(name))
+        return false;
+    // Only treat as type assertion if name is a TS primitive or capitalized type
+    const isPrimitive = TS_PRIMITIVE_TYPES.has(name);
+    const isCapitalized = name[0] >= 'A' && name[0] <= 'Z';
+    if (!isPrimitive && !isCapitalized)
+        return false;
+    // allow qualified type like `ns.Type` or `Array<string>`? For now only single identifier, skip generics check
+    // If next is '<', skip balanced <...>
+    if (input.charCodeAt(i) === 60) {
+        let depth = 0;
+        let j = i;
+        while (j < input.length) {
+            const c = input.charCodeAt(j);
+            if (c === 60)
+                depth++;
+            else if (c === 62) {
+                depth--;
+                if (depth === 0) {
+                    i = j + 1;
+                    break;
+                }
+            }
+            j++;
+            if (j - i > 100)
+                break;
+        }
+    }
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    if (input.charCodeAt(i) !== 62)
+        return false; // '>'
+    i++;
+    while (i < input.length && isWsChar(input.charCodeAt(i)))
+        i++;
+    if (i >= input.length)
+        return false;
+    const c = input.charCodeAt(i);
+    // expression start: identifier, (, [, {, ", ', `, !, ~, +, -, number, this/super etc.
+    if (isIdentStartCode$1(c) || c === 40 || c === 91 || c === 123 || c === 34 || c === 39 || c === 96 || c === 33 || c === 126 || c === 43 || c === 45 || (c >= 48 && c <= 57))
+        return true;
+    return false;
+}
 function isWsChar(code) {
     return code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
 }
@@ -95752,6 +95838,10 @@ function VeskParserPlugin(config = {}) {
                         };
                         if (inType) {
                             if (startsNewStatement) {
+                                if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
+                                    this.#jsxStartsStatement = false;
+                                    return super.readToken(code);
+                                }
                                 this.#jsxStartsStatement = true;
                                 ++this.pos;
                                 return this.finishToken(tstt.jsxTagStart);
@@ -95764,6 +95854,10 @@ function VeskParserPlugin(config = {}) {
                                 prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
                                 prev === tt._null || prev === tt.jsxTagEnd;
                             if (!canEndExpr || startsNewStatement) {
+                                if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
+                                    this.#jsxStartsStatement = false;
+                                    return super.readToken(code);
+                                }
                                 this.#jsxStartsStatement = true;
                                 return forceJsx();
                             }
@@ -97606,28 +97700,236 @@ const KW_JS = new Set([
     'interface', 'is', 'keyof', 'let', 'namespace', 'new', 'of', 'private', 'protected', 'public',
     'readonly', 'return', 'satisfies', 'set', 'static', 'super', 'switch', 'this', 'throw', 'try',
     'type', 'typeof', 'var', 'void', 'while', 'with', 'yield',
+    'string', 'number', 'boolean', 'any', 'unknown', 'never', 'object', 'symbol', 'bigint',
 ]);
 new Set([...KW_JS, 'component']);
 
-const SECRET_PATTERNS = [
-    { pattern: /(sk_live_[a-zA-Z0-9]{20,})/g, replace: 'sk_live_***' },
-    { pattern: /(sk_test_[a-zA-Z0-9]{20,})/g, replace: 'sk_test_***' },
-    { pattern: /(ghp_[a-zA-Z0-9]{36,})/g, replace: 'ghp_***' },
-    { pattern: /(gho_[a-zA-Z0-9]{36,})/g, replace: 'gho_***' },
-    { pattern: /(xox[bpsra]-[a-zA-Z0-9-]{20,})/g, replace: 'xox-***' },
-    { pattern: /(Bearer\s+)[a-zA-Z0-9._-]{20,}/g, replace: '$1***' },
-    { pattern: /(Authorization:\s*Basic\s+)[a-zA-Z0-9+/=]{20,}/gi, replace: '$1***' },
-    { pattern: /(-----BEGIN\s+(?:RSA\s+)?PRIVATE KEY-----)[\s\S]*?(-----END\s+(?:RSA\s+)?PRIVATE KEY-----)/g, replace: '$1***$2' },
-    { pattern: /(['"]?(?:api[_-]?key|secret|password|token|auth|private[_-]?key|access[_-]?key|session[_-]?secret)[, }\]'"*]*[:=]\s*['"]?)(?!.*\*\*\*)([^'"\s,}\]]{8,})(['"]?)/gi, replace: '$1***$3' },
+function isAlnum(code) {
+    return (code >= 48 && code <= 57) || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+}
+/** Token body charset: alnum plus base64url/JWT punctuation. */
+function isTokenChar(code) {
+    return isAlnum(code) || code === 46 /* . */ || code === 95 /* _ */ || code === 45 /* - */ || code === 43 /* + */ || code === 47 /* / */ || code === 61 /* = */;
+}
+const TOKEN_PREFIXES = [
+    {
+        match: (s, i) => {
+            if (!s.startsWith('sk_', i))
+                return null;
+            if (s.startsWith('sk_live_', i))
+                return 'sk_live_';
+            if (s.startsWith('sk_test_', i))
+                return 'sk_test_';
+            return null;
+        },
+        emit: (keep) => keep + '***',
+        minLen: 20,
+    },
+    {
+        match: (s, i) => {
+            if (s.startsWith('ghp_', i))
+                return 'ghp_';
+            if (s.startsWith('gho_', i))
+                return 'gho_';
+            return null;
+        },
+        emit: (keep) => keep + '***',
+        minLen: 36,
+    },
+    {
+        match: (s, i) => {
+            if (!s.startsWith('xox', i) || i + 4 >= s.length)
+                return null;
+            const c = s[i + 3];
+            if (c !== 'b' && c !== 'p' && c !== 's' && c !== 'r' && c !== 'a')
+                return null;
+            if (s[i + 4] !== '-')
+                return null;
+            return 'xox' + c + '-';
+        },
+        emit: () => 'xox-***',
+        minLen: 20,
+    },
 ];
+const LOWER = (c) => c >= 'A' && c <= 'Z' ? String.fromCharCode(c.charCodeAt(0) + 32) : c;
+function ciStartsWith(s, word, i) {
+    if (i + word.length > s.length)
+        return false;
+    for (let j = 0; j < word.length; j++) {
+        if (LOWER(s[i + j]) !== word[j])
+            return false;
+    }
+    return true;
+}
+/**
+ * Replaces known secret token shapes with `prefix***`. Char-scan pass over
+ * the whole string (no regex). Returns a new string.
+ */
+function scanSecretTokens(str) {
+    let out = '';
+    let i = 0;
+    while (i < str.length) {
+        // PEM private key blocks: BEGIN header kept, body collapsed, END kept.
+        if (str.startsWith('-----BEGIN ', i)) {
+            let hdrEnd = -1;
+            for (let j = i + 11; j + 5 <= str.length; j++) {
+                if (str.startsWith('-----', j)) {
+                    hdrEnd = j;
+                    break;
+                }
+            }
+            const endIdx = str.indexOf('-----END ', i + 11);
+            if (hdrEnd !== -1 && endIdx !== -1 && endIdx > hdrEnd) {
+                let closeIdx = -1;
+                for (let j = endIdx + 9; j + 5 <= str.length; j++) {
+                    if (str.startsWith('-----', j)) {
+                        closeIdx = j;
+                        break;
+                    }
+                }
+                if (closeIdx !== -1) {
+                    out += str.slice(i, hdrEnd + 5) + '***' + str.slice(endIdx, closeIdx + 5);
+                    i = closeIdx + 5;
+                    continue;
+                }
+            }
+        }
+        let matched = false;
+        for (const tp of TOKEN_PREFIXES) {
+            const keep = tp.match(str, i);
+            if (keep !== null) {
+                let j = i + keep.length;
+                while (j < str.length && isTokenChar(str.charCodeAt(j)))
+                    j++;
+                if (j - (i + keep.length) >= tp.minLen) {
+                    out += tp.emit(keep);
+                    i = j;
+                    matched = true;
+                }
+                break;
+            }
+        }
+        if (matched)
+            continue;
+        // Bearer <token> / Authorization: Basic <token>
+        const prevIsWord = i > 0 && isAlnum(str.charCodeAt(i - 1));
+        if (!prevIsWord && ciStartsWith(str, 'bearer', i)) {
+            let j = i + 6;
+            let spaces = 0;
+            while (j < str.length && (str[j] === ' ' || str[j] === '\t')) {
+                j++;
+                spaces++;
+            }
+            if (spaces > 0) {
+                let k = j;
+                while (k < str.length && isTokenChar(str.charCodeAt(k)))
+                    k++;
+                if (k - j >= 20) {
+                    out += 'Bearer ***';
+                    i = k;
+                    continue;
+                }
+            }
+        }
+        if (!prevIsWord && ciStartsWith(str, 'basic', i)) {
+            let j = i + 5;
+            let spaces = 0;
+            while (j < str.length && (str[j] === ' ' || str[j] === '\t')) {
+                j++;
+                spaces++;
+            }
+            if (spaces > 0) {
+                let k = j;
+                while (k < str.length && isTokenChar(str.charCodeAt(k)))
+                    k++;
+                if (k - j >= 20) {
+                    out += 'Basic ***';
+                    i = k;
+                    continue;
+                }
+            }
+        }
+        out += str[i];
+        i++;
+    }
+    return out;
+}
+const SECRET_KEY_NAMES = [
+    'api_key', 'api-key', 'apikey',
+    'secret', 'password', 'token', 'auth',
+    'private_key', 'private-key',
+    'access_key', 'access-key',
+    'session_secret',
+];
+function lowerRun(s) {
+    let out = '';
+    for (const c of s)
+        out += LOWER(c);
+    return out;
+}
+function isValueStopChar(c) {
+    return c === "'" || c === '"' || c === ' ' || c === '\t' || c === '\n' || c === '\r'
+        || c === ',' || c === '}' || c === ']';
+}
+/**
+ * Second redaction pass: `<secret-ish key>` followed by `:` or `=` gets its
+ * value collapsed to `***` unless the value already contains `***` (already
+ * handled by the token pass).
+ */
+function scanKeyValueSecrets(str) {
+    let out = '';
+    let i = 0;
+    while (i < str.length) {
+        let keyHit = null;
+        if (i === 0 || !(isAlnum(str.charCodeAt(i - 1)) || str[i - 1] === '_' || str[i - 1] === '-')) {
+            const run = lowerRun(str.slice(i, i + 16));
+            for (const name of SECRET_KEY_NAMES) {
+                if (run.startsWith(name)) {
+                    keyHit = { nameLen: name.length };
+                    break;
+                }
+            }
+        }
+        if (keyHit) {
+            let j = i + keyHit.nameLen;
+            // filler chars between key and separator: , space } ] ' " *
+            while (j < str.length && (str[j] === ',' || str[j] === ' ' || str[j] === '}' || str[j] === ']' || str[j] === "'" || str[j] === '"' || str[j] === '*'))
+                j++;
+            if (str[j] === ':' || str[j] === '=') {
+                j++; // separator
+                while (j < str.length && (str[j] === ' ' || str[j] === '\t'))
+                    j++;
+                let openQuote = '';
+                if (str[j] === "'" || str[j] === '"') {
+                    openQuote = str[j];
+                    j++;
+                }
+                let k = j;
+                while (k < str.length && !isValueStopChar(str[k]))
+                    k++;
+                const value = str.slice(j, k);
+                if (k - j >= 8 && !value.includes('***')) {
+                    out += str.slice(i, j) + '***';
+                    if (openQuote && k < str.length && str[k] === openQuote) {
+                        out += openQuote;
+                        k++;
+                    }
+                    else if (openQuote)
+                        out += openQuote;
+                    i = k;
+                    continue;
+                }
+            }
+        }
+        out += str[i];
+        i++;
+    }
+    return out;
+}
 function redactLog(str) {
     if (!str || typeof str !== 'string')
         return str;
-    let result = str;
-    for (const { pattern, replace } of SECRET_PATTERNS) {
-        result = result.replace(pattern, replace);
-    }
-    return result;
+    return scanKeyValueSecrets(scanSecretTokens(str));
 }
 const _origConsoleError = console.error;
 const _origConsoleLog = console.log;
@@ -296533,7 +296835,7 @@ function compileVskCodegen(source, opts = {}) {
     g.add(clean.slice(pos), pos, source.length);
     let code = g.code;
     if (isModuleAst(ast) && containsIdentifier(code, 'Head') && !isIdentifierImported(code, 'Head')) {
-        g.prepend('declare const Head: (props: { children?: unknown }) => unknown;\n');
+        g.prepend('declare const Head: (props: { children?: Component }) => Component;\n');
         code = g.code;
     }
     return { code, mappings: g.mappings, styleRegions: g.styleRegions, errors: [] };
@@ -296588,8 +296890,9 @@ declare namespace JSX {
     onchange?: VeskEventHandler<Event>;
     onsubmit?: VeskEventHandler<SubmitEvent>;
   }
+  type Component = string | number | boolean | null | undefined | Component[];
   interface VeskGlobalAttributes extends VeskCommonAttributes, VeskEventAttributes {
-    children?: unknown;
+    children?: Component;
   }
   interface VeskAnchorAttributes extends VeskGlobalAttributes {
     href?: string;
@@ -296893,8 +297196,10 @@ declare namespace JSX {
     // resolve through the index signature, known tags get the typed members.
     [elemName: string]: unknown;
   }
+  type Component = string | number | boolean | null | undefined | Component[];
 }
-declare const Head: (props: { children?: unknown }) => unknown;
+declare type Component = string | number | boolean | null | undefined | Component[];
+declare const Head: (props: { children?: Component }) => Component;
 declare class Cell<T> {
   get(): T;
   set(value: T): void;
@@ -296954,28 +297259,60 @@ declare function usePathname(): string;
 declare function useSearchParams(): URLSearchParams;
 declare function useNavigate(): (to: string) => void;
 declare function defineAction(...args: unknown[]): unknown;
-declare const Form: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Field: (props: { [k: string]: unknown; children?: unknown }) => unknown;
+declare const Form: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Field: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare function required(...args: unknown[]): unknown;
 declare function email(...args: unknown[]): unknown;
 declare function minLength(...args: unknown[]): unknown;
 declare function maxLength(...args: unknown[]): unknown;
 declare function pattern(...args: unknown[]): unknown;
 declare function custom(...args: unknown[]): unknown;
-declare const Link: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const NavLink: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Outlet: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Image: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Portal: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const Experiment: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const JsonLd: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const ArticleSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const ProductSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const FAQPageSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const BreadcrumbListSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const OrganizationSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const LocalBusinessSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
-declare const VideoSchema: (props: { [k: string]: unknown; children?: unknown }) => unknown;
+declare const Link: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const NavLink: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Outlet: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Image: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Portal: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const Experiment: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare function useLoadingIndicator(options?: {
+  duration?: number;
+  throttle?: number;
+  hideDelay?: number;
+  resetDelay?: number;
+  estimatedProgress?: (duration: number, elapsed: number) => number;
+}): {
+  progress: Cell<number>;
+  isLoading: Cell<boolean>;
+  error: Cell<boolean>;
+  start(opts?: { force?: boolean }): void;
+  set(value: number, opts?: { force?: boolean }): void;
+  finish(opts?: { force?: boolean; error?: boolean }): void;
+  clear(): void;
+};
+declare const LoadingIndicator: (props: {
+  color?: string | false;
+  errorColor?: string;
+  height?: number | string;
+  position?: 'top' | 'bottom';
+  zIndex?: number;
+  duration?: number;
+  throttle?: number;
+  hideDelay?: number;
+  resetDelay?: number;
+  estimatedProgress?: (duration: number, elapsed: number) => number;
+  class?: string;
+  className?: string;
+  style?: string;
+  children?: Component;
+  [k: string]: unknown;
+}) => Component;
+declare const JsonLd: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const ArticleSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const ProductSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const FAQPageSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const BreadcrumbListSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const OrganizationSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const LocalBusinessSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
+declare const VideoSchema: (props: { [k: string]: unknown; children?: Component }) => Component;
 declare function redirect(...args: unknown[]): unknown;
 declare function permanentRedirect(...args: unknown[]): unknown;
 declare function notFound(...args: unknown[]): never;
@@ -298526,6 +298863,279 @@ function createCompileErrorDiagnosticPlugin() {
                         });
                     }
                     return diagnostics;
+                },
+            };
+        },
+    };
+}
+
+/**
+ * Md raw-HTML policy plugin — surfaces the Markdown HTML policy as editor
+ * warnings ("ide debug") so users are informed wherever markdown content is
+ * authored:
+ *
+ * - `.vsk` files: raw-HTML tags inside template-literal strings (inline
+ *   markdown content, e.g. `<Md content={featureDoc}>`) and `<Md>` usages
+ *   themselves get diagnostics; hovering `<Md` explains the effective policy.
+ * - Markdown documents (`.md`): every raw-HTML tag is diagnosed.
+ *
+ * The plugin is policy-aware: when the workspace's vesk.config.ts enables
+ * `md.html = 'allow' | 'allowlist'`, the message changes from "this will be
+ * escaped" to "passthrough is enabled — only render trusted content".
+ */
+let workspaceRoot = null;
+let cachedPolicy = null;
+/** Called by the server on initialize so the plugin can find vesk.config. */
+function setMdPluginWorkspaceRoot(root) {
+    workspaceRoot = root;
+    cachedPolicy = null;
+}
+function detectPolicy() {
+    if (!workspaceRoot)
+        return 'escape';
+    const now = Date.now();
+    if (cachedPolicy && now - cachedPolicy.readAt < 5000)
+        return cachedPolicy.mode;
+    let mode = 'escape';
+    for (const name of ['vesk.config.ts', 'vesk.config.js', 'vesk.config.mjs']) {
+        const p = resolve(workspaceRoot, name);
+        if (!existsSync(p))
+            continue;
+        try {
+            const text = readFileSync(p, 'utf-8');
+            const keyIdx = text.indexOf('html');
+            if (keyIdx !== -1) {
+                // scan forward for a quoted mode value within ~80 chars
+                const window = text.slice(keyIdx, keyIdx + 120);
+                if (window.includes("'allowlist'") || window.includes('"allowlist"'))
+                    mode = 'allowlist';
+                else if (window.includes("'allow'") || window.includes('"allow"'))
+                    mode = 'allow';
+            }
+        }
+        catch {
+            // unreadable config — keep escape default
+        }
+        break;
+    }
+    cachedPolicy = { mode, readAt: now };
+    return mode;
+}
+function isAsciiLetter(c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+function isTagNameChar(c) {
+    return isAsciiLetter(c) || (c >= '0' && c <= '9') || c === '-';
+}
+const VOID_TAGS = new Set(['br', 'hr', 'img', 'input', 'wbr', 'meta', 'link']);
+/** Finds well-formed raw-HTML tags in `text`; used for .md content regions. */
+function findRawHtmlTags(text) {
+    const tags = [];
+    let i = 0;
+    while (i < text.length) {
+        if (text[i] !== '<') {
+            i++;
+            continue;
+        }
+        if (text.startsWith('<!--', i)) {
+            const close = text.indexOf('-->', i + 4);
+            i = close === -1 ? text.length : close + 3;
+            continue;
+        }
+        let j = i + 1;
+        let closing = false;
+        if (text[j] === '/') {
+            closing = true;
+            j++;
+        }
+        if (!isAsciiLetter(text[j])) {
+            i++;
+            continue;
+        }
+        const nameStart = j;
+        while (j < text.length && isTagNameChar(text[j]))
+            j++;
+        const tag = text.slice(nameStart, j).toLowerCase();
+        if (VOID_TAGS.has(tag) || !closing) {
+            // opening/void tag — record it; skip to '>' honoring quotes
+            let k = j;
+            let quote = '';
+            while (k < text.length) {
+                const c = text[k];
+                if (quote !== '') {
+                    if (c === quote)
+                        quote = '';
+                }
+                else if (c === '"' || c === "'")
+                    quote = c;
+                else if (c === '>')
+                    break;
+                k++;
+            }
+            if (k < text.length) {
+                tags.push({ start: i, end: k + 1, tag });
+                i = k + 1;
+                continue;
+            }
+        }
+        i++;
+    }
+    return tags;
+}
+/** Template-literal spans of a .vsk document (escape-aware backtick toggle). */
+function templateLiteralSpans(text) {
+    const spans = [];
+    let i = 0;
+    while (i < text.length) {
+        const ch = text[i];
+        if (ch === '\\') {
+            i += 2;
+            continue;
+        }
+        if (ch === '`') {
+            const start = i;
+            i++;
+            while (i < text.length) {
+                if (text[i] === '\\') {
+                    i += 2;
+                    continue;
+                }
+                if (text[i] === '`')
+                    break;
+                i++;
+            }
+            spans.push({ start, end: Math.min(i + 1, text.length) });
+            i++;
+            continue;
+        }
+        if (ch === '"' || ch === "'") {
+            const q = ch;
+            i++;
+            while (i < text.length) {
+                if (text[i] === '\\') {
+                    i += 2;
+                    continue;
+                }
+                if (text[i] === q)
+                    break;
+                i++;
+            }
+            i++;
+            continue;
+        }
+        if (ch === '/' && text[i + 1] === '/') {
+            while (i < text.length && text[i] !== '\n')
+                i++;
+            continue;
+        }
+        i++;
+    }
+    return spans;
+}
+function diagnosticMessage(tag, policy) {
+    if (policy === 'escape') {
+        return {
+            severity: DiagnosticSeverity.Warning,
+            message: `Raw HTML <${tag}> inside Markdown is ESCAPED by default and renders as visible text. ` +
+                'To render it, set md.html = "allow" or "allowlist" (+ md.allowTags) in vesk.config.ts.',
+        };
+    }
+    return {
+        severity: DiagnosticSeverity.Information,
+        message: `Raw HTML <${tag}> renders verbatim (md.html = "${policy}"). ` +
+            'Only render markdown you trust — passthrough bypasses escaping.',
+    };
+}
+function createMdHtmlPlugin() {
+    return {
+        name: 'vesk-md-html',
+        capabilities: {
+            diagnosticProvider: {
+                interFileDependencies: false,
+                workspaceDiagnostics: false,
+            },
+            hoverProvider: true,
+        },
+        create(context) {
+            function analyze(uri, text) {
+                const mdRanges = [];
+                let tags = [];
+                if (uri.endsWith('.vsk')) {
+                    for (const span of templateLiteralSpans(text)) {
+                        mdRanges.push(span);
+                        tags.push(...findRawHtmlTags(text.slice(span.start, span.end)).map((t) => ({
+                            start: t.start + span.start,
+                            end: t.end + span.start,
+                            tag: t.tag,
+                        })));
+                    }
+                }
+                else {
+                    tags = findRawHtmlTags(text);
+                }
+                return { tags, mdRanges };
+            }
+            return {
+                async provideDiagnostics(document, _token) {
+                    const uri = document.uri;
+                    if (!uri.endsWith('.vsk') && !uri.endsWith('.md') && !uri.endsWith('.markdown')) {
+                        return undefined;
+                    }
+                    const text = document.getText();
+                    const { tags } = analyze(uri, text);
+                    if (tags.length === 0)
+                        return undefined;
+                    const policy = detectPolicy();
+                    const diagnostics = [];
+                    for (const t of tags) {
+                        const { severity, message } = diagnosticMessage(t.tag, policy);
+                        diagnostics.push({
+                            range: {
+                                start: document.positionAt(t.start),
+                                end: document.positionAt(Math.min(t.end, text.length)),
+                            },
+                            severity,
+                            source: 'vesk',
+                            code: 'vesk-md-html',
+                            message,
+                        });
+                    }
+                    return diagnostics;
+                },
+                async provideHover(document, position, _token) {
+                    const uri = document.uri;
+                    if (!uri.endsWith('.vsk') && !uri.endsWith('.md'))
+                        return undefined;
+                    const offset = document.offsetAt(position);
+                    const text = document.getText();
+                    // Hovering an `<Md` usage in .vsk → explain the policy.
+                    if (uri.endsWith('.vsk')) {
+                        const mdIdx = text.lastIndexOf('<Md', offset);
+                        if (mdIdx !== -1 && offset <= mdIdx + 4 && offset - mdIdx >= 0 && offset - mdIdx < 40 && /^\s*$/.test(text.slice(mdIdx + 3, offset))) {
+                            const policy = detectPolicy();
+                            const what = policy === 'escape'
+                                ? 'Raw HTML inside Markdown is **escaped** by default (renders as visible text).'
+                                : `Raw HTML passthrough is **enabled** (\`md.html = "${policy}"\`). Only render trusted content.`;
+                            return {
+                                contents: {
+                                    kind: 'markdown',
+                                    value: `**Md** — markdown renderer\n\n${what}\n\nConfigure via \`md: { html: 'escape' | 'allow' | 'allowlist', allowTags?: string[] }\` in \`vesk.config.ts\`, or per instance with the \`html\` / \`allowTags\` props.`,
+                                },
+                            };
+                        }
+                    }
+                    // Hovering a detected raw-HTML tag → inline explanation.
+                    const { tags } = analyze(uri, text);
+                    for (const t of tags) {
+                        if (offset >= t.start && offset <= t.end) {
+                            const policy = detectPolicy();
+                            const { message } = diagnosticMessage(t.tag, policy);
+                            return {
+                                contents: { kind: 'markdown', value: `**Md raw HTML** — ${message}` },
+                            };
+                        }
+                    }
+                    return undefined;
                 },
             };
         },
@@ -329186,6 +329796,8 @@ function createVeskLanguageServer() {
                     // ignore malformed folder URIs
                 }
             }
+            // Md raw-HTML plugin reads vesk.config policy from the first root.
+            setMdPluginWorkspaceRoot(workspaceRoots[0] ?? null);
             const tsLibDir = findTypescriptLibDir(workspaceRoots);
             if (tsLibDir) {
                 log(`TypeScript lib directory resolved: ${tsLibDir}`);
@@ -329288,6 +329900,7 @@ function createVeskLanguageServer() {
             }), [
                 createCompletionPlugin(),
                 createCompileErrorDiagnosticPlugin(),
+                createMdHtmlPlugin(),
                 stripDocumentFormatting(volarServiceCssExports.create()),
                 ...createTypeScriptServices(ts).map(stripDocumentFormatting),
                 // Must come after TypeScript services to intercept their providers.

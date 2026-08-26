@@ -138,6 +138,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
 
   const projectDir = resolve(outDir, '..');
   let securityConfig: SecurityConfig = {};
+  let mdConfig: Record<string, unknown> | undefined;
   try {
     const veskConfigPath = resolve(projectDir, 'vesk.config.js');
     const veskConfigTsPath = resolve(projectDir, 'vesk.config.ts');
@@ -153,10 +154,17 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     if (typeof rawConfig === 'function') rawConfig = rawConfig();
     const configObj = rawConfig as Record<string, unknown>;
     securityConfig = { security: configObj.security as SecurityConfig['security'] };
+    mdConfig = configObj.md as Record<string, unknown> | undefined;
   } catch (e) {
     // Fail closed: keep the secure defaults above and warn loudly — a broken
     // config must never silently disable the app's chosen security policy.
     console.error('vesk start: failed to load vesk.config — falling back to secure defaults:', e instanceof Error ? e.message : e);
+  }
+  if (mdConfig) {
+    try {
+      const { configureMd } = await import('@vesk/runtime/src/md') as { configureMd: (p?: unknown) => void };
+      configureMd(mdConfig);
+    } catch { /* runtime md module unavailable — keep default escape policy */ }
   }
 
   let rateLimiter: { check: (ip: string) => boolean } | null = null;

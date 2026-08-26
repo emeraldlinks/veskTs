@@ -155,5 +155,32 @@ describe('definePlugin()', () => {
 
 });
 
+describe('md config (raw-HTML policy)', () => {
+	it('passes md through untouched when valid', () => {
+		const cfg = defineConfig({ md: { html: 'allowlist', allowTags: ['A', 'br', 'Span'] } });
+		expect(cfg.md.html).toBe('allowlist');
+		expect(JSON.stringify(cfg.md.allowTags)).toBe(JSON.stringify(['a', 'br', 'span']));
+	});
+
+	it('defaults to no md key (escape behavior)', () => {
+		const cfg = defineConfig({});
+		expect(cfg.md).toBeUndefined();
+	});
+
+	it('throws on unknown md.html mode', () => {
+		let threw = false;
+		try { defineConfig({ md: { html: 'sometimes' } }); }
+		catch { threw = true; }
+		expect(threw).toBe(true);
+	});
+
+	it('throws on non-array allowTags', () => {
+		let threw = false;
+		try { defineConfig({ md: { html: 'allowlist', allowTags: 'em' } }); }
+		catch { threw = true; }
+		expect(threw).toBe(true);
+	});
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 process.exit(failed > 0 ? 1 : 0);

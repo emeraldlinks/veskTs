@@ -1,5 +1,32 @@
-import type { VeskConfig, VeskPlugin, VeskSecurity, VeskSecurityPreset } from '@vesk/compiler/src/types';
+import type { VeskConfig, VeskPlugin, VeskSecurity, VeskSecurityPreset, MdConfig } from '@vesk/compiler/src/types';
 import { VeskError } from '@vesk/compiler/src/errors';
+
+/** Tags allowed by default when md.html = 'allowlist' and no allowTags given. */
+export const MD_DEFAULT_ALLOW_TAGS = [
+  'a', 'abbr', 'b', 'bdi', 'bdo', 'br', 'cite', 'code', 'data', 'del', 'dfn', 'em',
+  'i', 'ins', 'kbd', 'mark', 'q', 'rp', 'rt', 'ruby', 's', 'samp', 'small', 'span',
+  'strong', 'sub', 'sup', 'time', 'u', 'var', 'wbr',
+];
+
+const MD_HTML_MODES = ['escape', 'allow', 'allowlist'];
+
+function normalizeMdConfig(md: MdConfig | undefined): MdConfig | undefined {
+  if (!md || typeof md !== 'object') return md;
+  if (md.html !== undefined && !MD_HTML_MODES.includes(md.html)) {
+    throw VeskError.configError(
+      `Unknown md.html mode: "${md.html}".`,
+      MD_HTML_MODES,
+    );
+  }
+  const out: MdConfig = { ...md };
+  if (out.allowTags) {
+    if (!Array.isArray(out.allowTags)) {
+      throw VeskError.configError('md.allowTags must be an array of tag names.', []);
+    }
+    out.allowTags = out.allowTags.map((t) => String(t).toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean);
+  }
+  return out;
+}
 
 const SECURITY_PRESETS: Record<string, VeskSecurity> = {
   strict: {
@@ -68,6 +95,8 @@ export function defineConfig(config: VeskConfig): VeskConfig {
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'";
   if (sec.redactLogs !== false) sec.redactLogs = true;
   if (config.routeDataCache === undefined) config.routeDataCache = 0;
+  const md = normalizeMdConfig(config.md);
+  if (md !== undefined) config.md = md;
   return config;
 }
 

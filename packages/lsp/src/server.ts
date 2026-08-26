@@ -19,6 +19,7 @@ import { AMBIENT as AMBIENT_CONTENT, RUNTIME_OVERRIDE as RUNTIME_OVERRIDE_CONTEN
 import { createAutoInsertPlugin } from './plugins/autoInsert';
 import { createCompletionPlugin } from './plugins/completion';
 import { createCompileErrorDiagnosticPlugin } from './plugins/compileErrors';
+import { createMdHtmlPlugin, setMdPluginWorkspaceRoot } from './plugins/mdHtml';
 import { installStyleShim } from './styleShim';import { createHoverPlugin } from './plugins/hover';
 import { createTypeScriptDiagnosticFilterPlugin } from './plugins/diagnosticsFilter';
 import { getVeskLanguagePlugin, resolveConfig } from './language-plugin';
@@ -316,6 +317,8 @@ export function createVeskLanguageServer() {
           // ignore malformed folder URIs
         }
       }
+      // Md raw-HTML plugin reads vesk.config policy from the first root.
+      setMdPluginWorkspaceRoot(workspaceRoots[0] ?? null);
 
       const tsLibDir = findTypescriptLibDir(workspaceRoots);
       if (tsLibDir) {
@@ -437,6 +440,7 @@ export function createVeskLanguageServer() {
         [
           createCompletionPlugin(),
           createCompileErrorDiagnosticPlugin(),
+          createMdHtmlPlugin(),
           stripDocumentFormatting(createCssService()),
           ...createTypeScriptServices(ts).map(stripDocumentFormatting),
           // Must come after TypeScript services to intercept their providers.

@@ -15,6 +15,10 @@ export default defineConfig({
   appDir: './app',
   outDir: './dist',
   publicDir: './public',
+  md: {
+    html: 'allowlist',
+    allowTags: ['a', 'em', 'br'],
+  },
   security: preset('production', {
     trustProxy: true,
     cors: { origin: ['http://localhost:3002'] },

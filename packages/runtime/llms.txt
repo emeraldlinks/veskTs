@@ -203,6 +203,11 @@ maxLength(n: number, msg?: string): ValidationRule
 pattern(re: RegExp, msg?: string): ValidationRule
 custom(fn: (v: unknown) => boolean, msg?: string): ValidationRule
 Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+configureMd(policy?: { html?: MdHtmlMode; allowTags?: string[] }): void
+getMdPolicy(): { html: MdHtmlMode; allowTags: string[] }
+renderMarkdownEx(md: string, options?): { html: string; warnings: MdHtmlWarning[] }
+drainMdHtmlWarnings(): MdHtmlWarning[]
+setMdConsoleWarnings(enabled: boolean): void
 defineAction(config: ActionConfig | string, config2?: ActionConfig): ActionDefinition
 getAction(id: string): ActionConfig | null
 clearActions(): void
@@ -499,8 +504,14 @@ removal; never import/emit `batch` (matches repo AGENTS.md rule).
   `track` is true.
 - `Image` generates `srcset` from `${base}-${w}w${ext}` (i.e. it assumes
   pre-generated responsive files named `name-640w.jpg` etc.).
-- `Md`/`JsonLd` escape everything — no raw HTML pass-through; `</script>` is
-  escaped in JSON-LD.
+- `Md`/`JsonLd` escape everything by default; `</script>` is escaped in
+  JSON-LD. `Md` raw-HTML is configurable: `md.html = 'escape' | 'allow' |
+  'allowlist'` (+ `md.allowTags`) in vesk.config.ts, applied process-wide via
+  `configureMd()` and overridable per instance with the `<Md html allowTags>`
+  props. Passthrough emits a `[vesk-md]` console warning, feeds
+  `drainMdHtmlWarnings()` (printed once per `vesk build`), and is flagged by
+  the LSP (`vesk-md-html` diagnostics + hover). Allowlist mode drops `on*`
+  handlers and sanitizes `href`/`src`; `'allow'` is verbatim.
 - Server `useParams` (request) vs client `useParams` (router): different
   semantics; on server the router variant is `routerParams`.
 

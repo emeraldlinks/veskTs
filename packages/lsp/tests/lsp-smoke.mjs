@@ -270,6 +270,36 @@ async function main() {
   const reactiveHover = results(hoverReactive)?.contents?.value || '';
   assert(/reactive binding/i.test(reactiveHover), `hover on reactive binding count shows info`);
 
+  // 13b. Md raw-HTML policy: warnings inside markdown template strings + <Md> hover
+  const mdDocUri = 'file://' + FIXTURE + '/app/md-doc.vsk';
+  const mdDoc = [
+    "import { Md } from '@vesk/runtime'",
+    '',
+    'component MdDoc {',
+    '\tconst doc = `<a id="custom-target">d</a>`',
+    '\t<Md content={doc} />',
+    '}',
+  ].join('\n');
+  notify('textDocument/didOpen', {
+    textDocument: { uri: mdDocUri, languageId: 'vsk', version: 1, text: mdDoc },
+  });
+  await new Promise(r => setTimeout(r, 100));
+  notify('textDocument/didChange', {
+    textDocument: { uri: mdDocUri, version: 2 },
+    contentChanges: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: '' }],
+  });
+  await new Promise(r => setTimeout(r, 500));
+  const mdHtmlDiags = diagnostics.filter(d => d.code === 'vesk-md-html');
+  assert(mdHtmlDiags.length >= 1, `md raw-HTML diagnostic emitted (${mdHtmlDiags.length})`);
+  assert(mdHtmlDiags.some(d => d.message.includes('ESCAPED')), 'md html diagnostic explains default escaping');
+  const mdTagLine = mdDoc.split('\n')[4].indexOf('<Md');
+  const hoverMd = await request('textDocument/hover', {
+    textDocument: { uri: mdDocUri },
+    position: pos(4, mdTagLine + 1),
+  }, 'hover <Md>');
+  const mdHover = results(hoverMd)?.contents?.value || '';
+  assert(/markdown renderer/i.test(mdHover), `hover on <Md> shows policy docs`);
+
   // 14-15. import definition: open the imports fixture
   const impUri = 'file://' + FIXTURE + '/app/imports.vsk';
   const impSource = readFileSync(resolve(FIXTURE, 'app/imports.vsk'), 'utf-8');

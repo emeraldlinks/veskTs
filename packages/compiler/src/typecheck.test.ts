@@ -165,6 +165,26 @@ test('typecheck: auto-imported names (useFetch etc.) resolve without an import',
   }
 });
 
+test('typecheck: LoadingIndicator + useLoadingIndicator typecheck (statement mode)', () => {
+  const f = fixture({
+    'app/page.vsk': `component Page() {\n  <LoadingIndicator color="#f00" height={4} position="bottom" />\n}\n`,
+    'app/custom.vsk': `component Custom() {\n  const li = useLoadingIndicator({ duration: 900 })\n  effect(() => {\n    if (li.isLoading.get()) {\n      console.log(li.progress.get())\n    }\n  })\n  <div class={li.error.get() ? 'err' : 'ok'}>state</div>\n}\n`,
+    'app/bad.vsk': `component Bad() {\n  <LoadingIndicator height={true} />\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const inPageOrCustom = errors.filter((e) => e.file.includes('page.vsk') || e.file.includes('custom.vsk'));
+    if (inPageOrCustom.length > 0) {
+      throw new Error(`expected clean typecheck for loading-indicator usage, got:\n${formatTypecheckErrors(inPageOrCustom)}`);
+    }
+    if (!errors.some((e) => e.file.includes('bad.vsk'))) {
+      throw new Error('expected tsc error for height={true} on LoadingIndicator');
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('typecheck: const track decl typechecks (no "const let" regression)', () => {
   const f = fixture({
     'app/page.vsk': `component Page() {\n  const &[count] = track<number>(10)\n  <p>{count}</p>\n}\n`,
