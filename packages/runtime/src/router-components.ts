@@ -369,6 +369,7 @@ export function useSearchParams(): [URLSearchParams, (next: Record<string, strin
 export function useRouter(): {
 	push: (href: string) => void;
 	replace: (href: string) => void;
+	navigate: (href: string, opts?: { replace?: boolean }) => void;
 	back: () => void;
 	forward: () => void;
 	go: (n: number) => void;
@@ -395,6 +396,7 @@ export function useRouter(): {
 	return {
 		push: (href: string) => router?.navigate?.(href),
 		replace: (href: string) => router?.navigate?.(href, { replace: true }),
+		navigate: (href: string, opts?: { replace?: boolean }) => router?.navigate?.(href, opts as Record<string, unknown>),
 		back: () => window.history.back(),
 		forward: () => window.history.forward(),
 		go: (n: number) => window.history.go(n),
