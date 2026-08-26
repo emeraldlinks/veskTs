@@ -39,6 +39,16 @@ interface RouterInstance {
 	readonly currentPath: string;
 	/** True while an SPA navigation is in flight (shared with LoadingIndicator). */
 	readonly isLoading: boolean;
+	/** Registers a navigation guard (programmatic/Link navigations only — the
+	 * browser's own back/forward cannot be blocked). Return `false` to block
+	 * or a path to redirect. Returns an unsubscribe function. */
+	beforeEach(fn: (to: string, from: string) => false | string | void | Promise<false | string | void>): () => void;
+	go(n: number): void;
+	readonly route: { pathname: string; params: Record<string, string>; pattern: string } | null;
+	_beforeGuards?: GuardFn[];
+	_viewTransitions?: boolean;
+	_guardDepth?: number;
+	_runGuards(to: string): false | string | void | Promise<false | string | void>;
 	hmrUpdate(): void;
 	__hydrators?: Record<string, Function>;
 	__componentInstances?: Map<string, { root: Element; props: Record<string, unknown>; node: RouteNode; type: string }[]>;
@@ -53,6 +63,8 @@ interface RouterInstance {
 interface RouterOptions {
 	container?: HTMLElement;
 	prefetch?: boolean;
+	/** Wrap SPA DOM swaps in document.startViewTransition when supported. Default false. */
+	viewTransitions?: boolean;
 	hydrate?: 'full' | 'viewport' | 'idle' | 'interaction';
 	/** Route-data freshness TTL in ms. Default 0 = always refetch on SPA nav. */
 	routeDataCache?: number;
@@ -1076,6 +1088,21 @@ async function hydrateInitial(
 	}
 }
 
+function scrollToHash(): void {
+	const h = typeof window !== 'undefined' ? window.location.hash : '';
+	if (!h || h === '#') return;
+	const id = h.slice(1);
+	setTimeout(() => {
+		try {
+			const el = document.getElementById(id);
+			if (el && typeof el.scrollIntoView === 'function') el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+		} catch { /* element may not exist */ }
+	}, 80);
+}
+
+type GuardDecision = false | string | void | Promise<false | string | void>;
+type GuardFn = (to: string, from: string) => false | string | void | Promise<false | string | void>;
+
 export function createRouter(
 	routes: RouteNode[] | Record<string, Function>,
 	options: RouterOptions = {},
@@ -1095,6 +1122,49 @@ export function createRouter(
 		_depth: 0,
 		_routeDataCache: options.routeDataCache ?? 0,
 		_offlineUI: (options.offline ?? null) as OfflineEntry | null,
+		_beforeGuards: [],
+		_viewTransitions: options.viewTransitions === true,
+
+		beforeEach(fn: GuardFn): () => void {
+			(this._beforeGuards as GuardFn[]).push(fn);
+			let active = true;
+			return () => {
+				if (!active) return;
+				active = false;
+				const guards = this._beforeGuards as GuardFn[];
+				const i = guards.indexOf(fn);
+				if (i > -1) guards.splice(i, 1);
+			};
+		},
+
+		_runGuards(to: string): false | string | void | Promise<false | string | void> {
+			const from = window.location.pathname;
+			for (const g of (this._beforeGuards as GuardFn[]) ?? []) {
+				const d = g(to, from);
+				if (d instanceof Promise) {
+					return d.then((r) => {
+						if (r === false || typeof r === 'string') return r;
+					});
+				}
+				if (d === false || typeof d === 'string') return d;
+			}
+		},
+
+		go(n: number) {
+			window.history.go(n);
+		},
+
+		get route() {
+			const m = this._currentMatch as RouteMatch | null;
+			if (!m) return null;
+			const chain = m.matchChain ?? [];
+			const deepest = chain[chain.length - 1] as RouteNode | undefined;
+			return {
+				pathname: m.pathname || '',
+				params: m.params,
+				pattern: deepest?.fullPath || '/',
+			};
+		},
 
 		start() {
 			setCurrentRouter(this);
@@ -1161,67 +1231,104 @@ export function createRouter(
 
 			match.pathname = url.pathname;
 
-			if (!_isPopStateNavigation) {
-				_scrollPositions.set(window.location.pathname, window.scrollY);
-			}
+			// Navigation guards (programmatic/Link navigations only).
+			const self = this as RouterInstance;
+			const guardResult = self._runGuards(url.pathname);
+			const proceedNav = () => {
+				if (!_isPopStateNavigation) {
+					_scrollPositions.set(window.location.pathname, window.scrollY);
+				}
 
-			const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
-			this._navToken = (this._navToken || 0) + 1;
-			const navToken = this._navToken;
-			loadingStart();
+				const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
+				this._navToken = (this._navToken || 0) + 1;
+				const navToken = this._navToken;
+				loadingStart();
 
-			let firstRenderFailed = false;
+				let firstRenderFailed = false;
 
-			const updateUrl = () => {
-				if (!opts.replace) {
-					window.history.pushState({ path: url.pathname }, '', url.pathname);
+				const updateUrl = () => {
+					if (!opts.replace) {
+						window.history.pushState({ path: url.pathname }, '', url.pathname);
+					} else {
+						window.history.replaceState({ path: url.pathname }, '', url.pathname);
+					}
+					set(_state.path, url.pathname);
+					set(_state.search, url.search);
+				};
+
+				const renderContent = () => {
+					try {
+						renderMatch(this, match!, this.container);
+					} catch (e) {
+						firstRenderFailed = true;
+						throw e;
+					}
+					this._currentMatch = match!;
+					clearOfflineFlag(this, container);
+					handleScroll(url.pathname, opts.replace);
+				};
+
+				const swapView = (fn: () => void | Promise<void>) => {
+					const d = document as Document & { startViewTransition?: (cb: () => void | Promise<void>) => unknown };
+					if ((this as RouterInstance)._viewTransitions && typeof d.startViewTransition === 'function') d.startViewTransition(fn);
+					else fn();
+				};
+
+				const doRender = () => {
+					updateUrl();
+					swapView(() => renderContent());
+					scrollToHash();
+				};
+
+				const fetchData = () => {
+					if (firstRenderFailed) return;
+					if (!shouldFetchData(this, match!)) { loadingFinish(); scrollToHash(); return; }
+				getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
+					if (navToken !== this._navToken) return;
+					if (!data) { loadingFinish(); return; }
+					if (data.redirect) {
+						loadingFinish();
+						this.navigate(data.redirect, { replace: true });
+						return;
+					}
+					if (!hasRealPageData(data)) { loadingFinish(); scrollToHash(); return; }
+					await swapView(() => applyRouteData(this, match!, data, this.container));
+					scrollToHash();
+					loadingFinish({ error: !!data.error });
+				}).catch(() => loadingFinish({ error: true }));
+				};
+
+				if (loadingFn) {
+					showLoadingInContainer(this.container, loadingFn, match.params);
+					Promise.resolve().then(() => { try { doRender(); } finally { fetchData(); } });
 				} else {
-					window.history.replaceState({ path: url.pathname }, '', url.pathname);
+					try { doRender(); } finally { fetchData(); }
 				}
-				set(_state.path, url.pathname);
-				set(_state.search, url.search);
 			};
 
-			const renderContent = () => {
-				try {
-					renderMatch(this, match!, this.container);
-				} catch (e) {
-					firstRenderFailed = true;
-					throw e;
-				}
-				this._currentMatch = match!;
-				clearOfflineFlag(this, container);
-				handleScroll(url.pathname, opts.replace);
-			};
-
-			const doRender = () => {
-				updateUrl();
-				renderContent();
-			};
-
-			const fetchData = () => {
-				if (firstRenderFailed) return;
-				if (!shouldFetchData(this, match!)) { loadingFinish(); return; }
-			getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
-				if (navToken !== this._navToken) return;
-				if (!data) { loadingFinish(); return; }
-				if (data.redirect) {
-					loadingFinish();
-					this.navigate(data.redirect, { replace: true });
-					return;
-				}
-				if (!hasRealPageData(data)) { loadingFinish(); return; }
-				await applyRouteData(this, match!, data, this.container);
-				loadingFinish({ error: !!data.error });
-			}).catch(() => loadingFinish({ error: true }));
-			};
-
-			if (loadingFn) {
-				showLoadingInContainer(this.container, loadingFn, match.params);
-				Promise.resolve().then(() => { try { doRender(); } finally { fetchData(); } });
-			} else {
-				try { doRender(); } finally { fetchData(); }
+			// If guards return a Promise, chain the rest asynchronously.
+			// If sync (the common case), the navigation completes synchronously,
+			// preserving backward compatibility with callers that don't await.
+			if (guardResult instanceof Promise) {
+				return guardResult.then((decision) => {
+					if (decision === false) return;
+					if (typeof decision === 'string' && decision !== url.pathname && (self._guardDepth ?? 0) < 5) {
+						self._guardDepth = (self._guardDepth ?? 0) + 1;
+						try { self.navigate(decision, { replace: true }); }
+						finally { self._guardDepth = 0; }
+						return;
+					}
+					proceedNav();
+				});
 			}
+			if (guardResult === false) return;
+			if (typeof guardResult === 'string' && guardResult !== url.pathname && (self._guardDepth ?? 0) < 5) {
+				self._guardDepth = (self._guardDepth ?? 0) + 1;
+				try { self.navigate(guardResult, { replace: true }); }
+				finally { self._guardDepth = 0; }
+				return;
+			}
+			proceedNav();
 		},
 
 		prefetch(path: string) {
@@ -1319,6 +1426,49 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		_depth: 0,
 		_routeDataCache: options.routeDataCache ?? 0,
 		_offlineUI: (options.offline ?? null) as OfflineEntry | null,
+		_beforeGuards: [],
+		_viewTransitions: options.viewTransitions === true,
+
+		beforeEach(fn: GuardFn): () => void {
+			(this._beforeGuards as GuardFn[]).push(fn);
+			let active = true;
+			return () => {
+				if (!active) return;
+				active = false;
+				const guards = this._beforeGuards as GuardFn[];
+				const i = guards.indexOf(fn);
+				if (i > -1) guards.splice(i, 1);
+			};
+		},
+
+		_runGuards(to: string): false | string | void | Promise<false | string | void> {
+			const from = window.location.pathname;
+			for (const g of (this._beforeGuards as GuardFn[]) ?? []) {
+				const d = g(to, from);
+				if (d instanceof Promise) {
+					return d.then((r) => {
+						if (r === false || typeof r === 'string') return r;
+					});
+				}
+				if (d === false || typeof d === 'string') return d;
+			}
+		},
+
+		go(n: number) {
+			window.history.go(n);
+		},
+
+		get route() {
+			const m = router._currentMatch as RouteMatch | null;
+			if (!m) return null;
+			const chain = m.matchChain ?? [];
+			const deepest = chain[chain.length - 1] as RouteNode | undefined;
+			return {
+				pathname: m.pathname || '',
+				params: m.params,
+				pattern: deepest?.fullPath || '/',
+			};
+		},
 
 		start() {
 			setCurrentRouter(this);
@@ -1395,191 +1545,202 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 			match.pathname = url.pathname;
 
-			if (!_isPopStateNavigation) {
-				_scrollPositions.set(window.location.pathname, window.scrollY);
-			}
-
-			const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
-			router._navToken = (router._navToken || 0) + 1;
-			navDebug('navigate', url.pathname, 'token=' + router._navToken, 'pendingChunks', hasPendingChunks(match.matchChain));
-			const navToken = router._navToken;
-			loadingStart();
-
-			const middlewareFns: Function[] = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
-
-			let firstRenderFailed = false;
-
-			const updateUrl = () => {
-				const fullUrl = url.pathname + url.search;
-				if (!opts.replace) {
-					window.history.pushState({ path: fullUrl }, '', fullUrl);
-				} else {
-					window.history.replaceState({ path: fullUrl }, '', fullUrl);
+			const afterGuards = () => {
+				if (!_isPopStateNavigation) {
+					_scrollPositions.set(window.location.pathname, window.scrollY);
 				}
-				set(_state.path, url.pathname);
-				set(_state.search, url.search);
-			};
 
-			const renderContent = () => {
-				// Data isolation: route nodes are shared singletons. When the
-				// navigation changes the path a node was last hydrated with, its
-				// cached props must not render on the new path (a params-only or
-				// failed data payload would otherwise merge stale foreign data
-				// into the new page).
-				const propsNode = findPageNode(match!);
-				if (propsNode && propsNode._dataPath !== url.pathname) {
-					propsNode.props = undefined;
-				}
-				try {
-					// Stamp this navigation's token on the container: a suspended
-					// (async) page whose render resolves after a newer navigation
-					// must not clobber the newer page's DOM (see renderMatch's
-					// mountDom staleness guard).
-					(container as HTMLElement & { __veskMountToken?: number }).__veskMountToken = navToken;
-					renderFn(router, match!, container, navToken);
-				} catch (e) {
-					firstRenderFailed = true;
-					throw e;
-				}
-				router._currentMatch = match!;
-				clearOfflineFlag(router, container);
-				handleScroll(url.pathname, opts.replace);
-			};
+				const swapView = (fn: () => void | Promise<void>) => {
+					const d = document as Document & { startViewTransition?: (cb: () => void | Promise<void>) => unknown };
+					if (router._viewTransitions && typeof d.startViewTransition === 'function') d.startViewTransition(fn);
+					else fn();
+				};
 
-			const doRender = () => {
-				navDebug('doRender', url.pathname, 'token=' + navToken);
-				updateUrl();
-				renderContent();
-				navDebug('painted', url.pathname);
-			};
+				const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
+				router._navToken = (router._navToken || 0) + 1;
+				navDebug('navigate', url.pathname, 'token=' + router._navToken, 'pendingChunks', hasPendingChunks(match.matchChain));
+				const navToken = router._navToken;
+				loadingStart();
 
-			const fetchData = () => {
-				if (firstRenderFailed) return;
-				navDebug('fetchData?', url.pathname, String(shouldFetchData(router, match!)));
-				if (!shouldFetchData(router, match!)) { loadingFinish(); return; }
-				getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
-					navDebug('data arrived', url.pathname, 'token=' + navToken, 'current=' + router._navToken, 'realProps', JSON.stringify(data && hasRealPageData(data)));
-					if (navToken !== router._navToken) return;
-					if (!data) { loadingFinish(); return; }
-					if (data.redirect) {
-						loadingFinish();
-						router.navigate(data.redirect, { replace: true });
-						return;
+				const middlewareFns: Function[] = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
+
+				let firstRenderFailed = false;
+
+				const updateUrl = () => {
+					const fullUrl = url.pathname + url.search;
+					if (!opts.replace) {
+						window.history.pushState({ path: fullUrl }, '', fullUrl);
+					} else {
+						window.history.replaceState({ path: fullUrl }, '', fullUrl);
 					}
-					if (!hasRealPageData(data)) { loadingFinish(); return; }
-					const pending = hasPendingChunks(match!.matchChain);
-					if (pending.length > 0) {
-						await loadChunksQuietly(pending);
+					set(_state.path, url.pathname);
+					set(_state.search, url.search);
+				};
+
+				const renderContent = () => {
+					const propsNode = findPageNode(match!);
+					if (propsNode && propsNode._dataPath !== url.pathname) {
+						propsNode.props = undefined;
+					}
+					try {
+						(container as HTMLElement & { __veskMountToken?: number }).__veskMountToken = navToken;
+						renderFn(router, match!, container, navToken);
+					} catch (e) {
+						firstRenderFailed = true;
+						throw e;
+					}
+					router._currentMatch = match!;
+					clearOfflineFlag(router, container);
+					handleScroll(url.pathname, opts.replace);
+				};
+
+				const doRender = () => {
+					navDebug('doRender', url.pathname, 'token=' + navToken);
+					updateUrl();
+					swapView(() => renderContent());
+					scrollToHash();
+					navDebug('painted', url.pathname);
+				};
+
+				const fetchData = () => {
+					if (firstRenderFailed) return;
+					navDebug('fetchData?', url.pathname, String(shouldFetchData(router, match!)));
+					if (!shouldFetchData(router, match!)) { loadingFinish(); scrollToHash(); return; }
+					getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
+						navDebug('data arrived', url.pathname, 'token=' + navToken, 'current=' + router._navToken, 'realProps', JSON.stringify(data && hasRealPageData(data)));
 						if (navToken !== router._navToken) return;
+						if (!data) { loadingFinish(); return; }
+						if (data.redirect) {
+							loadingFinish();
+							router.navigate(data.redirect, { replace: true });
+							return;
+						}
+						if (!hasRealPageData(data)) { loadingFinish(); return; }
+						const pending = hasPendingChunks(match!.matchChain);
+						if (pending.length > 0) {
+							await loadChunksQuietly(pending);
+							if (navToken !== router._navToken) return;
+							if (typeof router.__updateComponents === 'function') {
+								router.__updateComponents(match!.matchChain);
+							}
+						}
+						await swapView(() => applyRouteData(router, match!, data, container, renderFn));
+						scrollToHash();
+						loadingFinish({ error: !!data.error });
+					}).catch(() => loadingFinish({ error: true }));
+				};
+
+				const pendingChunks = hasPendingChunks(match.matchChain);
+
+				const handleNavFailure = (err: unknown) => {
+					navDebug('handleNavFailure', String((err as Error)?.message || err).slice(0, 80));
+					if (navToken !== router._navToken) return;
+					loadingFinish({ error: true });
+					looksOffline().then((offline) => {
+						navDebug('handleNavFailure verdict', offline ? 'offline' : 'online');
+						if (offline) return void renderOfflinePage(router, match!, container);
+						return void renderErrorPage(router, match!, container, err);
+					}).catch(() => {});
+				};
+
+				const doRenderWithChunks = pendingChunks.length > 0
+					? () => {
+						updateUrl();
+						return loadChunksQuietly(pendingChunks).then(() => {
+							if (navToken !== router._navToken) return;
 						if (typeof router.__updateComponents === 'function') {
 							router.__updateComponents(match!.matchChain);
 						}
-					}
-					await applyRouteData(router, match!, data, container, renderFn);
-					loadingFinish({ error: !!data.error });
-				}).catch(() => loadingFinish({ error: true }));
-			};
-
-			const pendingChunks = hasPendingChunks(match.matchChain);
-
-			// A navigation whose render blew up (typically an unwired lazy
-			// page throwing "c.page is not a function") must degrade to the
-			// offline experience when connectivity is the culprit.
-			const handleNavFailure = (err: unknown) => {
-				navDebug('handleNavFailure', String((err as Error)?.message || err).slice(0, 80));
-				if (navToken !== router._navToken) return;
-				loadingFinish({ error: true });
-				looksOffline().then((offline) => {
-					navDebug('handleNavFailure verdict', offline ? 'offline' : 'online');
-					if (offline) return void renderOfflinePage(router, match!, container);
-					return void renderErrorPage(router, match!, container, err);
-				}).catch(() => {});
-			};
-
-			const doRenderWithChunks = pendingChunks.length > 0
-				? () => {
-					updateUrl();
-					return loadChunksQuietly(pendingChunks).then(() => {
-						// A newer navigation (e.g. popstate back while the chunk
-						// was still loading) may have superseded this one; don't
-						// paint the stale route over the current URL.
-						if (navToken !== router._navToken) return;
-					if (typeof router.__updateComponents === 'function') {
-						router.__updateComponents(match!.matchChain);
-					}
-					try {
-						renderContent();
-						// Chunks may resolve after fetchData's early-return already
-						// finished the indicator (prefetched data); a second finish
-						// here just re-schedules the hide, which is idempotent.
-						loadingFinish();
-					} catch (e) {
-						handleNavFailure(e);
-					}
-					}, (e) => {
-						handleNavFailure(e);
-					});
-				}
-				: (() => {
-					// Chunks already loaded (e.g. by prefetch) — resolve
-					// component refs so page/layout properties hold functions
-					// rather than string names (code-split __resolveNames only
-					// stores _pageName; __updateComponents turns it into a ref).
-					if (typeof router.__updateComponents === 'function') {
-						router.__updateComponents(match!.matchChain);
-					}
-					doRender();
-				}) as (() => Promise<void>) | (() => void);
-
-			async function runMwChain(index: number): Promise<void> {
-				if (index >= middlewareFns.length) {
-					await (doRenderWithChunks as () => Promise<void>)();
-					return;
-				}
-
-				const fn = middlewareFns[index];
-				const ctx = { url: url.pathname, params: match!.params, router, locals: {} };
-
-				async function next(rewrite?: string) {
-					if (rewrite) {
-						match!.pathname = rewrite;
-						url.pathname = rewrite;
-					}
-					return runMwChain(index + 1);
-				}
-
-				try {
-					const result = await fn(ctx, next);
-					if (result && result.redirect) {
-						router.navigate(result.redirect, { replace: true });
-						return;
-					}
-				} catch (e: unknown) {
-					if (e && (e as Error).name === 'Redirect') {
-						router.navigate((e as Redirect).url, { replace: true });
-						return;
-					}
-				}
-			}
-
-			if (middlewareFns.length > 0 || loadingFn) {
-				if (loadingFn) {
-					showLoadingInContainer(container, loadingFn, match.params);
-				}
-				Promise.resolve().then(() => {
-					try {
-						if (middlewareFns.length > 0) {
-							runMwChain(0);
-						} else {
-							(doRenderWithChunks as () => void)();
+						try {
+							renderContent();
+							loadingFinish();
+						} catch (e) {
+							handleNavFailure(e);
 						}
-					} finally {
-						fetchData();
+						}, (e) => {
+							handleNavFailure(e);
+						});
 					}
+					: (() => {
+						if (typeof router.__updateComponents === 'function') {
+							router.__updateComponents(match!.matchChain);
+						}
+						doRender();
+					}) as (() => Promise<void>) | (() => void);
+
+				async function runMwChain(index: number): Promise<void> {
+					if (index >= middlewareFns.length) {
+						await (doRenderWithChunks as () => Promise<void>)();
+						return;
+					}
+
+					const fn = middlewareFns[index];
+					const ctx = { url: url.pathname, params: match!.params, router, locals: {} };
+
+					async function next(rewrite?: string) {
+						if (rewrite) {
+							match!.pathname = rewrite;
+							url.pathname = rewrite;
+						}
+						return runMwChain(index + 1);
+					}
+
+					try {
+						const result = await fn(ctx, next);
+						if (result && result.redirect) {
+							router.navigate(result.redirect, { replace: true });
+							return;
+						}
+					} catch (e: unknown) {
+						if (e && (e as Error).name === 'Redirect') {
+							router.navigate((e as Redirect).url, { replace: true });
+							return;
+						}
+					}
+				}
+
+				if (middlewareFns.length > 0 || loadingFn) {
+					if (loadingFn) {
+						showLoadingInContainer(container, loadingFn, match.params);
+					}
+					Promise.resolve().then(() => {
+						try {
+							if (middlewareFns.length > 0) {
+								runMwChain(0);
+							} else {
+								(doRenderWithChunks as () => void)();
+							}
+						} finally {
+							fetchData();
+						}
+					});
+				} else {
+					try { (doRenderWithChunks as () => void)(); } finally { fetchData(); }
+				}
+			};
+
+			// Navigation guards — sync fast path for sync guard functions.
+			const guardResult = router._runGuards(url.pathname);
+			if (guardResult instanceof Promise) {
+				return guardResult.then((decision) => {
+					if (decision === false) return;
+					if (typeof decision === 'string' && decision !== url.pathname && (router._guardDepth || 0) < 5) {
+						router._guardDepth = (router._guardDepth || 0) + 1;
+						try { router.navigate(decision, { replace: true }); }
+						finally { router._guardDepth = 0; }
+						return;
+					}
+					afterGuards();
 				});
-			} else {
-				try { (doRenderWithChunks as () => void)(); } finally { fetchData(); }
 			}
+			if (guardResult === false) return;
+			if (typeof guardResult === 'string' && guardResult !== url.pathname && (router._guardDepth || 0) < 5) {
+				router._guardDepth = (router._guardDepth || 0) + 1;
+				try { router.navigate(guardResult, { replace: true }); }
+				finally { router._guardDepth = 0; }
+				return;
+			}
+			afterGuards();
 		},
 
 		prefetch(path: string) {

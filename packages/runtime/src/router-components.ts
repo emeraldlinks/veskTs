@@ -1,7 +1,7 @@
 import { track, get } from '@vesk/runtime/src/ripple-runtime';
 import { createContext } from '@vesk/runtime/src/context';
 import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
-import { isLoadingActive } from '@vesk/runtime/src/loading-indicator';
+import { isLoadingActive, getLoadingState } from '@vesk/runtime/src/loading-indicator';
 
 interface Router {
 	start(): Router;
@@ -371,9 +371,25 @@ export function useRouter(): {
 	replace: (href: string) => void;
 	back: () => void;
 	forward: () => void;
+	go: (n: number) => void;
 	refresh: () => void;
 	prefetch: (href: string) => void;
+	beforeEach: (fn: (to: string, from: string) => false | string | void | Promise<false | string | void>) => () => void;
 	readonly isLoading: boolean;
+	/** 0–100 progress of the in-flight navigation (0 when idle). */
+	readonly progress: number;
+	/** True when the last navigation finished with an error. */
+	readonly error: boolean;
+	/** Reactive current pathname. */
+	readonly pathname: string;
+	/** Reactive dynamic-segment params for the current route. */
+	readonly params: Record<string, string>;
+	/** Reactive query string (without '?'; empty when none). */
+	readonly search: string;
+	setSearch: (next: Record<string, string> | string) => void;
+	/** Snapshot of the matched route — null before the first navigation. */
+	readonly route: { pathname: string; params: Record<string, string>; pattern: string } | null;
+	readonly canGoBack: boolean;
 } {
 	const router = RouterCtx.get() || _currentRouter;
 	return {
@@ -381,12 +397,59 @@ export function useRouter(): {
 		replace: (href: string) => router?.navigate?.(href, { replace: true }),
 		back: () => window.history.back(),
 		forward: () => window.history.forward(),
+		go: (n: number) => window.history.go(n),
 		refresh: () => router?.navigate?.(window.location.pathname, { replace: true }),
 		prefetch: (href: string) => router?.prefetch?.(href),
-		// Reactive when read inside an effect(): backed by the shared
-		// LoadingIndicator cell the router drives during navigations.
+		beforeEach: (fn) => {
+			const r = router as { beforeEach?: (f: typeof fn) => () => void } | null | undefined;
+			if (r?.beforeEach) return r.beforeEach(fn);
+			// no active router yet — no-op subscription
+			return () => {};
+		},
+		// All state getters are reactive when read inside an effect():
+		// they read tracked cells the router updates during navigations.
 		get isLoading() {
 			return isLoadingActive();
+		},
+		get progress() {
+			const s = getLoadingState();
+			return Number(get(s.progress)) || 0;
+		},
+		get error() {
+			const s = getLoadingState();
+			return get(s.error) === true;
+		},
+		get pathname() {
+			return get(_state.path) as string;
+		},
+		get params() {
+			return (get(_state.params) as Record<string, string>) || {};
+		},
+		get search() {
+			return get(_state.search) as string;
+		},
+		setSearch: (next) => {
+			const q = typeof next === 'string' ? next : new URLSearchParams(next).toString();
+			(_state as unknown as Record<string, { value: string }>).search.value = q;
+			const nav = useNavigate();
+			const path = get(_state.path) as string;
+			nav(path + (q ? '?' + q : ''), { replace: true });
+		},
+		get route() {
+			const m = (router as Record<string, unknown> | undefined)?._currentMatch as
+				| { pathname?: string; params: Record<string, string>; matchChain?: Array<{ fullPath?: string }> }
+				| null | undefined;
+			if (!m) return null;
+			const chain = m.matchChain ?? [];
+			const deepest = chain[chain.length - 1];
+			return {
+				pathname: m.pathname || '',
+				params: m.params,
+				pattern: deepest?.fullPath || '/',
+			};
+		},
+		get canGoBack() {
+			try { return window.history.length > 1; } catch { return false; }
 		},
 	};
 }

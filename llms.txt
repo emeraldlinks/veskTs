@@ -54,11 +54,24 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
 | Package | Surface |
 | --- | --- |
 | `packages/compiler` | `@vesk/compiler` — preprocess/parser/IR/codegen, exports `parse`, `createBaseParser`, `VeskParserPlugin`, `generateIR`, `render` (server codegen), `compileClient`/`compile`, `isStaticIR`, `defineConfig`, `definePlugin`, `preset`, `validateConfig`, `scanRoutes`, `scanComponents`, `collectSources`, `matchUrl`, plus `typecheckProject` (via `src/typecheck`) |
-| `packages/runtime` | `@vesk/runtime` — client barrel `index-client`, server barrel `index-server` (split: hydrators/bindings client-only; request/ISR server-only) |
+| `packages/runtime` | `@vesk/runtime` — client barrel `index-client`, server barrel `index-server` (split: hydrators/bindings client-only; request/ISR server-only). Subpath exports: `@vesk/runtime/router` (full routing surface + LoadingIndicator), `@vesk/runtime/server` (request/response primitives) |
 | `packages/adapter` | build output (platforms: node/vercel/netlify/cloudflare/deno/aws/edge/coxmos), dev server, prod server, SSR function, SEO audit |
 | `packages/cli` | `vesk` binary — dev/build/start/typecheck/seo |
 | `packages/haul` + `@vesk/haul-<os>-<cpu>` | native Go engine: build/dev/start/seo; typecheck via Node sidecar (JSON-RPC to `@vesk/compiler`) |
 | `packages/lsp`, `prettier-plugin`, `plugin-tailwind`, `create-vesk` | tooling |
+
+## Router surface (`@vesk/runtime/router`)
+
+- `useRouter()`: `push`, `replace`, `back`, `forward`, `go(n)`, `refresh`,
+  `prefetch`, `beforeEach`, `isLoading`, `progress` (0-100), `error`,
+  `pathname`, `params`, `search`, `setSearch`, `route`, `canGoBack`.
+- `beforeEach(fn)`: sync guards return `false` (block) or `string`
+  (redirect). Async guards return a Promise. Returns unsubscribe fn.
+- Router options: `viewTransitions: boolean` wraps DOM swap in
+  `document.startViewTransition` when available.
+- Navigate is sync for sync guards (backward-compatible); async only
+  when a guard returns a Promise.
+- `scrollToHash()` called after every render for anchor restoration.
 
 ## Rules for agents
 

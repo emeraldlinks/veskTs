@@ -713,6 +713,67 @@ test('useRouter().isLoading reflects navigation loading state', async () => {
 	}
 });
 
+// ── useRouter facade: state getters + setSearch + go/canGoBack ──
+
+test('useRouter exposes pathname/params/search/route reactively', async () => {
+	const { useRouter } = await import('@vesk/runtime/src/router');
+	const li = await import('@vesk/runtime/src/loading-indicator');
+	const container = document.createElement('div');
+	const tree = buildRouteTree([defineRoute('/', { page: () => document.createTextNode('Home') }), defineRoute('/blog/:slug', { page: () => null })]);
+	createFileRouter(tree, { container }).start();
+	const router = useRouter();
+
+	li.loadingStart({ force: true });
+	expect(router.progress >= 0).toBe(true);
+	li.loadingFinish({ force: true, error: true });
+	expect(router.error).toBe(true);
+	li.loadingFinish({ force: true });
+
+	await router.navigate('/blog/hello?q=1');
+	expect(router.pathname).toBe('/blog/hello');
+	expect(router.params.slug).toBe('hello');
+	expect(router.search).toBe('q=1');
+	const r = router.route!;
+	expect(r.pattern).toBe('/blog/:slug');
+	expect(r.pathname).toBe('/blog/hello');
+
+	router.setSearch({ q: '2', page: '2' });
+	expect(router.search).toBe('q=2&page=2');
+});
+
+test('useRouter navigation guards block and redirect (createFileRouter)', async () => {
+	const { useRouter } = await import('@vesk/runtime/src/router');
+	const container = document.createElement('div');
+	let adminRendered = false;
+	const tree = buildRouteTree([
+		defineRoute('/', { page: () => document.createTextNode('Home') }),
+		defineRoute('/admin', { page: () => { adminRendered = true; return document.createTextNode('Admin'); } }),
+		defineRoute('/login', { page: () => document.createTextNode('Login') }),
+	]);
+	const router = createFileRouter(tree, { container });
+	router.start();
+	const facade = useRouter();
+
+	const unsub = facade.beforeEach((to) => {
+		if (to === '/admin') return false;
+		if (to === '/') return '/login';
+	});
+	try {
+		await router.navigate('/admin');
+		expect(adminRendered).toBe(false);
+
+		await router.navigate('/');
+		expect(document.body.textContent?.includes('Login') || container.textContent?.includes('Login')).toBe(true);
+	} finally {
+		unsub();
+	}
+	// guard removed → /admin renders now
+	await router.navigate('/admin');
+	expect(adminRendered).toBe(true);
+	facade.go(0); // presence check
+	expect(typeof facade.canGoBack).toBe('boolean');
+});
+
 test('@vesk/router barrel exposes the routing surface', async () => {
 	const mod = await import('@vesk/runtime/router');
 	for (const name of ['createRouter', 'createFileRouter', 'Link', 'NavLink', 'Outlet', 'useRouter', 'useNavigate', 'matchRoute', 'ensureChunk', 'LoadingIndicator', 'useLoadingIndicator']) {
