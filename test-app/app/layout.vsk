@@ -1,5 +1,5 @@
 import type { Component } from '@vesk/types';
-import { LoadingIndicator } from '@vesk/runtime'
+import { LoadingIndicator } from '@vesk/runtime/router'
 
 interface NavItem {
 	label: string

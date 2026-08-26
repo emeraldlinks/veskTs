@@ -15,7 +15,7 @@ import {
 	NotFoundError, notFound,
 } from '@vesk/runtime/src/router-components';
 import { getNetworkState, watchNetwork } from '@vesk/runtime/src/network';
-import { loadingStart, loadingFinish } from '@vesk/runtime/src/loading-indicator';
+import { loadingStart, loadingFinish, getLoadingState } from '@vesk/runtime/src/loading-indicator';
 
 export {
 	Outlet, Link, NavLink,
@@ -37,6 +37,8 @@ interface RouterInstance {
 	navigate(path: string, opts?: { replace?: boolean }): Promise<void> | void;
 	prefetch(path: string): void;
 	readonly currentPath: string;
+	/** True while an SPA navigation is in flight (shared with LoadingIndicator). */
+	readonly isLoading: boolean;
 	hmrUpdate(): void;
 	__hydrators?: Record<string, Function>;
 	__componentInstances?: Map<string, { root: Element; props: Record<string, unknown>; node: RouteNode; type: string }[]>;
@@ -1113,16 +1115,10 @@ export function createRouter(
 				}, { passive: true });
 			}
 
-			document.addEventListener('click', (e) => {
-				const link = (e.target as Element)?.nodeType === 1 ? (e.target as Element).closest('a[href]') : null;
-				if (!link) return;
-				if ((link as HTMLAnchorElement).hostname && (link as HTMLAnchorElement).hostname !== window.location.hostname) return;
-				const href = link.getAttribute('href');
-				if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:')) return;
-				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
-				e.preventDefault();
-				this.navigate(href);
-			});
+			// Navigation policy: SPA navigation happens ONLY through <Link>/
+			// <NavLink>/navigate(). Plain <a href> anchors always do native
+			// browser navigation — the router never installs a global click
+			// interceptor.
 
 			window.addEventListener('popstate', () => {
 				setIsPopStateNavigation(true);
@@ -1243,6 +1239,11 @@ export function createRouter(
 
 		get currentPath() {
 			return get(_state.path) as string;
+		},
+
+		get isLoading() {
+			const cells = getLoadingState();
+			return Boolean(get(cells.isLoading));
 		},
 
 		hmrUpdate() {
@@ -1598,6 +1599,11 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 		get currentPath() {
 			return get(_state.path) as string;
+		},
+
+		get isLoading() {
+			const cells = getLoadingState();
+			return Boolean(get(cells.isLoading));
 		},
 
 		hmrUpdate() {

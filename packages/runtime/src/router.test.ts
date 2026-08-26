@@ -669,8 +669,7 @@ test('NavLink does not have active class when path does not match', () => {
 	expect(a.classList.contains('active')).toBe(false);
 });
 
-test('createFileRouter does not intercept document clicks', () => {
-	const container = document.createElement('div');
+test('createFileRouter does not intercept document clicks', () => {	const container = document.createElement('div');
 	const pageFn = () => document.createTextNode('Home');
 	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
 	const router = createFileRouter(tree, { container });
@@ -678,6 +677,47 @@ test('createFileRouter does not intercept document clicks', () => {
 	// Document should NOT have a global click listener — plain <a> does full navigation
 	const doc = globalThis.document || global.document;
 	expect(doc._listeners.click).toBeFalsy();
+});
+
+test('createRouter does not intercept document clicks either (Link/NavLink only)', () => {
+	const container = document.createElement('div');
+	const routes = defineRoute({ path: '/', page: () => document.createTextNode('Home') });
+	const router = createRouter(routes, { container });
+	router.start();
+	// Navigation policy: no global click listener — only <Link>/<NavLink> are SPA-aware
+	const doc = globalThis.document || global.document;
+	expect(doc._listeners.click).toBeFalsy();
+});
+
+// ── router.isLoading (shared with LoadingIndicator) ──
+
+test('useRouter().isLoading reflects navigation loading state', async () => {
+	const li = await import('@vesk/runtime/src/loading-indicator');
+	const container = document.createElement('div');
+	const tree = buildRouteTree([{ path: '/', page: () => document.createTextNode('Home') }]);
+	createFileRouter(tree, { container }).start();
+
+	const router = useRouter();
+	li.loadingStart({ force: true });
+	expect(router.isLoading).toBe(true);
+	li.loadingFinish({ force: true });
+	expect(router.isLoading).toBe(false);
+
+	// instance accessor mirrors the facade
+	const inst = (globalThis as Record<string, unknown>).__vesk_router as Record<string, unknown> | undefined;
+	if (inst) {
+		li.loadingStart({ force: true });
+		expect(inst.isLoading).toBe(true);
+		li.loadingFinish({ force: true });
+		expect(inst.isLoading).toBe(false);
+	}
+});
+
+test('@vesk/router barrel exposes the routing surface', async () => {
+	const mod = await import('@vesk/runtime/router');
+	for (const name of ['createRouter', 'createFileRouter', 'Link', 'NavLink', 'Outlet', 'useRouter', 'useNavigate', 'matchRoute', 'ensureChunk', 'LoadingIndicator', 'useLoadingIndicator']) {
+		if (typeof mod[name] !== 'function') throw new Error(`index-router missing export: ${name}`);
+	}
 });
 
 test('plain anchor created via createElement has no Vesk listeners', () => {

@@ -875,6 +875,35 @@ function processEnum(node: any, source: string, exported: boolean): string {
   return `${prefix} = { ${allPairs} };`;
 }
 
+
+/**
+ * Normalizes any `@vesk/runtime/<subpath>` import specifier to the bare
+ * `'@vesk/runtime'` form. The runtime resolves all subpaths onto the same
+ * module graph, and downstream consumers (client scope injection, chunk
+ * stripping) key off the canonical bare specifier. Char-scan based — no
+ * regex, per repo rule.
+ */
+function normalizeRuntimeSpecifier(stmt: string): string {
+  const fromIdx = stmt.indexOf(' from ');
+  if (fromIdx === -1) return stmt;
+  const q1 = idxOfQuote(stmt, fromIdx);
+  if (q1 === -1) return stmt;
+  const quote = stmt[q1];
+  const q2 = stmt.indexOf(quote, q1 + 1);
+  if (q2 === -1) return stmt;
+  const spec = stmt.slice(q1 + 1, q2);
+  if (spec === '@vesk/runtime' || !spec.startsWith('@vesk/runtime/')) return stmt;
+  return stmt.slice(0, q1 + 1) + '@vesk/runtime' + stmt.slice(q2);
+}
+
+function idxOfQuote(s: string, from: number): number {
+  for (let i = from; i < s.length; i++) {
+    const c = s[i];
+    if (c === "'" || c === '"') return i;
+  }
+  return -1;
+}
+
 export function generateIR(ast: any, source: string): IRRoot {
   __vskAnnotations = (ast as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations ?? [];
   const components: ComponentIR[] = [];
@@ -887,8 +916,9 @@ export function generateIR(ast: any, source: string): IRRoot {
   for (const node of ast.body) {
     if (node.type === 'ImportDeclaration') {
       const raw = getSource(source, node);
-      const cleaned = stripTypeImport(raw);
+      let cleaned = stripTypeImport(raw);
       if (cleaned === null) continue;
+      cleaned = normalizeRuntimeSpecifier(cleaned);
       imports.push(cleaned);
       for (const spec of node.specifiers) {
         if (spec.importKind === 'type') continue;

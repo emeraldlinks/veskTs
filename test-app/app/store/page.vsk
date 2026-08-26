@@ -1,4 +1,4 @@
-import { Link } from '@vesk/runtime';
+import { Link } from '@vesk/runtime/router';
 
 interface StoreLink {
 	label: string

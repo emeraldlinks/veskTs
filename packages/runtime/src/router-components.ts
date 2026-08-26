@@ -1,6 +1,7 @@
 import { track, get } from '@vesk/runtime/src/ripple-runtime';
 import { createContext } from '@vesk/runtime/src/context';
 import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
+import { isLoadingActive } from '@vesk/runtime/src/loading-indicator';
 
 interface Router {
 	start(): Router;
@@ -372,6 +373,7 @@ export function useRouter(): {
 	forward: () => void;
 	refresh: () => void;
 	prefetch: (href: string) => void;
+	readonly isLoading: boolean;
 } {
 	const router = RouterCtx.get() || _currentRouter;
 	return {
@@ -381,5 +383,10 @@ export function useRouter(): {
 		forward: () => window.history.forward(),
 		refresh: () => router?.navigate?.(window.location.pathname, { replace: true }),
 		prefetch: (href: string) => router?.prefetch?.(href),
+		// Reactive when read inside an effect(): backed by the shared
+		// LoadingIndicator cell the router drives during navigations.
+		get isLoading() {
+			return isLoadingActive();
+		},
 	};
 }

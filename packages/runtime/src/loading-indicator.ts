@@ -240,6 +240,15 @@ export function getLoadingError(): boolean {
 	return get(errorCell) === true;
 }
 
+/** The raw tracked cells backing the shared singleton (used by the router). */
+export function getLoadingState(): {
+	progress: Tracked<number>;
+	isLoading: Tracked<boolean>;
+	error: Tracked<boolean>;
+} {
+	return { progress: progressCell, isLoading: loadingCell, error: errorCell };
+}
+
 // ── Component ────────────────────────────────────────────────
 
 export const LOADING_INDICATOR_DEFAULT_COLOR =

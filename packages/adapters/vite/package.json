@@ -1,6 +1,6 @@
 {
   "name": "vite-plugin-vesk",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "type": "module",
   "description": "Vite plugin for Vesk — compiles .vsk components to TSX/JS",
   "main": "./dist/index.js",
@@ -16,7 +16,7 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@vesk/compiler": "^0.2.6"
+    "@vesk/compiler": "^0.2.7"
   },
   "peerDependencies": {
     "vite": "^5.0.0 || ^6.0.0"

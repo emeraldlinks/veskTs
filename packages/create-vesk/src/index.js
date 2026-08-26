@@ -52,12 +52,12 @@ writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
 		typecheck: 'tsc --noEmit',
 	},
 	dependencies: {
-		'@vesk/compiler': '^0.2.6',
-		'@vesk/runtime': '^0.2.6',
-		'@vesk/types': '^0.2.6',
-		'@vesk/vesk-cli': '^0.2.6',
-		'@vesk/adapter': '^0.2.6',
-		'@vesk/plugin-tailwind': '^0.2.6',
+		'@vesk/compiler': '^0.2.7',
+		'@vesk/runtime': '^0.2.7',
+		'@vesk/types': '^0.2.7',
+		'@vesk/vesk-cli': '^0.2.7',
+		'@vesk/adapter': '^0.2.7',
+		'@vesk/plugin-tailwind': '^0.2.7',
 	},
 	devDependencies: {
 		tailwindcss: '^4.0.0',
@@ -128,7 +128,7 @@ writeFileSync(join(srcDir, 'global.css'), [
 // ── app/layout.vsk ──
 writeFileSync(join(appDirPath, 'layout.vsk'), [
 	`import type { Component } from '@vesk/types';`,
-	`import { NavLink } from '@vesk/runtime';`,
+	`import { NavLink } from '@vesk/runtime/router';`,
 	'',
 	`interface LayoutProps {`,
 	`\tchildren?: Component`,
@@ -193,7 +193,7 @@ writeFileSync(join(appDirPath, 'about', 'page.vsk'), [
 
 // ── app/blog/page.vsk ──
 writeFileSync(join(appDirPath, 'blog', 'page.vsk'), [
-	`import { Link } from '@vesk/runtime';`,
+	`import { Link } from '@vesk/runtime/router';`,
 	``,
 	`component Blog {`,
 	`\t<h1 class="text-3xl font-bold mb-4">Blog</h1>`,
@@ -215,7 +215,7 @@ writeFileSync(join(appDirPath, 'blog', 'page.vsk'), [
 
 // ── app/blog/[slug]/page.vsk ──
 writeFileSync(join(appDirPath, 'blog', '[slug]', 'page.vsk'), [
-	`import { Link } from '@vesk/runtime';`,
+	`import { Link } from '@vesk/runtime/router';`,
 	``,
 	`component BlogPost(props: { params: { slug: string } }) {`,
 	`\t<Link href="/blog" class="inline-block mb-6 text-blue-600 no-underline hover:underline">`,
@@ -379,7 +379,7 @@ writeFileSync(join(appDirPath, 'middleware.ts'), [
 
 // ── app/not-found.vsk ──
 writeFileSync(join(appDirPath, 'not-found.vsk'), [
-	`import { Link } from '@vesk/runtime';`,
+	`import { Link } from '@vesk/runtime/router';`,
 	``,
 	`component NotFound404(props) {`,
 	`\t<main class="max-w-3xl mx-auto my-16 px-4 text-center">`,

@@ -1,0 +1,22 @@
+{
+  "version": "0.2.7",
+  "type": "module",
+  "license": "MIT",
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "name": "@vesk/server",
+  "description": "Vesk \u2014 server APIs: VeskRequest/VeskResponse, cookies, headers, locals, cors, hooks, ISR, actions",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": {
+    "@vesk/runtime": "^0.2.7"
+  }
+}

@@ -2,7 +2,7 @@
   "name": "vesk",
   "private": false,
   "type": "module",
-  "description": "Vesk — A Compiler-First Framework for the Post-VDOM Web",
+  "description": "Vesk \u2014 A Compiler-First Framework for the Post-VDOM Web",
   "author": "emeraldlinks",
   "license": "MIT",
   "engines": {

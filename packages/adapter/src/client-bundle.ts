@@ -68,7 +68,9 @@ export async function generateClientBundle(
   }
 
   function collectRuntimeImports(code: string): void {
-    const re = /^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm;
+    // matches bare '@vesk/runtime' and any of its subpaths
+    // ('@vesk/runtime/router', '@vesk/runtime/server', …)
+    const re = /^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime(\/[a-zA-Z0-9-]+)*['"];?\s*\n?/gm;
     for (const m of code.matchAll(re)) {
       for (const name of m[1].split(',')) {
         const trimmed = name.trim().replace(/^(\w+)\s+as\s+.*$/, '$1');
@@ -79,7 +81,7 @@ export async function generateClientBundle(
   }
 
   function stripRuntimeImport(code: string): string {
-    return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime['"];?\s*\n?/gm, '')
+    return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime(\/[a-zA-Z0-9-]+)*['"];?\s*\n?/gm, '')
                .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '')
                .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '')
                .replace(/^function __place\(start, end, nodes, fallback\) \{[\s\S]*?\n\}\s*\n?/gm, '');

@@ -1,4 +1,4 @@
-import { NotFoundError } from '@vesk/runtime';
+import { NotFoundError } from '@vesk/runtime/router';
 
 component StoreItem(props: { params: { item: string } }) {
 	if (props.params.item === 'missing') {

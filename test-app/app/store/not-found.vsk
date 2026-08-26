@@ -1,4 +1,4 @@
-import { Link } from '@vesk/runtime';
+import { Link } from '@vesk/runtime/router';
 
 component StoreNotFound(props: { url: string }) {
 	<div class="max-w-2xl mx-auto my-12 p-8 bg-rose-50 border-l-4 border-rose-500 rounded-r-lg text-center">
