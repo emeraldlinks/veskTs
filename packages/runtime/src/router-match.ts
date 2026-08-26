@@ -148,8 +148,9 @@ export function matchRoute(tree: RouteNode[], pathname: string): RouteMatch | nu
 		const segCount = node.segmentCount != null ? node.segmentCount : 1;
 		if (node.isDynamic && !node.isCatchAll) {
 			const name = node.path.startsWith(':') ? node.path.slice(1) : node.path;
-			if (partIdx < pathParts.length) {
-				params[name] = decodeURIComponent(pathParts[partIdx]);
+			const paramIdx = partIdx + segCount - 1;
+			if (paramIdx < pathParts.length) {
+				params[name] = decodeURIComponent(pathParts[paramIdx]);
 			}
 		}
 		if (node.isCatchAll) {
@@ -185,7 +186,7 @@ export function buildTreeFromMap(
 			offline: null,
 			network: null,
 			children: [],
-			segmentCount: parts.length || 1,
+			segmentCount: parts.length,
 			loader,
 		};
 		root.push(node);

@@ -728,7 +728,10 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	const pageStep = (): unknown => {
 		set(_state.params, paramValues);
 		set(_state.path, match.pathname || window.location.pathname);
-		set(_state.search, window.location.search || '');
+		{
+			const s = window.location.search || '';
+			set(_state.search, s.startsWith('?') ? s.slice(1) : s);
+		}
 		const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
 		const result = pageNode!.page!(pageProps, new Map(), clientWalker) as unknown;
 		if (result && typeof (result as { then?: unknown }).then === 'function') {
@@ -975,7 +978,10 @@ async function hydrateInitial(
 	})();
 	set(_state.params, paramValues);
 	set(_state.path, match.pathname || window.location.pathname);
-	set(_state.search, window.location.search || '');
+	{
+		const s = window.location.search || '';
+		set(_state.search, s.startsWith('?') ? s.slice(1) : s);
+	}
 	if (ssrErrorMarker !== null) {
 		let message = 'Internal Server Error';
 		if (ssrErrorMarker.startsWith(':')) {
@@ -1185,14 +1191,40 @@ export function createRouter(
 				}, { passive: true });
 			}
 
-			// Navigation policy: SPA navigation happens ONLY through <Link>/
-			// <NavLink>/navigate(). Plain <a href> anchors always do native
-			// browser navigation — the router never installs a global click
-			// interceptor.
+			// Navigation policy: SPA navigation happens through <Link>/
+			// <NavLink>/navigate() and opt-in plain anchors
+			// `<a href="..." no-reload>`. Plain <a href> without `no-reload`
+			// (or `data-no-reload`) always does native browser navigation.
+			// `no-reload` anchors are intercepted via a delegated document
+			// click listener that respects modifier keys, target="_blank",
+			// download, external origins, hash/mailto/tel schemes.
 
 			window.addEventListener('popstate', () => {
 				setIsPopStateNavigation(true);
 				this.navigate(window.location.href, { replace: true });
+			});
+
+			document.addEventListener('click', (e) => {
+				const target = e.target as Element | null;
+				if (!target || target.nodeType !== 1) return;
+				const anchor = (target as Element).closest('a[href]') as HTMLAnchorElement | null;
+				if (!anchor) return;
+				if (!anchor.hasAttribute('no-reload') && !anchor.hasAttribute('data-no-reload')) return;
+				if ((e as MouseEvent).defaultPrevented) return;
+				const me = e as MouseEvent;
+				if (me.metaKey || me.ctrlKey || me.shiftKey || me.altKey || me.button !== 0) return;
+				if (anchor.target === '_blank') return;
+				if (anchor.hasAttribute('download')) return;
+				if (anchor.getAttribute('rel') === 'external') return;
+				const href = anchor.getAttribute('href');
+				if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+				try {
+					const url = new URL(href, window.location.origin);
+					if (url.origin !== window.location.origin) return;
+				} catch { return; }
+				e.preventDefault();
+				e.stopPropagation();
+				this.navigate(href);
 			});
 
 			if (prefetch) {
@@ -1248,12 +1280,12 @@ export function createRouter(
 
 				const updateUrl = () => {
 					if (!opts.replace) {
-						window.history.pushState({ path: url.pathname }, '', url.pathname);
+						window.history.pushState({ path: url.pathname }, '', url.pathname + url.search);
 					} else {
-						window.history.replaceState({ path: url.pathname }, '', url.pathname);
+						window.history.replaceState({ path: url.pathname }, '', url.pathname + url.search);
 					}
 					set(_state.path, url.pathname);
-					set(_state.search, url.search);
+					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 				};
 
 				const renderContent = () => {
@@ -1495,6 +1527,29 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				router.navigate(window.location.pathname + window.location.search, { replace: true });
 			});
 
+			document.addEventListener('click', (e) => {
+				const target = e.target as Element | null;
+				if (!target || target.nodeType !== 1) return;
+				const anchor = (target as Element).closest('a[href]') as HTMLAnchorElement | null;
+				if (!anchor) return;
+				if (!anchor.hasAttribute('no-reload') && !anchor.hasAttribute('data-no-reload')) return;
+				if ((e as MouseEvent).defaultPrevented) return;
+				const me = e as MouseEvent;
+				if (me.metaKey || me.ctrlKey || me.shiftKey || me.altKey || me.button !== 0) return;
+				if (anchor.target === '_blank') return;
+				if (anchor.hasAttribute('download')) return;
+				if (anchor.getAttribute('rel') === 'external') return;
+				const href = anchor.getAttribute('href');
+				if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+				try {
+					const url = new URL(href, window.location.origin);
+					if (url.origin !== window.location.origin) return;
+				} catch { return; }
+				e.preventDefault();
+				e.stopPropagation();
+				router.navigate(href);
+			});
+
 			if (options.prefetch !== false) {
 				document.addEventListener('mouseenter', (e) => {
 					const link = (e.target as Element)?.nodeType === 1 ? (e.target as Element).closest('a[href]') : null;
@@ -1574,7 +1629,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						window.history.replaceState({ path: fullUrl }, '', fullUrl);
 					}
 					set(_state.path, url.pathname);
-					set(_state.search, url.search);
+					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 				};
 
 				const renderContent = () => {
@@ -1850,11 +1905,11 @@ export function buildRouteTree(definitions: RouteNode[]): RouteNode[] {
 					loading: null,
 					error: null,
 					notFound: null,
-					segmentCount: Math.max(1, cParts.length),
+					segmentCount: cParts.length || 1,
 					children: [],
 				};
 			}),
-			segmentCount: Math.max(1, parts.length),
+			segmentCount: parts.length,
 		};
 		tree.push(node);
 	}

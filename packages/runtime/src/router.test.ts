@@ -180,8 +180,26 @@ function setupMockDom() {
 		flushRAF() { const q = _rAFQueue; _rAFQueue = []; for (const fn of q) fn(); },
 		history: {
 			_stack: ['http://localhost/'],
-			pushState(d, t, u) { this._stack.push(u); },
-			replaceState(d, t, u) { this._stack[this._stack.length - 1] = u; },
+			pushState(d, t, u) {
+				this._stack.push(u);
+				try {
+					const url = new URL(u, 'http://localhost');
+					global.window.location.pathname = url.pathname;
+					global.window.location.search = url.search;
+					global.window.location.href = url.href;
+				} catch {}
+			},
+			replaceState(d, t, u) {
+				this._stack[this._stack.length - 1] = u;
+				try {
+					const url = new URL(u, 'http://localhost');
+					global.window.location.pathname = url.pathname;
+					global.window.location.search = url.search;
+					global.window.location.href = url.href;
+				} catch {}
+			},
+			go(n) {},
+			get length() { return this._stack.length; },
 			get scrollRestoration() { return this._sr; },
 			set scrollRestoration(v) { this._sr = v; },
 		},
@@ -191,6 +209,13 @@ function setupMockDom() {
 }
 
 setupMockDom();
+// handleScroll uses global requestAnimationFrame (not window.*) in Node
+if (typeof globalThis.requestAnimationFrame === 'undefined') {
+	(globalThis as unknown as Record<string, unknown>).requestAnimationFrame = (fn: FrameRequestCallback) => { try { fn(0); } catch {} return 0 as unknown as number; };
+}
+if (typeof (global as unknown as Record<string, unknown>).requestAnimationFrame === 'undefined') {
+	(global as unknown as Record<string, unknown>).requestAnimationFrame = globalThis.requestAnimationFrame;
+}
 
 const defaultFetch = async () => ({
 	ok: true, status: 200, redirected: false, url: '',
@@ -307,7 +332,7 @@ test('useRouter includes prefetch method', () => {
 	expect(typeof router.prefetch).toBe('function');
 });
 
-test('Loading component shown during deferred navigation', async () => {
+testAsync('Loading component shown during deferred navigation', async () => {
 	const container = document.createElement('div');
 	const loadingFn = () => {
 		const el = document.createElement('div');
@@ -669,29 +694,103 @@ test('NavLink does not have active class when path does not match', () => {
 	expect(a.classList.contains('active')).toBe(false);
 });
 
-test('createFileRouter does not intercept document clicks', () => {	const container = document.createElement('div');
+test('createFileRouter installs delegated click listener for [no-reload] anchors', () => {	const container = document.createElement('div');
 	const pageFn = () => document.createTextNode('Home');
 	const tree = buildRouteTree([{ path: '/', page: pageFn }]);
 	const router = createFileRouter(tree, { container });
 	router.start();
-	// Document should NOT have a global click listener — plain <a> does full navigation
+	// Document SHOULD have a global click listener — but it must be selective:
+	// only <a no-reload> / <a data-no-reload> are SPA-navigated.
 	const doc = globalThis.document || global.document;
-	expect(doc._listeners.click).toBeFalsy();
+	expect(doc._listeners.click).toBeTruthy();
+	expect(doc._listeners.click.length).toBeGreaterThanOrEqual(1);
 });
 
-test('createRouter does not intercept document clicks either (Link/NavLink only)', () => {
+test('createRouter installs delegated click listener for [no-reload] anchors', () => {
 	const container = document.createElement('div');
 	const routes = defineRoute({ path: '/', page: () => document.createTextNode('Home') });
 	const router = createRouter(routes, { container });
 	router.start();
-	// Navigation policy: no global click listener — only <Link>/<NavLink> are SPA-aware
+	// Navigation policy: delegated listener exists, but only opt-in anchors are intercepted.
 	const doc = globalThis.document || global.document;
-	expect(doc._listeners.click).toBeFalsy();
+	expect(doc._listeners.click).toBeTruthy();
+	expect(doc._listeners.click.length).toBeGreaterThanOrEqual(1);
+});
+
+test('plain <a> without no-reload is NOT intercepted (native navigation)', () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([{ path: '/', page: () => document.createTextNode('Home') }, { path: '/login', page: () => document.createTextNode('Login') }]);
+	const router = createFileRouter(tree, { container });
+	router.start();
+	// Simulate click on plain <a href="/login"> without no-reload -> should NOT call router.navigate
+	let navigated = null;
+	const origNavigate = router.navigate.bind(router);
+	router.navigate = (p) => { navigated = p; };
+	const anchor = { nodeType: 1, hasAttribute: (k) => false, getAttribute: (k) => k === 'href' ? '/login' : null, target: '', closest(s) { return s.includes('a[href]') ? this : null; } };
+	const doc = globalThis.document || global.document;
+	const handler = doc._listeners.click[doc._listeners.click.length - 1];
+	let prevented = false;
+	handler({ target: anchor, defaultPrevented: false, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, button: 0, preventDefault() { prevented = true; }, stopPropagation() {} });
+	expect(prevented).toBeFalsy();
+	expect(navigated).toBeNull();
+	router.navigate = origNavigate;
+});
+
+test('anchor with no-reload IS intercepted as SPA navigation', () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([{ path: '/', page: () => document.createTextNode('Home') }, { path: '/login', page: () => document.createTextNode('Login') }]);
+	const router = createFileRouter(tree, { container });
+	router.start();
+	let navigated = null;
+	const origNavigate = router.navigate.bind(router);
+	router.navigate = (p) => { navigated = p; };
+	const anchor = {
+		nodeType: 1,
+		hasAttribute: (k) => k === 'no-reload' || k === 'href',
+		getAttribute: (k) => {
+			if (k === 'href') return '/login';
+			if (k === 'rel') return null;
+			return null;
+		},
+		target: '',
+		closest(s) { return s.includes('a[href]') ? this : null; },
+	};
+	const doc = globalThis.document || global.document;
+	const handler = doc._listeners.click[doc._listeners.click.length - 1];
+	let prevented = false;
+	handler({ target: anchor, defaultPrevented: false, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, button: 0, preventDefault() { prevented = true; }, stopPropagation() {} });
+	expect(prevented).toBeTruthy();
+	expect(navigated).toBe('/login');
+	router.navigate = origNavigate;
+});
+
+test('anchor with data-no-reload is also intercepted', () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([{ path: '/', page: () => document.createTextNode('Home') }, { path: '/docs', page: () => document.createTextNode('Docs') }]);
+	const router = createFileRouter(tree, { container });
+	router.start();
+	let navigated = null;
+	const origNavigate = router.navigate.bind(router);
+	router.navigate = (p) => { navigated = p; };
+	const anchor = {
+		nodeType: 1,
+		hasAttribute: (k) => k === 'data-no-reload',
+		getAttribute: (k) => k === 'href' ? '/docs' : null,
+		target: '',
+		closest(s) { return s.includes('a[href]') ? this : null; },
+	};
+	const doc = globalThis.document || global.document;
+	const handler = doc._listeners.click[doc._listeners.click.length - 1];
+	let prevented = false;
+	handler({ target: anchor, defaultPrevented: false, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, button: 0, preventDefault() { prevented = true; }, stopPropagation() {} });
+	expect(prevented).toBeTruthy();
+	expect(navigated).toBe('/docs');
+	router.navigate = origNavigate;
 });
 
 // ── router.isLoading (shared with LoadingIndicator) ──
 
-test('useRouter().isLoading reflects navigation loading state', async () => {
+testAsync('useRouter().isLoading reflects navigation loading state', async () => {
 	const li = await import('@vesk/runtime/src/loading-indicator');
 	const container = document.createElement('div');
 	const tree = buildRouteTree([{ path: '/', page: () => document.createTextNode('Home') }]);
@@ -715,7 +814,7 @@ test('useRouter().isLoading reflects navigation loading state', async () => {
 
 // ── useRouter facade: state getters + setSearch + go/canGoBack ──
 
-test('useRouter exposes pathname/params/search/route reactively', async () => {
+testAsync('useRouter exposes pathname/params/search/route reactively', async () => {
 	const { useRouter } = await import('@vesk/runtime/src/router');
 	const li = await import('@vesk/runtime/src/loading-indicator');
 	const container = document.createElement('div');
@@ -741,8 +840,12 @@ test('useRouter exposes pathname/params/search/route reactively', async () => {
 	expect(router.search).toBe('q=2&page=2');
 });
 
-test('useRouter navigation guards block and redirect (createFileRouter)', async () => {
+testAsync('useRouter navigation guards block and redirect (createFileRouter)', async () => {
 	const { useRouter } = await import('@vesk/runtime/src/router');
+	// isolate location/container for this test (previous tests may have polluted global state)
+	globalThis.window.location.pathname = '/';
+	globalThis.window.location.search = '';
+	globalThis.window.location.href = 'http://localhost/';
 	const container = document.createElement('div');
 	let adminRendered = false;
 	const tree = buildRouteTree([
@@ -763,6 +866,8 @@ test('useRouter navigation guards block and redirect (createFileRouter)', async 
 		expect(adminRendered).toBe(false);
 
 		await router.navigate('/');
+		// fileRouter guard redirect is sync, but give a tick for any microtask rendering
+		await tick(5);
 		expect(document.body.textContent?.includes('Login') || container.textContent?.includes('Login')).toBe(true);
 	} finally {
 		unsub();
@@ -774,7 +879,7 @@ test('useRouter navigation guards block and redirect (createFileRouter)', async 
 	expect(typeof facade.canGoBack).toBe('boolean');
 });
 
-test('@vesk/router barrel exposes the routing surface', async () => {
+testAsync('@vesk/router barrel exposes the routing surface', async () => {
 	const mod = await import('@vesk/runtime/router');
 	for (const name of ['createRouter', 'createFileRouter', 'Link', 'NavLink', 'Outlet', 'useRouter', 'useNavigate', 'matchRoute', 'ensureChunk', 'LoadingIndicator', 'useLoadingIndicator']) {
 		if (typeof mod[name] !== 'function') throw new Error(`index-router missing export: ${name}`);
