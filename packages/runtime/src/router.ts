@@ -608,6 +608,22 @@ function replacePageContent(container: HTMLElement, newContent: Node | string | 
 	return true;
 }
 
+function storePageInstance(router: RouterInstance, pageNode: RouteNode, pageProps: Record<string, unknown>, result: unknown): void {
+	if (!router || !pageNode._pageName || !result || (result as Node).nodeType !== 1) return;
+	if (!router.__componentInstances) router.__componentInstances = new Map();
+	const name = pageNode._pageName as string;
+	if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
+	router.__componentInstances.get(name)!.push({ root: result as Element, props: pageProps as Record<string, unknown>, node: pageNode, type: 'page' });
+}
+
+function storeLayoutInstance(router: RouterInstance, node: RouteNode, layoutProps: Record<string, unknown>, result: unknown): void {
+	if (!router || !node._layoutName || !result || (result as Node).nodeType !== 1) return;
+	if (!router.__componentInstances) router.__componentInstances = new Map();
+	const name = node._layoutName as string;
+	if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
+	router.__componentInstances.get(name)!.push({ root: result as Element, props: layoutProps as Record<string, unknown>, node, type: 'layout' });
+}
+
 function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement, navToken?: number): void | Promise<void> {
 	const chain = match.matchChain;
 	const paramValues = match.params;
@@ -784,21 +800,6 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		}
 	}
 
-	function storePageInstance(router: RouterInstance, pageNode: RouteNode, pageProps: Record<string, unknown>, result: unknown): void {
-		if (!router || !pageNode._pageName || !result || (result as Node).nodeType !== 1) return;
-		if (!router.__componentInstances) router.__componentInstances = new Map();
-		const name = pageNode._pageName as string;
-		if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
-		router.__componentInstances.get(name)!.push({ root: result as Element, props: pageProps as Record<string, unknown>, node: pageNode, type: 'page' });
-	}
-
-	function storeLayoutInstance(router: RouterInstance, node: RouteNode, layoutProps: Record<string, unknown>, result: unknown): void {
-		if (!router || !node._layoutName || !result || (result as Node).nodeType !== 1) return;
-		if (!router.__componentInstances) router.__componentInstances = new Map();
-		const name = node._layoutName as string;
-		if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
-		router.__componentInstances.get(name)!.push({ root: result as Element, props: layoutProps as Record<string, unknown>, node, type: 'layout' });
-	}
 
 	const mountDom = (dom: unknown): void => {
 		// Staleness guard: a suspended (async) page whose render resolves after
@@ -1032,7 +1033,10 @@ async function hydrateInitial(
 			if (!strategy || strategy === 'full') {
 				const walker = createHydrateWalker(container);
 				setIsHydrating(true);
-				await runInBlockWindow(() => hydPage(pageProps, new Map(), walker));
+				await runInBlockWindow(() => {
+					const result = hydPage(pageProps, new Map(), walker);
+					storePageInstance(router, pageNode!, pageProps, result);
+				});
 				setIsHydrating(false);
 			} else if (strategy === 'viewport') {
 				root(() => { hydrateViewport(container, hydPage, pageProps); });
@@ -1056,7 +1060,10 @@ async function hydrateInitial(
 			if (index >= layoutNodes.length) {
 				return (subWalker: HydrateWalker) => {
 					if (!strategy || strategy === 'full') {
-						return hydPage({ params: paramValues, ...(pageNode!.props as Record<string, unknown>) }, new Map(), subWalker);
+						const pageProps = { params: paramValues, ...(pageNode!.props as Record<string, unknown>) };
+						const result = hydPage(pageProps, new Map(), subWalker);
+						storePageInstance(router, pageNode!, pageProps, result);
+						return result;
 					} else if (strategy === 'viewport') {
 						hydrateViewport(subWalker.root!, hydPage, { params: paramValues, ...(pageNode!.props as Record<string, unknown>) });
 					} else if (strategy === 'idle') {
@@ -1071,7 +1078,9 @@ async function hydrateInitial(
 			const hydLayout = hydLayouts[index]!;
 			const childHydrator = renderLayoutChain(index + 1);
 			const layoutProps = { children: childHydrator, params: paramValues };
-			return hydLayout(layoutProps, new Map(), walker);
+			const result = hydLayout(layoutProps, new Map(), walker);
+			storeLayoutInstance(router, node, layoutProps, result);
+			return result;
 		}
 
 		const walker = createHydrateWalker(container);
