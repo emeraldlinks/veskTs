@@ -18,16 +18,16 @@
 				try {
 					var msg = JSON.parse(e.data) as Record<string, unknown>;
 					switch (msg.type) {
-						case 'update':
-							if (msg.fnSources) {
-								var _eval: (c: string, n?: string) => unknown = ((globalThis as Record<string, unknown>).__vesk_hmr_eval as ((c: string, n?: string) => unknown) | undefined) || function(c: string) { try { return eval(c) } catch(ex) { console.error('HMR eval error:', ex) } };
-								Object.values(msg.fnSources as Record<string, string>).forEach(function(fn: string) { _eval(fn, msg.nonce as string | undefined) });
-							}
-							(globalThis as Record<string, unknown>).__updatedComponents = new Set(Object.keys((msg.components || {}) as Record<string, unknown>));
-							var router = (globalThis as Record<string, unknown>).__vesk_router as { hmrUpdate?: () => void } | undefined;
-							if (router && typeof router.hmrUpdate === 'function') {
-								router.hmrUpdate();
-							}
+				case 'update':
+						if (msg.fnSources) {
+							var _eval: (c: string, n?: string) => unknown = ((globalThis as Record<string, unknown>).__vesk_hmr_eval as ((c: string, n?: string) => unknown) | undefined) || function(c: string) { try { return eval(c) } catch(ex) { console.error('HMR eval error:', ex) } };
+							Object.values(msg.fnSources as Record<string, string>).forEach(function(fn: string) { _eval(fn, msg.nonce as string | undefined) });
+						}
+						(globalThis as Record<string, unknown>).__updatedComponents = new Set(Object.keys((msg.components || {}) as Record<string, unknown>));
+						var router = (globalThis as Record<string, unknown>).__vesk_router as { hmrUpdate?: () => void } | undefined;
+						if (router && typeof router.hmrUpdate === 'function') {
+							router.hmrUpdate();
+						}
 							lastCompileMs = (msg.time as number) || 0;
 							status = 'connected';
 							clearError();

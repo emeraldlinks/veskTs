@@ -642,6 +642,10 @@ async function buildMainBundle(
     cleanupFn +
     placeFn +
     'globalThis.__components = __components;\n' +
+    'globalThis.__runtime_comps = __runtime_comps;\n' +
+    'globalThis.__cleanup = __cleanup;\n' +
+    'globalThis.__place = __place;\n' +
+    allRuntimeImports.map(n => `globalThis.${n} = ${n};\n`).join('') +
     'function __resolveNames(nodes) {\n' +
     '  for (const n of nodes) {\n' +
     "    if (typeof n.page === 'string') {\n" +

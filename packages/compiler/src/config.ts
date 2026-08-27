@@ -23,7 +23,7 @@ function normalizeMdConfig(md: MdConfig | undefined): MdConfig | undefined {
     if (!Array.isArray(out.allowTags)) {
       throw VeskError.configError('md.allowTags must be an array of tag names.', []);
     }
-    out.allowTags = out.allowTags.map((t) => String(t).toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean);
+    out.allowTags = out.allowTags.map((t: string) => String(t).toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean);
   }
   return out;
 }

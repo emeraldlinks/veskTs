@@ -319,8 +319,8 @@ export function generateRouteManifest(tree: RouteNode[], options: RouteManifestO
     if (node.offline) parts.push(`offline: ${node.offline}`);
     if (node.network) parts.push(`network: ${node.network}`);
     if (node.children.length > 0) {
-      const childCodes = node.children.map(c => genNode(c));
-      parts.push(`children: [\n${childCodes.map(c => '\t\t' + c).join(',\n')}\n\t]`);
+      const childCodes = node.children.map((c: RouteNode) => genNode(c));
+      parts.push(`children: [\n${childCodes.map((c: string) => '\t\t' + c).join(',\n')}\n\t]`);
     }
     const pathStr = JSON.stringify(node.fullPath);
     const groupStr = node.isGroup ? `, isGroup: true` : '';

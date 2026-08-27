@@ -379,15 +379,17 @@ declare namespace JSX {
 }
 declare type Component = string | number | boolean | null | undefined | Component[];
 declare const Head: (props: { children?: Component }) => Component;
-declare class Cell<T> {
+interface Tracked<T> {
   get(): T;
   set(value: T): void;
-  peek(): T;
-  update(fn: (current: T) => T): boolean;
-  unsubscribe(effect: unknown): void;
 }
-declare function track<T>(initialValue: T): Cell<T>;
-declare function derived<T>(fn: () => T): Cell<T>;
+interface Derived<T> {
+  get(): T;
+  set(value: T): void;
+}
+declare function track<T>(initialValue: T): Tracked<T>;
+declare function track<T>(fn: () => T): Derived<T>;
+declare function derived<T>(fn: () => T): Derived<T>;
 declare function effect(fn: () => void): unknown;
 declare function untrack<T>(fn: () => T): T;
 declare function peek<T>(fn: () => T): T;
@@ -414,7 +416,7 @@ interface VeskUseFetchOptions<T> {
   /** Cache/SSR key — defaults to the URL string. */
   key?: string;
   /** Target tracked cell (from track<T>()) — the payload is written into it, so awaiting is unnecessary. */
-  into?: Cell<T>;
+  into?: Tracked<T>;
   staleTime?: number;
   keepPreviousData?: boolean;
   retry?: number;
@@ -459,9 +461,9 @@ declare function useLoadingIndicator(options?: {
   resetDelay?: number;
   estimatedProgress?: (duration: number, elapsed: number) => number;
 }): {
-  progress: Cell<number>;
-  isLoading: Cell<boolean>;
-  error: Cell<boolean>;
+  progress: Tracked<number>;
+  isLoading: Tracked<boolean>;
+  error: Tracked<boolean>;
   start(opts?: { force?: boolean }): void;
   set(value: number, opts?: { force?: boolean }): void;
   finish(opts?: { force?: boolean; error?: boolean }): void;
@@ -506,8 +508,9 @@ declare function isFormAction(...args: unknown[]): unknown;
 export const RUNTIME_OVERRIDE = `
 import '@vesk/runtime';
 declare module '@vesk/runtime' {
-  export function track<T>(initialValue: T): Cell<T>;
-  export function derived<T>(fn: () => T): Cell<T>;
+  export function track<T>(initialValue: T): Tracked<T>;
+  export function track<T>(fn: () => T): Derived<T>;
+  export function derived<T>(fn: () => T): Derived<T>;
 }
 `;
 

@@ -11,9 +11,11 @@ function test(name: string, fn: () => void) {
   catch (e) { failed++; console.log(`  ✗ ${name} — ${(e as Error).message}`); }
 }
 
-const RUNTIME_DTS = `export declare class Cell<T> { get(): T; set(v: T): void; peek(): T; update(f: (c: T) => T): boolean; unsubscribe(e: unknown): void; }
-export declare function track<T>(initialValue: T): Cell<T>;
-export declare function derived<T>(fn: () => T): Cell<T>;
+const RUNTIME_DTS = `export interface Tracked<T> { get(): T; set(value: T): void; }
+export interface Derived<T> { get(): T; set(value: T): void; }
+export declare function track<T>(initialValue: T): Tracked<T>;
+export declare function track<T>(fn: () => T): Derived<T>;
+export declare function derived<T>(fn: () => T): Derived<T>;
 export declare function effect(fn: () => void): unknown;
 export declare function untrack<T>(fn: () => T): T;
 export declare function peek<T>(fn: () => T): T;
