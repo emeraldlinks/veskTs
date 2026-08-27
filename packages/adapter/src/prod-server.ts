@@ -422,10 +422,10 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     if (existsSync(nfPath)) {
       try {
         const runtimePath = resolve(outDir, 'server', 'runtime.js');
-        const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
+        const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
         const src = readFileSync(nfPath, 'utf-8');
         const compName = resolveComponentName(src) || 'NotFound';
-        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: nfPath });
+        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: nfPath });
       } catch {}
     }
 
@@ -486,12 +486,12 @@ export async function startProdServer(outDir: string, options?: { port?: number;
               if (existsSync(errPath)) {
                 try {
                   const runtimePath = resolve(outDir, 'server', 'runtime.js');
-                  const { renderFullPage } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string> };
+                  const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
                   const src = readFileSync(errPath, 'utf-8');
                   const compName = resolveComponentName(src) || 'Error';
                   // never leak stack traces / internal messages to prod error pages
                   const expose = process.env.NODE_ENV !== 'production';
-                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, sourcePath: errPath });
+                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });

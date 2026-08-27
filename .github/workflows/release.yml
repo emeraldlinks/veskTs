@@ -124,6 +124,7 @@ jobs:
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
           BASE: http://localhost:3000
+          VESK_TEST_TARGET: production
         run: node hydration-test.mjs
 
       - name: SSR crawl against prod
@@ -131,6 +132,7 @@ jobs:
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
           BASE: http://localhost:3000
+          VESK_TEST_TARGET: production
         run: node crawl.mjs
 
       - name: Dump prod server log (always)

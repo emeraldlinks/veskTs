@@ -9,6 +9,12 @@ import puppeteer from 'puppeteer-core';
 
 const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
 const BASE = process.env.BASE || 'http://localhost:3000';
+// Tests run against both the dev server (Test job) and the prod server
+// (Production job, where VESK_TEST_TARGET=production). Prod intentionally
+// sanitizes server-rendered error messages to "Internal Server Error"
+// (never leak internals to end users), so error-message assertions must
+// branch on the target.
+const IS_PROD = process.env.VESK_TEST_TARGET === 'production';
 
 // CDP Input.dispatchMouseEvent / dispatchKeyEvent can crash some chromium
 // builds in this environment, so dispatch clicks/typing in-page via JS.
@@ -990,7 +996,11 @@ async function main() {
         };
       });
       assert(state.body.includes('Store Error Boundary'), 'route-level error component rendered');
-      assert(state.body.includes('Store exploded'), 'store error message rendered');
+      // Prod sanitizes the server error message; dev surfaces the real one.
+      assert(
+        IS_PROD ? state.body.includes('Internal Server Error') : state.body.includes('Store exploded'),
+        'store error message rendered' + (IS_PROD ? ' (prod: sanitized)' : ''),
+      );
       assert(state.navText.includes('Home') && state.navText.includes('Broken'), 'nav survives on server-error page');
       assert(state.footer.includes('Powered by Vesk'), 'footer survives on server-error page');
       assert(errors.length === 0, 'zero uncaught page errors (got ' + errors.length + ': ' + errors.join(', ') + ')');

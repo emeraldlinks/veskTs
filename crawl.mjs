@@ -48,6 +48,11 @@ if (!CHROMIUM_PATH) {
   process.exit(1);
 }
 const BASE = process.env.BASE || 'http://localhost:3000';
+// Tests run against both the dev server (Test job) and the prod server
+// (Production job, where VESK_TEST_TARGET=production). Prod intentionally
+// sanitizes server-rendered error messages, so error-message expectations
+// must branch on the target.
+const IS_PROD = process.env.VESK_TEST_TARGET === 'production';
 const HYDRATION_DEADLINE = 5000;
 
 // expectStatus:   HTTP status the route must return.
@@ -80,6 +85,9 @@ const ROUTES = [
     route: '/store/boom',
     expectStatus: 500,
     expectErrors: ['Store exploded'],
+    // externalDataScript is always used (dev + prod) -> one origin-served
+    // ssr-data.js reference in the document.
+    ssrRefs: 1,
     // The store error boundary intentionally renders err.stack; report the
     // stack but don't fail. Any other stack/absolute path still fails.
     leakTolerance: true,
@@ -88,6 +96,9 @@ const ROUTES = [
     route: '/dataerror',
     expectStatus: 500,
     expectErrors: ['Data layer unavailable during SSR'],
+    // externalDataScript is always used (dev + prod) -> one origin-served
+    // ssr-data.js reference in the document.
+    ssrRefs: 1,
     // Same error-boundary stack display as /store/boom.
     leakTolerance: true,
   },
@@ -111,7 +122,7 @@ const SPA_TEXT = {
   '/store': 'Store',
   '/store/widget': 'Item: widget',
   '/typed': 'Total likes',
-  '/dataerror': 'Data layer unavailable during SSR',
+  '/dataerror': IS_PROD ? 'Data Error Demo' : 'Data layer unavailable during SSR',
 };
 
 // Per-route x-vesk-data expectations during SPA navigation: { count, status }.
