@@ -29,7 +29,8 @@ const PUBLISH_ORDER = [
   '@vesk/prettier-plugin',
   '@vesk/adapter',
   'vite-plugin-vesk',
-  '@vesk/lsp',
+  // '@vesk/lsp' — broken imports (LiveTypecheckProgram, createTypecheckOptions,
+  // ./context, ./text-utils missing from compiler); re-enable when fixed.
   '@vesk/vesk-cli',
   'create-vesk',
 ];
@@ -118,7 +119,7 @@ const BUILD_ORDER = [
   '@vesk/adapter',
   'vite-plugin-vesk',
   '@vesk/prettier-plugin',
-  '@vesk/lsp',
+  // '@vesk/lsp' — see PUBLISH_ORDER note
   '@vesk/vesk-cli',
   'create-vesk',
 ];
