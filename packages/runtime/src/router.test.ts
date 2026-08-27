@@ -480,7 +480,7 @@ test('renderMatch stores layout component instance after navigate', () => {
 	expect(layoutInst.root.className).toBe('layout-root');
 });
 
-test('hmrUpdate swaps page component DOM in-place without navigate', () => {
+test('hmrUpdate re-renders page component via renderMatch', () => {
 	const container = document.createElement('div');
 
 	const pageFn = () => {
@@ -495,8 +495,7 @@ test('hmrUpdate swaps page component DOM in-place without navigate', () => {
 	const router = createFileRouter(tree, { container });
 	router.navigate('/', { replace: true });
 
-	const oldRoot = router.__componentInstances.get('Home')[0].root;
-	expect(oldRoot.parentNode).toBe(container);
+	expect(container.textContent).toBe('Old Page');
 
 	const newPageFn = () => {
 		const el = document.createElement('p');
@@ -515,12 +514,10 @@ test('hmrUpdate swaps page component DOM in-place without navigate', () => {
 
 	router.hmrUpdate();
 
-	expect(oldRoot.parentNode).toBeNull();
-	expect(container.children.filter(c => c.nodeType === 1).length).toBe(1);
 	expect(container.textContent).toBe('New Page');
 });
 
-test('hmrUpdate updates component instance root reference', () => {
+test('hmrUpdate re-renders and updates component content', () => {
 	const container = document.createElement('div');
 
 	const pageFn = () => {
@@ -549,11 +546,10 @@ test('hmrUpdate updates component instance root reference', () => {
 	globalThis.__updatedComponents = new Set(['Home']);
 	router.hmrUpdate();
 
-	const updatedRoot = router.__componentInstances.get('Home')[0].root;
-	expect(updatedRoot.textContent).toBe('V2');
+	expect(container.textContent).toBe('V2');
 });
 
-test('hmrUpdate preserves non-updated layout when updating page only', () => {
+test('hmrUpdate re-renders full layout chain when updating page', () => {
 	const container = document.createElement('div');
 
 	const layoutFn = (props) => {
@@ -574,8 +570,7 @@ test('hmrUpdate preserves non-updated layout when updating page only', () => {
 	const router = createFileRouter(tree, { container });
 	router.navigate('/', { replace: true });
 
-	const layoutRoot = router.__componentInstances.get('MainLayout')[0].root;
-	expect(container.children[0]).toBe(layoutRoot);
+	expect(container.children[0]).toBeDefined();
 
 	const newPageFn = () => {
 		const el = document.createElement('p');
@@ -593,8 +588,8 @@ test('hmrUpdate preserves non-updated layout when updating page only', () => {
 	globalThis.__updatedComponents = new Set(['Home']);
 	router.hmrUpdate();
 
-	expect(container.children[0]).toBe(layoutRoot);
-	expect(layoutRoot.textContent).toBe('New Page');
+	expect(container.textContent).toBe('New Page');
+	expect(container.children[0].className).toBe('layout-root');
 });
 
 test('hmrUpdate falls back to navigate when no instances tracked', () => {

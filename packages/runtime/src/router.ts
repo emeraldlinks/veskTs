@@ -1838,39 +1838,14 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			if (typeof router.__updateComponents === 'function') {
 				router.__updateComponents(router.routeTree);
 			}
-			const instances = router.__componentInstances;
-			if (instances && instances.size > 0) {
-				let didUpdate = false;
-				for (const [name, nameInstances] of instances) {
-					if (updated.has(name)) {
-						for (const inst of nameInstances) {
-							try {
-								const isPage = inst.type === 'page';
-								const newFn = isPage ? inst.node.page : inst.node.layout;
-								if (!newFn) continue;
-								const walker = createHydrateWalker(document.createDocumentFragment() as unknown as HTMLElement, []);
-								let newDom: unknown;
-								root(() => {
-									newDom = newFn!(inst.props, new Map(), walker);
-								});
-								if (newDom && (newDom as Node).nodeType === 1 && inst.root && inst.root.parentNode) {
-									inst.root.parentNode.replaceChild(newDom as Node, inst.root);
-									inst.root = newDom as Element;
-									didUpdate = true;
-								}
-							} catch (e) {
-								console.error('HMR update error:', e);
-							}
-						}
-					}
+			const path = window.location.pathname + window.location.search;
+			const match = matchRoute(router.routeTree, path);
+			if (match) {
+				match.pathname = path;
+				const result = renderMatch(router, match, container);
+				if (result && typeof (result as { then?: unknown }).then === 'function') {
+					(result as Promise<unknown>).catch((e: unknown) => console.error('HMR renderMatch error:', e));
 				}
-				if (!didUpdate) {
-					const path = window.location.pathname + window.location.search;
-					router.navigate(path, { replace: true });
-				}
-			} else {
-				const path = window.location.pathname + window.location.search;
-				router.navigate(path, { replace: true });
 			}
 		},
 	};

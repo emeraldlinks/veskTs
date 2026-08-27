@@ -469,7 +469,7 @@ function appendHmrGlobals(code: string): string {
   return code +
     "globalThis.__vesk_hmr_eval = (code, n) => {\n" +
     "  if (!n || n !== globalThis.__vesk_hmr_nonce) throw new Error('vesk hmr: invalid nonce');\n" +
-    "  return (0, eval)(code);\n" +
+    "  return eval(code);\n" +
     "};\n";
 }
 
