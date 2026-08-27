@@ -112,8 +112,8 @@ console.log(`\n\x1b[1mrelease: building all packages\x1b[0m`);
 // package's typecheck always sees its dependencies' freshly built dist/.
 const BUILD_ORDER = [
   '@vesk/types',
-  '@vesk/compiler',
   '@vesk/runtime',
+  '@vesk/compiler',
   '@vesk/plugin-tailwind',
   '@vesk/adapter',
   'vite-plugin-vesk',
