@@ -39,6 +39,10 @@ function run(cmd, args, opts = {}) {
 console.log('[refresh] building workspace packages...');
 run('npx', ['tsx', 'packages/cli/src/build-packages.ts'], { cwd: root });
 run('npm', ['run', 'build'], { cwd: join(root, 'packages', 'plugin-tailwind') });
+// The `vesk` CLI bin (test-app's `dev`/`build`/`start` scripts and
+// leakage-test.mjs invoke `node_modules/.bin/vesk`) must be compiled before
+// packing, or the tarball ships without dist/cli.js and the symlink is dead.
+run('npm', ['run', 'build'], { cwd: join(root, 'packages', 'cli') });
 
 const epoch = Date.now();
 const ciVersions = new Map();

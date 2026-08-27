@@ -282,11 +282,12 @@ export function generateSsrFunction(
     const indentedRender = dataCode.split('\n').map(l => l ? `  ${l}` : '').join('\n');
     bodyCode = [
       '  // ── Middleware context ──',
+      "  const __rootLocals = (globalThis.__vesk_request && globalThis.__vesk_request.locals) || {};",
       '  const __ctx = {',
       '    request,',
       '    params,',
       '    url,',
-      "    locals: {},",
+      "    locals: Object.assign({}, __rootLocals),",
       "    cookies: parseCookies(request.headers.get('cookie') || ''),",
       '    set(key, value) { this.locals[key] = value; },',
       '    get(key) { return this.locals[key]; },',

@@ -116,8 +116,9 @@ export async function handleRequest(request) {
     return new Response(null, { status: 308, headers: { Location: '/_vesk/static/public' + (pathname.endsWith('/') ? pathname + 'index.html' : pathname + '.html') } });
   }
 
+  let mwCtx = { params: {}, url, locals: {}, cookies: {}, request, set() {}, get() { return undefined; } };
   if (${hasMwLiteral}) {
-    const mwCtx = {
+    mwCtx = {
       request,
       params: {},
       url,
@@ -130,6 +131,9 @@ export async function handleRequest(request) {
     if (mwResult.response) return mwResult.response;
     if (mwResult.rewriteUrl) url.pathname = mwResult.rewriteUrl;
   }
+  // Expose root middleware locals to API/SSR handlers (which seed their own
+  // ctx.locals from this before running route-level middleware).
+  globalThis.__vesk_request = mwCtx;
 
   for (const route of __routes) {
     const params = __matchPath(route.path, url.pathname);

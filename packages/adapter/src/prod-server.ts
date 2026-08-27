@@ -324,8 +324,9 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       }
     }
 
+    let mwCtx: Record<string, unknown>;
     if (middlewareMod) {
-      const mwCtx: Record<string, unknown> = {
+      mwCtx = {
         request: new Request(url.href, { headers: req.headers as Record<string, string>, method: req.method || 'GET' }),
         params: {},
         url,
@@ -340,10 +341,24 @@ export async function startProdServer(outDir: string, options?: { port?: number;
         res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
         res.end(body);
         return;
-      }      if (mwResult.rewriteUrl) {
+      }
+      if (mwResult.rewriteUrl) {
         url.pathname = mwResult.rewriteUrl;
       }
+    } else {
+      mwCtx = {
+        params: {},
+        url,
+        locals: {},
+        cookies: {},
+        request: null,
+        set() {},
+        get() { return undefined; },
+      };
     }
+    // Expose root middleware locals to API/SSR handlers (which seed their own
+    // ctx.locals from this before running route-level middleware).
+    (globalThis as Record<string, unknown>).__vesk_request = mwCtx;
 
     if (url.pathname.startsWith('/_vesk/action/')) {
       const actionId = url.pathname.replace('/_vesk/action/', '');
@@ -476,7 +491,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                   const compName = resolveComponentName(src) || 'Error';
                   // never leak stack traces / internal messages to prod error pages
                   const expose = process.env.NODE_ENV !== 'production';
-                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: securityConfig?.security || {}, sourcePath: errPath });
+                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, sourcePath: errPath });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });
