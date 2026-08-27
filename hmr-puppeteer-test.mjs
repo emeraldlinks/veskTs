@@ -5,7 +5,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname);
-const CHROMIUM_PATH = '/data/data/com.termux/files/usr/bin/chromium-browser';
+const CHROMIUM_PATH = process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
 const BASE = 'http://localhost:3000';
 
 const pagePath = resolve(root, 'test-app', 'app', 'page.vsk');
