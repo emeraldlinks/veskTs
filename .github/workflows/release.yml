@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  test:
-    name: Test (typecheck, unit + e2e, hydration, crawl)
+  verify:
+    name: Verify (typecheck, unit + e2e, dev + prod hydration, crawl, leakage)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,9 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
-
       - name: Refresh test-app deps from latest workspace build
         run: node scripts/refresh-testapp-deps.mjs
+
       - name: Install Chrome for puppeteer-core
         id: chrome
         run: |
@@ -41,14 +41,13 @@ jobs:
       - name: Typecheck packages
         run: npm run typecheck
 
-      - name: Unit + E2E suite (scripts/test.js)
+      - name: Unit + E2E suite (npm test)
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
         run: npm test
 
+      # --- Dev server phase (port 3000) ---
       - name: Start dev server
-        env:
-          CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
         run: |
           cd test-app
           npm install --no-audit --no-fund
@@ -59,60 +58,26 @@ jobs:
           done
           curl -s -o /dev/null -w "dev server: %{http_code}\n" http://localhost:3000/
 
-      - name: Hydration test (production-hydration path)
+      - name: Hydration test (dev)
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
         run: node hydration-test.mjs
 
-      - name: SSR crawl test
+      - name: SSR crawl test (dev)
         if: always()
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
         run: node crawl.mjs
 
-      - name: Dump dev server log (always)
-        if: always()
-        run: |
-          echo "===== /tmp/dev.log ====="
-          cat /tmp/dev.log
-          echo "===== end /tmp/dev.log ====="
-
-  prod:
-    name: Production (leakage isolation, build + start, hydration, crawl)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install Chrome for puppeteer-core
-        id: chrome
-        run: |
-          npx --yes @puppeteer/browsers install chrome@stable --path "$RUNNER_TEMP/chrome" > /dev/null
-          CHROME="$(find "$RUNNER_TEMP/chrome" -type f -name chrome | head -1)"
-          if [ -z "$CHROME" ]; then echo "chrome binary not found" >&2; exit 1; fi
-          echo "path=$CHROME" >> "$GITHUB_OUTPUT"
-          echo "chrome at: $CHROME"
-
-      - name: Install dependencies
-        run: npm install --no-audit --no-fund
-
-      - name: Refresh test-app deps from latest workspace build
-        run: node scripts/refresh-testapp-deps.mjs
-
+      # --- Production phase (reuses the prod build produced by leakage-test) ---
       - name: Leakage isolation suite (build + prod server)
-        run: node test-app/leakage-test.mjs
-
-      - name: Production build
-        working-directory: test-app
         run: |
-          npm run build
+          lsof -ti:3000 2>/dev/null | xargs -r kill 2>/dev/null || true
+          node test-app/leakage-test.mjs
 
       - name: Start production server
-        working-directory: test-app
         run: |
+          cd test-app
           (setsid nohup npm run start > /tmp/start.log 2>&1 < /dev/null &)
           for i in $(seq 1 60); do
             curl -s -o /dev/null http://localhost:3000/ && break
@@ -135,14 +100,16 @@ jobs:
           VESK_TEST_TARGET: production
         run: node crawl.mjs
 
-      - name: Dump prod server log (always)
-        if: always()
+      - name: Dump server logs (on failure)
+        if: failure()
         run: |
+          echo "===== /tmp/dev.log ====="
+          cat /tmp/dev.log 2>/dev/null || true
           echo "===== /tmp/start.log ====="
-          cat /tmp/start.log || true
-          echo "===== end /tmp/start.log ====="
+          cat /tmp/start.log 2>/dev/null || true
+          echo "===== end logs ====="
 
-  deploy-targets:
+  platforms:
     name: Platform deployment targets (vercel/netlify/cloudflare/deno/aws)
     runs-on: ubuntu-latest
     steps:
@@ -198,7 +165,7 @@ jobs:
 
   release:
     name: Publish to npm + GitHub tag & release
-    needs: [test, prod, deploy-targets]
+    needs: [verify, platforms]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' &&
       contains(github.event.head_commit.message, 'publish')
