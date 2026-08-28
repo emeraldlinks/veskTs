@@ -128,7 +128,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
       format: 'esm',
       minify: true,
       outfile: resolve(outDir, 'server', 'runtime.js'),
-      external: ['fs', 'node:fs', 'path', 'node:path', 'node:async_hooks'],
+      external: ['fs', 'node:fs', 'path', 'node:path', 'module', 'node:module', 'node:async_hooks'],
       target: ['es2022'],
       treeShaking: true,
     });
