@@ -434,6 +434,11 @@ declare function useFetch<T = unknown>(
   urlOrFn: string | (() => Promise<T>),
   options?: VeskUseFetchOptions<T>,
 ): VeskResource<T>;
+declare namespace useFetch {
+  function text<T = string>(url: string, options?: Omit<VeskUseFetchOptions<T>, 'body'>): VeskResource<T>;
+  function json<T = unknown>(url: string, options?: Omit<VeskUseFetchOptions<T>, 'body'>): VeskResource<T>;
+  function arrayBuffer<T = ArrayBuffer>(url: string, options?: Omit<VeskUseFetchOptions<T>, 'body'>): VeskResource<T>;
+}
 declare function useRouter(): unknown;
 declare function useParams(): Record<string, string>;
 declare function usePathname(): string;

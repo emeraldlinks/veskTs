@@ -232,6 +232,54 @@ test('typecheck: awaited useFetch yields T', () => {
   }
 });
 
+test('typecheck: useFetch.text/json/arrayBuffer resolve via the ambient namespace', () => {
+  const f = fixture({
+    'app/page.vsk': [
+      'async component Page() {',
+      "  const doc = await useFetch.text<string>('/docs/readme.md')",
+      "  const data = await useFetch.json<{ ok: boolean }>('/api/status')",
+      "  const buf = await useFetch.arrayBuffer('/assets/blob.bin')",
+      '  <p>{doc.length + (data.ok ? 1 : 0) + buf.byteLength}</p>',
+      '}',
+    ].join('\n'),
+    'app/stmt.vsk': [
+      'async component DocView() {',
+      "  const res = useFetch.text('/docs/readme.md', { key: 'doc' })",
+      '  if (res.loading) {',
+      "    <p>Loading…</p>",
+      '  }',
+      '  const doc = await res',
+      '  if (doc) {',
+      '    <p>{doc.slice(0, 80)}</p>',
+      '  }',
+      '}',
+    ].join('\n'),
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for useFetch statics, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
+test('typecheck: useFetch.text rejects body (Omit<..., "body"> works)', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const doc = await useFetch.text('/docs/readme.md', { body: 'x' })\n  <p>{doc}</p>\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    if (!errors.some((e) => e.file.includes('page.vsk'))) {
+      throw new Error('expected tsc error for body on useFetch.text');
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('typecheck: useFetch into a tracked cell needs no await and stays clean', () => {
   const f = fixture({
     'app/page.vsk': `component Page() {\n  const &[posts, postsCell] = track<{ id: number }[]>([])\n  const res = useFetch('/api/posts', { key: 'posts', into: postsCell })\n  <span>{res.loading ? 'Loading' : 'Fresh'}</span>\n  <button onClick={() => res.refresh()}>r</button>\n  for (const p of posts) {\n    <p>{p.id}</p>\n  }\n}\n`,
