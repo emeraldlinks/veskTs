@@ -27,7 +27,7 @@ into an API reference).
 | [Components](language/components/doc.md) | The `component` keyword, props, children, refs, auto-imports |
 | [Body Modes](language/body-modes/doc.md) | Overview: expression vs statement mode |
 | [Expression Mode](language/expression-mode/doc.md) | `return <jsx>` style; where JSX may appear |
-| [Statement Mode](language/statement-mode/doc.md) | Bare JSX, if/for/while/switch/try, key/index/empty, guards |
+| [Statement Mode](language/statement-mode/doc.md) | Bare JSX, if/for/while/switch/try, key/index/empty, guards, text-vs-code in children |
 | [TypeScript](language/typescript/doc.md) | Full TS in `.vsk`; `vesk typecheck` (tsc-in-.vsk) |
 | [Styles](language/styles/doc.md) | `<style>` blocks per component; global CSS; Tailwind |
 | [Client Boundary](language/client-boundary/doc.md) | Islands (`client`), `{#client}` / `{#server}` blocks |

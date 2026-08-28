@@ -1,4 +1,19 @@
-import { GUIDE } from '../_lib/guide';
+import { GUIDE } from '../lib/guide.ts';
+
+export default component GuideLayout(props: { children?: unknown }) {
+	<div class="g-mobile">
+		<details class="g-sections">
+			<summary>guide sections</summary>
+			<SideNav />
+		</details>
+	</div>
+	<div class="g-grid">
+		<aside class="g-side">
+			<SideNav />
+		</aside>
+		<div class="g-col">{props.children}</div>
+	</div>
+}
 
 component SideNav {
 	const path = usePathname()
@@ -18,19 +33,4 @@ component SideNav {
 			</div>
 		}
 	</nav>
-}
-
-component GuideLayout(props: { children?: unknown }) {
-	<div class="g-mobile">
-		<details class="g-sections">
-			<summary>guide sections</summary>
-			<SideNav />
-		</details>
-	</div>
-	<div class="g-grid">
-		<aside class="g-side">
-			<SideNav />
-		</aside>
-		<div class="g-col">{props.children}</div>
-	</div>
 }

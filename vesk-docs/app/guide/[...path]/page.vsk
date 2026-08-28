@@ -1,6 +1,6 @@
 import { Md } from '@vesk/runtime';
 import { track } from '@vesk/runtime';
-import { firstHeading, tocFrom } from '../../_lib/guide';
+import { firstHeading, tocFrom } from '../../lib/guide';
 
 component GuideDoc(props: { params: { path: string | string[] } }) {
 	const segs = Array.isArray(props.params.path) ? props.params.path : [String(props.params.path)]

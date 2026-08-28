@@ -187,3 +187,49 @@ catch (e) {
 
 
 Route-level failures belong in [`error.vsk`](../../routing/error-handling/doc.md).
+
+## Text vs. code in element children
+
+Everything inside an element is a chance to run code or to print text. By
+default Vesk treats a child as **code** when it looks like a line of code,
+and as **text** otherwise. The rule of thumb:
+
+> If it looks like a line of code — `name(...)` with no spaces, ending the
+> line or followed by `;` — we run it. If it looks like a sentence, we
+> print it. When in doubt, wrap it in `{}` — braces always mean *evaluate*.
+
+A bare call on its own line inside an element executes as a statement:
+
+```vsk
+component Trace(props: { id: number }) {
+	<div>
+		console.log("loading", props.id)
+		<p>Loaded</p>
+	</div>
+}
+```
+
+This runs `console.log(...)` and otherwise renders `<p>Loaded</p>`.
+
+Text that merely *resembles* a call stays text — because a word follows the
+closing paren, or the paren is spaced off, or there's no `;</newline`
+terminator:
+
+```vsk
+<p>call me (maybe); ok</p>      {/* text */}
+<p>the(cat) sat</p>             {/* text */}
+<p>doSomething(x) then more</p> {/* text */}
+```
+
+Anything else that starts like code but doesn't fit the pattern — a bare
+identifier with no call parens, or a call that doesn't close the line — is
+treated as text too.
+
+To force a line to be code even when it looks like prose, wrap it in braces:
+
+```vsk
+<div>{"print this literally"}</div>
+```
+
+`const`/`let`/`var` declarations and `if`/`for`/etc. keep working inside any
+element in both modes.
