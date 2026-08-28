@@ -27,6 +27,7 @@ import { createBaseParser } from '@vesk/compiler/src/parser';
 import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, collapseNewlineWhitespace } from '@vesk/compiler/src/scan';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { stripTypeImport } from '@vesk/compiler/src/vsk-imports';
+import { importBindingPairs } from '@vesk/compiler/src/module-imports';
 import { collectCalledIdentifiers, extractImportNames, importModuleTarget } from '@vesk/compiler/src/tokens';
 import type { VeskAnnotation } from '@vesk/compiler/src/parser';
 
@@ -1199,7 +1200,14 @@ export function generateIR(ast: any, source: string): IRRoot {
       if (importModuleTarget(imp) !== '@vesk/runtime') continue;
       for (const n of extractImportNames(imp)) existing.add(n);
     }
-    const missing = [...usedFunctions].filter(f => !existing.has(f));
+    // A name already bound by the file's own imports (any target — including a
+    // local module with the same export) wins; never auto-import a duplicate
+    // binding. Mirrors client shadowing so SSR and client agree.
+    const boundLocally = new Set<string>();
+    for (const imp of imports) {
+      for (const pair of importBindingPairs(imp)) boundLocally.add(pair.local);
+    }
+    const missing = [...usedFunctions].filter(f => !existing.has(f) && !boundLocally.has(f));
     if (missing.length > 0) {
       imports.push(`import { ${missing.join(', ')} } from '@vesk/runtime';`);
     }

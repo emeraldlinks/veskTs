@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from 'node:fs';
+import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { print } from 'esrap';
@@ -43,12 +43,40 @@ const RUNTIME_PREFIXES = ['@vesk/runtime/', '@vesk/reactivity/', '@vesk/types', 
 
 const EXTENSIONS = ['.ts', '.tsx', '.mts', '.cts', '.js', '.mjs', '.cjs', '.jsx', '.json'];
 
+/** Marker prefix returned by `resolveSsrModule` for Node builtins. */
+const BUILTIN_PREFIX = '\u0000builtin:';
+
+/** Node builtins already loaded (never go stale; no mtime tracking). */
+const BUILTIN_CACHE = new Map<string, Record<string, unknown>>();
+
 interface CachedModule {
   mtimeMs: number;
+  /** Absolute paths + mtimes resolved anywhere in this module's transitive eval tree. */
+  deps: Array<{ path: string; mtimeMs: number }>;
   exports: Record<string, unknown>;
 }
 
 const MODULE_CACHE = new Map<string, CachedModule>();
+
+/** Hard cap on cached modules — bounds long dev-session growth (LRU-ish: evicts oldest). */
+const MAX_CACHE_ENTRIES = 256;
+
+function cacheModule(p: string, val: CachedModule): void {
+  MODULE_CACHE.delete(p);
+  MODULE_CACHE.set(p, val);
+  if (MODULE_CACHE.size > MAX_CACHE_ENTRIES) {
+    MODULE_CACHE.delete(MODULE_CACHE.keys().next().value as string);
+  }
+}
+
+/**
+ * Active evaluation frames — an array (not a single slot) so nested module
+ * evaluation keeps each ancestor's closure live. Every resolve performed by
+ * `createModuleRequire` is recorded into ALL frames, so a module's invalidation
+ * set is its full transitive dependency closure (editing a leaf invalidates
+ * every ancestor that transitively depends on it).
+ */
+const depStack: Set<string>[] = [];
 
 /** True when the import target is owned by the framework (never SSR-loaded). */
 function isCompilerOwnedTarget(target: string): boolean {
@@ -130,9 +158,14 @@ export function isLocalValueImport(imp: string): boolean {
 
 /**
  * Loads every local value import and merges its exports into `__vesk` so SSR
- * component bodies can reference them. Resolution is relative to `sourcePath`
- * (the importing `.vsk` file). Best-effort: unresolvable/unloadable modules
- * warn and are skipped, matching how unresolvable `.vsk` imports are handled.
+ * component bodies can reference them. Pure side-effect imports (`import './x'`)
+ * are also resolved and executed so their module-level setup runs client AND
+ * server. Resolution is relative to `sourcePath` (the importing `.vsk` file).
+ *
+ * Best-effort: unresolvable/unloadable modules warn and are skipped, matching
+ * how unresolvable `.vsk` imports are handled. Unsupported ESM constructs
+ * (import.meta/top-level await) THROW a specific error — loading them would
+ * silently yield `undefined` at render.
  */
 export function applyLocalModuleImports(
   __vesk: Record<string, unknown>,
@@ -142,13 +175,15 @@ export function applyLocalModuleImports(
   if (!sourcePath) return;
   const fromDir = dirname(sourcePath);
   for (const imp of importStrs) {
-    if (!isLocalValueImport(imp)) continue;
-    const target = importModuleTarget(imp) as string;
+    const target = importModuleTarget(imp);
+    if (!target || isCompilerOwnedTarget(target) || isValueLessTarget(target)) continue;
     const resolved = resolveSsrModule(target, fromDir);
     if (!resolved) {
       console.warn(`[vesk] SSR: cannot resolve "${target}" imported by ${sourcePath} — the imported name will be undefined during server render.`);
       continue;
     }
+    // Load always (a side-effect import runs the module's top-level code);
+    // merge values only when the import actually binds names.
     const mod = loadSsrModule(resolved);
     if (!mod || typeof mod !== 'object') continue;
     for (const pair of importBindingPairs(imp)) {
@@ -176,48 +211,106 @@ function nativeRequireFallback(absPath: string): Record<string, unknown> | null 
   }
 }
 
-/** Loads (and caches, keyed by mtime) a module's export object. */
+/**
+ * Loads (and caches) a module's export object. Cache entries track both the
+ * module's own mtime and the mtimes of everything it transitively resolved,
+ * so a change to any dependency invalidates every module that pulls it in.
+ * Builtin markers load through Node and are cached separately (never stale).
+ */
 export function loadSsrModule(absPath: string): Record<string, unknown> | null {
+  if (isBuiltinPath(absPath)) {
+    return loadBuiltin(absPath.slice(BUILTIN_PREFIX.length));
+  }
+
   let mtimeMs = 0;
   try {
     mtimeMs = statSync(absPath).mtimeMs;
   } catch {
     return null;
   }
+  // A module that is still evaluating links back to live partial exports —
+  // the CJS analogue of ESM circular-import tolerance (no infinite recursion).
+  const inFlight = EVALUATING.get(absPath);
+  if (inFlight !== undefined) return inFlight;
   const cachedVal = MODULE_CACHE.get(absPath);
-  if (cachedVal && cachedVal.mtimeMs === mtimeMs) return cachedVal.exports;
+  if (cachedVal && cachedVal.mtimeMs === mtimeMs && depsFresh(cachedVal)) return cachedVal.exports;
 
-  let exportsObj: Record<string, unknown> | null = null;
-  if (absPath.endsWith('.json')) {
-    try {
-      exportsObj = JSON.parse(readFileSync(absPath, 'utf-8')) as Record<string, unknown>;
-      if (exportsObj && typeof exportsObj === 'object' && !('default' in exportsObj)) {
-        exportsObj.default = exportsObj;
+  // Capture the transitive closure of this evaluation into the live frames.
+  const frame = new Set<string>();
+  depStack.push(frame);
+
+  try {
+    let exportsObj: Record<string, unknown> | null = null;
+    if (absPath.endsWith('.json')) {
+      try {
+        exportsObj = JSON.parse(readFileSync(absPath, 'utf-8')) as Record<string, unknown>;
+        if (exportsObj && typeof exportsObj === 'object' && !('default' in exportsObj)) {
+          exportsObj.default = exportsObj;
+        }
+      } catch {
+        exportsObj = null;
       }
-    } catch {
-      exportsObj = null;
+    } else {
+      exportsObj = {};
+      EVALUATING.set(absPath, exportsObj);
+      const ran = evaluateModuleFile(absPath, exportsObj);
+      // Runtime evaluation failure (already warned) — give Node's own loader
+      // a chance before giving up.
+      if (!ran) exportsObj = null;
     }
-  } else {
-    exportsObj = evaluateModuleFile(absPath);
-  }
 
-  if (exportsObj === null) {
-    // Fall back to Node's own loader (works on Node >= 22.12 with TS
-    // stripping) before giving up.
-    exportsObj = nativeRequireFallback(absPath);
-  }
-  if (exportsObj === null) return null;
+    if (exportsObj === null) {
+      exportsObj = nativeRequireFallback(absPath);
+    }
+    if (exportsObj === null) return null;
 
-  MODULE_CACHE.set(absPath, { mtimeMs, exports: exportsObj });
-  return exportsObj;
+    cacheModule(absPath, { mtimeMs, deps: captureClosure(frame), exports: exportsObj });
+    return exportsObj;
+  } finally {
+    depStack.pop();
+    EVALUATING.delete(absPath);
+  }
 }
 
-function evaluateModuleFile(absPath: string): Record<string, unknown> | null {
+/** Snapshots the current stat of every file in a module's closure. */
+function captureClosure(frame: Set<string>): Array<{ path: string; mtimeMs: number }> {
+  const deps: Array<{ path: string; mtimeMs: number }> = [];
+  for (const dep of frame) {
+    try {
+      deps.push({ path: dep, mtimeMs: statSync(dep).mtimeMs });
+    } catch {
+      // Missing now, but the parent re-check will hit the missing file and
+      // treat it as changed — record it so stale entries get dropped.
+      deps.push({ path: dep, mtimeMs: -1 });
+    }
+  }
+  return deps;
+}
+
+/** True when every file in the module's dependency closure still matches. */
+function depsFresh(cachedVal: CachedModule): boolean {
+  for (const dep of cachedVal.deps) {
+    try {
+      if (statSync(dep.path).mtimeMs !== dep.mtimeMs) return false;
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Runs one module file. Returns `true` when the body executed, `false` when a
+ * runtime failure was already warned about. Unsupported ESM constructs throw —
+ * the only honest outcome is a loud, specific error, never silently undefined.
+ */
+function evaluateModuleFile(absPath: string, exportsObj: Record<string, unknown>): boolean {
   let raw: string;
   try {
     raw = readFileSync(absPath, 'utf-8');
-  } catch {
-    return null;
+  } catch (err) {
+    console.warn(`[vesk] SSR: failed to read ${absPath}: ${(err as Error)?.message ?? String(err)}`);
+    return false;
   }
 
   let ast: ReturnType<typeof parse> | null = null;
@@ -227,35 +320,89 @@ function evaluateModuleFile(absPath: string): Record<string, unknown> | null {
     ast = null;
   }
 
-  const mod = { exports: {} as Record<string, unknown> };
-  const dir = dirname(absPath);
-
-  if (ast) {
-    let stripped = ast;
-    if (hasTsSyntax(ast)) stripped = stripTsTypes(ast);
-    stripped.body = (stripped.body || []).filter((n: unknown) => {
-      if (!n) return false;
-      return !isTypeOnlyStatement(n);
-    });
-    try {
-      const body = esmToCjs(stripped.body as Array<{ type: string }>);
-      const fn = new Function('require', 'module', 'exports', '__dirname', '__filename', body);
-      fn(createModuleRequire(dir), mod, mod.exports, dir, absPath);
-    } catch (err) {
-      console.warn(`[vesk] SSR: failed to load ${absPath}: ${(err as Error)?.message ?? String(err)}`);
-      return null;
-    }
-  } else {
+  if (!ast) {
     // Not parseable as ESM — run verbatim as CJS.
     try {
       const fn = new Function('require', 'module', 'exports', '__dirname', '__filename', raw);
-      fn(createModuleRequire(dir), mod, mod.exports, dir, absPath);
+      fn(createModuleRequire(dirname(absPath)), { exports: exportsObj }, exportsObj, dirname(absPath), absPath);
     } catch (err) {
       console.warn(`[vesk] SSR: failed to load ${absPath}: ${(err as Error)?.message ?? String(err)}`);
-      return null;
+      return false;
+    }
+    return true;
+  }
+
+  const unsupported = findUnsupportedEsm(ast.body as Array<{ type: string }>);
+  if (unsupported) {
+    throw new Error(
+      `${absPath} uses ${unsupported} — not representable in the SSR module loader. ` +
+        `Split it out of the module or avoid ${unsupported} in .vsk-imported code.`
+    );
+  }
+
+  let stripped = ast;
+  if (hasTsSyntax(ast)) stripped = stripTsTypes(ast);
+  stripped.body = (stripped.body || []).filter((n: unknown) => {
+    if (!n) return false;
+    return !isTypeOnlyStatement(n);
+  });
+
+  const body = esmToCjs(stripped.body as Array<{ type: string }>);
+  // ESM modules are always strict; mirror per-spec `this === undefined`.
+  try {
+    const fn = new Function('require', 'module', 'exports', '__dirname', '__filename', "'use strict';\n" + body);
+    fn(createModuleRequire(dirname(absPath)), { exports: exportsObj }, exportsObj, dirname(absPath), absPath);
+  } catch (err) {
+    console.warn(`[vesk] SSR: failed to load ${absPath}: ${(err as Error)?.message ?? String(err)}`);
+    return false;
+  }
+  return true;
+}
+
+const EVALUATING = new Map<string, Record<string, unknown>>();
+
+/**
+ * Detects ESM constructs the CJS rewrite cannot express, returning a
+ * human-readable name (`import.meta`, `top-level await`) or `null`.
+ * Nested usage inside function/class bodies is legal ESM and fine here.
+ */
+function findUnsupportedEsm(body: Array<{ type: string } & Record<string, unknown>>): string | null {
+  for (const stmt of body) {
+    const hit = scanUnsupportedNode(stmt);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function scanUnsupportedNode(node: unknown, inFunction = false): string | null {
+  if (!node || typeof node !== 'object') return null;
+  const n = node as Record<string, unknown>;
+  const t = n.type as string | undefined;
+  if (t === 'MetaProperty' || (t === 'MetaProperty' && (n.meta as { name?: string })?.name === 'import')) {
+    return 'import.meta';
+  }
+  if (!inFunction && t === 'AwaitExpression') return 'top-level await';
+  if (
+    t === 'FunctionDeclaration' || t === 'FunctionExpression' ||
+    t === 'ArrowFunctionExpression' || t === 'ClassDeclaration' || t === 'ClassExpression'
+  ) {
+    return null;
+  }
+  for (const key of Object.keys(n)) {
+    const val = n[key];
+    if (Array.isArray(val)) {
+      for (const item of val) {
+        if (item && typeof item === 'object') {
+          const sub = scanUnsupportedNode(item, inFunction);
+          if (sub) return sub;
+        }
+      }
+    } else if (val && typeof val === 'object') {
+      const sub = scanUnsupportedNode(val, inFunction);
+      if (sub) return sub;
     }
   }
-  return mod.exports;
+  return null;
 }
 
 /** Recursive `require` used inside evaluated modules, rooted at their dir. */
@@ -263,6 +410,9 @@ function createModuleRequire(fromDir: string): (specifier: string) => unknown {
   return (specifier: string): unknown => {
     const resolved = resolveSsrModule(specifier, fromDir);
     if (!resolved) throw new Error(`Cannot find module '${specifier}'`);
+    // Builtins are handled natively; files join every live evaluation frame so
+    // the transitive closure stays fresh.
+    for (const frame of depStack) frame.add(resolved);
     const loaded = loadSsrModule(resolved);
     if (loaded === null) throw new Error(`Cannot load module '${specifier}'`);
     return loaded;
@@ -270,27 +420,92 @@ function createModuleRequire(fromDir: string): (specifier: string) => unknown {
 }
 
 /**
- * Resolves a specifier to an absolute file path with extension probing:
- * relative/absolute localities, plus bare specifiers via node_modules walk-up.
+ * Resolves a specifier to an absolute file path (or a `BUILTIN_PREFIX` marker
+ * for Node builtins). Relative/absolute localities use extension probing;
+ * bare specifiers (`npm-package`, `pkg/subpath`, `node:fs`, `fs`) prefer
+ * Node's own resolver — which understands `exports` maps, conditions, scoped
+ * packages and builtins — and fall back to a `node_modules` walk-up.
+ *
+ * Every resolved file path is normalized through `realpathSync` so two
+ * specifiers pointing at the same physical file (e.g. pnpm/yarn symlinked
+ * `node_modules`) share one cache entry and one module instance.
  */
 export function resolveSsrModule(specifier: string, fromDir: string): string | null {
+  let resolved: string | null = null;
   if (specifier === '.' || specifier === '..' || isAbsolute(specifier)) {
-    return probeFile(resolve(specifier));
+    resolved = probeFile(resolve(specifier));
+  } else if (specifier.startsWith('./') || specifier.startsWith('../')) {
+    resolved = probeFile(resolve(fromDir, specifier));
+  } else {
+    // Bare specifier — prefer the native resolver (exports map, conditions,
+    // builtins, symlinks), then fall back to a node_modules walk-up.
+    const native = nativeResolve(specifier, fromDir);
+    if (native) return native; // realpath'd inside nativeResolve / builtin marker
+    let dir = fromDir;
+    for (let depth = 0; depth < 64; depth++) {
+      const base = join(dir, 'node_modules', specifier);
+      const found = probeFile(base);
+      if (found) {
+        resolved = found;
+        break;
+      }
+      const parent = dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
   }
-  if (specifier.startsWith('./') || specifier.startsWith('../')) {
-    return probeFile(resolve(fromDir, specifier));
+  return resolved ? toRealPath(resolved) : null;
+}
+
+/** Normalizes a resolved file path through `realpathSync` (no-op on failure). */
+function toRealPath(p: string): string {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
   }
-  // Bare specifier — walk up looking for a matching node_modules entry.
-  let dir = fromDir;
-  for (let depth = 0; depth < 64; depth++) {
-    const base = join(dir, 'node_modules', specifier);
-    const found = probeFile(base);
-    if (found) return found;
-    const parent = dirname(dir);
-    if (parent === dir) break;
-    dir = parent;
+}
+
+/**
+ * Native resolution of a bare specifier. `createRequire.resolve` returns an
+ * absolute file path for packages; for builtins it returns the bare specifier
+ * itself (`'node:fs'` / `'fs'`), which `resolveSsrModule` marks as a builtin.
+ */
+function nativeResolve(specifier: string, fromDir: string): string | null {
+  try {
+    const req = createRequire(join(fromDir, '__vesk_resolve__.js'));
+    const resolved = req.resolve(specifier);
+    if (isAbsolute(resolved)) return toRealPath(resolved);
+    return builtinMarker(resolved);
+  } catch {
+    return null;
   }
-  return null;
+}
+
+function builtinMarker(name: string): string {
+  return BUILTIN_PREFIX + name;
+}
+
+function isBuiltinPath(p: string): boolean {
+  return p.startsWith(BUILTIN_PREFIX);
+}
+
+/** Loads a Node builtin module (never cached in `MODULE_CACHE`, never stale). */
+function loadBuiltin(name: string): Record<string, unknown> | null {
+  const id = name.startsWith('node:') ? name : `node:${name}`;
+  const cachedVal = BUILTIN_CACHE.get(id);
+  if (cachedVal) return cachedVal;
+  try {
+    const req = createRequire(join('/', '__vesk_builtin__.js'));
+    const loaded = req(id);
+    let mod: Record<string, unknown> | null = null;
+    if (loaded && typeof loaded === 'object') mod = loaded as Record<string, unknown>;
+    else if (loaded !== null && loaded !== undefined) mod = { default: loaded };
+    if (mod) BUILTIN_CACHE.set(id, mod);
+    return mod;
+  } catch {
+    return null;
+  }
 }
 
 function statOrNull(p: string): { isFile: () => boolean; isDirectory: () => boolean } | null {
@@ -378,6 +593,14 @@ function stripOuterQuotes(s: string): string {
   return s;
 }
 
+/**
+ * Emits a live-binding getter for an export, so consumers observe mutations
+ * the way real ESM live bindings do (a snapshot `exports.x = x` goes stale).
+ */
+function exportGetter(lines: string[], key: string, valueExpr: string): void {
+  lines.push(`Object.defineProperty(exports, ${JSON.stringify(key)}, { get: () => ${valueExpr}, enumerable: true });`);
+}
+
 let exportCounter = 0;
 
 /** Rewrites an ESM program body (imports/exports removed) into CJS statements. */
@@ -418,11 +641,11 @@ export function esmToCjs(body: Array<{ type: string } & Record<string, unknown>>
             if (declaration.type === 'VariableDeclaration') {
               const declarators = (declaration.declarations as Array<{ id?: { type: string; name?: string } }>) || [];
               for (const d of declarators) {
-                if (d.id && d.id.type === 'Identifier') lines.push(`exports[${JSON.stringify(d.id.name)}] = ${d.id.name};`);
+                if (d.id && d.id.type === 'Identifier') exportGetter(lines, exportKeyName(d.id), d.id.name ?? '');
               }
             } else if ((declaration as { id?: { type: string; name?: string } }).id) {
               const name = (declaration as { id: { type: string; name?: string } }).id;
-              lines.push(`exports[${JSON.stringify(name.name)}] = ${name.name};`);
+              exportGetter(lines, exportKeyName(name), name.name ?? '');
             }
           }
         } else if (source) {
@@ -433,7 +656,7 @@ export function esmToCjs(body: Array<{ type: string } & Record<string, unknown>>
             if (spec.exportKind === 'type') continue;
             const local = spec.local as { type: string; name?: string };
             const exported = spec.exported as { type: string; name?: string };
-            lines.push(`exports[${JSON.stringify(exportKeyName(exported))}] = ${memberAccess(modVar, local)};`);
+            exportGetter(lines, exportKeyName(exported), memberAccess(modVar, local));
           }
         } else {
           const specifiers = (stmt.specifiers as Array<Record<string, unknown>>) || [];
@@ -441,7 +664,7 @@ export function esmToCjs(body: Array<{ type: string } & Record<string, unknown>>
             if (spec.exportKind === 'type') continue;
             const local = spec.local as { type: string; name?: string };
             const exported = spec.exported as { type: string; name?: string };
-            lines.push(`exports[${JSON.stringify(exportKeyName(exported))}] = ${astName(local)};`);
+            exportGetter(lines, exportKeyName(exported), astName(local));
           }
         }
         break;

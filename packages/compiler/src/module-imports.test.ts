@@ -7,7 +7,7 @@
  *
  * Run with: npx tsx packages/compiler/src/module-imports.test.ts
  */
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { render } from '@vesk/compiler/src/server-codegen';
@@ -371,6 +371,180 @@ test('SSR: runtime imports continue to work alongside local module imports', () 
     ].join('\n');
     const html = render(src, 'Page', {}, new Map(), { sourcePath: fx.file('page.vsk') }) as string;
     expect(html).toContain('<li>Alpha</li>');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ============================================================
+// Hardening: native resolution, exports maps, builtins, live
+// bindings, fail-loud guards, cycles, invalidation, side-effect
+// imports.
+// ============================================================
+test('loadSsrModule: node: builtin value import resolves and is usable', () => {
+  const fx = makeFixture();
+  try {
+    const scope: Record<string, unknown> = {};
+    applyLocalModuleImports(scope, [`import { join } from 'node:path';`], fx.file('page.vsk'));
+    expect(typeof scope.join).toEqual('function');
+    expect((scope.join as (...a: string[]) => string)('a', 'b')).toEqual(join('a', 'b'));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('resolveSsrModule: bare specifier honors the exports map (node_modules fixture)', () => {
+  const fx = makeFixture();
+  try {
+    mkdirSync(fx.file('node_modules/fixpkg/dist'), { recursive: true });
+    writeFileSync(fx.file('node_modules/fixpkg/package.json'), JSON.stringify({ name: 'fixpkg', version: '1.0.0', exports: { '.': './dist/lib.js' } }));
+    writeFileSync(fx.file('node_modules/fixpkg/dist/lib.js'), `export const VALUE = 'from-map';`);
+    const resolved = resolveSsrModule('fixpkg', fx.dir);
+    expect(resolved).toEqual(fx.file('node_modules/fixpkg/dist/lib.js'));
+    const mod = loadSsrModule(resolved as string) as Record<string, unknown>;
+    expect(mod.VALUE).toEqual('from-map');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: live bindings observe post-import mutation', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('counter.ts'), [
+      `export let count = 1;`,
+      `export function bump(): number { count += 1; return count; }`,
+      `export function getCount(): number { return count; }`,
+    ].join('\n'));
+    const mod = loadSsrModule(fx.file('counter.ts')) as {
+      count: number;
+      bump: () => number;
+      getCount: () => number;
+    };
+    (mod.bump)();
+    expect(mod.count).toEqual(2);
+    expect(mod.getCount()).toEqual(2);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: import.meta fails loudly with a specific error', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('meta.ts'), `export const u = import.meta.url;`);
+    let threw: Error | null = null;
+    try {
+      loadSsrModule(fx.file('meta.ts'));
+    } catch (e) {
+      threw = e as Error;
+    }
+    if (!threw) throw new Error('expected import.meta module to throw');
+    if (!/import\.meta/.test(threw.message)) throw new Error(`expected import.meta in error, got: ${threw.message}`);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: top-level await never yields a silent partial load', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('tla.ts'), `export const v = await Promise.resolve(1);`);
+    let result: unknown = 'sentinel';
+    try {
+      result = loadSsrModule(fx.file('tla.ts'));
+    } catch (e) {
+      result = e;
+    }
+    if (result !== null && !(result instanceof Error)) {
+      throw new Error(`expected null (or explicit error) for TLA module, got: ${String(result)}`);
+    }
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: circular imports resolve without infinite recursion', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('a.ts'), [
+      `import { B } from './b';`,
+      `export const A = 'a';`,
+      `export function fromA(): string { return 'from-a'; }`,
+    ].join('\n'));
+    writeFileSync(fx.file('b.ts'), [
+      `import { A } from './a';`,
+      `export const B = 'b:' + (A === undefined ? 'none' : A);`,
+    ].join('\n'));
+    const a = loadSsrModule(fx.file('a.ts')) as Record<string, unknown>;
+    expect(a.A).toEqual('a');
+    expect((a.fromA as () => string)()).toEqual('from-a');
+    // b evaluated while a was still partial, so it observed the in-flight
+    // exports (A undefined there) exactly once — and that snapshot is cached.
+    const b = loadSsrModule(fx.file('b.ts')) as Record<string, unknown>;
+    expect(b.B).toEqual('b:none');
+    const bAgain = loadSsrModule(fx.file('b.ts')) as Record<string, unknown>;
+    expect(bAgain.B).toEqual('b:none');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('applyLocalModuleImports: transitive closure invalidation on dep edit', () => {
+  const fx = makeFixture();
+  try {
+    const t0 = new Date(Date.now() - 60000);
+    const t1 = new Date(Date.now() - 30000);
+    writeFileSync(fx.file('leaf.ts'), `export const V = 'v1';`);
+    utimesSync(fx.file('leaf.ts'), t0, t0);
+    writeFileSync(fx.file('mid.ts'), `import { V } from './leaf';\nexport const W = V + '!';`);
+    utimesSync(fx.file('mid.ts'), t0, t0);
+
+    const scope1: Record<string, unknown> = {};
+    applyLocalModuleImports(scope1, [`import { W } from './mid.ts';`], fx.file('page.vsk'));
+    expect(scope1.W).toEqual('v1!');
+
+    writeFileSync(fx.file('leaf.ts'), `export const V = 'v2';`);
+    utimesSync(fx.file('leaf.ts'), t1, t1);
+
+    const scope2: Record<string, unknown> = {};
+    applyLocalModuleImports(scope2, [`import { W } from './mid.ts';`], fx.file('page.vsk'));
+    expect(scope2.W).toEqual('v2!');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('applyLocalModuleImports: side-effect imports run their module top-level code', () => {
+  const fx = makeFixture();
+  try {
+    delete (globalThis as { __VESK_SSR_SETUP?: string }).__VESK_SSR_SETUP;
+    writeFileSync(fx.file('setup.ts'), `(globalThis as any).__VESK_SSR_SETUP = 'ran';`);
+    writeFileSync(fx.file('lib.ts'), `export const A = 1;`);
+    const scope: Record<string, unknown> = {};
+    applyLocalModuleImports(scope, [`import './setup.ts';`, `import { A } from './lib.ts';`], fx.file('page.vsk'));
+    expect((globalThis as { __VESK_SSR_SETUP?: string }).__VESK_SSR_SETUP).toEqual('ran');
+    expect(scope.A).toEqual(1);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('SSR: side-effect import + value import both present during render', () => {
+  const fx = makeFixture();
+  try {
+    delete (globalThis as { __VESK_SSR_SETUP?: string }).__VESK_SSR_SETUP;
+    writeFileSync(fx.file('setup.ts'), `(globalThis as any).__VESK_SSR_SETUP = 'ran';`);
+    writeFileSync(fx.file('lib.ts'), `export const A = 1;`);
+    const src = [
+      `import './setup.ts';`,
+      `import { A } from './lib.ts';`,
+      `component Page {`,
+      `  <p>{globalThis.__VESK_SSR_SETUP}:{A}</p>`,
+      `}`,
+    ].join('\n');
+    const html = render(src, 'Page', {}, new Map(), { sourcePath: fx.file('page.vsk') }) as string;
+    expect(html).toContain('ran:1');
   } finally {
     fx.cleanup();
   }

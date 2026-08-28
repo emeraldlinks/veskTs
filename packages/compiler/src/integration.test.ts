@@ -947,6 +947,31 @@ it('auto-import does not inject if already imported', () => {
   assert(count === 1, `expected exactly 1 useFetch import, got ${count}: ${JSON.stringify(ir.imports)}`);
 });
 
+it('auto-import defers to a locally-imported name (shadowing parity, both generators)', () => {
+  const source = `import { effect } from './custom-effect.ts';
+  component App {
+    effect(() => {});
+    return <div>ok</div>;
+  }`;
+  const ir = generateIR(parse(source), source);
+  const runtimeImports = ir.imports.filter(i => i.includes('@vesk/runtime'));
+  assert(runtimeImports.length === 0, `no runtime import expected (effect is shadowed), got: ${JSON.stringify(runtimeImports)}`);
+  assert(
+    ir.imports.some(i => i.includes('./custom-effect.ts') && i.includes('effect')),
+    `local effect import missing: ${JSON.stringify(ir.imports)}`
+  );
+  const client = compileClient(source, 'App', { hydrate: true });
+  assert(
+    client.includes('./custom-effect.ts'),
+    `client bundle lost the local effect import: ${client.slice(0, 400)}`
+  );
+  const runtimeImportLine = client.split('\n').find(l => l.includes('@vesk/runtime'));
+  assert(
+    runtimeImportLine === undefined || !/['" ]effect['" ,]/.test(runtimeImportLine),
+    `client bundle re-injected runtime effect alongside the local import: ${runtimeImportLine}`
+  );
+});
+
 it('no auto-import when builtins are not used', () => {
   const source = `component App {
     const x = 42;

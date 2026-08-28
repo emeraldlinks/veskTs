@@ -27,6 +27,7 @@ import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
+import { importBindingPairs } from '@vesk/compiler/src/module-imports';
 import { stripTrackGeneric } from '@vesk/compiler/src/scan';
 import { inlineMdImportsFrom } from '@vesk/compiler/src/md-inline';
 import { stripTsTypes, hasTsSyntax } from '@vesk/compiler/src/strip-ts';
@@ -1477,7 +1478,16 @@ function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?
     }
   }
 
-  const runtimeImport = `import { ${runtimeNames.join(', ')} } from '@vesk/runtime';`;
+  // A name the file already binds via its own imports (e.g. a local module that
+  // exports its own `effect`) shadows the runtime binding — never inject a
+  // duplicate `import { x } from '@vesk/runtime'`. Mirrors SSR, so the two agree.
+  const boundLocally = new Set<string>();
+  for (const imp of ir.imports) {
+    for (const pair of importBindingPairs(imp)) boundLocally.add(pair.local);
+  }
+  const shadowedRuntimeNames = runtimeNames.filter(n => !boundLocally.has(n));
+
+  const runtimeImport = `import { ${shadowedRuntimeNames.length > 0 ? shadowedRuntimeNames.join(', ') : 'destroy_block'} } from '@vesk/runtime';`;
 
   const moduleCode = `
 ${runtimeImport}

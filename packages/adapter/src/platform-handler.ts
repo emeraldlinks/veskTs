@@ -186,7 +186,7 @@ export async function bundlePlatformHandler(options: BundlePlatformOptions): Pro
     plugins.push({
       name: 'empty-node-builtins',
       setup(build: any) {
-        const builtins = /^(node:)?(fs|path|child_process|os|crypto|net|stream|buffer|events|util|url|querystring|http|https|zlib|tty|async_hooks)$/;
+        const builtins = /^(node:)?(fs|module|path|child_process|os|crypto|net|stream|buffer|events|util|url|querystring|http|https|zlib|tty|async_hooks)$/;
         build.onResolve({ filter: builtins }, (args: any) => {
           return { path: args.path, namespace: 'empty-node' };
         });
@@ -217,14 +217,19 @@ export const readFileSync = () => {};
 export const writeFileSync = () => {};
 export const existsSync = () => {};
 export const statSync = () => {};
+export const realpathSync = () => '';
 export const readdirSync = () => {};
 export const mkdirSync = () => {};
 export const unlinkSync = () => {};
 export const rmSync = () => {};
 export const copyFileSync = () => {};
 export const accessSync = () => {};
+// node:module — createRequire is server-only dead code in the browser bundle;
+// the stub keeps esbuild from failing on the named import.
+export const createRequire = () => () => undefined;
 export const join = (...a) => a.join('/');
 export const resolve = (...a) => a.join('/');
+export const isAbsolute = () => false;
 export const dirname = () => '';
 export const basename = () => '';
 export const extname = () => '';

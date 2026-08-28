@@ -166,6 +166,11 @@ describe('stripTypeImport', () => {
     expect(stripTypeImport("import { helper } from './x.ts';")).toBe("import { helper } from './x.ts';");
     expect(stripTypeImport("import * as ns from './x.ts';")).toBe("import * as ns from './x.ts';");
   });
+
+  it('keeps side-effect imports (no specifiers is not type-only)', () => {
+    expect(stripTypeImport("import './setup.ts';")).toBe("import './setup.ts';");
+    expect(stripTypeImport("import './site.css';")).toBe("import './site.css';");
+  });
 });
 
 describe('vskImportLines', () => {

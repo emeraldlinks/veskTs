@@ -113,7 +113,9 @@ export function stripTypeImport(importSrc: string): string | null {
   if (isTypeOnlyImport(stmt)) return null;
   const specs: any[] = stmt.specifiers || [];
   const kept = specs.filter((s: any) => s.importKind !== 'type');
-  if (kept.length === 0) return null;
+  // A side-effect import (`import './x'`) has no specifiers at all — it is NOT
+  // type-only and must survive so both bundles run its module-level code.
+  if (specs.length > 0 && kept.length === 0) return null;
   if (kept.length === specs.length) return importSrc;
   try {
     const rewritten = { ...stmt, specifiers: kept };
