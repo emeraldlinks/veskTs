@@ -1,4 +1,4 @@
-import { track } from '@vesk/runtime';
+// import { track } from '@vesk/runtime';
 
 interface Post {
 	id: number
@@ -11,9 +11,10 @@ interface Post {
 }
 
 component PostCard(props: { post: Post }) {
+  console.log("post: ", props.post)
 	<article class="demo-card">
 		<div class="dc-meta">
-			<span>{props.post.date}</span>
+		//	<span>{props.post.date}</span>
 			<span>by {props.post.author}</span>
 		</div>
 		<h2>{props.post.title}</h2>
@@ -21,7 +22,7 @@ component PostCard(props: { post: Post }) {
 	</article>
 }
 
-component Posts {
+export default component Posts {
 	<Head>
 		<title>data — live useFetch demo · vesk</title>
 		<meta name="description" content="A live demo of useFetch: deduped, cached with staleTime, retried with backoff." />
@@ -36,11 +37,12 @@ component Posts {
 		retryDelay: 400,
 		timeout: 8000,
 	})
+ //  console.log(posts)
 	<div class="page-wrap page-wrap-wide">
 		<div class="crumb">data<span class="crumb-sep">/</span>posts</div>
 		<div class="post-layout">
 			<div>
-				<h1 class="page-h1">Posts, fetched live</h1>
+				<h1 class="page-h1">Plf, fetched live</h1>
 				<p class="page-lede" style="margin-bottom: 0;">
 					useFetch — deduped, cached with staleTime, retried with backoff, timed out, and written
 					into a tracked cell. One network round-trip, rendered from SSR data on first load.
@@ -59,10 +61,14 @@ component Posts {
 				<p>The request to /api/posts failed after its retries. Check that the dev server is running this app's API route.</p>
 			</div>
 		}
+    console.log("for loop")
 		<div class="demo-grid">
 			for (const post of posts) {
+  console.log("post in loop:: ", post)
 				<PostCard post={post} />
 			}
 		</div>
 	</div>
 }
+
+
