@@ -68,7 +68,17 @@ export function collectCalledIdentifiers(code: string): Set<string> {
       const t = tokens[i];
       if (t.label !== 'name') continue;
       const prev = i > 0 ? tokens[i - 1] : null;
-      if (prev && (prev.label === '.' || prev.label === '?.')) continue;
+      if (prev && (prev.label === '.' || prev.label === '?.')) {
+        // Member calls (`useFetch.text(`) surface the receiver so an
+        // auto-importable function used as a receiver is still imported.
+        const obj = i >= 2 ? tokens[i - 2] : null;
+        const next = tokens[i + 1];
+        if (obj && obj.label === 'name' && next) {
+          const nextCh = code[next.start];
+          if (nextCh === '(' || nextCh === '<') result.add(obj.value);
+        }
+        continue;
+      }
       const next = tokens[i + 1];
       if (!next) continue;
       const nextCh = code[next.start];
@@ -182,6 +192,7 @@ export function importModuleTarget(importText: string): string | null {
 function manualCollectCalledIdentifiers(code: string): Set<string> {
   const result = new Set<string>();
   let i = 0;
+  let prevIdent: [number, number] | null = null;
   while (i < code.length) {
     const c = code[i];
     if (c === '"' || c === "'" || c === '`') { i = skipString(code, i); continue; }
@@ -194,7 +205,18 @@ function manualCollectCalledIdentifiers(code: string): Set<string> {
         let k = skipWhitespace(code, j);
         if (code[k] === '<') k = skipTrackGeneric(code, k);
         if (code[k] === '(') result.add(code.slice(i, j));
+      } else if (before === '.' && prevIdent) {
+        let p = i - 1;
+        while (
+          p > prevIdent[1] &&
+          (code[p] === '.' || code[p] === '?' || code[p] === '\n' || code[p] === '\t' || code[p] === ' ')
+        ) p--;
+        if (p === prevIdent[1]) {
+          let k = skipWhitespace(code, j);
+          if (code[k] === '(') result.add(code.slice(prevIdent[0], prevIdent[1]));
+        }
       }
+      prevIdent = [i, j];
       i = j;
       continue;
     }

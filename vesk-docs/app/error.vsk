@@ -1,0 +1,16 @@
+
+component ErrorPage(props) {
+	<Head>
+		<title>error — vesk</title>
+	</Head>
+	<div class="void">
+		<p class="void-code"><span class="c">✕</span></p>
+		<h1>Status {props.statusCode ?? 500}</h1>
+		<p>The page at <code>{props.url}</code> threw while rendering.</p>
+		<pre class="error-stack">{props.stack ?? String(props.error ?? '')}</pre>
+		<div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+			<Link class="btn btn-solid" href="/guide">back to guide</Link>
+			<Link class="btn" href="/">home</Link>
+		</div>
+	</div>
+}

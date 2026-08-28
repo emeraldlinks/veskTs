@@ -28,6 +28,7 @@ declare module 'acorn' {
     unexpected(pos?: number): void;
     next(): void;
     eat(token: any): boolean;
+    context: any[];
     jsx_parseElementAt(startPos: number, startLoc?: any): any;
     jsx_parseElement(): any;
     jsx_parseExpressionContainer(): any;
@@ -84,6 +85,16 @@ function isIdentStartCode(code: number): boolean {
 }
 function isIdentCharCode(code: number): boolean {
   return isIdentStartCode(code) || (code >= 48 && code <= 57);
+}
+
+function getQualifiedJSXName(object: any): any {
+  if (!object) return object;
+  if (object.type === 'JSXIdentifier') return object.name;
+  if (object.type === 'JSXNamespacedName') return object.namespace.name + ':' + object.name.name;
+  if (object.type === 'JSXMemberExpression') {
+    return getQualifiedJSXName(object.object) + '.' + getQualifiedJSXName(object.property);
+  }
+  return null;
 }
 
 function looksLikeGenericArrowAt(input: string, pos: number): boolean {
@@ -180,6 +191,10 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
       #closeTagName: string | null = null;
       #jsxStartsStatement = false;
       #inTSTypeDecl = false;
+#pendingChildStatement = false;
+
+      /** per-statement context-stack depths (LIFO — child statements may nest) */
+      #jsxChildDepthStack: number[] = [];
 
       constructor(options: Options, input: string) {
         super(options, input);
@@ -190,7 +205,74 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         return ctx && (ctx.token === '{' || ctx.token === 'function');
       }
 
+      #isJsxChildrenContext(): boolean {
+        const ctx = this.curContext();
+        return !!ctx && (ctx as any).token === '<tag>...</tag>';
+      }
+
+      /**
+       * Determines whether the text starting at `this.pos` opens a
+       * statement-mode control-flow header (`if (`, `for (`, `while (`,
+       * `switch (`, `try {`, `do {`) among JSX children. Scans chars only —
+       * the paren body must balance and be followed by a `{` block.
+       */
+      #scansChildStatement(): boolean {
+        const input = this.input;
+        let i = this.pos;
+        while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+        if (i >= input.length || !isIdentStartCode(input.charCodeAt(i))) return false;
+        const wordStart = i;
+        while (i < input.length && isIdentCharCode(input.charCodeAt(i))) i++;
+        const word = input.slice(wordStart, i);
+        if (word !== 'if' && word !== 'for' && word !== 'while' && word !== 'switch' && word !== 'try' && word !== 'do') return false;
+        let p = i;
+        while (p < input.length && isWsChar(input.charCodeAt(p))) p++;
+        if (word === 'try' || word === 'do') {
+          return input.charCodeAt(p) === 123; // '{'
+        }
+        if (input.charCodeAt(p) !== 40) return false; // '('
+        let depth = 1;
+        let q = p + 1;
+        while (q < input.length) {
+          const c = input.charCodeAt(q);
+          if (c === 34 || c === 39 || c === 96) {
+            const quote = c;
+            q++;
+            while (q < input.length) {
+              const ch = input.charCodeAt(q);
+              if (ch === 92) { q += 2; continue; }
+              if (ch === quote) { q++; break; }
+              q++;
+            }
+            continue;
+          }
+          if (c === 40 || c === 91 || c === 123) depth++;
+          else if (c === 41 || c === 93 || c === 125) {
+            depth--;
+            if (c === 41 && depth === 0) break;
+          }
+          q++;
+        }
+        if (q >= input.length) return false;
+        let r = q + 1;
+        while (r < input.length && isWsChar(input.charCodeAt(r))) r++;
+        return input.charCodeAt(r) === 123; // '{'
+      }
+
       readToken(code: number): any {
+        if (this.#componentDepth > 0 && this.#isJsxChildrenContext() && this.#scansChildStatement()) {
+          this.#pendingChildStatement = true;
+          this.#jsxChildDepthStack.push(this.context.length);
+          (this.context as any[]).push((acorn as any).tokContexts.b_stat);
+          if (isWsChar(code)) {
+            (this as any).skipSpace();
+            this.start = this.pos;
+            if (this.options.locations && typeof (this as any).curPosition === 'function') {
+              this.startLoc = (this as any).curPosition();
+            }
+          }
+          return super.readToken(this.input.codePointAt(this.pos) as number);
+        }
         if (this.#componentDepth > 0 && code === 60 && this.#isBlockContext()) {
           const next = this.input.charCodeAt(this.pos + 1);
           if (next === 47 || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
@@ -552,7 +634,71 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         if (prefix.startsWith('<style') && isStyleBoundary(prefix.charCodeAt(6))) {
           return this.parseStyleElement(startPos, startLoc);
         }
-        return super.jsx_parseElementAt(startPos, startLoc);
+        return this.#parseElementWithStatements(startPos, startLoc);
+      }
+
+      /**
+       * Parses an entire JSX element (or fragment) starting after `<`,
+       * mirroring the vendored acorn-jsx `jsx_parseElementAt` with an added
+       * statement-mode branch: when `#pendingChildStatement` is set (a
+       * control-flow header like `if (…) {` appeared where JSX children
+       * expect text), a real statement is parsed into the children array.
+       */
+      #parseElementWithStatements(startPos: number, startLoc?: any): any {
+        const node = this.startNodeAt(startPos, startLoc);
+        const children: any[] = [];
+        const openingElement = this.jsx_parseOpeningElementAt(startPos, startLoc);
+        let closingElement = null;
+        if (!openingElement.selfClosing) {
+          contents: for (; ;) {
+            if (this.#pendingChildStatement) {
+              this.#pendingChildStatement = false;
+              const stmt = this.parseStatement(null);
+              children.push(stmt);
+              // Restore the JSX-children tokenizer and re-lex the trailing
+              // token (lexed under the temporary b_stat context) as a JSX child.
+              this.context.length = this.#jsxChildDepthStack.pop() ?? this.context.length;
+              (this as any).exprAllowed = true;
+              this.pos = this.start;
+              this.next();
+              continue;
+            }
+            switch (this.type) {
+              case tstt?.jsxTagStart:
+                startPos = this.start;
+                startLoc = this.startLoc;
+                this.next();
+                if (this.eat(tt.slash)) {
+                  closingElement = this.jsx_parseClosingElementAt(startPos, startLoc);
+                  break contents;
+                }
+                children.push(this.jsx_parseElementAt(startPos, startLoc));
+                break;
+              case tstt?.jsxText:
+                children.push(this.parseExprAtom());
+                break;
+              case tt.braceL:
+                children.push(this.jsx_parseExpressionContainer());
+                break;
+              default:
+                this.unexpected();
+            }
+          }
+          if (getQualifiedJSXName(closingElement.name) !== getQualifiedJSXName(openingElement.name)) {
+            this.raise(
+              closingElement.start,
+              "Expected corresponding JSX closing tag for <" + getQualifiedJSXName(openingElement.name) + ">"
+            );
+          }
+        }
+        const fragmentOrElement = openingElement.name ? "Element" : "Fragment";
+        node["opening" + fragmentOrElement] = openingElement;
+        node["closing" + fragmentOrElement] = closingElement;
+        node.children = children;
+        if (this.type === tt.relational && this.value === "<") {
+          this.raise(this.start, "Adjacent JSX elements must be wrapped in an enclosing tag");
+        }
+        return this.finishNode(node, "JSX" + fragmentOrElement);
       }
 
       jsx_parseOpeningElementAt(startPos: number, startLoc?: any): any {

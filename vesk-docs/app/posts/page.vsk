@@ -1,0 +1,68 @@
+import { track } from '@vesk/runtime';
+
+interface Post {
+	id: number
+	title: string
+	slug: string
+	excerpt: string
+	author: string
+	tags: string[]
+	date: string
+}
+
+component PostCard(props: { post: Post }) {
+	<article class="demo-card">
+		<div class="dc-meta">
+			<span>{props.post.date}</span>
+			<span>by {props.post.author}</span>
+		</div>
+		<h2>{props.post.title}</h2>
+		<p>{props.post.excerpt}</p>
+	</article>
+}
+
+component Posts {
+	<Head>
+		<title>data — live useFetch demo · vesk</title>
+		<meta name="description" content="A live demo of useFetch: deduped, cached with staleTime, retried with backoff." />
+	</Head>
+	let &[posts, postsCell] = track<Post[]>([])
+	const postsResource = useFetch('/api/posts', {
+		key: 'posts',
+		into: postsCell,
+		staleTime: 30000,
+		keepPreviousData: true,
+		retry: 2,
+		retryDelay: 400,
+		timeout: 8000,
+	})
+	<div class="page-wrap page-wrap-wide">
+		<div class="crumb">data<span class="crumb-sep">/</span>posts</div>
+		<div class="post-layout">
+			<div>
+				<h1 class="page-h1">Posts, fetched live</h1>
+				<p class="page-lede" style="margin-bottom: 0;">
+					useFetch — deduped, cached with staleTime, retried with backoff, timed out, and written
+					into a tracked cell. One network round-trip, rendered from SSR data on first load.
+				</p>
+			</div>
+			<div style="display: flex; align-items: center; gap: 1rem;">
+				<span class={postsResource.loading && posts.length > 0 ? 'chip-status loading' : 'chip-status ok'}>
+					{postsResource.loading ? (posts.length > 0 ? 'refreshing…' : 'loading…') : 'fresh'}
+				</span>
+				<button class="btn" onClick={() => postsResource.refresh()}>refresh</button>
+			</div>
+		</div>
+		if (postsResource.error && posts.length === 0) {
+			<div class="error-panel">
+				<p class="ep-title">fetch failed — {postsResource.error.message}</p>
+				<p>The request to /api/posts failed after its retries. Check that the dev server is running this app's API route.</p>
+			</div>
+		}
+		<div class="demo-grid">
+			for (const post of posts) {
+				<PostCard post={post} />
+			}
+		</div>
+	</div>
+}

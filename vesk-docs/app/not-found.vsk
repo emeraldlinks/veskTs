@@ -1,0 +1,13 @@
+
+
+component NotFound404(props) {
+	<Head>
+		<title>404 — not found · vesk</title>
+	</Head>
+	<div class="void">
+		<p class="void-code">4<span class="c">0</span>4</p>
+		<h1>nothing compiles at this path</h1>
+		<p>We couldn't find a page at <code>/</code><code>{props.url}</code>. Check the route — or head back to the guide.</p>
+		<Link class="btn btn-solid" href="/guide">← read the guide</Link>
+	</div>
+}

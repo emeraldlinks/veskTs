@@ -1,0 +1,83 @@
+component Statements {
+	<Head>
+		<title>statements — every JS construct in .vsk · vesk</title>
+		<meta name="description" content="A live tour of statement mode: if, for, switch, try, and more." />
+	</Head>
+	const items = ['alpha', 'beta', 'gamma']
+	const obj = { name: 'Vesk', year: 2026, tags: ['fast', 'reactive'] }
+	const score = 7
+	let n = 0
+	<div class="page-wrap page-wrap-wide">
+		<div class="crumb">statements<span class="crumb-sep">/</span>index</div>
+		<h1 class="page-h1">Every JS construct, running</h1>
+		<p class="page-lede">
+			Statement mode lets control flow live in the body of a component — no <code>return</code>,
+			no wrapping. Each of these renders right where it appears in the source.
+		</p>
+		<div class="claims">
+			<div class="claims-row">
+				<p class="lbl">if / else</p>
+				if (score > 5) {
+					<p><span class="m-the">//</span> score {score} is above the threshold</p>
+				} else {
+					<p><span class="m-the">//</span> score {score} is low</p>
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">ternary</p>
+				<p><span class="m-the">//</span> {score % 2 === 0 ? 'even' : 'odd'}</p>
+			</div>
+			<div class="claims-row">
+				<p class="lbl">switch</p>
+				switch (score) {
+					case 1:
+						<p><span class="m-the">//</span> One</p>
+						break
+					case 7:
+						<p><span class="m-the">//</span> Seven</p>
+						break
+					default:
+						<p><span class="m-the">//</span> Something else</p>
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">for (i)</p>
+				for (let i = 0; i < 3; i++) {
+					<span class="g-com">i={i} </span>
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">for…of</p>
+				for (const item of items) {
+					<span class="g-com">{item} </span>
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">for…in</p>
+				for (const key in obj) {
+					<span class="g-com">{key}:{obj[key]} </span>
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">while</p>
+				while (n < 3) {
+					<span class="g-com">{n} </span>
+					n = n + 1
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">try / catch</p>
+				try {
+					throw new Error('Boom!')
+				} catch(e) {
+					<p><span class="m-the">//</span> caught: {e?.message ?? e}</p>
+				}
+			</div>
+			<div class="claims-row">
+				<p class="lbl">runtime</p>
+				const total = items.length * 2
+				<p><span class="m-the">//</span> items.length * 2 = {total}</p>
+			</div>
+		</div>
+	</div>
+}

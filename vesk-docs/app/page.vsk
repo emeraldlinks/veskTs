@@ -1,0 +1,133 @@
+import { track } from '@vesk/runtime';
+
+component InstallLine() client {
+	let &[done] = track(false)
+	const cmd = 'npx create-vesk@latest my-app'
+	<div class="install-row reveal reveal-3">
+		<code class="install-cmd"><span class="prompt">$</span>{cmd}</code>
+		<button class={done ? 'install-copy done' : 'install-copy'} onClick={() => {
+			if (navigator.clipboard) navigator.clipboard.writeText(cmd)
+			done = true
+			setTimeout(() => done = false, 1500)
+		}}>{done ? 'copied ✓' : 'copy'}</button>
+	</div>
+}
+
+component CompilePane {
+	<div class="compile reveal reveal-4">
+		<p class="compile-cap">what the compiler emits</p>
+		<div class="pane-wrap">
+			<section class="pane pane-src">
+				<div class="pane-title"><span class="pane-dot"></span>counter.vsk</div>
+				<div class="code-lines">
+					<span class="ln"><span class="tk-kw">component</span> Counter() {"{"}</span>
+					<span class="ln pl-[1.15em]"><span class="tk-kw">let</span> &[count] = <span class="tk-fn">track</span>(0)</span>
+					<span class="ln"></span>
+					<span class="ln pl-[1.15em]">{"<button onClick={() => count++}>"}</span>
+					<span class="ln pl-[2.3em]">{"count: {"}<span class="tk-fn">count</span>{"}"}</span>
+					<span class="ln pl-[1.15em]">{"</button>"}</span>
+					<span class="ln">{"}"}</span>
+				</div>
+			</section>
+			<section class="pane pane-out">
+				<div class="pane-title"><span class="pane-dot"></span>counter.html</div>
+				<div class="code-lines">
+					<span class="ln">{"<button>"}</span>
+					<span class="ln pl-[1.15em]">{"count: "}<span class="tk-mrk">{`<!--vsk-->`}</span>0<span class="tk-mrk">{`<!--/vsk-->`}</span></span>
+					<span class="ln">{"</button>"}</span>
+					<span class="ln"></span>
+					<span class="ln ln-dim">{"// per-cell update → el.textContent"}</span>
+					<span class="ln ln-dim">{"// static subtrees ship no runtime"}</span>
+				</div>
+			</section>
+		</div>
+		<div class="compile-lead">
+			<span class="ok">ssr: html ✓</span>
+			<span>markers: 1</span>
+			<span>cells: 1</span>
+			<span>vdom: 0</span>
+		</div>
+	</div>
+}
+
+component Claims {
+	<section class="claims reveal reveal-5">
+		<p class="claims-head">what vesk certifies</p>
+		<div class="claims-row">
+			<div>
+				<h2 class="claim-title">No virtual DOM</h2>
+				<p class="claim-body">The compiler emits targeted DOM writes per tracked cell. There is no reconciliation pass, no diffing, and nothing virtual to keep in sync.</p>
+			</div>
+			<code class="claim-art">vsk build → update(cell: count) → textContent</code>
+		</div>
+		<div class="claims-row">
+			<div>
+				<h2 class="claim-title">Static pages ship no JS</h2>
+				<p class="claim-body">A subtree that never changes carries no hydration marker and no runtime. A page that doesn't move ships one thing: HTML.</p>
+			</div>
+			<code class="claim-art">markers: 0 · bundle: none</code>
+		</div>
+		<div class="claims-row">
+			<div>
+				<h2 class="claim-title">TypeScript superset-in</h2>
+				<p class="claim-body">Everything TypeScript parses in .vsk — then typechecks with tsc-in-.vsk, compiles, and strips to lean ESM. No new language to learn.</p>
+			</div>
+			<code class="claim-art">vesk typecheck · passes</code>
+		</div>
+	</section>
+}
+
+component StartLinks {
+	<section class="start-grid reveal reveal-5">
+		<p class="lbl" style="margin:0 0 0.4rem;">start here</p>
+		<a class="start-link" href="/guide">
+			<span class="sl-path">/guide</span>
+			<span class="sl-name">read the guide</span>
+			<span class="sl-desc">complete documentation</span>
+			<span class="sl-arrow">→</span>
+		</a>
+		<a class="start-link" href="/guide/language/statement-mode">
+			<span class="sl-path">/statement-mode</span>
+			<span class="sl-name">templates with superpowers</span>
+			<span class="sl-desc">bare jsx, if, for, switch</span>
+			<span class="sl-arrow">→</span>
+		</a>
+		<a class="start-link" href="/guide/reactivity">
+			<span class="sl-path">/reactivity</span>
+			<span class="sl-name">tracked cells</span>
+			<span class="sl-desc">track, effect, derived</span>
+			<span class="sl-arrow">→</span>
+		</a>
+		<a class="start-link" href="/posts">
+			<span class="sl-path">/posts</span>
+			<span class="sl-name">watch it fetch live</span>
+			<span class="sl-desc">useFetch, retry, staleTime</span>
+			<span class="sl-arrow">→</span>
+		</a>
+	</section>
+}
+
+component Home {
+	<Head>
+		<title>vesk — compiler-first framework for the post-VDOM web</title>
+	</Head>
+	<section class="hero">
+		<div class="hero-inner">
+			<p class="hero-eyebrow reveal reveal-1">compiler-first framework · post-vdom web · v0.2.8</p>
+			<h1 class="hero-mark reveal reveal-1"><span>vesk</span><span class="dot">.</span><span class="ext">vsk</span></h1>
+			<p class="hero-sub reveal reveal-2">
+				<strong>Vesk compiles .vsk</strong> — a TypeScript superset — to server-rendered
+				HTML and per-cell DOM updates. No virtual DOM, and pages that don't move
+				ship no runtime at all.
+			</p>
+			<InstallLine />
+		</div>
+	</section>
+	<div class="page-wrap page-wrap-wide">
+		<CompilePane />
+		<div style="height: clamp(2.5rem, 6vw, 4rem);" aria-hidden="true"></div>
+		<Claims />
+		<div style="height: clamp(2.5rem, 6vw, 4rem);" aria-hidden="true"></div>
+		<StartLinks />
+	</div>
+}

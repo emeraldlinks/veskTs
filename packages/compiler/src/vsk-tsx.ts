@@ -645,6 +645,19 @@ function emitJSXChildren(g: VskGen, source: string, children: any[], opts: VskCo
     } else if (child.type === 'JSXFragment') {
       emitJSXFragment(g, source, child, opts);
       i++;
+    } else if (
+      child.type === 'IfStatement' || child.type === 'ForOfStatement' ||
+      child.type === 'ForStatement' || child.type === 'ForInStatement' ||
+      child.type === 'WhileStatement' || child.type === 'DoWhileStatement' ||
+      child.type === 'SwitchStatement' || child.type === 'TryStatement' ||
+      child.type === 'VariableDeclaration' || child.type === 'ExpressionStatement'
+    ) {
+      // Statement-mode control flow nested among JSX children: TSX has no
+      // statement children, so wrap each in an IIFE expression container.
+      g.addRaw('{(() => { ');
+      emitBody(g, source, [child], '', opts);
+      g.addRaw(' })()}');
+      i++;
     } else {
       i++;
     }

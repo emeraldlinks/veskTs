@@ -108,9 +108,9 @@ function componentUsesFetch(nodes: IRNode[]): boolean {
     if (node instanceof ServerBlock || node instanceof ClientBlock) {
       if (componentUsesFetch(node.children)) return true;
     } else if (node instanceof RuntimeStatement) {
-      if (node.raw.includes('useFetch(')) return true;
+      if (node.raw.includes('useFetch(') || node.raw.includes('useFetch.')) return true;
     } else if (node instanceof DynamicBinding) {
-      if (node.expression.raw.includes('useFetch(')) return true;
+      if (node.expression.raw.includes('useFetch(') || node.expression.raw.includes('useFetch.')) return true;
     } else if (node instanceof MapRegion) {
       if (componentUsesFetch(node.bodyTemplate)) return true;
       if (componentUsesFetch(node.alternateNodes)) return true;
@@ -465,6 +465,34 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
       i++;
     } else if (child.type === 'JSXFragment') {
       for (const c of child.children) result.push(...processJSXChildren(source, [c]));
+      i++;
+    } else if (child.type === 'ForOfStatement') {
+      let alternate: IRNode[] = [];
+      let consumed = 1;
+      const emptyText = children[i + 1];
+      const emptyContainer = children[i + 2];
+      if (
+        emptyText && emptyText.type === 'JSXText' &&
+        ['#empty', 'empty'].includes(emptyText.value.trim()) &&
+        emptyContainer && emptyContainer.type === 'JSXExpressionContainer' &&
+        emptyContainer.expression.type !== 'JSXEmptyExpression'
+      ) {
+        alternate = exprToIR(source, emptyContainer.expression);
+        consumed = 3;
+      }
+      result.push(...processForStatement(source, child, alternate));
+      i += consumed;
+      continue;
+    } else if (
+      child.type === 'IfStatement' || child.type === 'ForStatement' ||
+      child.type === 'ForInStatement' ||
+      child.type === 'WhileStatement' || child.type === 'DoWhileStatement' ||
+      child.type === 'SwitchStatement' || child.type === 'TryStatement' ||
+      child.type === 'VariableDeclaration' || child.type === 'ExpressionStatement' ||
+      child.type === 'ReturnStatement' || child.type === 'WithStatement' ||
+      child.type === 'LabeledStatement'
+    ) {
+      result.push(...processStatementModeBody(source, [child]));
       i++;
     } else {
       i++;
