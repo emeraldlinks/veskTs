@@ -19,6 +19,7 @@ import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { collectVskImportPaths } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
+import { applyLocalModuleImports } from '@vesk/compiler/src/module-imports';
 
 
 export function compileFile(source: string, options?: { sourcePath?: string }): CompileFileResult {
@@ -33,6 +34,8 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
   const ast = parse(source);
   const ir = generateIR(ast, source);
   const componentMap = buildComponentMap(ir, true);
+  const __vesk = loadRuntimeImports(ir.imports);
+  applyLocalModuleImports(__vesk, ir.imports, sourcePath);
   if (sourcePath) {
     for (const importPath of collectVskImportPaths(ir.imports, sourcePath)) {
       if (seenImportFiles.has(importPath)) continue;
@@ -43,12 +46,18 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
         for (const [name, fn] of sub.componentMap) {
           if (!componentMap.has(name)) componentMap.set(name, fn);
         }
+        // Hoist the sub-`.vsk`'s scope into this file's so that
+        // registry-hoisted sub components (called with this `__vesk`) can
+        // destructure runtime imports, module values and top-level helpers.
+        for (const key of Object.keys(sub.__vesk)) {
+          if (key in __vesk) continue;
+          __vesk[key] = sub.__vesk[key];
+        }
       } catch {
         // skip unresolvable imports
       }
     }
   }
-  const __vesk = loadRuntimeImports(ir.imports);
   evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
   return { ir, componentMap, __vesk };
 }
@@ -367,7 +376,11 @@ export function renderPageStream(
 
   let ssrProps = { ...props };
   let serializedProps: string | null = null;
-  let __vesk = options.__vesk || cached?.__vesk || loadRuntimeImports(ir.imports);
+  let __vesk = options.__vesk || cached?.__vesk || null;
+  if (!__vesk) {
+    __vesk = loadRuntimeImports(ir.imports);
+    applyLocalModuleImports(__vesk, ir.imports, (options.sourcePath as string) || undefined);
+  }
 
   if (ir.loadFn) {
     const loadResult = await callLoadFunction(ir.loadFn, props, __vesk);

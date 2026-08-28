@@ -14,6 +14,7 @@ import {
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
   __vskHydrate, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
+import { localValueImportNames } from '@vesk/compiler/src/module-imports';
 
 export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isAsync: boolean = false, tracked?: Map<string, TrackedInfo>): string {
   importedNames = importedNames || __vskImportedNames;
@@ -417,17 +418,21 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
 export function buildComponentMap(irRoot: IRRoot, useSharedScope: boolean): Map<string, Function> {
   const map = new Map<string, Function>();
   const runtimeNames = extractRuntimeNames(irRoot.imports);
-  const importedNames = new Set(runtimeNames);
+  const localValueNames = localValueImportNames(irRoot.imports);
+  const importedNames = new Set([...runtimeNames, ...localValueNames]);
   const topNames = extractTopLevelNames(irRoot.topLevelCode);
   const hasTracked = irRoot.components.some((c) => c.body.some((n) => n instanceof TrackDecl));
   const extraNames = hasTracked ? ['get', 'set', 'track'] : [];
-  const allNames = [...new Set([...runtimeNames, ...topNames, ...extraNames])];
+  const allNames = [...new Set([...runtimeNames, ...topNames, ...extraNames, ...localValueNames])];
   const scopeDecl = allNames.length > 0 ? `const { ${allNames.join(', ')} } = __vesk;\n` : '';
   setVskImportedNames(importedNames);
   for (const comp of irRoot.components) {
     const bodyCode = generateFunctionBody(comp, importedNames);
     const paramInit = buildParamInit(comp.paramNames);
-    const code = `${scopeDecl}${paramInit}\n${bodyCode}`;
+    const diag = process.env.VESK_SSR_LOG
+      ? `console.error('[SSR-CALL]', ${JSON.stringify(comp.name)}, props ? JSON.stringify(props) : String(props));\n`
+      : '';
+    const code = `${scopeDecl}${paramInit}${diag}\n${bodyCode}`;
     let fn: Function;
     if (comp.isAsync || comp.ssrAwait) {
       fn = new Function('props', '__registry', '__vesk', `return (async () => {\n${code}\n})()`);
