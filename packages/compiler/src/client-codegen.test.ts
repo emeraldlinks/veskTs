@@ -441,6 +441,72 @@ describe('Client Codegen — Statement Mode', () => {
 		expect(code).toContain('const y = props.x * 2;');
 	});
 
+	bothModes('preserves runtime statement nested inside an element as code', `
+		component App(props: { items: string[] }) {
+			<div class="w">
+				const total = props.items.length * 2;
+				<p>{total}</p>
+			</div>
+		}
+	`, (code) => {
+		expect(code).toContain('const total = props.items.length * 2;');
+		// must be emitted as an executable statement, not literal JSX text
+		expect(code).not.toContain('createTextNode(" const total');
+	});
+
+	bothModes('nested runtime statement with comparison/complex initializers stays code', `
+		component App(props: { score: number; obj: { a: number; b: number } }) {
+			<div class="w">
+				const flag = props.score > 5;
+				const label = props.score > 5 ? 'big' : 'small';
+				const { a, b } = props.obj;
+				const map = { x: [1, 2], y: { z: 3 } };
+				const f = (n) => n * 2;
+				<p>{String(flag)} {label} {a + b} {map.x.length} {f(3)}</p>
+			</div>
+		}
+	`, (code) => {
+		expect(code).toContain('const flag = props.score > 5;');
+		expect(code).toContain('const label = props.score > 5 ?');
+		expect(code).toContain('const { a, b } = props.obj;');
+		expect(code).toContain('const map = { x:');
+		expect(code).toContain('const f = (n) => n * 2;');
+		expect(code).not.toContain('createTextNode(" const flag');
+	});
+
+	bothModes('nested runtime statement ASI (no semicolon) compiles as code', `
+		component App(props: { items: string[] }) {
+			<div class="w">
+				const total = props.items.length * 2
+				<p>t={total}</p>
+			</div>
+		}
+	`, (code) => {
+		expect(code).toContain('const total = props.items.length * 2;');
+	});
+
+	bothModes('keeps prose starting with const/let/var as text on client', `
+		component App {
+			<div>
+				<p>const value = 5 apples</p>
+				<p>let x = y</p>
+				<p>var args = rest</p>
+			</div>
+		}
+	`, (code, mode) => {
+		// Never emitted as executable statements (which would crash at runtime).
+		expect(code).not.toContain('" const value = 5 apples;');
+		if (mode === 'normal') {
+			// In non-hydrate mode they are emitted as literal JSX text nodes.
+			expect(code).toContain('createTextNode("const value = 5 apples")');
+			expect(code).toContain('createTextNode("let x = y")');
+			expect(code).toContain('createTextNode("var args = rest")');
+		} else {
+			// In hydrate mode static text is left in the SSR DOM, not re-created.
+			expect(code).not.toContain('createTextNode("const value');
+		}
+	});
+
 	bothModes('interleaved runtime statements', `
 		component App(props: { x: number }) {
 			const y = props.x * 3;

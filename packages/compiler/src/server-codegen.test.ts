@@ -692,6 +692,207 @@ describe('Statement Mode Server Rendering', () => {
 			}
 		`, 'App', { x: 5 })).toBe('<div>10</div>');
 	});
+	it('renders runtime statement nested inside an element (semicolon)', () => {
+		expect(render(`
+			component App(props: { items: string[] }) {
+				<div class="w">
+					const total = props.items.length * 2;
+					<p>{total}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] })).toBe('<div class="w"><p>6</p></div>');
+	});
+	it('renders runtime statement nested inside an element (ASI, no semicolon)', () => {
+		expect(render(`
+			component App(props: { items: string[] }) {
+				<div class="w">
+					const total = props.items.length * 2
+					<p>t={total}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] })).toBe('<div class="w"><p>t=6</p></div>');
+	});
+	it('does not hoist const keyword from literal JSX text', () => {
+		expect(render(`
+			component App {
+				<p>const is a keyword, let go</p>
+			}
+		`, 'App')).toBe('<p>const is a keyword, let go</p>');
+	});
+	it('nested runtime statement with comparison operators', () => {
+		expect(render(`
+			component App(props: { score: number }) {
+				<div class="w">
+					const flag = props.score > 5;
+					<p>{String(flag)}</p>
+				</div>
+			}
+		`, 'App', { score: 7 })).toBe('<div class="w"><p>true</p></div>');
+		expect(render(`
+			component App(props: { score: number }) {
+				<div class="w">
+					const flag = props.score < 5;
+					<p>{String(flag)}</p>
+				</div>
+			}
+		`, 'App', { score: 7 })).toBe('<div class="w"><p>false</p></div>');
+	});
+	it('nested runtime statement with object, array, and destructure initializers', () => {
+		expect(render(`
+			component App(props: { obj: Record<string, number> }) {
+				<div class="w">
+					const cfg = { a: 1, b: 2 };
+					<p>{cfg.a + cfg.b}</p>
+				</div>
+			}
+		`, 'App', { obj: { a: 1, b: 2 } })).toBe('<div class="w"><p>3</p></div>');
+		expect(render(`
+			component App(props: { obj: { a: number; b: number } }) {
+				<div class="w">
+					const { a, b } = props.obj;
+					<p>{a + b}</p>
+				</div>
+			}
+		`, 'App', { obj: { a: 1, b: 2 } })).toBe('<div class="w"><p>3</p></div>');
+		expect(render(`
+			component App {
+				<div class="w">
+					const [x, y] = [1, 2];
+					<p>{x + y}</p>
+				</div>
+			}
+		`, 'App')).toBe('<div class="w"><p>3</p></div>');
+	});
+	it('nested runtime statement with arrow/ternary/template initializers', () => {
+		expect(render(`
+			component App(props: { score: number }) {
+				<div class="w">
+					const label = props.score > 5 ? 'big' : 'small';
+					<p>{label}</p>
+				</div>
+			}
+		`, 'App', { score: 7 })).toBe('<div class="w"><p>big</p></div>');
+		expect(render(`
+			component App(props: { score: number }) {
+				<div class="w">
+					const label = \`score;\${props.score}\`;
+					<p>{label}</p>
+				</div>
+			}
+		`, 'App', { score: 7 })).toBe('<div class="w"><p>score;7</p></div>');
+		expect(render(`
+			component App {
+				<div class="w">
+					const f = (x) => x * 2;
+					<p>{f(3)}</p>
+				</div>
+			}
+		`, 'App')).toBe('<div class="w"><p>6</p></div>');
+		expect(render(`
+			component App {
+				<div class="w">
+					const f = (x) => { const y = x + 1; return y; };
+					<p>{f(1)}</p>
+				</div>
+			}
+		`, 'App')).toBe('<div class="w"><p>2</p></div>');
+	});
+	it('nested runtime statement with string containing semicolon', () => {
+		expect(render(`
+			component App {
+				<div class="w">
+					const s = "a;b;c";
+					<p>{s}</p>
+				</div>
+			}
+		`, 'App')).toBe('<div class="w"><p>a;b;c</p></div>');
+	});
+	it('nested runtime statement spanning multiple lines (parsed parens)', () => {
+		expect(render(`
+			component App(props: { items: string[]; obj: Record<string, number> }) {
+				<div class="w">
+					const sum = props.items.length
+						+ props.obj.a;
+					<p>{sum}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'], obj: { a: 1 } })).toBe('<div class="w"><p>4</p></div>');
+		expect(render(`
+			component App(props: { items: string[] }) {
+				<div class="w">
+					const v = (props.items.length + 1) * 2;
+					<p>{v}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] })).toBe('<div class="w"><p>8</p></div>');
+	});
+	it('nested var and let declarations', () => {
+		expect(render(`
+			component App(props: { items: string[] }) {
+				<div class="w">
+					var total = props.items.length * 2;
+					<p>{total}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] })).toBe('<div class="w"><p>6</p></div>');
+		expect(render(`
+			component App(props: { items: string[] }) {
+				<div class="w">
+					let total = props.items.length
+					<p>len={total}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] })).toBe('<div class="w"><p>len=3</p></div>');
+		expect(render(`
+			component App(props: { items: string[] }) {
+				<div class="w">
+					const total = props.items.length
+					<p>len={total}</p>
+				</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] })).toBe('<div class="w"><p>len=3</p></div>');
+	});
+	it('keeps prose starting with const/let/var as JSX text, not code', () => {
+		expect(render(`
+			component App {
+				<p>const value = 5 apples</p>
+			}
+		`, 'App')).toBe('<p>const value = 5 apples</p>');
+		expect(render(`
+			component App {
+				<p>let x = y</p>
+			}
+		`, 'App')).toBe('<p>let x = y</p>');
+		expect(render(`
+			component App {
+				<p>var args = rest</p>
+			}
+		`, 'App')).toBe('<p>var args = rest</p>');
+		expect(render(`
+			component App {
+				<p>let me help you</p>
+			}
+		`, 'App')).toBe('<p>let me help you</p>');
+		expect(render(`
+			component App {
+				<p>say const x = 1 to me</p>
+			}
+		`, 'App')).toBe('<p>say const x = 1 to me</p>');
+	});
+	it('nested const inside an if consequent element', () => {
+		expect(render(`
+			component App(props: { score: number }) {
+				<div>
+					if (props.score > 5) {
+						const big = props.score * 2;
+						<p>{big}</p>
+					} else {
+						<p>low</p>
+					}
+				</div>
+			}
+		`, 'App', { score: 7 })).toBe('<div><p>14</p></div>');
+	});
 	it('renders labeled statement with JSX', () => {
 		expect(render(`
 			component App(props: { flag: boolean }) {

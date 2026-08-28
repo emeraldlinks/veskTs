@@ -1,12 +1,17 @@
 #!/usr/bin/env node
 /**
  * Rebuilds workspace packages and repacks them as uniquely-versioned CI
- * tarballs for test-app, then rewrites test-app's dependency pins and runs
- * npm install. Guarantees every CI run exercises the LATEST source instead
- * of stale checked-in tarballs (npm's same-name+version cache makes reuse
- * of unchanged filenames unsafe).
+ * tarballs for a Vesk example app (default: test-app), then rewrites the
+ * app's dependency pins and runs npm install. Guarantees every run (CI or
+ * local) exercises the LATEST source instead of stale checked-in tarballs
+ * (npm's same-name+version cache makes reuse of unchanged filenames unsafe).
  *
- * Usage: node scripts/refresh-testapp-deps.mjs
+ * Usage: node scripts/refresh-testapp-deps.mjs [appDir]
+ *   appDir defaults to "test-app". Pass another example app dir, e.g.
+ *   "vesk-docs", to repack for that app instead. The default TARGETS mirror
+ *   test-app's deps; for other apps the target list is derived from the
+ *   app's own @vesk/* / vesk dependency names (so vesk-docs's
+ *   @vesk/vesk-cli maps to packages/cli automatically).
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -15,18 +20,57 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
-const testAppDir = join(root, 'test-app');
-const tarballsDir = join(testAppDir, 'tarballs');
+const appArg = process.argv[2];
+const appDirName = appArg || 'test-app';
+const appDir = join(root, appDirName);
+const tarballsDir = join(appDir, 'tarballs');
 
-// dir in packages/, and the dependency NAME test-app references.
-const TARGETS = [
-	{ dir: 'types', name: '@vesk/types' },
-	{ dir: 'compiler', name: '@vesk/compiler' },
-	{ dir: 'runtime', name: '@vesk/runtime' },
-	{ dir: 'adapter', name: '@vesk/adapter' },
-	{ dir: 'plugin-tailwind', name: '@vesk/plugin-tailwind' },
-	{ dir: 'cli', name: 'vesk' },
-];
+// name -> directory under packages/ (built from every package.json in packages/)
+function buildPackageIndex() {
+	const index = new Map();
+	for (const dir of readdirSync(join(root, 'packages'))) {
+		try {
+			const pkgPath = join(root, 'packages', dir, 'package.json');
+			const pkg = JSON.parse(readFileSync(pkgPath, 'utf8'));
+			if (pkg.name) index.set(pkg.name, dir);
+		} catch {
+			// skip dirs without a readable package.json
+		}
+	}
+	return index;
+}
+
+function deriveTargets(index) {
+	const appPkg = JSON.parse(readFileSync(join(appDir, 'package.json'), 'utf-8'));
+	const names = new Set([
+		...Object.keys(appPkg.dependencies || {}),
+		...Object.keys(appPkg.devDependencies || {}),
+	]);
+	const targets = [];
+	for (const name of names) {
+		const dir = index.get(name);
+		if (dir && name.startsWith('@vesk/')) targets.push({ dir, name });
+	}
+	return targets;
+}
+
+// dir in packages/, and the dependency NAME the app references.
+const TARGETS = buildDefaultTargets();
+
+function buildDefaultTargets() {
+	// test-app: CLI dependency name is `vesk` (not @vesk/vesk-cli like vesk-docs).
+	if (appDirName === 'test-app') {
+		return [
+			{ dir: 'types', name: '@vesk/types' },
+			{ dir: 'compiler', name: '@vesk/compiler' },
+			{ dir: 'runtime', name: '@vesk/runtime' },
+			{ dir: 'adapter', name: '@vesk/adapter' },
+			{ dir: 'plugin-tailwind', name: '@vesk/plugin-tailwind' },
+			{ dir: 'cli', name: 'vesk' },
+		];
+	}
+	return deriveTargets(buildPackageIndex());
+}
 
 function run(cmd, args, opts = {}) {
 	const res = spawnSync(cmd, args, { stdio: 'inherit', ...opts });
@@ -55,7 +99,7 @@ for (const f of readdirSync(tarballsDir)) {
 	}
 }
 
-const pkg = JSON.parse(readFileSync(join(testAppDir, 'package.json'), 'utf-8'));
+const pkg = JSON.parse(readFileSync(join(appDir, 'package.json'), 'utf-8'));
 
 for (const target of TARGETS) {
 	const srcPkgPath = join(root, 'packages', target.dir, 'package.json');
@@ -93,33 +137,47 @@ for (const target of TARGETS) {
 		console.error(`refresh-testapp-deps: expected tarball ${packedName} was not produced`);
 		process.exit(1);
 	}
-	pkg.dependencies[target.name] = `file:./tarballs/${packedName}`;
+	let pinned = false;
+	for (const fld of ['dependencies', 'devDependencies']) {
+		if (pkg[fld] && Object.prototype.hasOwnProperty.call(pkg[fld], target.name)) {
+			pkg[fld][target.name] = `file:./tarballs/${packedName}`;
+			pinned = true;
+			break;
+		}
+	}
+	if (!pinned) pkg.dependencies[target.name] = `file:./tarballs/${packedName}`;
 	rmSync(tmp, { recursive: true, force: true });
 }
 
-writeFileSync(join(testAppDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
+writeFileSync(join(appDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
 
 // Purge previously installed copies so npm cannot satisfy resolution from
 // stale directories, then install fresh.
 for (const target of TARGETS) {
 	const scopePrefix = target.name.startsWith('@') ? target.name.split('/')[0].replace('@', '') : null;
 	const nmPath = scopePrefix
-		? join(testAppDir, 'node_modules', scopePrefix, target.name.split('/')[1])
-		: join(testAppDir, 'node_modules', target.name);
+		? join(appDir, 'node_modules', scopePrefix, target.name.split('/')[1])
+		: join(appDir, 'node_modules', target.name);
 	rmSync(nmPath, { recursive: true, force: true });
 }
 
-console.log('[refresh] installing test-app dependencies...');
-run('npm', ['install', '--no-audit', '--no-fund'], { cwd: testAppDir });
+console.log(`[refresh] installing ${appDirName} dependencies...`);
+run('npm', ['install', '--no-audit', '--no-fund'], { cwd: appDir });
 
-// npm nests @vesk/* copies under vesk/node_modules when the tarball's
-// dependency range doesn't match the CI version pins — those nested copies
-// are pulled from the REGISTRY (stale) and shadow the fresh top-level
-// packages during sidecar resolution. Prune them after install.
-const nestedScope = join(testAppDir, 'node_modules', 'vesk', 'node_modules', '@vesk');
+// npm nests @vesk/* copies under the CLI package's node_modules when the
+// tarball's dependency range doesn't match the CI version pins — those
+// nested copies are pulled from the REGISTRY (stale) and shadow the fresh
+// top-level packages during sidecar resolution. Prune them after install.
+// The CLI dep is `vesk` in test-app but `@vesk/vesk-cli` in vesk-docs, so
+// compute the nested path from the actual CLI target.
+const cliTarget = TARGETS.find((t) => t.dir === 'cli');
+const nestedScopeBase = cliTarget && cliTarget.name.startsWith('@')
+	? join(appDir, 'node_modules', cliTarget.name.split('/')[0], cliTarget.name.split('/')[1])
+	: join(appDir, 'node_modules', cliTarget ? cliTarget.name : 'vesk');
+const nestedScope = join(nestedScopeBase, 'node_modules', '@vesk');
 if (existsSync(nestedScope)) {
 	rmSync(nestedScope, { recursive: true, force: true });
-	console.log('[refresh] pruned nested node_modules/vesk/node_modules/@vesk (registry shadows)');
+	console.log(`[refresh] pruned nested ${nestedScope} (registry shadows)`);
 }
 
 // Freshness gate: assert every installed package carries the exact CI
@@ -127,8 +185,8 @@ if (existsSync(nestedScope)) {
 let stale = false;
 for (const target of TARGETS) {
 	const nmPkgPath = target.name.startsWith('@')
-		? join(testAppDir, 'node_modules', target.name.split('/')[0], target.name.split('/')[1], 'package.json')
-		: join(testAppDir, 'node_modules', target.name, 'package.json');
+		? join(appDir, 'node_modules', target.name.split('/')[0], target.name.split('/')[1], 'package.json')
+		: join(appDir, 'node_modules', target.name, 'package.json');
 	if (!existsSync(nmPkgPath)) {
 		console.error(`[refresh] MISSING installed package ${target.name}`);
 		stale = true;
@@ -144,4 +202,4 @@ for (const target of TARGETS) {
 if (stale) process.exit(1);
 console.log('[refresh] all installed versions match freshly packed CI tarballs');
 
-console.log('[refresh] done — test-app now pins freshly built CI tarballs.');
+console.log(`[refresh] done — ${appDirName} now pins freshly built CI tarballs.`);

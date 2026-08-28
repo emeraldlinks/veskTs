@@ -224,6 +224,47 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         const wordStart = i;
         while (i < input.length && isIdentCharCode(input.charCodeAt(i))) i++;
         const word = input.slice(wordStart, i);
+        // Declaration statements (`const`/`let`/`var …;`) are also valid
+        // statement-mode element children. Recognise them by a `=` of
+        // assignment plus either a top-level `;` or a newline at depth 0
+        // (ASI-style). Bail out (stay text) when a closing JSX tag `</` is
+        // seen before a terminator: a real element-child statement never
+        // contains its parent's closing tag, while prose text like
+        // `<p>const value = 5 apples</p>` does.
+        if (word === 'const' || word === 'let' || word === 'var') {
+          let depth = 0;
+          let seenAssign = false;
+          let q = i;
+          while (q < input.length) {
+            const c = input.charCodeAt(q);
+            if (c === 34 || c === 39 || c === 96) { // " ' `
+              const quote = c;
+              let tplDepth = 0;
+              q++;
+              while (q < input.length) {
+                const ch = input.charCodeAt(q);
+                if (ch === 92) { q += 2; continue; }
+                if (quote === 96 && ch === 36 && input.charCodeAt(q + 1) === 123) { tplDepth++; q += 2; continue; }
+                if (quote === 96 && ch === 125 && tplDepth > 0) { tplDepth--; q++; continue; }
+                if (ch === quote && tplDepth === 0) { q++; break; }
+                q++;
+              }
+              continue;
+            }
+            if (c === 60 && input.charCodeAt(q + 1) === 47) return false; // '</' -> it's JSX text, not a statement
+            if (c === 40 || c === 91 || c === 123) depth++;
+            else if (c === 41 || c === 93 || c === 125) depth--;
+            else if (c === 61 && depth === 0) { // '='
+              const n2 = input.charCodeAt(q + 1);
+              const n1 = q > 0 ? input.charCodeAt(q - 1) : 0;
+              if (n2 !== 61 && n2 !== 62 && n1 !== 33 && n1 !== 60 && n1 !== 61) seenAssign = true; // not ==, =>, !=, <=, >=
+            }
+            else if (c === 59 && depth === 0) return true; // ';'
+            else if ((c === 10 || c === 13) && depth === 0 && seenAssign) return true; // ASI at end of line
+            q++;
+          }
+          return false;
+        }
         if (word !== 'if' && word !== 'for' && word !== 'while' && word !== 'switch' && word !== 'try' && word !== 'do') return false;
         let p = i;
         while (p < input.length && isWsChar(input.charCodeAt(p))) p++;
