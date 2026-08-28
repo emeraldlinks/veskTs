@@ -535,6 +535,33 @@ function exprToIR(source: string, expr: any): IRNode[] {
   return [new DynamicBinding(toExpression(source, expr))];
 }
 
+/**
+ * True when an `ExpressionStatement` expression is a pure value that should
+ * render as output (a bare reference, member access, literal, template,
+ * conditional, etc.) rather than a side-effecting statement (call, assignment,
+ * update, `new`, `await`, `yield`, tagged template, `delete`/`void`). Side
+ * effects stay as runtime statements; pure values become dynamic bindings.
+ */
+function isRenderableExpression(expr: any): boolean {
+  const t = expr.type;
+  if (
+    t === 'CallExpression' || t === 'NewExpression' ||
+    t === 'AssignmentExpression' || t === 'UpdateExpression' ||
+    t === 'AwaitExpression' || t === 'YieldExpression' ||
+    t === 'TaggedTemplateExpression' || t === 'ImportExpression' ||
+    t === 'MetaProperty'
+  ) {
+    return false;
+  }
+  if (t === 'UnaryExpression') {
+    return expr.operator !== 'delete' && expr.operator !== 'void';
+  }
+  if (t === 'SequenceExpression') {
+    return isRenderableExpression(expr.expressions[expr.expressions.length - 1]);
+  }
+  return true;
+}
+
 function processJSXCallbackBody(source: string, body: any): IRNode[] {
   if (body.type === 'JSXElement') return processJSXElement(source, body);
   if (body.type === 'JSXFragment') {
@@ -636,11 +663,14 @@ function buildGuardChain(source: string, guardClauses: any[], mainReturn: any): 
     const guard = guardClauses[i];
     const condExpr = toExpression(source, guard.test);
     const consequent: IRNode[] = [];
-    if (guard.consequent.type === 'ReturnStatement' && guard.consequent.argument) {
-      if (guard.consequent.argument.type === 'JSXElement') {
-        consequent.push(...processJSXElement(source, guard.consequent.argument));
+    const guardReturn = getReturnArgument(guard.consequent);
+    if (guardReturn) {
+      if (guardReturn.type === 'JSXElement') {
+        consequent.push(...processJSXElement(source, guardReturn));
+      } else if (guardReturn.type === 'JSXFragment') {
+        for (const c of guardReturn.children) consequent.push(...processJSXChildren(source, [c]));
       } else {
-        consequent.push(new DynamicBinding(toExpression(source, guard.consequent.argument)));
+        consequent.push(new DynamicBinding(toExpression(source, guardReturn)));
       }
     }
     currentAlternate = [new OpaqueDynamicRegion(condExpr, consequent, currentAlternate)];
@@ -675,7 +705,26 @@ function hasJSXInSubtree(node: any): boolean {
 }
 
 function isGuardClause(node: any): boolean {
-  return node.type === 'IfStatement' && node.consequent.type === 'ReturnStatement' && hasJSXInSubtree(node.consequent);
+  return (
+    node.type === 'IfStatement' &&
+    !node.alternate &&
+    getReturnArgument(node.consequent) !== null &&
+    hasJSXInSubtree(node.consequent)
+  );
+}
+
+/**
+ * Returns the `return` argument of a statement that represents an early
+ * return — either a bare `ReturnStatement` or a `BlockStatement` wrapping a
+ * single `ReturnStatement`. Returns `null` when the statement is not such a
+ * return (including `return null` / `return;`, whose argument is absent).
+ */
+function getReturnArgument(node: any): any {
+  if (node.type === 'ReturnStatement') return node.argument ?? null;
+  if (node.type === 'BlockStatement' && node.body.length === 1 && node.body[0].type === 'ReturnStatement') {
+    return node.body[0].argument ?? null;
+  }
+  return null;
 }
 
 function isStatementMode(bodyStmts: any[]): boolean {
@@ -837,6 +886,13 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
       nodes.push(...processForStatement(source, stmt));
     } else if (stmt.type === 'ForStatement') {
       nodes.push(...processForStatement(source, stmt));
+    } else if (stmt.type === 'ExpressionStatement') {
+      if (isRenderableExpression(stmt.expression)) {
+        nodes.push(...exprToIR(source, stmt.expression));
+      } else {
+        const raw = getSource(source, stmt);
+        if (raw) nodes.push(new RuntimeStatement(raw, stmt, source));
+      }
     } else if (stmt.type === 'ClassDeclaration') {
       throw VeskError.classDecl();
     } else {

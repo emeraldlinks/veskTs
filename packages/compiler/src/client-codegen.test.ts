@@ -507,6 +507,50 @@ describe('Client Codegen — Statement Mode', () => {
 		}
 	});
 
+	bothModes('executes bare console.log child as code on client', `
+		component App(props: { x: number }) {
+			<div class="log">
+				console.log("render start", props.x)
+				<p>done</p>
+			</div>
+		}
+	`, (code) => {
+		// The bare call must be emitted as an executable statement, never a text node.
+		expect(code).toContain('console.log("render start", props.x)');
+		expect(code).not.toContain('createTextNode("console.log');
+	});
+
+	bothModes('keeps prose with parenthesised text as text on client', `
+		component App {
+			<div>
+				<p>call me (maybe); ok</p>
+				<p>the(cat) sat</p>
+				<p>do(that)</p>
+			</div>
+		}
+	`, (code, mode) => {
+		if (mode === 'normal') {
+			expect(code).toContain('createTextNode("call me (maybe); ok")');
+			expect(code).toContain('createTextNode("the(cat) sat")');
+			expect(code).toContain('createTextNode("do(that)")');
+		}
+	});
+
+	bothModes('keeps a call followed by more prose on the same line as text on client', `
+		component App(props: { x: number }) {
+			<div>
+				<p>doSomething(props.x) then more</p>
+				<p>inline doSomething(props.x)</p>
+			</div>
+		}
+	`, (code, mode) => {
+		if (mode === 'normal') {
+			expect(code).toContain('createTextNode("doSomething(props.x) then more")');
+			expect(code).toContain('createTextNode("inline doSomething(props.x)")');
+		}
+		expect(code).not.toContain('doSomething(props.x);');
+	});
+
 	bothModes('interleaved runtime statements', `
 		component App(props: { x: number }) {
 			const y = props.x * 3;

@@ -893,6 +893,96 @@ describe('Statement Mode Server Rendering', () => {
 			}
 		`, 'App', { score: 7 })).toBe('<div><p>14</p></div>');
 	});
+	describe('bare expression statements as element children', () => {
+		function captureLog(fn: () => string) {
+			const orig = console.log;
+			const calls: unknown[][] = [];
+			console.log = (...args: unknown[]) => { calls.push(args); };
+			let out = '';
+			try { out = fn(); } finally { console.log = orig; }
+			return { out, calls };
+		}
+		it('executes a bare console.log child and does not leak its source as text', () => {
+			const { out, calls } = captureLog(() => render(`
+				component App(props: { x: number }) {
+					<div class="log">
+						console.log("render start", props.x)
+						<p>done</p>
+					</div>
+				}
+			`, 'App', { x: 5 }));
+			expect(out).toBe('<div class="log"><p>done</p></div>');
+			expect(JSON.stringify(calls)).toBe(`[["render start",5]]`);
+		});
+		it('executes multiple bare statements on separate lines', () => {
+			const { out, calls } = captureLog(() => render(`
+				component App(props: { x: number }) {
+					<div class="log">
+						console.log("first")
+						console.log("second", props.x)
+						<p>ok</p>
+					</div>
+				}
+			`, 'App', { x: 5 }));
+			expect(out).toBe('<div class="log"><p>ok</p></div>');
+			expect(JSON.stringify(calls)).toBe(`[["first"],["second",5]]`);
+		});
+		it('runs a bare call whose effect is observable in later output', () => {
+			expect(render(`
+				component App(props: { x: number }) {
+					const &[n, nCell] = track(0)
+					set(nCell, props.x * 2)
+					<p>{n}</p>
+				}
+			`, 'App', { x: 5 })).toBe('<p>10</p>');
+		});
+		it('keeps prose with parenthesised text as text', () => {
+			expect(render(`
+				component App {
+					<p>call me (maybe); ok</p>
+				}
+			`, 'App')).toBe('<p>call me (maybe); ok</p>');
+			expect(render(`
+				component App {
+					<p>the(cat) sat</p>
+				}
+			`, 'App')).toBe('<p>the(cat) sat</p>');
+			expect(render(`
+				component App {
+					<p>do(that)</p>
+				}
+			`, 'App')).toBe('<p>do(that)</p>');
+		});
+		it('keeps a call followed by more prose on the same line as text', () => {
+			expect(render(`
+				component App(props: { x: number }) {
+					<p>doSomething(props.x) then more</p>
+				}
+			`, 'App', { x: 1 })).toBe('<p>doSomething(props.x) then more</p>');
+			expect(render(`
+				component App(props: { x: number }) {
+					<p>inline doSomething(props.x)</p>
+				}
+			`, 'App', { x: 1 })).toBe('<p>inline doSomething(props.x)</p>');
+		});
+		it('keeps a braced string as forced text', () => {
+			expect(render(`
+				component App {
+					<div>{"doSomething(props.x)"}</div>
+				}
+			`, 'App')).toBe('<div>doSomething(props.x)</div>');
+		});
+		it('keeps an unbound identifier on its own line as text', () => {
+			expect(render(`
+				component App {
+					<div>
+						plainVar
+						<p>x</p>
+					</div>
+				}
+			`, 'App')).toBe('<div> plainVar <p>x</p></div>');
+		});
+	});
 	it('renders labeled statement with JSX', () => {
 		expect(render(`
 			component App(props: { flag: boolean }) {

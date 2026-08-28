@@ -160,6 +160,11 @@ function isWsChar(code: number): boolean {
   return code === 32 || code === 9 || code === 10 || code === 13 || code === 12;
 }
 
+function skipWs(input: string, i: number): number {
+  while (i < input.length && isWsChar(input.charCodeAt(i))) i++;
+  return i;
+}
+
 function isStyleBoundary(code: number): boolean {
   return isWsChar(code) || code === 62 || code === 47 || code === 123;
 }
@@ -264,6 +269,99 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
             q++;
           }
           return false;
+        }
+        // Bare expression statements (`console.log(x)`, `alert('hi')`,
+        // `doSomething(args)`) are also valid statement-mode element children.
+        // They are ambiguous with prose, so only treat them as code when they
+        // read like a standalone line of code — not a sentence:
+        //   * an identifier call chain (`console.log`, `foo?.bar`) with NO
+        //     whitespace before the `(` (prose writes `word (`, code writes
+        //     `word(`),
+        //   * a balanced `(...)` call,
+        //   * then a terminator — a top-level `;` or ASI newline — with no
+        //     bare word after the `)` before it (`doSomething(x) then more`
+        //     is prose; `doSomething(x)` on its own line is code).
+        // Bail out (stay text) when a closing JSX tag `</` is seen first, as
+        // a real child statement never contains its parent's closing tag.
+        if (isIdentStartCode(input.charCodeAt(wordStart))) {
+          let q = i; // position just after the first identifier
+          // member chain: `.foo` / `?.bar`, no surrounding whitespace
+          while (q < input.length) {
+            const c = input.charCodeAt(q);
+            if (c === 46 /* . */) { q++; }
+            else if (c === 63 /* ? */ && input.charCodeAt(q + 1) === 46) { q += 2; }
+            else break;
+            if (q >= input.length || !isIdentStartCode(input.charCodeAt(q))) return false;
+            q++;
+            while (q < input.length && isIdentCharCode(input.charCodeAt(q))) q++;
+          }
+          // must be a call: `(` with no whitespace before it
+          if (input.charCodeAt(q) === 40 /* ( */) {
+            let depth = 0;
+            let callClosed = false;
+            let s = q;
+            while (s < input.length) {
+              const c = input.charCodeAt(s);
+              if (c === 34 || c === 39 || c === 96) { // " ' `
+                const quote = c;
+                let tplDepth = 0;
+                s++;
+                while (s < input.length) {
+                  const ch = input.charCodeAt(s);
+                  if (ch === 92) { s += 2; continue; }
+                  if (quote === 96 && ch === 36 && input.charCodeAt(s + 1) === 123) { tplDepth++; s += 2; continue; }
+                  if (quote === 96 && ch === 125 && tplDepth > 0) { tplDepth--; s++; continue; }
+                  if (ch === quote && tplDepth === 0) { s++; break; }
+                  s++;
+                }
+                continue;
+              }
+              if (c === 60 && input.charCodeAt(s + 1) === 47) return false; // '</'
+              if (c === 40 || c === 91 || c === 123) depth++;
+              else if (c === 41 || c === 93 || c === 125) {
+                depth--;
+                if (c === 41 && depth === 0) { callClosed = true; s++; break; }
+              }
+              s++;
+            }
+            if (!callClosed) return false;
+            // After the call, walk forward treating each character in turn so
+            // we can tell "standalone statement ending in `;` / newline" from
+            // "trailing prose on the same line". Chained member calls
+            // (`.foo(...)`) and paren-groups are consumed; a bare word on the
+            // same line before a newline/`;` means the child is a sentence.
+            let d = 0;
+            for (;;) {
+              if (s >= input.length) return false;
+              const c = input.charCodeAt(s);
+              if (c === 60 && input.charCodeAt(s + 1) === 47) return false; // '</' -> prose
+              if (c === 34 || c === 39 || c === 96) { // " ' `
+                const quote = c;
+                let tplDepth = 0;
+                s++;
+                while (s < input.length) {
+                  const ch = input.charCodeAt(s);
+                  if (ch === 92) { s += 2; continue; }
+                  if (quote === 96 && ch === 36 && input.charCodeAt(s + 1) === 123) { tplDepth++; s += 2; continue; }
+                  if (quote === 96 && ch === 125 && tplDepth > 0) { tplDepth--; s++; continue; }
+                  if (ch === quote && tplDepth === 0) { s++; break; }
+                  s++;
+                }
+                continue;
+              }
+              if (c === 40 || c === 91 || c === 123) d++;
+              else if (c === 41 || c === 93 || c === 125) d--;
+              else if (c === 59 && d === 0) return true; // ';' -> statement
+              else if ((c === 10 || c === 13) && d === 0) return true; // ASI newline -> standalone
+              else if (c === 46) { // member access `.foo`; may lead to another call
+                s++;
+                while (s < input.length && isIdentCharCode(input.charCodeAt(s))) s++;
+                continue;
+              }
+              else if (isIdentCharCode(c) || isIdentStartCode(c)) return false; // bare word -> prose
+              s++;
+            }
+          }
         }
         if (word !== 'if' && word !== 'for' && word !== 'while' && word !== 'switch' && word !== 'try' && word !== 'do') return false;
         let p = i;
