@@ -1,0 +1,96 @@
+component Features {
+	<section id="features" class="border-b border-zinc-800">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+				<div>
+					<div class="inline-flex items-center border border-zinc-800 bg-black px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Features</div>
+					<h2 class="mt-3 text-[28px] md:text-[36px] font-black tracking-[-0.04em] leading-none">Everything you need.<br /><span class="text-zinc-400">Nothing you don’t.</span></h2>
+				</div>
+				<p class="max-w-[420px] text-[14px] leading-6 text-zinc-400">A complete toolkit for modern apps - focused on compile-time quality, native reach, and developer speed.</p>
+			</div>
+
+			<div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[12px]">*</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Compiler-first</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Build-time guarantees, not runtime hopes.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px] font-bold">TS</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">TypeScript</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Full TS support - tsc passes through vskToTsx.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[11px] font-bold">.vsk</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">.vsk components</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Statement & expression modes, both first-class.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px]">O</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Expression Mode</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Familiar JSX ergonomics, compiled away.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[11px] font-bold">TW</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Tailwind CSS</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Utility-first styling, first-class plugin.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-[#7F52FF] flex items-center justify-center text-white text-[11px] font-black">K</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Native Kotlin</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Compile toward Kotlin/Compose, not WebView.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-bold">M3</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Material 3</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Native theming and components.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[11px]">*</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Vesk Native</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Unified model for web + native.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px]">↗</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Animations</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Framer Motion-inspired, compiler-aware.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px]">!</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">HMR</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Hot module replacement, fast rebuilds.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-black">npm</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">npm compatible</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Use the ecosystem you already know.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px]">✓</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Compile-time validation</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Catch errors before they ship.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px]">*</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Production builds</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">SSG + SSR, code-split, optimized.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-[11px]">*</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Native APIs</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">Access platform capabilities directly.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 hover:border-zinc-700 transition-colors">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-white text-[11px]">*</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Developer tooling</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">CLI, LSP, prettier, diagnostics.</p>
+				</div>
+				<div class=" border border-zinc-800 p-5 bg-zinc-900 text-white">
+					<div class="h-8 w-8 bg-zinc-900 flex items-center justify-center text-zinc-100 text-[11px]">oo</div>
+					<h3 class="mt-3 text-[13.5px] font-semibold">Cross-platform</h3>
+					<p class="mt-1 text-[12.5px] leading-5 text-zinc-400">One model, multiple targets - correctly.</p>
+				</div>
+			</div>
+		</div>
+	</section>
+}

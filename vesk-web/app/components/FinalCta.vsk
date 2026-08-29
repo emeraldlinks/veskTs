@@ -1,0 +1,30 @@
+import { Link } from '@vesk/runtime/router'
+
+component FinalCta {
+	<section class="relative overflow-hidden bg-black text-white">
+		<div class="absolute inset-0 pointer-events-none">
+			<div class="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:32px_32px] opacity-30"></div>
+			<div class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[800px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.08),transparent_65%)]"></div>
+		</div>
+		<div class="relative mx-auto max-w-[1200px] px-6 py-16 md:py-24 text-center">
+			<div class="inline-flex items-center border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium tracking-widest uppercase text-zinc-400">The next generation starts with the compiler</div>
+			<h2 class="mx-auto mt-6 max-w-[760px] text-[36px] md:text-[52px] font-black tracking-[-0.05em] leading-[0.9]">
+				Build for the web.<br />Build for native.<br /><span class="text-zinc-400">Let Vesk handle</span> the translation.
+			</h2>
+			<p class="mx-auto mt-5 max-w-[560px] text-[15px] leading-6 text-zinc-400">
+				A unified, compiler-driven way to build modern applications. Precise. Fast. Intelligent. Experimental. Native.
+			</p>
+			<div class="mt-8 flex flex-wrap items-center justify-center gap-3">
+				<Link href="#dx" class="inline-flex items-center bg-zinc-900 px-7 py-3 text-[14px] font-semibold text-zinc-100 hover:bg-zinc-800/60 transition-colors no-underline">Get Started →</Link>
+				<Link href="#docs" class="inline-flex items-center border border-white/15 bg-white/5 px-7 py-3 text-[14px] font-semibold text-white hover:bg-zinc-900/10 transition-colors backdrop-blur no-underline">Read the Docs</Link>
+			</div>
+			<div class="mt-10 flex flex-wrap items-center justify-center gap-6 text-[12px] font-mono text-zinc-400">
+				<span class="inline-flex items-center gap-2"><span class="h-1.5 w-1.5 bg-emerald-500"></span> npm create vesk@latest</span>
+				<span class="hidden sm:inline text-zinc-600">*</span>
+				<span>TypeScript • Tailwind • Kotlin • Material 3</span>
+				<span class="hidden sm:inline text-zinc-600">*</span>
+				<span>MIT • v0.2.9</span>
+			</div>
+		</div>
+	</section>
+}

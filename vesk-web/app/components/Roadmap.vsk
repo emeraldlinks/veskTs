@@ -1,0 +1,61 @@
+component Roadmap {
+	<section id="roadmap" class="border-b border-zinc-800">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="max-w-[720px]">
+				<div class="inline-flex items-center border border-zinc-800 bg-black px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Roadmap</div>
+				<h2 class="mt-4 text-[28px] md:text-[40px] font-black tracking-[-0.04em] leading-[0.95]">Ambitious but credible.</h2>
+				<p class="mt-3 text-[15px] leading-6 text-zinc-400">We ship in increments. The compiler leads - everything else follows.</p>
+			</div>
+
+			<div class="mt-10 grid md:grid-cols-3 gap-6">
+				<div class=" border border-zinc-900 bg-zinc-900 p-6 text-white">
+					<div class="inline-flex items-center gap-2 bg-zinc-900 px-2.5 py-1 text-[11px] font-bold tracking-widest uppercase text-zinc-100">
+						<span class="h-1.5 w-1.5 bg-emerald-500"></span>
+						Now
+					</div>
+					<h3 class="mt-4 text-[16px] font-semibold">Foundation</h3>
+					<ul class="mt-3 space-y-2.5 text-[13px] leading-5 text-zinc-400">
+						<li class="flex gap-2"><span class="text-emerald-400 mt-0.5">✓</span> Core compiler (parse → IR → codegen)</li>
+						<li class="flex gap-2"><span class="text-emerald-400 mt-0.5">✓</span> Vesk Native - Kotlin target</li>
+						<li class="flex gap-2"><span class="text-emerald-400 mt-0.5">✓</span> Developer tooling & LSP</li>
+						<li class="flex gap-2"><span class="text-emerald-400 mt-0.5">✓</span> Documentation (30+ guides)</li>
+						<li class="flex gap-2"><span class="text-zinc-400 mt-0.5">*</span> Production builds & SSR</li>
+					</ul>
+					<div class="mt-6 h-1 w-full bg-zinc-900/10 overflow-hidden"><div class="h-full w-[85%] bg-zinc-900"></div></div>
+				</div>
+
+				<div class=" border border-zinc-800 bg-zinc-900 p-6">
+					<div class="inline-flex items-center gap-2 border border-zinc-800 bg-black px-2.5 py-1 text-[11px] font-bold tracking-widest uppercase text-zinc-400">
+						<span class="h-1.5 w-1.5 bg-amber-500"></span>
+						Next
+					</div>
+					<h3 class="mt-4 text-[16px] font-semibold tracking-[-0.02em]">Polish & APIs</h3>
+					<ul class="mt-3 space-y-2.5 text-[13px] leading-5 text-zinc-400">
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Improved HMR & faster rebuilds</li>
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> More native APIs & Material 3</li>
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Package ecosystem & plugins</li>
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Enhanced dev tooling</li>
+					</ul>
+					<div class="mt-6 h-1 w-full bg-zinc-800/60 overflow-hidden"><div class="h-full w-[45%] bg-zinc-900"></div></div>
+				</div>
+
+				<div class=" border border-zinc-800 bg-black p-6">
+					<div class="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-900 px-2.5 py-1 text-[11px] font-bold tracking-widest uppercase text-zinc-400">
+						<span class="h-1.5 w-1.5 bg-zinc-400"></span>
+						Future
+					</div>
+					<h3 class="mt-4 text-[16px] font-semibold tracking-[-0.02em]">Scale & reach</h3>
+					<ul class="mt-3 space-y-2.5 text-[13px] leading-5 text-zinc-400">
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Additional platforms</li>
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Advanced compiler optimizations</li>
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Larger ecosystem & integrations</li>
+						<li class="flex gap-2"><span class="text-zinc-600 mt-0.5">o</span> Production-scale tooling</li>
+					</ul>
+					<div class="mt-6 h-1 w-full bg-zinc-800 overflow-hidden"><div class="h-full w-[15%] bg-zinc-400"></div></div>
+				</div>
+			</div>
+
+			<p class="mt-6 text-center text-[12px] text-zinc-400">We don’t overpromise. Every stage ships only when semantics are provably preserved.</p>
+		</div>
+	</section>
+}

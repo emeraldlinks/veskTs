@@ -1,0 +1,117 @@
+import { track } from '@vesk/runtime'
+
+component CompilerArchitecture {
+	let &[activeStage] = track(2)
+	<section id="compiler" class="border-b border-zinc-800">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="max-w-[720px] mx-auto text-center">
+				<div class="inline-flex items-center border border-zinc-800 bg-black px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Compiler architecture</div>
+				<h2 class="mt-4 text-[28px] md:text-[40px] font-black tracking-[-0.04em] leading-[0.95] text-zinc-100">The compiler is the product.</h2>
+				<p class="mt-4 text-[15px] leading-6 text-zinc-400">Hover each stage. Vesk’s compiler is the heart - parsing, analyzing semantics, and emitting platform-appropriate code.</p>
+			</div>
+
+			<div class="mt-12 mx-auto max-w-[920px]">
+				<div class="relative border border-zinc-800 bg-zinc-900 p-6 md:p-8 ">
+					<div class="hidden md:block absolute left-1/2 top-[88px] bottom-[88px] w-px bg-zinc-800 -translate-x-1/2"></div>
+
+					<div class="grid md:grid-cols-5 gap-4 md:gap-3 relative">
+						<button onMouseEnter={() => activeStage = 0} onClick={() => activeStage = 0} class={activeStage === 0 ? "relative xl border border-zinc-900 bg-zinc-900 p-4 text-left " : "relative xl border border-zinc-800 bg-black p-4 text-left hover:border-zinc-700 hover:bg-zinc-900"}>
+							<div class={activeStage === 0 ? "h-8 w-8 bg-zinc-900 flex items-center justify-center text-zinc-100 text-[11px] font-bold" : "h-8 w-8 bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 text-[11px] font-bold"}>01</div>
+							<div class={activeStage === 0 ? "mt-3 text-[13px] font-semibold text-white" : "mt-3 text-[13px] font-semibold text-zinc-100"}>Vesk Source</div>
+							<div class={activeStage === 0 ? "mt-1 text-[12px] leading-4 text-zinc-400" : "mt-1 text-[12px] leading-4 text-zinc-400"}>.vsk + TypeScript + Tailwind</div>
+							<div class={activeStage === 0 ? "mt-3 inline-flex bg-zinc-900/10 border border-white/15 px-2 py-1 text-[10px] font-mono text-white" : "mt-3 inline-flex bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-400"}>app/page.vsk</div>
+						</button>
+
+						<div class="hidden md:flex items-center justify-center">
+							<div class={activeStage === 1 ? "h-8 w-8 bg-zinc-900 text-white flex items-center justify-center" : "h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400"}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+							</div>
+						</div>
+						<button onMouseEnter={() => activeStage = 1} onClick={() => activeStage = 1} class={activeStage === 1 ? "relative xl border border-zinc-900 bg-zinc-900 p-4 text-left " : "relative xl border border-zinc-800 bg-black p-4 text-left hover:border-zinc-700 hover:bg-zinc-900"}>
+							<div class={activeStage === 1 ? "h-8 w-8 bg-zinc-900 flex items-center justify-center text-zinc-100 text-[11px] font-bold" : "h-8 w-8 bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 text-[11px] font-bold"}>02</div>
+							<div class={activeStage === 1 ? "mt-3 text-[13px] font-semibold text-white" : "mt-3 text-[13px] font-semibold text-zinc-100"}>Parser</div>
+							<div class={activeStage === 1 ? "mt-1 text-[12px] leading-4 text-zinc-400" : "mt-1 text-[12px] leading-4 text-zinc-400"}>Acorn + TS plugin → AST</div>
+							<div class={activeStage === 1 ? "mt-3 inline-flex bg-zinc-900/10 border border-white/15 px-2 py-1 text-[10px] font-mono text-white" : "mt-3 inline-flex bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-400"}>no regex</div>
+						</button>
+
+						<div class="hidden md:flex items-center justify-center">
+							<div class={activeStage === 2 ? "h-8 w-8 bg-zinc-900 text-white flex items-center justify-center" : "h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400"}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+							</div>
+						</div>
+						<button onMouseEnter={() => activeStage = 2} onClick={() => activeStage = 2} class={activeStage === 2 ? "relative xl border border-zinc-900 bg-zinc-900 p-4 text-left " : "relative xl border border-zinc-800 bg-black p-4 text-left hover:border-zinc-700 hover:bg-zinc-900"}>
+							<div class={activeStage === 2 ? "h-8 w-8 bg-zinc-900 flex items-center justify-center text-zinc-100 text-[11px] font-bold" : "h-8 w-8 bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 text-[11px] font-bold"}>03</div>
+							<div class={activeStage === 2 ? "mt-3 text-[13px] font-semibold text-white" : "mt-3 text-[13px] font-semibold text-zinc-100"}>Semantic Analysis</div>
+							<div class={activeStage === 2 ? "mt-1 text-[12px] leading-4 text-zinc-400" : "mt-1 text-[12px] leading-4 text-zinc-400"}>Validate semantics & safety</div>
+							<div class={activeStage === 2 ? "mt-3 inline-flex bg-zinc-900/10 border border-white/15 px-2 py-1 text-[10px] font-mono text-white" : "mt-3 inline-flex bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-400"}>fail-fast</div>
+						</button>
+					</div>
+
+					<div class="mt-4 grid md:grid-cols-5 gap-4 md:gap-3">
+						<button onMouseEnter={() => activeStage = 3} onClick={() => activeStage = 3} class={activeStage === 3 ? " border border-zinc-900 bg-zinc-900 p-4 text-left md:col-start-2" : " border border-zinc-800 bg-black p-4 text-left hover:border-zinc-700 hover:bg-zinc-900 md:col-start-2"}>
+							<div class={activeStage === 3 ? "h-8 w-8 bg-zinc-900 flex items-center justify-center text-zinc-100 text-[11px] font-bold" : "h-8 w-8 bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 text-[11px] font-bold"}>04</div>
+							<div class={activeStage === 3 ? "mt-3 text-[13px] font-semibold text-white" : "mt-3 text-[13px] font-semibold text-zinc-100"}>Vesk Compiler</div>
+							<div class={activeStage === 3 ? "mt-1 text-[12px] leading-4 text-zinc-400" : "mt-1 text-[12px] leading-4 text-zinc-400"}>IR transforms • codegen</div>
+							<div class={activeStage === 3 ? "mt-3 inline-flex bg-zinc-900/10 border border-white/15 px-2 py-1 text-[10px] font-mono text-white" : "mt-3 inline-flex bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-400"}>AOT • optimized</div>
+						</button>
+						<div class="hidden md:flex items-center justify-center">
+							<div class={activeStage === 4 ? "h-8 w-8 bg-zinc-900 text-white flex items-center justify-center" : "h-8 w-8 border border-zinc-800 bg-zinc-900 flex items-center justify-center text-zinc-400"}>
+								<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+							</div>
+						</div>
+						<button onMouseEnter={() => activeStage = 4} onClick={() => activeStage = 4} class={activeStage === 4 ? " border border-zinc-900 bg-zinc-900 p-4 text-left " : " border border-zinc-800 bg-black p-4 text-left hover:border-zinc-700 hover:bg-zinc-900"}>
+							<div class={activeStage === 4 ? "h-8 w-8 bg-zinc-900 flex items-center justify-center text-zinc-100 text-[11px] font-bold" : "h-8 w-8 bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 text-[11px] font-bold"}>05</div>
+							<div class={activeStage === 4 ? "mt-3 text-[13px] font-semibold text-white" : "mt-3 text-[13px] font-semibold text-zinc-100"}>Platform Code</div>
+							<div class={activeStage === 4 ? "mt-1 text-[12px] leading-4 text-zinc-400" : "mt-1 text-[12px] leading-4 text-zinc-400"}>Web ESM • Kotlin</div>
+							<div class={activeStage === 4 ? "mt-3 inline-flex bg-zinc-900/10 border border-white/15 px-2 py-1 text-[10px] font-mono text-white" : "mt-3 inline-flex bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-mono text-zinc-400"}>ship</div>
+						</button>
+					</div>
+
+					<div class="mt-6 border border-zinc-800 bg-black p-4">
+						if (activeStage === 0) {
+							<div class="flex gap-3">
+								<span class="h-6 w-6 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-bold shrink-0">01</span>
+								<div>
+									<div class="text-[13px] font-semibold">Vesk Source - .vsk, TypeScript, Tailwind, Motion</div>
+									<div class="text-[12.5px] leading-5 text-zinc-400 mt-1">You write familiar components. Every TypeScript construct survives codegen and passes through vskToTsx for tsc.</div>
+								</div>
+							</div>
+						} else if (activeStage === 1) {
+							<div class="flex gap-3">
+								<span class="h-6 w-6 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-bold shrink-0">02</span>
+								<div>
+									<div class="text-[13px] font-semibold">Parser - AST, not regex</div>
+									<div class="text-[12.5px] leading-5 text-zinc-400 mt-1">Acorn + acorn-ts-plugin + vesk-plugin. All syntax analysis goes through the tokenizer/AST - never regex.</div>
+								</div>
+							</div>
+						} else if (activeStage === 2) {
+							<div class="flex gap-3">
+								<span class="h-6 w-6 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-bold shrink-0">03</span>
+								<div>
+									<div class="text-[13px] font-semibold">Semantic Analysis - safety checks</div>
+									<div class="text-[12.5px] leading-5 text-zinc-400 mt-1"> Validates that web semantics can be faithfully preserved for native targets. If not, the build fails - silently incorrect behavior is never emitted.</div>
+								</div>
+							</div>
+						} else if (activeStage === 3) {
+							<div class="flex gap-3">
+								<span class="h-6 w-6 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-bold shrink-0">04</span>
+								<div>
+									<div class="text-[13px] font-semibold">Vesk Compiler - IR transforms</div>
+									<div class="text-[12.5px] leading-5 text-zinc-400 mt-1">Compiles to fine-grained reactivity (no VDOM), islands, AOT event delegation, SSR + hydration, streaming. Statement mode and expression mode both first-class.</div>
+								</div>
+							</div>
+						} else {
+							<div class="flex gap-3">
+								<span class="h-6 w-6 bg-zinc-900 flex items-center justify-center text-white text-[10px] font-bold shrink-0">05</span>
+								<div>
+									<div class="text-[13px] font-semibold">Platform Code - Web & Kotlin Native</div>
+									<div class="text-[12.5px] leading-5 text-zinc-400 mt-1">Emits optimized ESM for the web and Kotlin/Compose for native. Same source, appropriate output per target - not “write once, run anywhere” wrapping.</div>
+								</div>
+							</div>
+						}
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

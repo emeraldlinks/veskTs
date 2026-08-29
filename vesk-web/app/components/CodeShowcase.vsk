@@ -1,0 +1,104 @@
+import { track } from '@vesk/runtime'
+
+component CodeShowcase {
+	let &[codeMode] = track('vesk')
+	let &[showCompiled] = track(false)
+	<section class="border-b border-zinc-800 bg-black text-white">
+		<div class="mx-auto max-w-[1200px] px-6 py-12 md:py-16">
+			<div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6 mb-8">
+				<div>
+					<div class="inline-flex items-center gap-2 border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium tracking-widest uppercase text-zinc-400">
+						<span class="h-1.5 w-1.5 bg-zinc-900"></span>
+						Interactive code showcase
+					</div>
+					<h2 class="mt-4 text-[28px] md:text-[36px] font-bold tracking-[-0.03em] leading-none">Code is the product.</h2>
+					<p class="mt-3 max-w-[560px] text-[14px] leading-6 text-zinc-400">
+						Write modern Vesk with Expression Mode. The compiler understands your intent, validates semantics at build time, and emits optimized output.
+					</p>
+				</div>
+				<div class="flex items-center gap-2 border border-white/10 bg-white/5 p-1">
+					<button onClick={() => { codeMode = 'vesk'; showCompiled = false }} class={codeMode === 'vesk' ? " bg-zinc-900 px-4 py-1.5 text-[13px] font-semibold text-zinc-100 " : " px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-white"}>Vesk source</button>
+					<button onClick={() => { codeMode = 'compiled'; showCompiled = true }} class={codeMode === 'compiled' ? " bg-zinc-900 px-4 py-1.5 text-[13px] font-semibold text-zinc-100 " : " px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-white"}>Compiled</button>
+				</div>
+			</div>
+
+			<div class="grid lg:grid-cols-[1.15fr_0.85fr] gap-6">
+				<div class=" border border-white/10 bg-zinc-900/[0.04] backdrop-blur overflow-hidden">
+					<div class="flex items-center justify-between border-b border-white/10 bg-zinc-900/[0.04] px-4 py-3">
+						<div class="flex items-center gap-2">
+							<span class="h-2.5 w-2.5 bg-zinc-900/15"></span>
+							<span class="h-2.5 w-2.5 bg-zinc-900/15"></span>
+							<span class="h-2.5 w-2.5 bg-zinc-900/15"></span>
+							<span class="ml-3 font-mono text-[12px] text-zinc-400">app/page.vsk</span>
+						</div>
+						<span class="hidden sm:inline-flex border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium tracking-widest uppercase text-zinc-600">{codeMode === 'vesk' ? "Statement mode" : "Optimized output"}</span>
+					</div>
+					<div class="p-5 md:p-6 font-mono text-[13px] leading-6">
+						if (codeMode === 'vesk') {
+							<div>
+								<div><span class="text-zinc-400">1</span> <span class="text-[#ff7ab2]">component</span> <span class="text-white font-semibold">App</span> <span class="text-zinc-400">{'{'}</span></div>
+								<div><span class="text-zinc-400">2</span> <span class="text-white"> {'<'}<span class="text-[#7cc4ff]">main</span> <span class="text-[#ffd60a]">class</span>=<span class="text-[#a6e3a1]">"min-h-screen flex items-center justify-center"</span>{'>'}</span></div>
+								<div><span class="text-zinc-400">3</span> <span class="text-white"> {'<'}<span class="text-[#7cc4ff]">h1</span> <span class="text-[#ffd60a]">class</span>=<span class="text-[#a6e3a1]">"text-4xl font-bold tracking-tight"</span>{'>'}Hello, Vesk.{'</'}<span class="text-[#7cc4ff]">h1</span>{'>'}</span></div>
+								<div><span class="text-zinc-400">4</span> <span class="text-white"> {'<'}<span class="text-[#7cc4ff]">p</span> <span class="text-[#ffd60a]">class</span>=<span class="text-[#a6e3a1]">"text-zinc-400 mt-2"</span>{'>'}The compiler-first framework.{'</'}<span class="text-[#7cc4ff]">p</span>{'>'}</span></div>
+								<div><span class="text-zinc-400">5</span> <span class="text-white"> {'</'}<span class="text-[#7cc4ff]">main</span>{'>'}</span></div>
+								<div><span class="text-zinc-400">6</span> <span class="text-zinc-400">{'}'}</span></div>
+								<div class="mt-4 h-px bg-zinc-900/10"></div>
+								<div class="mt-3 text-[11px] text-zinc-400">Write modern Vesk code → Vesk understands it → Vesk compiles it → ship.</div>
+							</div>
+						} else {
+							<div>
+								<div><span class="text-zinc-400">1</span> <span class="text-zinc-400">// compiled output - fine-grained reactivity, no VDOM</span></div>
+								<div><span class="text-zinc-400">2</span> <span class="text-[#ff7ab2]">export</span> <span class="text-white">function</span> <span class="text-[#7cc4ff]">App</span>() {'{'}</div>
+								<div><span class="text-zinc-400">3</span> <span class="text-white"> {'const el = template(`'}<span class="text-[#a6e3a1]">{'<main><h1></h1><p></p></main>'}</span>{'`)'}</span></div>
+								<div><span class="text-zinc-400">4</span> <span class="text-white"> {'claim(`'}<span class="text-[#a6e3a1]">{'h1'}</span>{'`) · set_text('}<span class="text-[#a6e3a1]">{'"Hello, Vesk."'}</span>{') · hydrate()'}</span></div>
+								<div><span class="text-zinc-400">5</span> <span class="text-white"> {'return el'}</span></div>
+								<div><span class="text-zinc-400">6</span> {'}'}</div>
+								<div class="mt-4 flex items-center gap-2 text-[11px]">
+									<span class=" bg-emerald-500/15 border border-emerald-500/20 px-2 py-1 text-emerald-300">✓ 0.9 kB gzipped</span>
+									<span class=" bg-white/5 border border-white/10 px-2 py-1 text-zinc-400">no runtime VDOM</span>
+								</div>
+							</div>
+						}
+					</div>
+					<div class="border-t border-white/10 bg-zinc-900/[0.03] px-4 py-3 flex items-center justify-between">
+						<span class="font-mono text-[11px] text-zinc-400">transform in 12ms • deterministic • no hidden runtime</span>
+						<button onClick={() => showCompiled = !showCompiled} class=" bg-zinc-900 px-3 py-1 text-[12px] font-semibold text-zinc-100 hover:bg-zinc-800/60">
+							{showCompiled ? "Show source" : "Show compiled →"}
+						</button>
+					</div>
+				</div>
+
+				<div class=" border border-white/10 bg-zinc-900 overflow-hidden text-zinc-100">
+					<div class="border-b border-zinc-800 bg-black px-4 py-3 flex items-center justify-between">
+						<span class="text-[12px] font-semibold tracking-[-0.02em]">Live preview</span>
+						<span class=" bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-medium tracking-widest uppercase text-zinc-400">SSR + Hydration</span>
+					</div>
+					<div class="p-8">
+						<div class="min-h-[180px] flex flex-col items-center justify-center border border-zinc-800 bg-zinc-900 p-8 ">
+							<h1 class="text-4xl font-black tracking-[-0.04em]">Hello, Vesk.</h1>
+							<p class="text-zinc-400 mt-2 text-[13px]">The compiler-first framework.</p>
+							<div class="mt-6 h-px w-full bg-zinc-800/60"></div>
+							<div class="mt-4 flex items-center gap-2 text-[11px] font-mono text-zinc-400">
+								<span class="h-2 w-2 bg-emerald-500"></span> Hydrated • interactive • 0 JS until needed
+							</div>
+						</div>
+						<div class="mt-4 grid grid-cols-3 gap-3 text-center">
+							<div class=" border border-zinc-800 bg-black p-3">
+								<div class="text-[18px] font-bold tracking-tight">48ms</div>
+								<div class="text-[11px] text-zinc-400">compile</div>
+							</div>
+							<div class=" border border-zinc-800 bg-black p-3">
+								<div class="text-[18px] font-bold tracking-tight">0.9kB</div>
+								<div class="text-[11px] text-zinc-400">runtime</div>
+							</div>
+							<div class=" border border-zinc-800 bg-black p-3">
+								<div class="text-[18px] font-bold tracking-tight">100</div>
+								<div class="text-[11px] text-zinc-400">lighthouse</div>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

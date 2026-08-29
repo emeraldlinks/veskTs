@@ -1,0 +1,98 @@
+import { Link } from '@vesk/runtime/router'
+
+component Showcase {
+	<section id="showcase" class="border-b border-zinc-800">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="flex flex-col md:flex-row md:items-end justify-between gap-6">
+				<div>
+					<div class="inline-flex items-center border border-zinc-800 bg-black px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Showcase</div>
+					<h2 class="mt-3 text-[28px] md:text-[36px] font-black tracking-[-0.04em] leading-none">Built with Vesk.</h2>
+					<p class="mt-2 text-[14px] leading-6 text-zinc-400">Real applications - web and native - powered by the compiler.</p>
+				</div>
+				<Link href="#" class="inline-flex items-center border border-zinc-800 bg-zinc-900 px-5 py-2.5 text-[13px] font-semibold text-zinc-100 hover:bg-black no-underline">Build something with Vesk →</Link>
+			</div>
+
+			<div class="mt-10 grid md:grid-cols-3 gap-6">
+				<div class="group border border-zinc-800 bg-zinc-900 overflow-hidden hover:border-zinc-700 hover: transition-colors">
+					<div class="h-[180px] bg-black relative overflow-hidden p-6">
+						<div class="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.06)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.06)_1px,transparent_1px)] bg-[size:20px_20px]"></div>
+						<div class="relative bg-zinc-900 p-4 ">
+							<div class="h-2 w-20 bg-zinc-900"></div>
+							<div class="mt-2 h-2 w-3/4 bg-zinc-800"></div>
+							<div class="mt-3 flex gap-2">
+								<span class="h-6 flex-1 bg-zinc-900"></span>
+								<span class="h-6 flex-1 border border-zinc-800"></span>
+							</div>
+						</div>
+						<span class="absolute top-3 right-3 bg-zinc-900 px-2.5 py-1 text-[10px] font-semibold tracking-widest uppercase text-zinc-100">Web • SSR</span>
+					</div>
+					<div class="p-5">
+						<h3 class="text-[15px] font-semibold leading-none">Founders Forge</h3>
+						<p class="mt-1.5 text-[13px] leading-5 text-zinc-400">Minimal, premium marketing site - generous whitespace, strong typography, high contrast.</p>
+						<div class="mt-3 flex flex-wrap gap-1.5">
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">Tailwind</span>
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">SSG</span>
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">Motion</span>
+						</div>
+						<Link href="#" class="mt-4 inline-flex text-[12.5px] font-semibold text-zinc-100 hover:underline no-underline">View project →</Link>
+					</div>
+				</div>
+
+				<div class="group border border-zinc-800 bg-zinc-900 overflow-hidden hover:border-zinc-700 hover: transition-colors">
+					<div class="h-[180px] bg-[#7F52FF] relative overflow-hidden p-6 flex items-center justify-center">
+						<div class="w-[160px] border-[5px] border-zinc-900 bg-zinc-900 overflow-hidden ">
+							<div class="h-8 bg-zinc-900 flex items-center justify-center"><div class="h-1 w-12 bg-zinc-800"></div></div>
+							<div class="p-3">
+								<div class=" bg-zinc-900 p-3 text-white">
+									<div class="text-[11px] font-bold">Native Commerce</div>
+									<div class="text-[10px] text-white/60">Kotlin • Material 3</div>
+								</div>
+								<div class="mt-2 h-2 w-full bg-zinc-800/60"></div>
+								<div class="mt-1.5 h-2 w-2/3 bg-zinc-800/60"></div>
+							</div>
+						</div>
+						<span class="absolute top-3 right-3 bg-zinc-900 px-2.5 py-1 text-[10px] font-semibold tracking-widest uppercase text-zinc-100">Native • Kotlin</span>
+					</div>
+					<div class="p-5">
+						<h3 class="text-[15px] font-semibold leading-none">Vesk Native Store</h3>
+						<p class="mt-1.5 text-[13px] leading-5 text-zinc-400">Native commerce app - same Vesk components, compiled to Kotlin with Material 3 theming.</p>
+						<div class="mt-3 flex flex-wrap gap-1.5">
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">Kotlin</span>
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">Material 3</span>
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">Native APIs</span>
+						</div>
+						<Link href="#" class="mt-4 inline-flex text-[12.5px] font-semibold text-zinc-100 hover:underline no-underline">View project →</Link>
+					</div>
+				</div>
+
+				<div class="group border border-zinc-800 bg-zinc-900 overflow-hidden hover:border-zinc-700 hover: transition-colors">
+					<div class="h-[180px] bg-zinc-900 relative overflow-hidden p-4">
+						<div class=" border border-white/10 bg-zinc-900/[0.06] backdrop-blur p-3">
+							<div class="font-mono text-[11px] leading-4 text-white">
+								<div class="text-white/50">// docs streaming</div>
+								<div><span class="text-[#ff7ab2]">useFetch</span>.<span class="text-[#7cc4ff]">stream</span>(<span class="text-[#a6e3a1]">'/api/docs/guide'</span>)</div>
+								<div class="text-emerald-300">✓ chunk 12/48 • 400B</div>
+							</div>
+						</div>
+						<div class="mt-3 bg-zinc-900 p-3">
+							<div class="h-2 w-16 bg-zinc-900"></div>
+							<div class="mt-2 h-2 w-full bg-zinc-800/60"></div>
+							<div class="mt-1.5 h-2 w-5/6 bg-zinc-800/60"></div>
+						</div>
+						<span class="absolute top-3 right-3 bg-zinc-900 px-2.5 py-1 text-[10px] font-semibold tracking-widest uppercase text-zinc-100">Docs • Streaming</span>
+					</div>
+					<div class="p-5">
+						<h3 class="text-[15px] font-semibold leading-none">Vesk Docs</h3>
+						<p class="mt-1.5 text-[13px] leading-5 text-zinc-400">Streaming markdown docs - useFetch.stream chunks render progressively via {'<Md />'}.</p>
+						<div class="mt-3 flex flex-wrap gap-1.5">
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">Md</span>
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">streamText</span>
+							<span class=" bg-black border border-zinc-800 px-2 py-1 text-[11px] font-mono text-zinc-400">SSR</span>
+						</div>
+						<Link href="/posts" class="mt-4 inline-flex text-[12.5px] font-semibold text-zinc-100 hover:underline no-underline">Explore docs →</Link>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

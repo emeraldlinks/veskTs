@@ -1,0 +1,66 @@
+import { Link } from '@vesk/runtime/router'
+
+component DocsSection {
+	<section id="docs" class="border-b border-zinc-800">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="grid lg:grid-cols-[1.1fr_0.9fr] gap-10 items-start">
+				<div>
+					<div class="inline-flex items-center border border-zinc-800 bg-black px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Documentation</div>
+					<h2 class="mt-4 text-[30px] md:text-[40px] font-black tracking-[-0.04em] leading-[0.95]">Docs that<br /><span class="text-zinc-400">earn their keep.</span></h2>
+					<p class="mt-4 max-w-[480px] text-[15px] leading-6 text-zinc-400">The docs are the product. Clear guides, searchable API, and copy-paste examples that actually compile.</p>
+					<Link href="/docs" class="mt-6 inline-flex items-center bg-zinc-900 px-5 py-2.5 text-[13px] font-semibold text-white hover:bg-black no-underline">Read the Documentation →</Link>
+					<div class="mt-8 flex items-center gap-3 text-[12px] text-zinc-400">
+						<span class="h-2 w-2 bg-emerald-500"></span>
+						<span>30+ guide pages • streamed via useFetch • SSR + hydration</span>
+					</div>
+				</div>
+
+				<div class=" border border-zinc-800 bg-zinc-900 overflow-hidden">
+					<div class="border-b border-zinc-800 bg-black px-4 py-3 flex items-center justify-between">
+						<span class="text-[12px] font-semibold tracking-[-0.02em]">Documentation</span>
+						<span class=" bg-zinc-900 border border-zinc-800 px-2 py-1 text-[10px] font-medium tracking-widest uppercase text-zinc-400">Search ⌘K</span>
+					</div>
+					<div class="p-2">
+						<div class="grid grid-cols-2 gap-2">
+							<div class=" border border-zinc-800 bg-zinc-900 p-3">
+								<div class="text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Getting Started</div>
+								<ul class="mt-2 space-y-1.5 text-[12.5px]">
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Installation</Link></li>
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Core Concepts</Link></li>
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Expression Mode</Link></li>
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Components</Link></li>
+								</ul>
+							</div>
+							<div class=" border border-zinc-800 bg-zinc-900 p-3">
+								<div class="text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Guides & API</div>
+								<ul class="mt-2 space-y-1.5 text-[12.5px]">
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Styling</Link></li>
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Animations</Link></li>
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-[#7F52FF]"></span> Vesk Native</Link></li>
+									<li><Link href="/posts" class="text-zinc-600 hover:text-zinc-100 no-underline flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Compiler</Link></li>
+								</ul>
+							</div>
+							<div class=" border border-zinc-800 bg-black p-3">
+								<div class="text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Ecosystem</div>
+								<ul class="mt-2 space-y-1.5 text-[12.5px]">
+									<li class="text-zinc-400 flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> npm Packages</li>
+									<li class="text-zinc-400 flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> API</li>
+									<li class="text-zinc-400 flex items-center gap-2"><span class="h-1 w-1 bg-zinc-700"></span> Deployment</li>
+								</ul>
+							</div>
+							<div class=" bg-zinc-900 p-3 text-white">
+								<div class="text-[11px] font-semibold tracking-widest uppercase text-white/60">Try in 30s</div>
+								<div class="mt-2 font-mono text-[11px] leading-4 text-zinc-600">npm create vesk@latest<br />cd my-app<br />npm run dev</div>
+								<div class="mt-3 inline-flex bg-zinc-900 px-3 py-1 text-[11px] font-semibold text-zinc-100">Copy →</div>
+							</div>
+						</div>
+					</div>
+					<div class="border-t border-zinc-800 bg-black px-4 py-3 flex items-center justify-between">
+						<span class="text-[11px] font-mono text-zinc-400">docs/guide/* → streamed as text/markdown</span>
+						<span class="text-[11px] font-medium text-zinc-600">Open →</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

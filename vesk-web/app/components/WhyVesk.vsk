@@ -1,0 +1,66 @@
+component WhyVesk {
+	<section id="why" class="border-b border-zinc-800">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="max-w-[720px]">
+				<div class="inline-flex items-center border border-zinc-800 bg-black px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Why Vesk</div>
+				<h2 class="mt-4 text-[32px] md:text-[42px] font-black tracking-[-0.04em] leading-[0.95] text-zinc-100">
+					Move guarantees<br />to <span class="text-zinc-400">build time.</span>
+				</h2>
+				<p class="mt-4 text-[15px] leading-6 text-zinc-400 max-w-[560px]">
+					Vesk is not “another framework.” It’s a compiler that preserves your semantics, eliminates unnecessary runtime, and fails the build instead of shipping broken native behavior.
+				</p>
+			</div>
+
+			<div class="mt-10 grid md:grid-cols-2 lg:grid-cols-3 gap-4">
+				<div class=" border border-zinc-800 bg-zinc-900 p-6 hover:border-zinc-700 hover: transition-colors">
+					<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><path d="M10 13H8"/><path d="M16 17H8"/><path d="M13 13h3"/></svg>
+					</div>
+					<h3 class="mt-4 text-[15px] font-semibold tracking-[-0.02em]">Compiler First</h3>
+					<p class="mt-2 text-[13.5px] leading-5 text-zinc-400">Important guarantees move from runtime to build time. If semantics can’t be preserved, the build fails.</p>
+					<div class="mt-4 inline-flex bg-black border border-zinc-800 px-2.5 py-1 text-[11px] font-mono text-zinc-400">fail-fast · deterministic</div>
+				</div>
+				<div class=" border border-zinc-800 bg-zinc-900 p-6 hover:border-zinc-700 hover: transition-colors">
+					<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8"><rect x="3" y="3" width="18" height="18" rx="0"/><path d="M9 9h6v6H9z"/></svg>
+					</div>
+					<h3 class="mt-4 text-[15px] font-semibold tracking-[-0.02em]">One Development Model</h3>
+					<p class="mt-2 text-[13.5px] leading-5 text-zinc-400">Consistent component and styling model across platforms. Learn once, target web and native.</p>
+					<div class="mt-4 inline-flex bg-black border border-zinc-800 px-2.5 py-1 text-[11px] font-mono text-zinc-400">.vsk · Tailwind</div>
+				</div>
+				<div class=" border border-zinc-800 bg-zinc-900 p-6 hover:border-zinc-700 hover: transition-colors">
+					<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8"><rect x="5" y="2" width="14" height="20" rx="0"/><path d="M12 18h.01"/></svg>
+					</div>
+					<h3 class="mt-4 text-[15px] font-semibold tracking-[-0.02em]">Native Applications</h3>
+					<p class="mt-2 text-[13.5px] leading-5 text-zinc-400">Vesk Native compiles toward native Kotlin - not a WebView wrapper. Material 3, Native APIs, real performance.</p>
+					<div class="mt-4 inline-flex bg-black border border-zinc-800 px-2.5 py-1 text-[11px] font-mono text-zinc-400">Kotlin · Material 3</div>
+				</div>
+				<div class=" border border-zinc-800 bg-zinc-900 p-6 hover:border-zinc-700 hover: transition-colors">
+					<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+					</div>
+					<h3 class="mt-4 text-[15px] font-semibold tracking-[-0.02em]">Developer Experience</h3>
+					<p class="mt-2 text-[13.5px] leading-5 text-zinc-400">Fast feedback loops, HMR, Tailwind utilities, icons, and familiar component ergonomics.</p>
+					<div class="mt-4 inline-flex bg-black border border-zinc-800 px-2.5 py-1 text-[11px] font-mono text-zinc-400">HMR · 48ms rebuilds</div>
+				</div>
+				<div class=" border border-zinc-800 bg-zinc-900 p-6 hover:border-zinc-700 hover: transition-colors">
+					<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.8"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
+					</div>
+					<h3 class="mt-4 text-[15px] font-semibold tracking-[-0.02em]">Performance</h3>
+					<p class="mt-2 text-[13.5px] leading-5 text-zinc-400">Optimized output without carrying an unnecessary runtime. Fine-grained reactivity, no VDOM tax.</p>
+					<div class="mt-4 inline-flex bg-black border border-zinc-800 px-2.5 py-1 text-[11px] font-mono text-zinc-400">no VDOM · 0.9kB</div>
+				</div>
+				<div class=" border border-zinc-800 bg-zinc-900 text-white p-6">
+					<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center">
+						<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#18181b" stroke-width="1.8"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+					</div>
+					<h3 class="mt-4 text-[15px] font-semibold tracking-[-0.02em]">Safety</h3>
+					<p class="mt-2 text-[13.5px] leading-5 text-zinc-400">If Vesk cannot safely preserve semantics, the compiler fails the build rather than silently producing incorrect native behavior.</p>
+					<div class="mt-4 inline-flex bg-zinc-900/10 border border-white/10 px-2.5 py-1 text-[11px] font-mono text-white">semantic preservation</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

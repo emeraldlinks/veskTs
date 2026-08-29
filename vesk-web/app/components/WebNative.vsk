@@ -1,0 +1,55 @@
+component WebNative {
+	<section class="border-b border-zinc-800 bg-black">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-20">
+			<div class="max-w-[720px] mx-auto text-center">
+				<div class="inline-flex items-center border border-zinc-800 bg-zinc-900 px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Web + Native</div>
+				<h2 class="mt-4 text-[28px] md:text-[40px] font-black tracking-[-0.04em] leading-[0.95]">One experience. <span class="text-zinc-400">Different targets.</span></h2>
+				<p class="mt-3 text-[15px] leading-6 text-zinc-400">Not “write once, run anywhere.” One polished development experience, with platform-appropriate output.</p>
+			</div>
+
+			<div class="mt-12 mx-auto max-w-[900px] border border-zinc-800 bg-zinc-900 p-6 md:p-8 ">
+				<div class="flex flex-col items-center">
+					<div class=" border border-zinc-900 bg-zinc-900 px-6 py-3 flex items-center gap-3">
+						<div class="h-7 w-7 bg-zinc-900 flex items-center justify-center text-zinc-100 font-black text-[11px]">V</div>
+						<span class="text-white font-semibold tracking-[-0.02em] text-[14px]">Vesk</span>
+						<span class="hidden sm:inline text-zinc-400 text-[12px] font-mono">.vsk - single source</span>
+					</div>
+					<div class="h-8 w-px bg-zinc-800"></div>
+					<div class="h-px w-full max-w-[560px] bg-zinc-800"></div>
+					<div class="flex w-full max-w-[560px] justify-between">
+						<div class="h-8 w-px bg-zinc-800 ml-[25%]"></div>
+						<div class="h-8 w-px bg-zinc-800 mr-[25%]"></div>
+					</div>
+					<div class="grid grid-cols-2 gap-6 w-full max-w-[560px]">
+						<div class=" border border-zinc-800 bg-zinc-900 p-5">
+							<div class="h-9 w-9 bg-zinc-900 flex items-center justify-center text-white"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="1.6"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10A15.3 15.3 0 0 1 12 2z"/></svg></div>
+							<div class="mt-3 text-[14px] font-semibold">Web</div>
+							<div class="text-[12px] text-zinc-400">Web Platform • ESM • SSR • Hydration • Islands • Tailwind</div>
+							<div class="mt-3 bg-black border border-zinc-800 px-2.5 py-1 inline-flex text-[11px] font-mono text-zinc-400">vercel • cloudflare • node</div>
+						</div>
+						<div class=" border border-zinc-800 bg-zinc-900 p-5">
+							<div class="h-9 w-9 bg-[#7F52FF] flex items-center justify-center text-white font-black text-[12px]">K</div>
+							<div class="mt-3 text-[14px] font-semibold">Native</div>
+							<div class="text-[12px] text-zinc-400">Kotlin • Compose • Material 3 • Native APIs • Animations</div>
+							<div class="mt-3 bg-black border border-zinc-800 px-2.5 py-1 inline-flex text-[11px] font-mono text-zinc-400">android • material • motion</div>
+						</div>
+					</div>
+					<div class="mt-8 grid grid-cols-3 gap-3 w-full max-w-[560px] text-center">
+						<div class=" bg-black border border-zinc-800 p-3">
+							<div class="text-[12px] font-semibold">Semantic preservation</div>
+							<div class="text-[11px] text-zinc-400">Compiler validates</div>
+						</div>
+						<div class=" bg-black border border-zinc-800 p-3">
+							<div class="text-[12px] font-semibold">Optimized emit</div>
+							<div class="text-[11px] text-zinc-400">No VDOM tax</div>
+						</div>
+						<div class=" bg-black border border-zinc-800 p-3">
+							<div class="text-[12px] font-semibold">Platform idioms</div>
+							<div class="text-[11px] text-zinc-400">Native feel</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}
