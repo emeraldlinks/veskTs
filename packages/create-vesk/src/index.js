@@ -52,12 +52,12 @@ writeFileSync(join(targetDir, 'package.json'), JSON.stringify({
 		typecheck: 'tsc --noEmit',
 	},
 	dependencies: {
-		'@vesk/compiler': '^0.2.9',
-		'@vesk/runtime': '^0.2.9',
-		'@vesk/types': '^0.2.9',
-		'@vesk/vesk-cli': '^0.2.9',
-		'@vesk/adapter': '^0.2.9',
-		'@vesk/plugin-tailwind': '^0.2.9',
+		'@vesk/compiler': '^0.2.10',
+		'@vesk/runtime': '^0.2.10',
+		'@vesk/types': '^0.2.10',
+		'@vesk/vesk-cli': '^0.2.10',
+		'@vesk/adapter': '^0.2.10',
+		'@vesk/plugin-tailwind': '^0.2.10',
 	},
 	devDependencies: {
 		tailwindcss: '^4.0.0',

@@ -1,6 +1,6 @@
 {
   "name": "@vesk/prettier-plugin",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "description": "Prettier plugin for the Vesk component language",
   "type": "module",
   "main": "./src/index.js",
@@ -34,7 +34,7 @@
     "prettier": "^3.0.0"
   },
   "dependencies": {
-    "@vesk/compiler": "^0.2.9"
+    "@vesk/compiler": "^0.2.10"
   },
   "publishConfig": {
     "access": "public"
