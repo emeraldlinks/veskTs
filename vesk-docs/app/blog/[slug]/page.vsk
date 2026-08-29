@@ -6,7 +6,7 @@ component BlogPost(props: { params: { slug: string } }) {
 	</Head>
 	<div class="page-wrap">
 		<div class="crumb">
-			<a href="/blog">blog</a><span class="crumb-sep">/</span>
+			<Link href="/blog">blog</Link><span class="crumb-sep">/</span>
 			<span>{props.params.slug}</span>
 		</div>
 		<h1 class="page-h1">Post: {props.params.slug}</h1>

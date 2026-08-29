@@ -69,6 +69,7 @@ export default component Posts {
 			}
 		</div>
 	</div>
+<Md content="/doc/guide/guide/reactivity.md" />  
 }
 
 

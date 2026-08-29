@@ -80,30 +80,30 @@ component Claims {
 component StartLinks {
 	<section class="start-grid reveal reveal-5">
 		<p class="lbl" style="margin:0 0 0.4rem;">start here</p>
-		<a class="start-link" href="/guide">
+		<Link class="start-link" href="/guide">
 			<span class="sl-path">/guide</span>
 			<span class="sl-name">read the guide</span>
 			<span class="sl-desc">complete documentation</span>
 			<span class="sl-arrow">→</span>
-		</a>
-		<a class="start-link" href="/guide/language/statement-mode">
+		</Link>
+		<Link class="start-link" href="/guide/language/statement-mode">
 			<span class="sl-path">/statement-mode</span>
 			<span class="sl-name">templates with superpowers</span>
 			<span class="sl-desc">bare jsx, if, for, switch</span>
 			<span class="sl-arrow">→</span>
-		</a>
-		<a class="start-link" href="/guide/reactivity">
+		</Link>
+		<Link class="start-link" href="/guide/reactivity">
 			<span class="sl-path">/reactivity</span>
 			<span class="sl-name">tracked cells</span>
 			<span class="sl-desc">track, effect, derived</span>
 			<span class="sl-arrow">→</span>
-		</a>
-		<a class="start-link" href="/posts">
+		</Link>
+		<Link class="start-link" href="/posts">
 			<span class="sl-path">/posts</span>
 			<span class="sl-name">watch it fetch live</span>
 			<span class="sl-desc">useFetch, retry, staleTime</span>
 			<span class="sl-arrow">→</span>
-		</a>
+		</Link>
 	</section>
 }
 

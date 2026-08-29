@@ -17,7 +17,7 @@ component GuideDoc(props: { params: { path: string | string[] } }) {
 	</Head>
 	<div class="g-main">
 		<div class="crumb">
-			<a href="/guide">guide</a><span class="crumb-sep">/</span>
+			<Link href="/guide">guide</Link><span class="crumb-sep">/</span>
 			<span>{docPath}</span><span class="crumb-sep">/</span>
 			<span>doc.md</span>
 		</div>
@@ -36,7 +36,7 @@ component GuideDoc(props: { params: { path: string | string[] } }) {
 		if (res.error && !src) {
 			<div class="error-panel">
 				<p class="ep-title">no source at this path</p>
-				<p>We couldn't compile /guide/{docPath} — there's no doc.md under that route. <a href="/guide">Back to the guide index →</a></p>
+				<p>We couldn't compile /guide/{docPath} — there's no doc.md under that route. <Link href="/guide">Back to the guide index →</Link></p>
 			</div>
 		}
 		if (src) {

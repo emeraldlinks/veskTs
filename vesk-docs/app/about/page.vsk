@@ -37,9 +37,9 @@ component About {
 		<div style="height: 2.5rem;"></div>
 		<p class="lbl" style="margin: 0 0 0.6rem;">explore</p>
 		<div style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-			<a class="btn" href="/guide">read the guide</a>
-			<a class="btn" href="/blog">blog</a>
-			<a class="btn" href="/statements">statement demos</a>
+			<Link class="btn" href="/guide">read the guide</Link>
+			<Link class="btn" href="/blog">blog</Link>
+			<Link class="btn" href="/statements">statement demos</Link>
 		</div>
 	</div>
 }

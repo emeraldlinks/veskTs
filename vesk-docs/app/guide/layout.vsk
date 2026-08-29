@@ -19,9 +19,9 @@ component SideNav {
 	const path = usePathname()
 	<nav class="g-nav" aria-label="Guide sections">
 		<p class="lbl">guide index</p>
-		<a class={path === '/guide' ? 'doc-link is-active' : 'doc-link'} href="/guide">
+		<Link class={path === '/guide' ? 'doc-link is-active' : 'doc-link'} href="/guide">
 			<span class="p">index</span><span class="tick"></span><span class="lead">→</span>
-		</a>
+		</Link>
 		for (const group of GUIDE) {
 			<div class="g-group">
 				<p class="g-group-title">{group.title}</p>

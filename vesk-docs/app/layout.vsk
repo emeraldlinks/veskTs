@@ -25,11 +25,11 @@ component Layout(props: LayoutProps) {
 		<details class="menum">
 			<summary>menu</summary>
 			<nav class="menum-panel" aria-label="Mobile">
-				<a href="/guide">guide</a>
-				<a href="/blog">blog</a>
-				<a href="/posts">data</a>
-				<a href="/statements">statements</a>
-				<a href="/about">about</a>
+				<Link href="/guide">guide</Link>
+				<Link href="/blog">blog</Link>
+				<Link href="/posts">data</Link>
+				<Link href="/statements">statements</Link>
+				<Link href="/about">about</Link>
 			</nav>
 		</details>
 	</header>
@@ -43,29 +43,29 @@ component Footer {
 	<footer class="site-foot">
 		<div class="foot-grid">
 			<div>
-				<a class="foot-brand" href="/">vesk<span class="dot">.</span><span class="ext">vsk</span></a>
+				<Link class="foot-brand" href="/">vesk<span class="dot">.</span><span class="ext">vsk</span></Link>
 				<p class="foot-tag">A compiler-first framework for the post-VDOM web. Server HTML and per-cell updates from one `.vsk` source.</p>
 			</div>
 			<div class="foot-col">
 				<p class="foot-col-title">guide</p>
-				<a href="/guide">intro</a>
-				<a href="/guide/language/statement-mode">statement mode</a>
-				<a href="/guide/reactivity">reactivity</a>
-				<a href="/guide/ssr-hydration">ssr + hydration</a>
+				<Link href="/guide">intro</Link>
+				<Link href="/guide/language/statement-mode">statement mode</Link>
+				<Link href="/guide/reactivity">reactivity</Link>
+				<Link href="/guide/ssr-hydration">ssr + hydration</Link>
 			</div>
 			<div class="foot-col">
 				<p class="foot-col-title">live demos</p>
-				<a href="/posts">data fetching</a>
-				<a href="/statements">statement mode</a>
-				<a href="/blog">blog</a>
-				<a href="/about">about</a>
+				<Link href="/posts">data fetching</Link>
+				<Link href="/statements">statement mode</Link>
+				<Link href="/blog">blog</Link>
+				<Link href="/about">about</Link>
 			</div>
 			<div class="foot-col">
 				<p class="foot-col-title">project</p>
-				<a href="/about">about vesk</a>
-				<a href="/blog">news</a>
-				<a href="/guide/configuration">configuration</a>
-				<a href="/guide/deployment">deployment</a>
+				<Link href="/about">about vesk</Link>
+				<Link href="/blog">news</Link>
+				<Link href="/guide/configuration">configuration</Link>
+				<Link href="/guide/deployment">deployment</Link>
 			</div>
 		</div>
 		<div class="ledger">
