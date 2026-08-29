@@ -1,4 +1,5 @@
 import { resolve, sep } from 'node:path';
+import { existsSync, statSync, readFileSync } from 'node:fs';
 
 /**
  * Resolves `relPath` against `baseDir` and returns the absolute path ONLY if
@@ -12,6 +13,33 @@ export function resolveWithin(baseDir: string, relPath: string): string | null {
   const prefix = base + sep;
   if (!target.startsWith(prefix)) return null;
   return target;
+}
+
+/**
+ * Installs `globalThis.__vsk_md_read_file` — the server-side backing of <Md>
+ * runtime markdown-file loading. Reads ONLY `.md`/`.markdown` files strictly
+ * inside one of the given public dirs (never above them, never other file
+ * types) and returns null otherwise, so a client-supplied path can only ever
+ * surface a public markdown file, never arbitrary filesystem content.
+ */
+export function installMdReadHook(publicDirs: string[]): void {
+  const dirs = publicDirs.map((d) => resolve(d));
+  (globalThis as Record<string, unknown>).__vsk_md_read_file = (p: string): string | null => {
+    for (const dir of dirs) {
+      try {
+        let rel = String(p);
+        while (rel.length > 0 && rel.charCodeAt(0) === 47) rel = rel.slice(1); // strip leading '/'
+        const abs = resolveWithin(dir, rel);
+        if (!abs) continue;
+        const lower = abs.toLowerCase();
+        if (!lower.endsWith('.md') && !lower.endsWith('.markdown')) continue;
+        if (existsSync(abs) && statSync(abs).isFile()) return readFileSync(abs, 'utf8');
+      } catch {
+        /* try the next public dir */
+      }
+    }
+    return null;
+  };
 }
 
 /**

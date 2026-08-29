@@ -39,7 +39,7 @@
    `resource.ts`, or `router.ts` hydration paths, run the repo-level
    production hydration check:
    ```bash
-   cd /root/vesk && node hydration-test.mjs
+   cd /root/vesk && node tests/hydration-test.mjs
    ```
    Unit tests alone (`npx tsx src/<file>.test.ts`) are NOT sufficient for
    reactivity/hydration work. Rebuild `dist/` first.
@@ -55,6 +55,23 @@
    `[UNVERIFIED]`. Keep `docs.md`, `llms.txt`, and this file accurate to the
    code.
 
+7. **TrackDecl `&` means auto-tracked.** `const &[x] = track(v)` / `let &[x] = track(v)`
+   declares an auto-tracked binding: read/write `x` directly (`x`, `x = 1`,
+   `x++`, `x === y`, `'/api/' + x`). Do **not** use `get(x)`/`set(x, v)` with `&`;
+   those are only for plain `const x = track(v)` outside `&` (or the second
+   binding `const &[x, raw] = track(v)` → `raw` is `Tracked<T>`). Docs, JSDoc
+   and tests must use `const &[…] = track(…)` for `.vsk` examples, and `get`/`set`
+   only for non-`&` cases. Public markdown paths for `<Md>` **must** be absolute
+   with `.md`/`.markdown` (`"/game.md"`, `"/welcome.md"`, `"/docs/guide.md"`);
+   `"/welcome"` or `"game.md"` render as literal markdown.
+
+8. **Public-path loading is constrained.** `isPublicMarkdownPath` rejects `//`,
+   `?`, `#`, `\` and requires leading `/` + `.md` suffix. Server reads via the
+   adapter-installed `__vsk_md_read_file` hook (`installMdReadHook([publicDir])`
+   in both `vesk dev` and adapter dev/prod servers) and stashes in
+   `__vsk_ssr_data`; client uses `mdPathCache`/`mdPathCells`/`mdPathInflight`
+   with literal fallback. Keep the hook installed in both servers.
+
 ## Commands
 
 ```bash
@@ -69,10 +86,10 @@ npx tsx src/isr.test.ts
 npm run typecheck              # tsc --noEmit
 npm run build                  # tsc -p tsconfig.build.json -> dist/
 # after editing shared source, also rebuild packages and run root hydration check:
-cd /root/vesk && npx tsx packages/cli/src/build-packages.ts && node hydration-test.mjs
+cd /root/vesk && npx tsx packages/cli/src/build-packages.ts && node tests/hydration-test.mjs
 ```
 Do not run the full `scripts/test.js` while iterating; use targeted tests.
-At completion, run `node hydration-test.mjs` from the repo root for any
+At completion, run `node tests/hydration-test.mjs` from the repo root for any
 reactivity/hydration change.
 
 ## File responsibility map
@@ -89,12 +106,12 @@ reactivity/hydration change.
 | `router.ts` | router factories + nav | `router.test.ts` |
 | `router-components.ts` | Link/NavLink/Outlet/hooks/guards | `router.test.ts` |
 | `router-match.ts` | route tree matching | `router.test.ts` |
-| `resource.ts` | resources, SSR handoff, cache | `resource.test.ts` |
-| `request.ts` | server request/response, cookies, hooks, cors, security | `request.test.ts` |
+| `resource.ts` | resources, SSR handoff, cache, `useFetch.stream` (provider re-evaluated per fetch, `into` progressive, `onChunk`, `resolveFetchUrl` prefers `ctx.resolveUrl`), `streamText`, `HttpError`/`TimeoutError` | `resource.test.ts` |
+| `request.ts` | server request/response, cookies, hooks, cors, security, `VeskRequest.resolveUrl`/`from`/`host`/`origin`, `VeskResponse.stream(ReadableStream)` | `request.test.ts` |
 | `isr.ts` | ISR caching + revalidation | `isr.test.ts` |
 | `form.ts` | Form/Field + rules | `form.test.ts` |
 | `action.ts` | server actions, validation | via `form.test.ts` |
-| `md.ts` | tokenizer markdown renderer | `md.test.ts` |
+| `md.ts` | tokenizer markdown renderer, polymorphic `content` (string / `const &[x]=track` cell / `useFetch.stream` resource / public `"/…/*.md"` via `__vsk_md_read_file` hook, `mdPathCache`/`Cells`/`Inflight`, literal fallback) | `md.test.ts` |
 | `seo.ts` | JSON-LD + schemas | `seo.test.ts` |
 | `image.ts` | Image component | `image.test.ts` |
 | `portal.ts` | Portal | (no dedicated file) |
@@ -138,5 +155,5 @@ reactivity/hydration change.
 - Don't claim suspense works: `suspense.ts` has no implementation yet — use
   the `if (loading)` + `createResource` pattern.
 - Don't ship reactivity/hydration changes without running
-  `node hydration-test.mjs` at the repo root.
+  `node tests/hydration-test.mjs` at the repo root.
 

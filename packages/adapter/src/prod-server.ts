@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
-import { resolveWithin } from '@vesk/adapter/src/paths';
+import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const _require = createRequire(import.meta.url);
@@ -20,6 +20,30 @@ async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAU
     chunks.push(chunk);
   }
   return Buffer.concat(chunks);
+}
+
+/**
+ * Writes a handler Response to the socket, piping a streaming body
+ * chunk-by-chunk (SSE / text streams) instead of buffering everything.
+ */
+async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  const body = response.body;
+  if (body && typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    } catch {
+      /* stream aborted by the client */
+    }
+    res.end();
+    return;
+  }
+  res.end(await response.text());
 }
 
 export function bodyTooLarge(maxBytes: number): Error & { status: number } {
@@ -126,6 +150,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
   if (!process.env.NODE_ENV) process.env.NODE_ENV = 'production';
   const staticDir = resolve(outDir, 'static');
   const configPath = resolve(outDir, 'config.json');
+  installMdReadHook([resolve(staticDir, 'public')]);
 
   if (!existsSync(configPath)) {
     console.error(`vesk start: no build found at ${outDir}`);
@@ -377,9 +402,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       try {
         const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
         const response = await mod.handleAction(webRequest, actionId);
-        const body = await response.text();
-        res.writeHead(response.status, Object.fromEntries(response.headers));
-        res.end(body);      } catch (e) {
+        await deliverResponse(res, response);      } catch (e) {
         const status = errorStatus(e, 500);
         const message = status === 500 && process.env.NODE_ENV === 'production'
           ? 'Internal Server Error'
@@ -400,9 +423,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
               try {
                 const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
                 const response = await mod.handle(webRequest);
-                const body = await response.text();
-                res.writeHead(response.status, Object.fromEntries(response.headers));
-                res.end(body);
+                await deliverResponse(res, response);
                 return;
               } catch (e) {
                 const status = errorStatus(e, 500);

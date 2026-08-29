@@ -631,6 +631,86 @@ it('writes resolved data into a tracked cell via createResource', async () => {
   expect(get(cell as Tracked)).toEqual([{ id: 1 }]);
 });
 
+// ============================================================
+// useFetch.stream — progressive chunks into a cell
+// ============================================================
+console.log('\n=== useFetch.stream — progressive stream chunks ===');
+
+function streamBody(chunks: string[], delayMs = 4): ReadableStream {
+  const encoder = new TextEncoder();
+  return new ReadableStream({
+    async start(controller) {
+      for (const c of chunks) {
+        controller.enqueue(encoder.encode(c));
+        await sleep(delayMs);
+      }
+      controller.close();
+    },
+  });
+}
+
+function streamingResponse(chunks: string[], status = 200): Response {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    statusText: String(status),
+    body: streamBody(chunks),
+    text: () => Promise.resolve(chunks.join('')),
+  } as unknown as Response;
+}
+
+it('streams chunks into the tracked `into` cell progressively', async () => {
+  cleanupGlobals();
+  const cell = track('');
+  const chunks = ['# Hello', '\n\nworld', '!'];
+  const totals: string[] = [];
+  const mock = mockFetch(() => Promise.resolve(streamingResponse(chunks)));
+  useFetch.stream('/api/doc', { into: cell, onChunk: (_c, total) => { totals.push(total); } });
+  await waitFor(() => (get(cell) as string).length === '# Hello\n\nworld!'.length, 5000);
+  expect(get(cell)).toBe('# Hello\n\nworld!');
+  expect(mock.calls.length).toBe(1);
+  expect(mock.calls[0].url).toBe('/api/doc');
+  // progressive delivery: at least one intermediate total before the last
+  if (totals.length < 2) throw new Error(`expected intermediate chunks, got ${totals.length} total(s)`);
+  expect(totals[totals.length - 1]).toBe('# Hello\n\nworld!');
+  mock.restore();
+});
+
+it('re-evaluates URL-provider functions on refresh (stale-URL fix)', async () => {
+  cleanupGlobals();
+  const cell = track('');
+  let path = '/a.md';
+  const mock = mockFetch(({ url }) => Promise.resolve(streamingResponse([`# ${url}`])));
+  const res = useFetch.stream(() => path, { key: 'doc', into: cell });
+  await waitFor(() => (get(cell) as string).includes('/a.md', 0), 5000);
+  expect(mock.calls[0].url).toBe('/a.md');
+  path = '/b.md';
+  res.refresh();
+  await waitFor(() => (get(cell) as string).includes('/b.md', 0), 5000);
+  expect(mock.calls[mock.calls.length - 1].url).toBe('/b.md');
+  expect((res as any).into).toBe(cell);
+  mock.restore();
+});
+
+it('streams through the SSR fetch hook with base-url resolution', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vesk_ssr_base_url = 'http://localhost:4173';
+  const seen: string[] = [];
+  (globalThis as any).__vesk_ssr_fetch = (url: string) => {
+    seen.push(url);
+    return Promise.resolve(streamingResponse(['p1', 'p2']));
+  };
+  const cell = track('');
+  const res = useFetch.stream('/api/docs/stream', { into: cell });
+  await waitFor(() => !res.loading, 5000);
+  expect(seen.length).toBe(1);
+  expect(seen[0]).toBe('http://localhost:4173/api/docs/stream');
+  expect(get(cell)).toBe('p1p2');
+  expect((globalThis as any).__vsk_ssr_data?.['/api/docs/stream']).toBe('p1p2');
+  cleanupGlobals();
+});
+
 // Summary
 await asyncChain;
 console.log(`\n${'='.repeat(50)}`);

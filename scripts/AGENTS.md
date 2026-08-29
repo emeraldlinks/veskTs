@@ -22,7 +22,7 @@ node scripts/release.mjs <version> --dry-run
 ## Do / Don't
 
 **Do**
-- Run `node hydration-test.mjs` after reactivity/hydration changes.
+- Run `node tests/hydration-test.mjs` after reactivity/hydration changes.
 - Verify port availability before running `test.js`.
 
 **Don't**

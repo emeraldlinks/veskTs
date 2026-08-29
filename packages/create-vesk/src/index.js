@@ -361,6 +361,8 @@ writeFileSync(join(appDirPath, 'statements', 'page.vsk'), [
 
 // ── app/middleware.ts ──
 writeFileSync(join(appDirPath, 'middleware.ts'), [
+	`import type { MiddlewareContext } from '@vesk/types';`,
+	``,
 	`// Vesk Middleware — onion model (ctx, next)`,
 	`// ctx = { request, params, url, locals, cookies, set, get }`,
 	`//   ctx.set('user', val) → ctx.locals.user`,
@@ -368,9 +370,8 @@ writeFileSync(join(appDirPath, 'middleware.ts'), [
 	`// next() — passes to next middleware or page render`,
 	`// next('/rewrite') — rewrites URL in place`,
 	`// Short-circuit: return Response without calling next()`,
-	`// Types come from @vesk/types (import type { MiddlewareContext }).`,
 	``,
-	`export async function middleware(ctx, next) {`,
+	`export async function middleware(ctx: MiddlewareContext, next: () => Promise<Response | void>) {`,
 	`\tctx.set('startTime', Date.now());`,
 	`\treturn next();`,
 	`}`,

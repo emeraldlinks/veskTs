@@ -116,7 +116,7 @@ export async function handleRequest(request) {
     return new Response(null, { status: 308, headers: { Location: '/_vesk/static/public' + (pathname.endsWith('/') ? pathname + 'index.html' : pathname + '.html') } });
   }
 
-  let mwCtx = { params: {}, url, locals: {}, cookies: {}, request, set() {}, get() { return undefined; } };
+  let mwCtx = { params: {}, url, locals: {}, cookies: {}, request, resolveUrl(u) { return new URL(u, request.url).href; }, set() {}, get() { return undefined; } };
   if (${hasMwLiteral}) {
     mwCtx = {
       request,
@@ -124,6 +124,7 @@ export async function handleRequest(request) {
       url,
       locals: {},
       cookies: typeof parseCookies !== 'undefined' ? parseCookies(request.headers.get('cookie') || '') : {},
+      resolveUrl(u) { return new URL(u, request.url).href; },
       set(key, value) { this.locals[key] = value; },
       get(key) { return this.locals[key]; },
     };

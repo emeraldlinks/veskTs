@@ -19,7 +19,7 @@ repo-root `/root/vesk/AGENTS.md` (these rules extend — never contradict — th
   statement mode (bare JSX, `if`/`for`/`while`/`switch`/`try`, guard-clause early returns). Every
   body-level feature AND every test suite exercising bodies must cover **both** modes.
 - **Every job completes with tests** — including the production-hydration path via
-  `node hydration-test.mjs` (repo root) for reactivity/hydration changes. Unit tests alone are not
+  `node tests/hydration-test.mjs` (repo root) for reactivity/hydration changes. Unit tests alone are not
   sufficient.
 - `.vsk` is a superset of TS: every TS construct must parse, survive codegen, and pass through
   `vskToTsx` for `tsc`.
@@ -56,7 +56,7 @@ npm run test   # = test:unit (scripts/test.js) + test:dev
 | IR shape (`ir.ts`) | `ir-generator.ts`, `server-jsgen.ts`, `client-codegen.ts`, `isStaticIR`, integration tests |
 | Tracked-variable semantics | `ir-generator.ts`, `client-codegen.ts` (`transformTracked`), `track-codegen.test.ts`, hydration test |
 | SSR output | `server-jsgen.ts`, `server-render.ts`, `server-head.ts`, `server-codegen.test.ts` |
-| Client DOM/hydration | `client-codegen.ts`, `client-codegen.test.ts`, `hydration-test.mjs` |
+| Client DOM/hydration | `client-codegen.ts`, `client-codegen.test.ts`, `tests/hydration-test.mjs` |
 | Routes/scans | `router.ts`, `api-routes.ts`, `scan.ts`, `scan.test.ts`, `router.test.ts`, `components-scan.test.ts` |
 | Middleware | `middleware.ts` |
 | Config/security | `config.ts`, `server-utils.ts`, `config.test.ts`, `server-utils.test.ts` |

@@ -388,6 +388,21 @@ export class VeskRequest extends ServerRequest {
 		this._body = null;
 		this._bodyPromise = null;
 		this._parsedUrl = null;
+		const cookieHeader = this.headers?.get('cookie') || '';
+		if (cookieHeader) {
+			for (const part of cookieHeader.split(';')) {
+				const eq = part.indexOf('=');
+				if (eq > 0) {
+					const name = part.slice(0, eq).trim();
+					const val = part.slice(eq + 1).trim();
+					try {
+						this._cookies[name] = decodeURIComponent(val);
+					} catch {
+						this._cookies[name] = val;
+					}
+				}
+			}
+		}
 		Object.defineProperty(this, 'body', {
 			get: () => {
 				if (!this._bodyPromise) {
@@ -398,6 +413,57 @@ export class VeskRequest extends ServerRequest {
 			configurable: true,
 			enumerable: true,
 		});
+	}
+
+	/**
+	 * The request's host header (honoring `x-forwarded-host` when
+	 * setTrustProxy() is enabled). Falls back to the parsed URL host.
+	 */
+	get host(): string {
+		const trust = this._security.trustProxy === true;
+		const fwd = trust ? this.headers?.get('x-forwarded-host') : undefined;
+		const header = typeof fwd === 'string' && fwd ? fwd : (this.headers?.get('host') || '');
+		if (header) return header;
+		return this.parsedUrl.host || 'localhost';
+	}
+
+	/** Absolute origin (`protocol://host`) — the base for resolving relative URLs. */
+	get origin(): string {
+		return `${this.protocol}://${this.host}`;
+	}
+
+	/**
+	 * Resolves a possibly-relative URL against this request's own origin.
+	 * Absolute URLs (scheme or protocol-relative `//`) pass through untouched.
+	 * Used by the runtime SSR fetcher (`resolveFetchUrl`) to make in-app
+	 * fetches (e.g. `/api/...`) work during server rendering.
+	 */
+	resolveUrl(url: string): string {
+		if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return url;
+		return new URL(url, this.origin).href;
+	}
+
+	/** locals map accessors so <VeskRequest> can double as the middleware ctx. */
+	set(key: string, value: unknown): void {
+		this._locals[key] = value;
+	}
+	get(key: string): unknown {
+		return this._locals[key];
+	}
+
+	/**
+	 * Wraps an inbound platform `Request` (from dev/prod/platform handlers)
+	 * into a VeskRequest carrying the same method, headers and cookie store.
+	 * Params/locals can be seeded so useParams()/useRequest() work in renders.
+	 */
+	static from(request: Request, init?: { params?: Record<string, string>; locals?: Record<string, unknown> }): VeskRequest {
+		const vreq = new VeskRequest(request instanceof Request ? request.url : String(request), {
+			method: request.method,
+			headers: request.headers,
+		} as RequestInit);
+		if (init?.params) vreq._params = { ...init.params };
+		if (init?.locals) vreq._locals = { ...init.locals };
+		return vreq;
 	}
 
 	get parsedUrl(): URL {
@@ -627,6 +693,11 @@ class _VeskResponse extends ServerResponse {
 			...init,
 			headers: { 'Content-Type': 'text/html; charset=utf-8', ...init?.headers },
 		});
+	}
+
+	/** Chunked streaming response over a `ReadableStream` body (SSE, file streams, …). */
+	static stream(readable: ReadableStream, init?: ResponseInit): _VeskResponse {
+		return new _VeskResponse(readable as unknown as BodyInit, init);
 	}
 }
 

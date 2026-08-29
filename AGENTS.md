@@ -40,7 +40,7 @@
 - Event handler attributes (`on*`) are excluded from SSR HTML entirely.
 - **Every job must be completed with tests.** Never call a feature/fix done without
   adding tests that rigorously exercise it — including the production-hydration
-  path via `hydration-test.mjs` (run: `node hydration-test.mjs`). Unit tests alone
+  path via `tests/hydration-test.mjs` (run: `node tests/hydration-test.mjs`). Unit tests alone
   are not sufficient for reactivity/hydration work.
 - `.vsk` is a superset of TypeScript: every TS construct must parse, survive
   codegen, and pass through `vskToTsx` for `tsc`.
@@ -53,7 +53,7 @@ npx tsx packages/compiler/src/<file>.test.ts # run one compiler test file
 npm run typecheck                            # tsc --noEmit for types + compiler + runtime + adapter
 node scripts/test.js                         # full suite: builds all packages first — not for iteration
 npm test                                     # unit suite + dev E2E (tests/dev-test.mjs)
-node hydration-test.mjs                      # production hydration path; needs test-app dev server
+node tests/hydration-test.mjs                # production hydration path; needs test-app dev server
                                              # on :3000 and CHROMIUM_PATH env (defaults to a Termux path;
                                              # set to your chrome/chromium binary)
 ```
@@ -65,7 +65,7 @@ node hydration-test.mjs                      # production hydration path; needs 
 - Nested AGENTS.md files add module rules: `scripts/AGENTS.md` (ports, release
   order, sentinel formats) and `packages/runtime/AGENTS.md` (barrel split,
   no-batch rule). They extend this file — read both when touching those areas.
-- `hydration-test.mjs`, `production-hydration-test.mjs` etc. at repo root are
+- `tests/hydration-test.mjs`, `tests/production-hydration-test.mjs` etc. in `tests/` are
   puppeteer-core probes against a running server; `joe/test/` holds the Joe app's
   hydration/event/HMR tests.
 - TODO.md is the living task tracker — read at session start, update after work.

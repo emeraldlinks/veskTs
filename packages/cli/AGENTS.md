@@ -7,7 +7,7 @@ Module-specific agent rules. Extends the repo-level `/root/vesk/AGENTS.md`.
 1. **After every `packages/compiler/src` edit, run `npx tsx packages/cli/src/build-packages.ts`.** The dev server and tests resolve compiler source through `dist/` via the `@vesk/compiler/src/*` exports map; source changes are invisible until rebuilt.
 2. **Do not run `scripts/test.js` while iterating.** It builds then runs the full suite. Use targeted tests: `npx tsx packages/compiler/src/<file>.test.ts`.
 3. **Statement mode is first-class.** Any body-level feature/fix and any test suite exercising component bodies must cover both expression and statement mode.
-4. **Every reactivity/hydration change ships with `node hydration-test.mjs`** (repo root), not just unit tests.
+4. **Every reactivity/hydration change ships with `node tests/hydration-test.mjs`** (repo root), not just unit tests.
 5. **ESM-only.** All source is ESM; no CJS.
 6. **`batch` does not exist in the runtime** — never import it.
 7. **haul is parked — do not revive it.** The native Go engine and its platform

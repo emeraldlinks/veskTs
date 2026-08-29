@@ -6,7 +6,7 @@
 
 | File | Purpose |
 |---|---|
-| `test.js` | Full test runner: builds packages, runs all compiler/runtime/adapter/plugin-tailwind unit tests, then E2E tests (`code-split.test.ts`, `hmr.test.ts`, `hydration.test.ts`), then `production-hydration-test.mjs` and `edge-test.mjs`. Exits non-zero on failure. |
+| `test.js` | Full test runner: builds packages, runs all compiler/runtime/adapter/plugin-tailwind unit tests, then E2E tests (`code-split.test.ts`, `hmr.test.ts`, `hydration.test.ts`), then `tests/production-hydration-test.mjs` and `tests/edge-test.mjs`. Exits non-zero on failure. |
 | `e2e-setup.js` | Spins up the E2E environment: builds `test-app/` with code-split, starts prod server on `3099`, starts dev server on `3002`, prints `E2E_SERVERS_READY`, then hangs. Kills both on SIGTERM. |
 | `build-lsp.js` | Rollup bundle for `packages/lsp/src/server.ts` → a single ESM server file for the editor extensions. Uses `@rollup/wasm-node` with `node-resolve`, `commonjs`, `json`, `typescript` plugins. |
 | `release.mjs` | Release automation: bumps all package versions + internal dep refs to `<version>`, runs `npm run build` per package in publish order, then `npm publish --access public` (or `--dry-run`). |

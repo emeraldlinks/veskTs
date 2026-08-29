@@ -142,11 +142,11 @@ for (const dir of testDirs) {
   }
 }
 
-// Run standalone production-hydration-test.mjs
-const prodHydrationPath = resolve(root, 'production-hydration-test.mjs')
+// Run standalone tests/production-hydration-test.mjs (now in tests/)
+const prodHydrationPath = resolve(root, 'tests', 'tests/production-hydration-test.mjs')
 if (existsSync(prodHydrationPath)) {
   totalFiles++
-  process.stdout.write('production-hydration-test.mjs ... ')
+  process.stdout.write('tests/production-hydration-test.mjs ... ')
   try {
     const output = runTestFile(prodHydrationPath, e2eEnv)
     const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
@@ -172,11 +172,11 @@ if (existsSync(prodHydrationPath)) {
   }
 }
 
-// Run standalone edge-test.mjs (after prod hydration — edge build overwrites .vesk)
-const edgeTestPath = resolve(root, 'edge-test.mjs')
+// Run standalone tests/edge-test.mjs (now in tests/; after prod hydration — edge build overwrites .vesk)
+const edgeTestPath = resolve(root, 'tests', 'tests/edge-test.mjs')
 if (existsSync(edgeTestPath)) {
   totalFiles++
-  process.stdout.write('edge-test.mjs ... ')
+  process.stdout.write('tests/edge-test.mjs ... ')
   try {
     const output = runTestFile(edgeTestPath)
     const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)

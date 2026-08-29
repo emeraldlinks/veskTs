@@ -289,6 +289,7 @@ export function generateSsrFunction(
       '    url,',
       "    locals: Object.assign({}, __rootLocals),",
       "    cookies: parseCookies(request.headers.get('cookie') || ''),",
+      '    resolveUrl(u) { return new URL(u, request.url).href; },',
       '    set(key, value) { this.locals[key] = value; },',
       '    get(key) { return this.locals[key]; },',
       '  };',
@@ -304,7 +305,17 @@ export function generateSsrFunction(
       '  }',
     ].join('\n');
   } else {
-    bodyCode = dataCode;
+    const indentedRender = dataCode.split('\n').map(l => l ? `  ${l}` : '').join('\n');
+    bodyCode = [
+      '  // Request context for SSR helpers (useParams/useRequest, relative useFetch resolution).',
+      '  const prevReq = globalThis.__vesk_request;',
+      '  globalThis.__vesk_request = VeskRequest.from(request, { params });',
+      '  try {',
+      indentedRender,
+      '  } finally {',
+      '    globalThis.__vesk_request = prevReq;',
+      '  }',
+    ].join('\n');
   }
 
   let registerActionsCode: string;
@@ -379,6 +390,7 @@ export function generateSsrFunction(
     '    url: pageUrl,',
     '    locals: {},',
     "    cookies: parseCookies(request.headers.get('cookie') || ''),",
+    '    resolveUrl(u) { return new URL(u, pageUrl.href).href; },',
     '  };',
     '  try {',
     '    const result = await action.execute(input, {',
@@ -410,7 +422,7 @@ export function generateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

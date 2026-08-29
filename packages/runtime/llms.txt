@@ -168,17 +168,24 @@ boundary_fn_running_block(fn: (state: unknown) => unknown, flags?: number, state
 ```ts
 createResource<T>(fn: () => Promise<T>, key?: string, into?: Tracked, options?: UseFetchOptions<T> = {}): Resource<T>
 setSsrData(key: string, value: unknown): void
-clearSsrData(): void
+clearSsrData(key?: string): void
+getSsrData(key: string): unknown | undefined
+setSsrSink(sink: SsrDataSink | null): void
 resolveSsrResources(): Promise<Record<string, unknown>>
 useFetch<T = unknown>(urlOrFn: string | (() => Promise<T>), options?: UseFetchOptions<T> = {}): Resource<T>
 useFetch.text<T = string>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T>
 useFetch.json<T = unknown>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T>
 useFetch.arrayBuffer<T = ArrayBuffer>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T>
-interface Resource<T> extends PromiseLike<T> { loading: boolean; error: unknown; data: T | undefined; _state?: Tracked; refresh: () => void; abort: () => void }
-interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> { key?: string; into?: Tracked; body?: unknown; staleTime?: number; keepPreviousData?: boolean; retry?: number; retryDelay?: number; timeout?: number; enabled?: boolean; dedupe?: boolean }
+useFetch.stream(urlOrFn: string | (() => string), options?: Omit<UseFetchOptions<string>, 'body'> & { into?: Tracked<string>; onChunk?: (chunk: string, total: string) => void }): Resource<string> // .into === options.into; provider re-evaluated per fetch
+streamText(res: Response, into?: Tracked<string>, onChunk?: (chunk: string, total: string) => void): Promise<string> // TextDecoder chunk loop → set(into, total)
+resolveFetchUrl(url: string): string // prefers ctx.resolveUrl → ctx.url string → __vesk_ssr_base_url; absolute URLs pass through
+interface Resource<T> extends PromiseLike<T> { loading: boolean; error: unknown; data: T | undefined; _state?: Tracked; refresh: () => void; abort: () => void; into?: Tracked<T> }
+interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> { key?: string; into?: Tracked<T>; body?: unknown; staleTime?: number; keepPreviousData?: boolean; retry?: number; retryDelay?: number; timeout?: number; enabled?: boolean; dedupe?: boolean }
+interface UseFetchStreamOptions extends Omit<UseFetchOptions<string>, 'body'> { into?: Tracked<string>; onChunk?: (chunk: string, total: string) => void }
+interface SsrDataSink { set(key: string, value: unknown): void; get(key: string): unknown | undefined; snapshot(): Record<string, unknown>; clear(): void }
 ```
-Non-index module exports: `class HttpError extends Error` (`.status: number`),
-`class TimeoutError extends Error`, `mutate(key, data?)` [not in index].
+Non-index module exports: `class HttpError extends Error` (`.status: number`, `.statusCode: number`),
+`class TimeoutError extends Error`, `mutate(key, data?)` [not in index]. `useFetch.stream` fixes the stale-URL bug: `urlOrFn` provider is re-evaluated on every fetch/`refresh()`, so `const &[docPath] = track('welcome')` → `() => '/api/docs/' + docPath` propagates without recreating the resource (supply `key` when URL is dynamic).
 
 ### 1h. Components/helpers from other modules
 ```ts
@@ -202,7 +209,7 @@ minLength(n: number, msg?: string): ValidationRule
 maxLength(n: number, msg?: string): ValidationRule
 pattern(re: RegExp, msg?: string): ValidationRule
 custom(fn: (v: unknown) => boolean, msg?: string): ValidationRule
-Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string
+Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string // content: string | Tracked<string> | Resource<string> (streamed via useFetch.stream) | absolute public path "/…/*.md" (e.g. "/game.md", "/welcome.md", "/docs/guide.md" — server: __vsk_md_read_file hook constrained to publicDir + .md/.markdown, //?#\ rejected, stashed in __vsk_ssr_data['md:'+path]; client: fetch(path) with mdPathCache/Cells/Inflight, literal fallback when missing)
 configureMd(policy?: { html?: MdHtmlMode; allowTags?: string[] }): void
 getMdPolicy(): { html: MdHtmlMode; allowTags: string[] }
 renderMarkdownEx(md: string, options?): { html: string; warnings: MdHtmlWarning[] }
@@ -240,8 +247,8 @@ headers(): Record<string, string | Function | undefined>   // Proxy; .get(name),
 locals(): Record<string, unknown>
 class ServerRequest extends Request { get/set cookies: CookieStore; get/set params: Record<string,string>; get/set locals: Record<string,unknown> }
 class ServerResponse extends Response { static json(body, init?); static redirect(url, status=307); static rewrite(url); static next() }
-class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown> }
-VeskResponse  // Proxy over an internal _VeskResponse Response subclass
+class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown>; resolveUrl(url: string): string; static from(request: Request, init?: { params?: Record<string,string>; locals?: Record<string,unknown> }): VeskRequest; get host(): string; get origin(): string; get/set query, ip, protocol, hostname, parsedUrl }
+VeskResponse  // Proxy over an internal _VeskResponse Response subclass; static stream(readable: ReadableStream, init?: ResponseInit): VeskResponse — chunked streaming (Transfer-Encoding: chunked, delivered via deliverResponse getReader loop; readable as unknown as BodyInit)
 withValidation(request: Request, schema: { safeParse: (data) => { success: boolean; error?: { issues: {path:(string|number)[];message:string}[] }; data?: unknown } }, opts?: { jsonOnly?: boolean }): Promise<unknown | Response>
 useBody(): Promise<unknown>
 useParams(): Record<string, string>       // request params (NOT router)

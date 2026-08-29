@@ -1,7 +1,7 @@
 # VeskTS Development Summary - 2026-08-02
 
 ## Overview
-This session added three demo pages exercising every supported JS statement in the compiler (if/else, ternary, switch, for, for-in, for-of, while, do-while, try/catch+throw, labeled blocks, runtime statements, async `load()`, inline `.map()`), curled each page one at a time, and fixed four real compiler/dev-server bugs uncovered along the way. Ended with `hydration-test.mjs` at 60/60 passing.
+This session added three demo pages exercising every supported JS statement in the compiler (if/else, ternary, switch, for, for-in, for-of, while, do-while, try/catch+throw, labeled blocks, runtime statements, async `load()`, inline `.map()`), curled each page one at a time, and fixed four real compiler/dev-server bugs uncovered along the way. Ended with `tests/hydration-test.mjs` at 60/60 passing.
 
 ---
 
@@ -55,7 +55,7 @@ Exercises statement-mode compilation of every supported construct with visible S
 ## Verification
 
 - All 8 pages HTTP 200 with correct content: `/`, `/about`, `/blog`, `/blog/hello-world`, `/posts`, `/statements`, `/async`, `/map`
-- `hydration-test.mjs`: **60/60 passed** (was failing on JS error on load, reactivity, error boundaries, markers claimed)
+- `tests/hydration-test.mjs`: **60/60 passed** (was failing on JS error on load, reactivity, error boundaries, markers claimed)
 - Compiler unit suites: client-codegen **104**, server-codegen **69**, integration **77** — all green
 - `tsc --noEmit` clean on compiler, runtime, adapter, cli
 

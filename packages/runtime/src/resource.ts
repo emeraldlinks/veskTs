@@ -106,7 +106,7 @@ function getRegistry(): Map<string, Set<ResourceHandle<unknown>>> {
 	return map;
 }
 
-function getSsrData(key: string): unknown {
+export function getSsrData(key: string): unknown {
 	const sink = ssrSink;
 	if (sink) return sink.get(key);
 	const store = g().__vsk_ssr_data as Record<string, unknown> | undefined;
@@ -217,13 +217,18 @@ function buildRequestInit<T>(options: UseFetchOptions<T>): RequestInit {
 }
 
 function resolveFetchUrl(url: string): string {
-  if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return url;
-  const reqUrl = (g().__vesk_request as Record<string, unknown> | undefined)?.url;
-  const base = typeof reqUrl === 'string' && /^https?:\/\//i.test(reqUrl)
-    ? reqUrl
-    : (g().__vesk_ssr_base_url as string) || '';
-  if (base) return new URL(url, base).href;
-  return url;
+	if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return url;
+	const ctx = g().__vesk_request as Record<string, unknown> | undefined;
+	const resolver = ctx && typeof (ctx as { resolveUrl?: unknown }).resolveUrl === 'function'
+		? (ctx as { resolveUrl: (u: string) => string }).resolveUrl
+		: null;
+	if (resolver) return resolver(url);
+	const reqUrl = ctx?.url;
+	const base = typeof reqUrl === 'string' && /^https?:\/\//i.test(reqUrl)
+		? reqUrl
+		: (globalThis as Record<string, unknown>).__vesk_ssr_base_url as string || '';
+	if (base) return new URL(url, base).href;
+	return url;
 }
 
 function doFetch(url: string, init?: RequestInit): Promise<Response> {
@@ -294,6 +299,44 @@ async function runFetcher<T>(handle: ResourceHandle<T>, timeout: number): Promis
 
 function sleep(ms: number): Promise<void> {
 	return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/**
+ * Reads a streaming `Response` body chunk by chunk (TextDecoder) and
+ * progressively fans the running total into a tracked cell via `into`.
+ * Falls back to `res.text()` when the body has no readable stream.
+ * Returns the fully consumed string so `settle` records the final value.
+ */
+function streamText(
+	res: Response,
+	into: Tracked<string> | undefined,
+	onChunk?: (chunk: string, total: string) => void,
+): Promise<string> {
+	const decoder = new TextDecoder();
+	let total = '';
+	const emit = (text: string): void => {
+		if (!text) return;
+		total += text;
+		if (into) setInto(into, total);
+		if (onChunk) onChunk(text, total);
+	};
+	const body = res.body;
+	if (body && typeof body.getReader === 'function') {
+		const reader = body.getReader();
+		return (async () => {
+			for (;;) {
+				const { done, value } = await reader.read();
+				if (done) break;
+				emit(decoder.decode(value, { stream: true }));
+			}
+			emit(decoder.decode());
+			return total;
+		})();
+	}
+	return res.text().then((text) => {
+		emit(text);
+		return total;
+	});
 }
 
 function settle<T>(handle: ResourceHandle<T>, data: T): void {
@@ -610,6 +653,34 @@ useFetch.arrayBuffer = <T = ArrayBuffer>(url: string, options?: Omit<UseFetchOpt
 		...options,
 		key: options?.key ?? url,
 	});
+
+/**
+ * Streaming fetch: consumes the response body chunk by chunk and reacts
+ * progressively. Each decoded chunk updates the target tracked cell (`into`),
+ * so anything subscribed to that cell (e.g. `<Md content={doc} />` or a
+ * plain `{doc}` interpolation) re-renders as data arrives. `url` may be a
+ * provider function — it is re-evaluated on every fetch (including `refresh`),
+ * so switching a tracked path propagates without recreating the resource.
+ */
+useFetch.stream = (
+	urlOrFn: string | (() => string),
+	options?: Omit<UseFetchOptions<string>, 'body'> & { into?: Tracked<string>; onChunk?: (chunk: string, total: string) => void },
+): Resource<string> => {
+	const streamInto = options?.into;
+	const streamOnChunk = options?.onChunk;
+	const fetcher = (signal?: AbortSignal): Promise<string> => {
+		const url = typeof urlOrFn === 'function' ? urlOrFn() : urlOrFn;
+		const init = buildRequestInit(options ?? {});
+		return doFetch(resolveFetchUrl(url), signal ? { ...init, signal } : init).then(async (res) => {
+			if (!res.ok) throw new HttpError(res.status, res.statusText);
+			return streamText(res, streamInto, streamOnChunk);
+		});
+	};
+	const key = options?.key ?? (typeof urlOrFn === 'string' ? urlOrFn : undefined);
+	const resource = useFetch<string>(fetcher, { ...options, key });
+	(resource as Resource<string> & { into?: Tracked<string> }).into = streamInto;
+	return resource;
+};
 
 export async function resolveSsrResources(): Promise<Record<string, unknown>> {
 	const sink = ssrSink;

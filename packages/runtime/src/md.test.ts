@@ -1,4 +1,7 @@
 import { renderMarkdown, renderMarkdownEx, configureMd, getMdPolicy, drainMdHtmlWarnings, setMdConsoleWarnings, MD_DEFAULT_ALLOW_TAGS, Md, escapeHtml, highlightCode, sanitizeUrl, MD_BASE_CSS } from '@vesk/runtime/src/md';
+import { clearSsrData, getSsrData } from '@vesk/runtime/src/resource';
+import { track, get, set, run_block, flush_sync } from '@vesk/runtime/src/ripple-runtime';
+import { root, destroy_block } from '@vesk/runtime/src/ripple-blocks';
 
 let passed = 0;
 let failed = 0;
@@ -759,5 +762,135 @@ describe('Md raw HTML policy', () => {
   });
 });
 
+// ============================================================
+// Runtime markdown-file loading (<Md content="/docs/x.md" />)
+// ============================================================
+let asyncChain = Promise.resolve();
+function itAsync(name: string, fn: () => Promise<void>): void {
+  asyncChain = asyncChain.then(async () => {
+    try {
+      await fn();
+      passed++;
+      console.log(`  \u2713 ${name}`);
+    } catch (e) {
+      failed++;
+      console.log(`  \u2717 ${name}`);
+      console.log(`    ${(e as Error).message}`);
+    }
+  });
+}
+
+const FILE_HOOK = (p: string) => (p === '/docs/guide.md' ? '# Guide\n\nBody text.' : null);
+
+// Minimal client DOM mock (mirrors hydrate.test.ts).
+function mockDocument() {
+  const listeners: Record<string, Function> = {};
+  const elProto = {
+    nodeType: 1, tagName: 'DIV', childNodes: [], children: [],
+    className: '', style: { cssText: '' }, innerHTML: '',
+    contains() { return true; },
+    addEventListener(ev: string, fn: Function) { listeners[ev] = fn; },
+    querySelectorAll() { return []; },
+  };
+  const doc = {
+    createElement(tag: string) {
+      return Object.create(Object.assign({}, elProto, { tagName: tag.toUpperCase() }));
+    },
+    createDocumentFragment() { return { nodeType: 11 }; },
+    createTreeWalker() { return { nextNode() { return null; } }; },
+  };
+  (globalThis as any).document = doc;
+  return doc;
+}
+
+describe('Runtime markdown-file loading', () => {
+  it('rejects non-public paths so they render as literal text (SSR)', () => {
+    for (const literal of ['docs/guide.md', '/docs/guide.md?x=1', '/docs/guide.md#top', '/docs/a\\b.md', 'relative.md']) {
+      const html = Md({ content: literal }) as string;
+      if (!html.includes('vesk-md')) throw new Error(`expected a rendered literal, got: ${html}`);
+      if (html.includes('<h1>')) throw new Error(`unexpected file render for "${literal}": ${html}`);
+      if (getSsrData('md:' + literal) !== undefined) throw new Error(`must not stash "${literal}" as a file read`);
+    }
+  });
+
+  it('SSR renders the public markdown file via the installed read hook', () => {
+    clearSsrData();
+    (globalThis as any).__vsk_md_read_file = FILE_HOOK;
+    const html = Md({ content: '/docs/guide.md' }) as string;
+    expect(html.includes('<h1>Guide</h1>') || html.includes('Guide')).toBe(true);
+    expect(getSsrData('md:/docs/guide.md')).toBe('# Guide\n\nBody text.');
+    clearSsrData();
+  });
+
+  it('SSR renders the literal path when the file does not exist', () => {
+    clearSsrData();
+    (globalThis as any).__vsk_md_read_file = FILE_HOOK;
+    const html = Md({ content: '/docs/missing.md' }) as string;
+    expect(html.includes('/docs/missing.md')).toBe(true);
+    expect(html.includes('<h1>')).toBe(false);
+    expect(getSsrData('md:/docs/missing.md')).toBe(undefined);
+    clearSsrData();
+  });
+
+  it('SSR stacks the markdown source into serialized SSR data for hydration', () => {
+    clearSsrData();
+    (globalThis as any).__vsk_md_read_file = FILE_HOOK;
+    Md({ content: '/docs/guide.md' }) as string;
+    const data = getSsrData('md:/docs/guide.md');
+    expect(data).toBe('# Guide\n\nBody text.');
+    clearSsrData();
+  });
+});
+
+describe('Md client path mode + streaming cells', () => {
+  itAsync('renders literal path first, then upgrades once fetch resolves', async () => {
+    clearSsrData();
+    mockDocument();
+    delete (globalThis as any).__vsk_md_read_file;
+    const calls: unknown[] = [];
+    const origFetch = (globalThis as any).fetch;
+    (globalThis as any).fetch = (url: string) => {
+      calls.push(url);
+      return Promise.resolve({ ok: true, status: 200, text: () => Promise.resolve('# File loaded') });
+    };
+    let div: any;
+    const block = root(() => {
+      div = Md({ content: '/docs/one.md' });
+    });
+    expect(div.tagName).toBe('DIV');
+    // literal path while the fetch is in flight
+    expect(String(div.innerHTML).includes('/docs/one.md')).toBe(true);
+    await new Promise(r => setTimeout(r, 30));
+    flush_sync();
+    expect(htmlOf(div)).toContain('File loaded');
+    if (calls.length !== 1 || calls[0] !== '/docs/one.md') throw new Error(`expected single fetch of the path, got ${JSON.stringify(calls)}`);
+    destroy_block(block as any);
+    (globalThis as any).fetch = origFetch;
+    delete (globalThis as any).document;
+  });
+
+  itAsync('re-renders when a streamed/tracked content cell updates', async () => {
+    clearSsrData();
+    mockDocument();
+    const cell = track('');
+    let div: any;
+    const block = root(() => {
+      div = Md({ content: cell });
+    });
+    expect(String(div.innerHTML).length < 10).toBe(true);
+    set(cell, '## Live\nupdated');
+    flush_sync();
+    await new Promise(r => setTimeout(r, 0));
+    expect(htmlOf(div)).toContain('Live');
+    destroy_block(block as any);
+    delete (globalThis as any).document;
+  });
+});
+
+function htmlOf(el: any): string {
+  return String(el && (el.innerHTML || ''));
+}
+
 console.log(`\nResults: ${passed} passed, ${failed} failed`);
+await asyncChain;
 process.exit(failed > 0 ? 1 : 0);

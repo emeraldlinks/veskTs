@@ -14,12 +14,22 @@ export type {
   VeskConfig,
   MdConfig,
   MdHtmlMode,
+  MdProps,
+  MarkdownOptions,
+  MdHtmlWarning,
   MiddlewareEntry,
   MiddlewareChainOptions,
   RenderPageResult,
   SSGResult,
   DataScriptPayload,
   ExternalDataScript,
+  Tracked,
+  Resource,
+  UseFetchOptions,
+  UseFetchStreamOptions,
+  SsrDataSink,
+  VeskResponse,
+  SetCookieOptions,
 } from '@vesk/types';
 
 export interface CompileFileResult {

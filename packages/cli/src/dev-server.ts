@@ -12,7 +12,7 @@ import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router'
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
-import { resolveWithin, isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
+import { resolveWithin, isAllowedWsUpgrade, installMdReadHook } from '@vesk/adapter/src/paths';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { ensurePackagesBuilt } from './build-packages';
@@ -119,6 +119,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
   const maxBodyBytes = (typeof secCfg.maxBodyBytes === 'number' ? secCfg.maxBodyBytes : undefined) || DEFAULT_MAX_BODY_BYTES;
   const appDirPath = join(projectDir, 'app');
   const publicDir = join(projectDir, 'public');
+  installMdReadHook([publicDir]);
 
   try {
     ensurePackagesBuilt();

@@ -64,12 +64,12 @@ All under `packages/runtime/src/`:
 | `router.ts` | Router factory (`createRouter`, `createFileRouter`), route-data fetching, chunk loading, navigation. |
 | `router-components.ts` | `Outlet`, `Link`, `NavLink`, router hooks (`useNavigate`/`useParams`/`usePathname`/`useSearchParams`/`useRouter`), `Redirect`/`notFound`, head/scroll handling. |
 | `router-match.ts` | Route tree matching: `matchRoute`, `flattenLayoutChain`, `compileRoutePattern`, `buildTreeFromMap`. |
-| `resource.ts` | `createResource` / `useFetch` (`.json`/`.text`/`.arrayBuffer`), SSR data handoff, client cache, dedupe, retry/timeout/abort. |
-| `request.ts` | Server HTTP abstraction: `ServerRequest`, `VeskRequest`, `ServerResponse`, `VeskResponse`, `cookies`/`headers`/`locals`, `withValidation`, `cors`, hooks, webhooks, signed cookies. |
+| `resource.ts` | `createResource` / `useFetch` (`.json`/`.text`/`.arrayBuffer`/`.stream`), `streamText`, SSR data handoff, client cache, dedupe, retry/timeout/abort, `resolveFetchUrl` (prefers `ctx.resolveUrl` → `ctx.url` string → `__vesk_ssr_base_url`), `HttpError`/`TimeoutError`. `useFetch.stream` consumes `ReadableStream` chunk-by-chunk into an `into` cell (`onChunk` callback), `urlOrFn` may be a provider `() => string` re-evaluated on every fetch/`refresh()` so a tracked path change propagates without recreating the resource. |
+| `request.ts` | Server HTTP abstraction: `ServerRequest`, `VeskRequest` (`resolveUrl`, `from`, `host`/`origin`, locals `get`/`set`, cookie parsing), `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream(ReadableStream)`), `cookies`/`headers`/`locals`, `withValidation`, `cors`, hooks, webhooks, signed cookies, `VeskResponse.stream`. |
 | `isr.ts` | Incremental Static Regeneration: `isr`, `pageIsr`, `componentIsr`, `revalidatePath`/`revalidateTag`, cache clearing. |
 | `form.ts` | `Form` / `Field` components + validation rules (`required`, `email`, `minLength`, `maxLength`, `pattern`, `custom`). |
 | `action.ts` | Server actions: `defineAction`, registry lookup, input validation, form-action detection. |
-| `md.ts` | Tokenizer-based (no-regex) Markdown → HTML for `<Md>`: GFM tables, task lists, syntax-highlighted code (ts/js/json/css/html/py/go/rust/sql/bash/diff) with lang badge + copy button + optional line numbers, heading anchors, autolinks, hard breaks, safe URL schemes; `renderMarkdown(md, opts?)`, `highlightCode`, `sanitizeUrl`, `MD_BASE_CSS`. |
+| `md.ts` | Tokenizer-based (no-regex) Markdown → HTML for `<Md>`: GFM tables, task lists, syntax-highlighted code (ts/js/json/css/html/py/go/rust/sql/bash/diff) with lang badge + copy button + optional line numbers, heading anchors, autolinks, hard breaks, safe URL schemes; `renderMarkdown(md, opts?)`, `highlightCode`, `sanitizeUrl`, `MD_BASE_CSS`. `Md` `content` is polymorphic: plain `string`, tracked cell (`Tracked<string>` — compiler emits the cell, `effect` re-renders on `set`), streamed resource (`useFetch.stream` → `streamCellFrom` unwraps `into`), or absolute public path (`/…/*.md` — server: `__vsk_md_read_file` hook constrained to `publicDir` + `.md` suffix, `//`/`?`/`#`/`\` rejected, stashed in `__vsk_ssr_data` for hydration; client: `fetch(path)` with `mdPathCache`/`mdPathCells`/`mdPathInflight`, literal fallback when missing). |
 | `seo.ts` | `JsonLd` + schema helpers (`ArticleSchema`, `ProductSchema`, `FAQPageSchema`, `BreadcrumbListSchema`, `OrganizationSchema`, `LocalBusinessSchema`, `VideoSchema`). |
 | `image.ts` | `Image` component (srcset/widths, responsive, placeholder). |
 | `portal.ts` | `Portal` component (render into another target). |
@@ -195,7 +195,7 @@ objects to their values on property access.
 
 `createResource(fn, key?, into?, options?)` and `useFetch(urlOrFn, options?)`
 return a `Resource<T>` (a thenable with `loading`, `error`, `data`,
-`refresh()`, `abort()`). On the **server** fetches are deduped by key, tagged
+`refresh()`, `abort()`, `into?`). On the **server** fetches are deduped by key, tagged
 into `__vsk_ssr_promises`, and resolved into `__vsk_ssr_data` via
 `setSsrData`; `resolveSsrResources()` is awaited after render to collect the
 handoff object. On the **client** the injected SSR data settles the resource
@@ -204,7 +204,64 @@ immediately without refetching.
 Options in `UseFetchOptions<T>`: `key`, `into` (a tracked cell to write
 into), `staleTime` (client cache TTL), `keepPreviousData`, `retry`,
 `retryDelay` (GET retries with exponential backoff), `timeout`, `enabled`,
-`dedupe`, plus any `RequestInit` (except `body`, which is `unknown`).
+`dedupe`, plus any `RequestInit` (`method`/`headers`/`credentials`/`cache`/…,
+except `body` which is `unknown` — objects become JSON).
+
+`useFetch` helpers: `.json(url, opts?)` / `.text(url, opts?)` /
+`.arrayBuffer(url, opts?)` build a `createFetcher` for the typed body, and
+`.stream(urlOrFn, opts?)` streams a text response chunk-by-chunk.
+
+#### useFetch.stream (progressive streaming)
+
+```ts
+useFetch.stream(
+  urlOrFn: string | (() => string),
+  options?: Omit<UseFetchOptions<string>, 'body'> & {
+    into?: Tracked<string>;               // cumulative text is set here after each chunk
+    onChunk?: (chunk: string, total: string) => void;
+  }
+): Resource<string>  // + .into === options.into
+```
+
+* Reads `res.body.getReader()` → `TextDecoder` loop → `set(into, total)` after
+  every chunk so subscribers (e.g. `<Md content={doc} />`) re-render progressively.
+  Falls back to `res.text()` when `getReader` is unavailable.
+* `urlOrFn` may be a *provider* `() => string`. It is **re-evaluated on every
+  fetch**, including `refresh()`, so switching a tracked `docPath` propagates
+  without recreating the resource (fixes the stale-URL bug where the closure
+  captured the initial value). When `urlOrFn` is a function, callers should
+  supply `key` so handles that share a logical resource co-locate in
+  `__vsk_fetch_registry`.
+* URL resolution is `resolveFetchUrl(url)`: `ctx.resolveUrl` (from
+  `VeskRequest`, `__vesk_request`) → string `ctx.url` → `__vesk_ssr_base_url`
+  (`__vesk_ssr_base_url`, never the misspelled `__vsk_…`) → `new URL(url, base).href`.
+  Absolute URLs (`scheme:` / `//`) pass through untouched. SSR hooks may
+  intercept via `__vesk_ssr_fetch`.
+* Throws `HttpError` on `!res.ok` and `TimeoutError` on `options.timeout`.
+
+### 3.6b Markdown — Md polymorphic content
+
+`<Md>` renders `content` after unwrapping cells/resources, with four source kinds:
+
+* **Plain string** — `content="## hi"` → `renderMarkdown` with tokenizer pipeline.
+* **Tracked cell** — `content={live}` where `let &[live] = track('# hi')` (compiler
+  emits the cell; `live` is auto-tracked). The component unwraps the underlying
+  cell and subscribes with `effect` so `live = next` re-renders; `live` itself is
+  read as `live` (no `get`), the raw cell is `&[live, raw] = track(...)` → `get(raw)`/`set(raw, v)` outside `&`.
+* **Streamed resource** — `content={doc}` where `let &[doc] = track('')` and
+  `useFetch.stream(() => '/api/docs/' + docPath, { into: doc })`. Unwrapped via
+  `streamCellFrom` (prefers `into` when `Resource` has `.into`); the effect
+  subscribes to `doc` so each chunk (`set(doc, total)` internally) arrives
+  progressively. With `&` you write `docPath = 'guide'` and `res.refresh()`; outside `&` use `get`/`set`.
+* **Public path** — `content="/docs/guide.md"` (absolute, `.md`/`.markdown`
+  suffix, no `//`/`?`/`#`/`\`). Server: `readServerMdPath` calls
+  `globalThis.__vsk_md_read_file` (installed by `installMdReadHook([publicDir])`
+  in both the CLI `vesk dev` server and the adapter dev/prod servers) which is
+  constrained to `publicDir` + `.md` suffix; result is stashed in
+  `__vsk_ssr_data['md:'+path]` for hydration. Client: `fetch(path)` with
+  `mdPathCache`/`mdPathCells`/`mdPathInflight`; while loading or when the file
+  is missing (`null` cache) the **path string itself** is rendered as literal
+  markdown so the missing state is visible, never blank.
 
 ### 3.7 Server actions
 
@@ -374,14 +431,23 @@ async function handle(request: Request) {
 
 ### Resources — both entries
 `createResource`, `setSsrData`, `clearSsrData`, `resolveSsrResources`,
-`useFetch` (+ `.json` / `.text` / `.arrayBuffer`).
+`useFetch` (+ `.json` / `.text` / `.arrayBuffer` / `.stream`), `streamText`,
+`HttpError`, `TimeoutError`, `SsrDataSink`. `useFetch.stream(urlOrFn, { into, onChunk, key })`
+progressively writes decoded chunks into `into` (`onChunk(chunk,total)` per chunk);
+`urlOrFn` may be a provider `() => string` re-evaluated on every fetch/`refresh()` so a
+tracked path switch propagates (supply `key` when the URL is dynamic). `into` is a
+`Tracked<string>`; the `Resource` also exposes `.into` for `Md`'s `streamCellFrom`.
 
 ### Server-only (index-server.ts)
-Request: `cookies`, `headers`, `locals`, `ServerRequest`, `ServerResponse`,
-`VeskRequest`, `VeskResponse`, `withValidation`, `useBody`, `useParams`
-(request), `useRequest`, `cors`, `defineHook`, `removeHook`, `runHooks`,
-`webhook`, `signCookie`, `unsignCookie`, `setSignedCookie`,
-`readSignedCookie`, `applyRequestSecurity`.
+Request: `cookies`, `headers`, `locals`, `ServerRequest`, `VeskRequest`
+(`resolveUrl`, `from`, `host`/`origin`, `query`/`parsedUrl`, `getBody`),
+`ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream`),
+`withValidation`, `useBody`, `useParams` (request), `useRequest`, `cors`,
+`defineHook`, `removeHook`, `runHooks`, `webhook`, `signCookie`, `unsignCookie`,
+`setSignedCookie`, `readSignedCookie`, `applyRequestSecurity`. `VeskResponse.stream(readable, init?)`
+creates a chunked `ReadableStream` response (`Transfer-Encoding: chunked`,
+no `Content-Length`; delivered via `deliverResponse`'s `getReader()` loop on dev/prod servers;
+`readable` is coerced `as unknown as BodyInit`).
 ISR: `isr`, `revalidatePath`, `revalidateTag`, `clearIsrCache`, `pageIsr`,
 `componentIsr`, `revalidateComponent`, `isrConfigToRevalidate`.
 
@@ -404,8 +470,8 @@ ISR: `isr`, `revalidatePath`, `revalidateTag`, `clearIsrCache`, `pageIsr`,
 |---------|-----|
 | `import { batch } from '@vesk/runtime'` | **`batch` does not exist in the active runtime.** The barrels (`index-client` / `index-server`) and the active reactivity modules (`ripple-runtime`, `ripple-blocks`) export no `batch` — the repo rule is to never import/emit it. Wrap work in `flushSync(() => { … })` to flush synchronously. *(Caveat: there is a legacy, deprecated `track.ts` module that declares its own `batch`, but it is not part of the public API, is not wired into any barrel, and must not be used.)* |
 | Importing `'@vesk/runtime'` (the `.` entry) in server code | It resolves to the **client** bundle. Use `@vesk/runtime/server` for request/ISR APIs. Use `@vesk/runtime` (or `/client`) for hydration in the browser. |
-| Treating the returned `track(0)` value as the scalar | In `.vsk` the compiler destructures via `const &[count] = track(0)` — `count` is the reactive handle, and `&[count, rawCell]` also gives the raw cell. The handle must go through `get()`/`set()`. |
-| Reading a value with `track(...)` directly | Use `get(cell)` to subscribe or `peek(cell)` to read without subscribing. |
+| Treating the returned `track(0)` value as the scalar | In `.vsk` declare `const &[count] = track(0)` — `count` is auto-tracked: read/write `count` directly (`count`, `count = 1`, `count++`), the compiler inserts `get`/`set`. `const &[count, rawCell] = track(0)` also gives the underlying `rawCell: Tracked<number>` for manual `get(rawCell)`/`set(rawCell, v)`. Outside `.vsk` (plain `const count = track(0)`) use `get(count)`/`set(count, v)`/`peek(count)`. |
+| Reading a value with `track(...)` directly | In `.vsk` with `&` read `count` directly; outside `.vsk` or with a raw cell use `get(cell)` to subscribe or `peek(cell)` to read without subscribing. |
 | Expecting event handler attributes (`on*`) in SSR HTML | Event handlers are **excluded from SSR output entirely**. They exist only after hydration/on the client. |
 | Assuming updates flush synchronously after `set()` | The default scheduler is **microtask-batched**. Use `flushSync(fn)` for immediate synchronous work. |
 | Mutating state inside a `derived`/`track(() => …)` | `set` throws: *"Assignments or updates to tracked values are not allowed during computed 'track(() => …)' evaluation"* (`is_mutating_allowed` is false during derived evaluation). |

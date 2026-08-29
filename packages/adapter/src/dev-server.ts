@@ -7,7 +7,7 @@ import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
 import { createHmrServer } from '@vesk/adapter/src/hmr';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
-import { resolveWithin } from '@vesk/adapter/src/paths';
+import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import type { RouteNode, DevServerOptions, Manifest } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -17,6 +17,30 @@ interface ExtendedRequest extends Request {
   text(): Promise<string>;
   formData(): Promise<FormData>;
   clone(): ExtendedRequest;
+}
+
+/**
+ * Writes a handler Response to the socket, piping a streaming body
+ * chunk-by-chunk (SSE / text streams) instead of buffering everything.
+ */
+async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  const body = response.body;
+  if (body && typeof body.getReader === 'function') {
+    const reader = body.getReader();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    } catch {
+      /* stream aborted by the client */
+    }
+    res.end();
+    return;
+  }
+  res.end(await response.text());
 }
 
 export function bodyTooLarge(maxBytes: number): Error & { status: number } {
@@ -91,6 +115,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
   const devDir = resolve(appDir, '..', '.vesk', 'dev');
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
+  installMdReadHook([publicDir, resolve(devDir, 'static', 'public')]);
 
   let componentMap = new Map<string, string>();
   const monorepoRouter = resolve(__dirname, '..', '..', 'compiler', 'dist', 'router.js');
@@ -239,9 +264,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
             const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
-            const body = await response.text();
-            res.writeHead(response.status, Object.fromEntries(response.headers));
-            res.end(body);
+            await deliverResponse(res, response);
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             res.writeHead(500, { 'Content-Type': 'application/json' });

@@ -61,13 +61,13 @@ jobs:
       - name: Hydration test (dev)
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
-        run: node hydration-test.mjs
+        run: node tests/hydration-test.mjs
 
       - name: SSR crawl test (dev)
         if: always()
         env:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
-        run: node crawl.mjs
+        run: node tests/crawl.mjs
 
       # --- Production phase (reuses the prod build produced by leakage-test) ---
       - name: Leakage isolation suite (build + prod server)
@@ -90,7 +90,7 @@ jobs:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
           BASE: http://localhost:3000
           VESK_TEST_TARGET: production
-        run: node hydration-test.mjs
+        run: node tests/hydration-test.mjs
 
       - name: SSR crawl against prod
         if: always()
@@ -98,7 +98,7 @@ jobs:
           CHROMIUM_PATH: ${{ steps.chrome.outputs.path }}
           BASE: http://localhost:3000
           VESK_TEST_TARGET: production
-        run: node crawl.mjs
+        run: node tests/crawl.mjs
 
       - name: Dump server logs (on failure)
         if: failure()

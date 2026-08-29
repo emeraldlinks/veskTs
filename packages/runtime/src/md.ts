@@ -1,5 +1,8 @@
 import type { HydrateWalker } from '@vesk/runtime/src/hydrate';
 import { effect } from '@vesk/runtime/src/ripple-blocks';
+import { tracked, get, set } from '@vesk/runtime/src/ripple-runtime';
+import type { Tracked } from '@vesk/runtime/src/ripple-runtime';
+import { getSsrData, setSsrData } from '@vesk/runtime/src/resource';
 
 // =============================================================
 // Markdown rendering for <Md content={...} />.
@@ -13,9 +16,10 @@ import { effect } from '@vesk/runtime/src/ripple-blocks';
 // chrome, heading anchors, autolinks, hard breaks) and can be tuned
 // via props (css / lineNumbers / copy / highlight / ids / autolink).
 //
-// `content` accepts a plain string or a tracked cell — cells are
-// unwrapped for rendering and, on the client, subscribed so the
-// rendered markdown updates reactively.
+// `content` accepts a plain string, a tracked cell, a useFetch.stream()
+// resource, or an absolute public markdown path (runtime-loaded) —
+// cells/resources are unwrapped for rendering and, on the client,
+// subscribed so the rendered markdown updates reactively.
 // =============================================================
 
 /** Unwraps tracked cells passed as props (compiler emits the cell itself). */
@@ -2037,7 +2041,9 @@ export function drainMdHtmlWarnings(): MdHtmlWarning[] {
 }
 
 export interface MdProps {
-	/** Markdown source — a plain string or a tracked cell (reactive on client). */
+	/** Markdown source — a plain string, a tracked cell (reactive on client), a
+	 *  streamed resource (useFetch.stream — re-renders per chunk), or an
+	 *  absolute public markdown path (runtime-loaded from the app's public dir). */
 	content?: string | { get: () => string };
 	/** Default background for all code blocks (CSS color or 'none'). Fence-level bg= wins. */
 	codeBg?: string;
@@ -2104,6 +2110,123 @@ function mdIsSSR(): boolean {
 	return typeof document === 'undefined';
 }
 
+// =============================================================
+// Runtime markdown-file loading (public/*.md) + streaming support
+//
+// When `content` resolves to an absolute public markdown path
+// (e.g. "/docs/guide.md"), <Md> loads the FILE at runtime:
+//   - server: adapter-installed `__vsk_md_read_file` hook reads it,
+//     constrained to the public dir + `.md` suffixes (returns null
+//     outside those bounds), and the content is stashed in
+//     `__vsk_ssr_data` for hydration so there is no flash.
+//   - client: `fetch(path)` with a per-path cache cell; while loading
+//     (or if the file does not exist) the path itself is rendered as
+//     literal markdown text.
+// `content` may also be a streaming-resource result (useFetch.stream),
+// whose `.into` cell is subscribed so chunks re-render progressively.
+// =============================================================
+
+/** Tokenizer endsWith (no regex, mirrors compiler rule). */
+function stringEndsWith(s: string, suffix: string): boolean {
+	if (suffix.length > s.length) return false;
+	for (let i = 0; i < suffix.length; i++) {
+		if (s[s.length - suffix.length + i] !== suffix[i]) return false;
+	}
+	return true;
+}
+
+function isPublicMarkdownPath(v: unknown): v is string {
+	if (typeof v !== 'string') return false;
+	const s = v;
+	if (s.length < 2 || s.charCodeAt(0) !== 47) return false; // '/'
+	if (s.charCodeAt(1) === 47) return false;                  // '//'
+	for (let i = 0; i < s.length; i++) {
+		const c = s.charCodeAt(i);
+		if (c === 63 || c === 35 || c === 92) return false;      // ? # \
+	}
+	const lower = s.toLowerCase();
+	return stringEndsWith(lower, '.md') || stringEndsWith(lower, '.markdown');
+}
+
+const mdPathCache = new Map<string, string | null>();
+const mdPathCells = new Map<string, Tracked>();
+const mdPathInflight = new Set<string>();
+
+function getMdPathCell(path: string): Tracked {
+	let cell = mdPathCells.get(path);
+	if (!cell) {
+		cell = tracked(undefined as string | undefined);
+		mdPathCells.set(path, cell);
+	}
+	return cell;
+}
+
+function ensureMdPathLoaded(path: string): void {
+	if (mdPathCache.has(path) || mdPathInflight.has(path)) return;
+	const ssr = getSsrData('md:' + path);
+	if (typeof ssr === 'string') {
+		mdPathCache.set(path, ssr);
+		return;
+	}
+	mdPathInflight.add(path);
+	fetch(path)
+		.then((r) => (r.ok ? r.text() : Promise.reject(r)))
+		.then((text) => {
+			mdPathCache.set(path, text);
+			set(getMdPathCell(path), text);
+		})
+		.catch(() => {
+			mdPathCache.set(path, null);
+			set(getMdPathCell(path), null);
+		})
+		.finally(() => {
+			mdPathInflight.delete(path);
+		});
+}
+
+function readServerMdPath(path: string): string | null {
+	const hook = (globalThis as Record<string, unknown>).__vsk_md_read_file;
+	if (typeof hook !== 'function') return null;
+	try {
+		const out = (hook as (p: string) => string | null)(path);
+		if (typeof out === 'string') return out;
+	} catch {
+		/* read errors fall through to literal rendering */
+	}
+	return null;
+}
+
+/**
+ * Resolves a raw content value to the markdown SOURCE that should be
+ * rendered. Non-path values pass through; public markdown paths are read
+ * on the server (SSR) or resolved from cache while loading on the client.
+ */
+function resolveMdSource(value: unknown): string {
+	const s = String(value ?? '');
+	if (!isPublicMarkdownPath(s)) return s;
+	if (mdIsSSR()) {
+		const content = readServerMdPath(s);
+		if (content !== null) {
+			setSsrData('md:' + s, content);
+			return content;
+		}
+		return s;
+	}
+	ensureMdPathLoaded(s);
+	const cached = mdPathCache.get(s);
+	return cached === undefined || cached === null ? s : cached;
+}
+
+/** Extracts the streaming target cell from a useFetch.stream() resource. */
+function streamCellFrom(rawContent: unknown): Tracked | null {
+	if (rawContent === null || typeof rawContent !== 'object') return null;
+	const into = (rawContent as { into?: unknown }).into;
+	if (into !== null && typeof into === 'object' && typeof (into as { get?: unknown }).get === 'function') {
+		return into as Tracked;
+	}
+	return null;
+}
+
 function buildHtml(content: string, props: MdProps): string {
 	// Per-instance props override the process-wide policy from vesk.config.ts.
 	const global = getMdPolicy();
@@ -2154,8 +2277,10 @@ function buildHtml(content: string, props: MdProps): string {
  */
 export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: HydrateWalker): Node | string {
 	const rawContent = props.content;
-	const content = String(unwrapMaybeCell(rawContent) ?? '');
-	const html = buildHtml(content, props);
+	const streamTarget = streamCellFrom(rawContent);
+	const contentCell = streamTarget ?? rawContent;
+	const content = String(unwrapMaybeCell(contentCell) ?? '');
+	const html = buildHtml(resolveMdSource(content), props);
 	const classNameRaw = props.className != null ? String(props.className) : props.class != null ? String(props.class) : '';
 	const themeClass = props.theme === 'dark' ? ' vesk-md-dark' : '';
 	const className = `vesk-md${themeClass}${classNameRaw ? ' ' + classNameRaw : ''}`;
@@ -2170,9 +2295,11 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 	if (propFg && propFg !== 'none') wrapperParts.push(`--md-code-fg:${propFg}`);
 	const wrapperStyle = wrapperParts.length > 0 ? escapeHtml(wrapperParts.join(';')) : '';
 
-	// A tracked `content` cell re-renders the markdown reactively on the
-	// client (per-keystroke live editing works without any extra wiring).
-	const reactive = isCell(rawContent);
+	// A tracked `content` cell (or a streaming resource's `into` cell)
+	// re-renders the markdown reactively on the client (per-keystroke live
+	// editing and progressive stream chunks work without any extra wiring).
+	const reactive = isCell(contentCell);
+	const pathMode = isPublicMarkdownPath(content);
 
 	if (mdIsSSR()) {
 		const attrs = className ? ` class="${escapeHtml(className)}"` : '';
@@ -2186,11 +2313,23 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 			const existing = hydrate.root.querySelector('div');
 			if (existing) el = existing as HTMLElement;
 		}
-		el.innerHTML = html;
+		const claimed = !!el.parentNode;
+		if (pathMode && claimed) {
+			// Retention: the SSR render already shows this path's rendered
+			// file (or the literal path). Only overwrite when the client has
+			// authoritative content (hydrated ssr data / cache); otherwise
+			// trust the markup until the client load resolves.
+			el.setAttribute('data-vsk-md-ssr', '1');
+			if (mdPathCache.has(content)) el.innerHTML = html;
+		} else {
+			el.innerHTML = html;
+		}
 		el.className = className;
 		el.style.cssText = [wrapperStyle, style].filter(Boolean).join(';');
 		wireCopyHandlers(el);
-		if (reactive) subscribeContent(el, rawContent, props);
+		if (reactive || pathMode) {
+			subscribeContent(el, contentCell, props, pathMode && claimed ? { trustInitialSsr: true, initialValue: content } : undefined);
+		}
 		// When the element came from SSR it is already in the document —
 		// return an empty fragment. When the walker handed us a FRESH
 		// element (dynamic branch that had no SSR markup), hand the element
@@ -2204,14 +2343,39 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 	div.className = className;
 	div.style.cssText = [wrapperStyle, style].filter(Boolean).join(';');
 	wireCopyHandlers(div);
-	if (reactive) subscribeContent(div, rawContent, props);
+	if (reactive || pathMode) subscribeContent(div, contentCell, props);
 	return div;
 }
 
-function subscribeContent(el: HTMLElement, rawContent: unknown, props: MdProps): void {
+function subscribeContent(
+	el: HTMLElement,
+	rawContent: unknown,
+	props: MdProps,
+	opts?: { trustInitialSsr?: boolean; initialValue?: string },
+): void {
+	const trust = opts?.trustInitialSsr === true;
+	const initial = opts?.initialValue;
+	let ran = false;
 	effect(() => {
 		const value = String(unwrapMaybeCell(rawContent) ?? '');
-		el.innerHTML = buildHtml(value, props);
+		if (isPublicMarkdownPath(value)) {
+			const known = getSsrData('md:' + value) !== undefined || mdPathCache.has(value);
+			ensureMdPathLoaded(value);
+			const cell = getMdPathCell(value);
+			get(cell);
+			if (trust && !ran && value === initial && !known) {
+				// Keep the SSR-rendered file visible while the client load is
+				// in flight (or the path stays a literal on not-found).
+				ran = true;
+				return;
+			}
+			ran = true;
+			el.innerHTML = buildHtml(resolveMdSource(value), props);
+			wireCopyHandlers(el);
+			return;
+		}
+		ran = true;
+		el.innerHTML = buildHtml(resolveMdSource(value), props);
 		wireCopyHandlers(el);
 	});
 }
