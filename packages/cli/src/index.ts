@@ -168,7 +168,39 @@ if (cmd === 'build') {
     }
     console.error('vesk build: done');
   } catch (e) {
-    console.error(`vesk build: error — ${(e as Error).message}`);
+    const err = e as Error & { name?: string; file?: string; line?: number; column?: number; code?: string; toString?: () => string };
+    // VeskError already formats file + line + code frame in its toString()
+    if (err && err.name === 'VeskError' && typeof err.toString === 'function') {
+      const vesErr = err as unknown as { toString: () => string };
+      // Use VeskError's rich formatting which includes file, line/col and 5 lines before/after
+      try {
+        const { VeskError: VE } = await import('@vesk/compiler/src/errors') as { VeskError: new (...args: unknown[]) => Error };
+        if (err instanceof (VE as unknown as { new(): Error })) {
+          console.error((err as unknown as { toString(): string }).toString());
+        } else {
+          console.error((err as unknown as { toString(): string }).toString());
+        }
+      } catch {
+        console.error((err as unknown as { toString(): string }).toString());
+      }
+    } else if (err && (err as unknown as { file?: string }).file) {
+      const f = (err as unknown as { file: string; line?: number; column?: number; code?: string }).file;
+      const l = (err as unknown as { line?: number }).line;
+      const c = (err as unknown as { column?: number }).column;
+      const code = (err as unknown as { code?: string }).code;
+      let out = `vesk build: error — ${err.message}`;
+      if (f) out += `\n  File: ${f}${l ? `:${l}${c ? `:${c}` : ''}` : ''}`;
+      if (code) out += `\n\n${code}`;
+      console.error(out);
+      if (err.stack && !String(err.stack).includes(err.message)) console.error(err.stack);
+    } else {
+      console.error(`vesk build: error — ${(e as Error).message}`);
+      if ((e as Error).stack) {
+        // Only print stack if it contains more than message
+        const stack = (e as Error).stack as string;
+        if (stack && !stack.includes('at ')) console.error(stack);
+      }
+    }
     process.exit(1);
   }
   process.exit(0);

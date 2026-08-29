@@ -1,0 +1,119 @@
+# vesk-web — llms.txt (machine index for the documentation site)
+
+> Source: `vesk-web/` — the docs site for the Vesk framework.
+> Framework source of truth: `packages/types/src/index.ts` (JSDoc), `packages/runtime/src/*`, `packages/compiler/src/*`
+> No hallucination — every API below was verified against those files before writing.
+
+## Project
+
+- **Name:** vesk-web — documentation site + demo app for Vesk
+- **Stack:** Vesk (`.vsk` components), `@vesk/plugin-tailwind` (Tailwind v4), TypeScript
+- **Entry:** `app/layout.vsk` (`{children: Component}` from `@vesk/types`), `app/page.vsk` (demo), `app/api/docs/[...path]/route.ts` (streams `docs/**/*.md`)
+- **Config:** `vesk.config.ts` — `appDir: ./app`, `publicDir: ./public`, `plugins: [tailwindcss({ entry: 'src/global.css', appDir: 'app' })]`
+- **Styling:** **Tailwind-only** — `src/global.css` contains only `@import 'tailwindcss'` + `html { scroll-behavior: smooth }`. All components use `class="..."` utilities. No `<style>` blocks or `.css` except `MD_BASE_CSS` via `<Md css />`.
+- **Docs source:** `docs/` — each guide page is `docs/guide/<topic>/doc.md` (plus `docs/welcome.md`, `docs/notes.md`). Served via streaming API, rendered with `<Md>`.
+
+## How to run / build docs site
+
+```bash
+cd /root/vesk/vesk-web
+npm install
+npm run dev        # http://localhost:3000 — HMR
+npm run build      # dist/
+npm run typecheck  # tsc --noEmit — layout uses Component, middleware uses MiddlewareContext
+curl http://localhost:3000/api/docs/guide/data-fetching | head
+curl http://localhost:3000/api/docs/guide/built-ins/markdown | head
+```
+
+- Add a guide: create `docs/guide/<topic>/doc.md` (`# Title` first line), add to `app/lib/guide.ts` index if listed, verify `curl /api/docs/<topic>`.
+- Edit a guide: edit `doc.md`; confirm API against `packages/types/src/index.ts` (e.g. `UseFetchStreamOptions` is `into?: Tracked<string>` + `onChunk`, not `onProgress`).
+
+## API index (verified against framework source)
+
+### Core — `packages/types/src/index.ts`, `packages/runtime/src/ripple-runtime.ts`
+
+- `track(v)` / `const &[x] = track(v)` — reactive cell. `&` means auto-tracked (`x`, `x=1`, `x++`). Plain `const x = track(v)` uses `get(x)`/`set(x,v)`/`peek(x)`.
+- `derived(fn)`, `effect(fn)`, `untrack(fn)`, `peek(cell)`, `flushSync(fn)`, `tick()`, `on_destroy(fn)`, `createContext(v)` — auto-imported in `.vsk`.
+
+### Data fetching — `packages/runtime/src/resource.ts`, `packages/types/src/index.ts` (Resource, UseFetchOptions, UseFetchStreamOptions)
+
+- `useFetch(urlOrFn, options): Resource<T>` — SSR dedupe + hydration handoff via `__vsk_ssr_data` / `resolveSsrResources()`. Options: `key`, `into`, `body`, `staleTime`, `keepPreviousData`, `retry`, `retryDelay`, `timeout`, `enabled`, `dedupe` + `RequestInit`.
+- `.text`/`.json`/`.arrayBuffer` variants.
+- `.stream(urlOrFn: string|(()=>string), { into?: Tracked<string>, onChunk?: (chunk,total)=>void, key? }): Resource<string>` — `streamText` via `TextDecoder` chunk loop `set(into,total)` per chunk; provider re-evaluated per fetch (`const &[p]=track('welcome')` → `()=> '/api/docs/'+p`); fix for stale URL.
+- `Resource<T>`: `loading`, `error`, `data`, `refresh()`, `abort()`, `into?`, thenable.
+- `resolveFetchUrl(url)` prefers `ctx.resolveUrl` (`VeskRequest`) → `ctx.url` → `__vesk_ssr_base_url`.
+
+### Markdown — `packages/runtime/src/md.ts`, `packages/types/src/index.ts` (MdProps, MarkdownOptions, MdHtmlWarning)
+
+- `<Md content={...} css />` — props: `content?: string|Tracked<string>|Resource<string>` (or `"/game.md"` public path), `css`, `theme`, `codeBg`, `codeFg`, `lineNumbers`, `copy`, `highlight`, `ids`, `autolink`, `hardBreaks`, `html`, `allowTags`, `class`. `content` with `.md` public path: server `__vsk_md_read_file` (constrained to `publicDir` + `.md`/`.markdown`, rejects `//`/`?`/`#`/`\`, stashed in `__vsk_ssr_data`), client `fetch` + `mdPathCache`/`Cells`/`Inflight`, literal fallback if missing.
+- `renderMarkdown`, `renderMarkdownEx`, `configureMd`, `MD_BASE_CSS`, `sanitizeUrl`, `escapeHtml`.
+
+### Request/Response — `packages/runtime/src/request.ts`, `packages/types/src/index.ts` (VeskRequest, VeskResponse)
+
+- `VeskRequest extends ServerRequest` — `parsedUrl`, `query`, `ip`/`protocol`/`hostname`, `resolveUrl(url)`, `static from(request, {params,locals})`, `host`/`origin`.
+- `VeskResponse extends Response` — `json`, `html`, `redirect`, `rewrite`, `next`, `setStatus`, `setCookie`, `clearCookie`, `setCsp`, `cache`, `noCache`, `cors`, `build`, **static `stream(readable: ReadableStream, init?)`** (chunked, `as unknown as BodyInit`, delivered via `deliverResponse`).
+
+### Docs API — `vesk-web/app/api/docs/[...path]/route.ts`
+
+- `GET /api/docs/<rel>` reads `docs/<rel>/doc.md` (or `<rel>.md`) with traversal guard (`..` → 400), streams in ~400-byte chunks every 8ms as `text/markdown; charset=utf-8`. Used by `useFetch.stream` demo on `/`.
+
+## Guide pages — `docs/`
+
+| Path | File | Summary |
+|------|------|---------|
+| `/` | `docs/welcome.md` | Welcome to Vesk |
+| `/notes` | `docs/notes.md` | Notes example for public-path demo (`/notes.md`) |
+| `guide` | `docs/guide/index.md` | Guide index |
+| `guide/getting-started` | `docs/guide/getting-started/doc.md` | Getting started |
+| `guide/cli` | `docs/guide/cli/doc.md` | CLI |
+| `guide/configuration` | `docs/guide/configuration/doc.md` | Config + `md.html` policy |
+| `guide/dev-server` | `docs/guide/dev-server/doc.md` | Dev server, HMR, Tailwind |
+| `guide/language/components` | `docs/guide/language/components/doc.md` | Components |
+| `guide/language/body-modes` | `docs/guide/language/body-modes/doc.md` | Body modes |
+| `guide/language/expression-mode` | `docs/guide/language/expression-mode/doc.md` | Expression mode |
+| `guide/language/statement-mode` | `docs/guide/language/statement-mode/doc.md` | Statement mode |
+| `guide/language/client-boundary` | `docs/guide/language/client-boundary/doc.md` | Islands |
+| `guide/language/head-metadata` | `docs/guide/language/head-metadata/doc.md` | Head |
+| `guide/language/styles` | `docs/guide/language/styles/doc.md` | Styles — Tailwind only |
+| `guide/language/typescript` | `docs/guide/language/typescript/doc.md` | TypeScript in .vsk |
+| `guide/reactivity` | `docs/guide/reactivity/doc.md` | Reactivity, track with `&` |
+| `guide/routing` | `docs/guide/routing/doc.md` | File-based routing |
+| `guide/data-fetching` | `docs/guide/data-fetching/doc.md` | useFetch, stream, Resource (updated with `useFetch.stream` + `&` + `/game.md` note) |
+| `guide/isr` | `docs/guide/isr/doc.md` | ISR |
+| `guide/ssr-hydration` | `docs/guide/ssr-hydration/doc.md` | SSR + hydration |
+| `guide/forms-actions` | `docs/guide/forms-actions/doc.md` | Forms + actions |
+| `guide/bindings` | `docs/guide/bindings/doc.md` | Bindings |
+| `guide/built-ins/markdown` | `docs/guide/built-ins/markdown/doc.md` | Md — updated with `Tracked` + `Resource` + `"/welcome.md"` public path |
+| `guide/built-ins/headless` | `docs/guide/built-ins/headless/doc.md` | Headless |
+| `guide/built-ins/image` | `docs/guide/built-ins/image/doc.md` | Image |
+| `guide/built-ins/portal` | `docs/guide/built-ins/portal/doc.md` | Portal |
+| `guide/built-ins/experiment` | `docs/guide/built-ins/experiment/doc.md` | Experiment |
+| `guide/api-routes` | `docs/guide/api-routes/doc.md` | API routes + `VeskResponse.stream` example |
+| `guide/middleware` | `docs/guide/middleware/doc.md` | Middleware (`MiddlewareContext`) |
+| `guide/plugins` | `docs/guide/plugins/doc.md` | Plugins |
+| `guide/security` | `docs/guide/security/doc.md` | Security |
+| `guide/seo` | `docs/guide/seo/doc.md` | SEO |
+| `guide/server` | `docs/guide/server/doc.md` | Server (if present) |
+| `guide/ssg` | `docs/guide/ssg/doc.md` | SSG |
+| `guide/deployment` | `docs/guide/deployment/doc.md` | Deployment |
+| `guide/tooling` | `docs/guide/tooling/doc.md` | Tooling (lsp, prettier) |
+
+Each `doc.md` is served as `GET /api/docs/<path>` and rendered client-side via:
+
+```vsk
+const &[docPath] = track('welcome')
+const &[doc] = track('')
+const res = useFetch.stream(() => '/api/docs/' + docPath, { into: doc, key: 'doc' })
+<Md content={doc} css />
+<Md content="/welcome.md" css />
+```
+
+Public file example that must have `.md`: `"/welcome.md"`, `"/game.md"`, `"/notes.md"`.
+
+## For another agent building the docs site
+
+1. Read `vesk-web/AGENTS.md` and `/root/vesk/AGENTS.md` first.
+2. Confirm every API statement against `packages/types/src/index.ts` JSDoc before writing — never assume. If unsure, open the source.
+3. Keep styling to Tailwind classes only (see AGENTS.md rule 1).
+4. Add a new guide by creating `docs/guide/<topic>/doc.md` and (if indexed) `app/lib/guide.ts`; verify streaming: `curl http://localhost:3000/api/docs/<topic>`.
+5. Run `npx tsx packages/cli/src/build-packages.ts && npm run typecheck --prefix vesk-web` after changes.

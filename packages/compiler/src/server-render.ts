@@ -31,8 +31,8 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
     const dir = dirname(sourcePath);
     source = inlineMdImportsFrom(source, sourcePath, guessProjectRoots(dir));
   }
-  const ast = parse(source);
-  const ir = generateIR(ast, source);
+  const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
+  const ir = generateIR(ast, source, sourcePath);
   const componentMap = buildComponentMap(ir, true);
   const __vesk = loadRuntimeImports(ir.imports);
   applyLocalModuleImports(__vesk, ir.imports, sourcePath);
@@ -193,10 +193,10 @@ export async function ssg(
   source: string,
   componentName?: string,
   customProps?: Record<string, unknown>,
-  options: { registry?: Map<string, Function>; cssUrl?: string; cssUrls?: string[]; [key: string]: unknown } = {}
+  options: { registry?: Map<string, Function>; cssUrl?: string; cssUrls?: string[]; sourcePath?: string; [key: string]: unknown } = {}
 ): Promise<SSGResult> {
-  const ast = parse(source);
-  const ir = generateIR(ast, source);
+  const ast = parse(source, options.sourcePath ? { filename: options.sourcePath as string } : {});
+  const ir = generateIR(ast, source, options.sourcePath as string | undefined);
 
   if (!componentName) {
     const defaultComp = ir.components.find((c) => c.defaultExport);
@@ -300,7 +300,7 @@ export async function renderFullPage(
     let ssrProps = { ...props };
     let serializedProps: string | null = null;
     const cached = (options.cached as CompileFileResult | undefined) || undefined;
-    const ir = cached ? cached.ir : generateIR(parse(source), source);
+    const ir = cached ? cached.ir : generateIR(parse(source, options.sourcePath ? { filename: options.sourcePath as string } : {}), source, options.sourcePath as string | undefined);
     if (ir.loadFn) {
       const __vesk = options.__vesk || cached?.__vesk || loadRuntimeImports(ir.imports);
       const loadResult = await callLoadFunction(ir.loadFn, ssrProps, __vesk);
@@ -372,7 +372,7 @@ export function renderPageStream(
 ): AsyncGenerator<string> {
   async function* raw(): AsyncGenerator<string> {
   const cached = (options.cached as CompileFileResult | undefined) || undefined;
-  const ir = cached ? cached.ir : generateIR(parse(source), source);
+  const ir = cached ? cached.ir : generateIR(parse(source, options.sourcePath ? { filename: options.sourcePath as string } : {}), source, options.sourcePath as string | undefined);
 
   let ssrProps = { ...props };
   let serializedProps: string | null = null;

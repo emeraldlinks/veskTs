@@ -1,0 +1,14 @@
+@import 'tailwindcss';
+
+@theme {
+	--font-sans: 'JetBrains Mono', 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	--font-display: 'Space Mono', 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@layer base {
+	html { scroll-behavior: smooth; }
+	body { font-feature-settings: 'liga' 1, 'calt' 1; }
+	h1, h2, h3, h4 { font-family: var(--font-display); font-weight: 700; }
+	::selection { background: #34d399; color: #000; }
+}

@@ -1,0 +1,10 @@
+component ErrorPage(props) {
+	<div class="min-h-screen flex items-center justify-center bg-gray-50">
+		<div class="max-w-2xl mx-auto p-8 bg-white rounded-xl shadow-sm border border-gray-200">
+			<h1 class="text-4xl font-bold text-red-600 mb-4">Error {props.statusCode}</h1>
+			<p class="text-lg text-gray-700 mb-6">{props.error}</p>
+			<pre class="bg-gray-100 p-4 rounded-lg text-sm font-mono overflow-x-auto max-h-64 overflow-y-auto">{props.stack}</pre>
+			<p class="mt-6 text-gray-500 text-sm">{props.url}</p>
+		</div>
+	</div>
+}

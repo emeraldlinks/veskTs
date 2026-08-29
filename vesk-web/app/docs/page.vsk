@@ -1,0 +1,105 @@
+import { track } from '@vesk/runtime'
+import { Link } from '@vesk/runtime/router'
+import { Md } from '@vesk/runtime'
+
+const GUIDES = [
+	{ label: 'Getting Started', path: 'guide/getting-started' },
+	{ label: 'Components', path: 'guide/language/components' },
+	{ label: 'Statement Mode', path: 'guide/language/statement-mode' },
+	{ label: 'Expression Mode', path: 'guide/language/expression-mode' },
+	{ label: 'Styling', path: 'guide/language/styles' },
+	{ label: 'TypeScript', path: 'guide/language/typescript' },
+	{ label: 'Reactivity', path: 'guide/reactivity' },
+	{ label: 'Data Fetching', path: 'guide/data-fetching' },
+	{ label: 'SSR & Hydration', path: 'guide/ssr-hydration' },
+	{ label: 'Routing', path: 'guide/routing' },
+	{ label: 'API Routes', path: 'guide/api-routes' },
+	{ label: 'Middleware', path: 'guide/middleware' },
+	{ label: 'Deployment', path: 'guide/deployment' },
+	{ label: 'Vesk Native', path: 'guide/plugins' },
+]
+
+component Docs {
+	<Head>
+		<title>Documentation — Vesk</title>
+		<meta name="description" content="Vesk documentation — guides, API, and compiler reference." />
+	</Head>
+	let &[active] = track(GUIDES[0].path)
+	let &[content] = track('')
+
+	const docRes = useFetch.stream(() => '/api/docs/' + active, {
+		key: 'docs-' + active,
+		into: content,
+		staleTime: 30000,
+	})
+
+	function pick(p: string) {
+		active = p
+		docRes.refresh()
+	}
+
+	<div class="mx-auto max-w-[1200px] px-6 py-10">
+		<div class="flex items-center gap-2 text-[12px] text-zinc-500 mb-6">
+			<Link href="/" class="hover:text-zinc-900 no-underline">Home</Link>
+			<span>/</span>
+			<span class="text-zinc-900 font-medium">Documentation</span>
+		</div>
+
+		<div class="grid lg:grid-cols-[260px_1fr] gap-8 items-start">
+			<aside class="hidden lg:block sticky top-[80px] rounded-[16px] border border-zinc-200 bg-white overflow-hidden">
+				<div class="px-4 py-3 border-b border-zinc-200 bg-zinc-50">
+					<div class="text-[11px] font-semibold tracking-widest uppercase text-zinc-500">Guides</div>
+					<div class="text-[11px] font-mono text-zinc-400">30+ pages • streamed</div>
+				</div>
+				<div class="p-2">
+					for (const g of GUIDES) {
+						<button onClick={() => pick(g.path)} class={active === g.path ? "w-full text-left rounded-xl bg-zinc-900 px-3 py-2.5 text-[13px] font-medium text-white" : "w-full text-left rounded-xl px-3 py-2.5 text-[13px] font-medium text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900"}>
+							{g.label}
+							if (active === g.path) {
+								<span class="float-right text-[11px] text-white/60">•</span>
+							}
+						</button>
+					}
+				</div>
+				<div class="p-3 border-t border-zinc-200 bg-zinc-50">
+					<div class="rounded-xl bg-zinc-900 p-3 text-white">
+						<div class="text-[11px] font-semibold tracking-widest uppercase text-white/60">Quick start</div>
+						<div class="mt-1 font-mono text-[11px] leading-4 text-zinc-300">npm create vesk@latest<br />cd my-app<br />npm run dev</div>
+					</div>
+				</div>
+			</aside>
+
+			<div class="min-w-0">
+				<div class="lg:hidden mb-4">
+					<select onchange={(e: Event) => pick((e.target as HTMLSelectElement).value)} class="w-full rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-[13px] font-medium">
+						for (const g of GUIDES) {
+							<option value={g.path} selected={g.path === active}>{g.label}</option>
+						}
+					</select>
+				</div>
+
+				<div class="rounded-[16px] border border-zinc-200 bg-white overflow-hidden">
+					<div class="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-3">
+						<div class="flex items-center gap-2">
+							<span class="h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+							<span class="font-mono text-[12px] text-zinc-600">/api/docs/{active}</span>
+							<span class="hidden sm:inline rounded-full bg-white border border-zinc-200 px-2 py-0.5 text-[10px] font-medium tracking-widest uppercase text-zinc-500">streamed • 400B chunks</span>
+						</div>
+						<span class="text-[11px] font-mono text-zinc-400">{docRes.loading ? "Loading…" : "Ready"}</span>
+					</div>
+					<div class="p-6 md:p-8">
+						<Md content={content} css />
+					</div>
+				</div>
+
+				<div class="mt-6 rounded-[16px] border border-zinc-200 bg-zinc-50 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+					<div>
+						<div class="text-[13px] font-semibold">Need the full reference?</div>
+						<div class="text-[12px] text-zinc-500">Every guide is a `docs/guide/*/doc.md` file streamed via `ReadableStream`.</div>
+					</div>
+					<Link href="/#docs" class="inline-flex items-center rounded-full bg-zinc-900 px-4 py-2 text-[13px] font-semibold text-white hover:bg-black no-underline">Back to overview →</Link>
+				</div>
+			</div>
+		</div>
+	</div>
+}

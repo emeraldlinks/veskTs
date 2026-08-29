@@ -4,6 +4,7 @@ import type { Program } from 'estree';
 import { tsPlugin } from './acorn-ts-plugin/index.js';
 import { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
 import { containsForOfIn } from '@vesk/compiler/src/scan';
+import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
 
 export interface ParseOptions {
   filename?: string;
@@ -225,15 +226,48 @@ export function createBaseParser(): typeof acorn.Parser {
 export function parse(source: string, options: ParseOptions = {}): Program {
   const ParserClass = createBaseParser();
   const { code, annotations } = preprocessForClauses(source);
-  const ast = (ParserClass as unknown as { parse(input: string, opts: Options): Program }).parse(code, {
-    ecmaVersion: 'latest',
-    sourceType: 'module',
-    locations: true,
-    ranges: true,
-    ...(options.filename ? { sourceFilename: options.filename } : {}),
-  } as Options);
-  if (annotations.length > 0) {
-    (ast as unknown as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations = annotations;
+  try {
+    const ast = (ParserClass as unknown as { parse(input: string, opts: Options): Program }).parse(code, {
+      ecmaVersion: 'latest',
+      sourceType: 'module',
+      locations: true,
+      ranges: true,
+      ...(options.filename ? { sourceFilename: options.filename } : {}),
+    } as Options);
+    if (annotations.length > 0) {
+      (ast as unknown as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations = annotations;
+    }
+    return ast;
+  } catch (e) {
+    const err = e as SyntaxError & { loc?: { line: number; column: number }; pos?: number };
+    // Acorn's SyntaxError already contains "(line:column)" in message and loc
+    let line = 0;
+    let column = 0;
+    if (err.loc && typeof err.loc.line === 'number') {
+      line = err.loc.line;
+      column = (err.loc.column ?? 0) + 1;
+    } else {
+      const m = err.message.match(/\((\d+):(\d+)\)/);
+      if (m) {
+        line = parseInt(m[1], 10);
+        column = parseInt(m[2], 10) + 1;
+      }
+    }
+    const filename = (options.filename as string) || '';
+    const cleanMessage = err.message.replace(/\s*\(\d+:\d+\)\s*$/, '');
+    const frame = line > 0 ? codeFrame(source, line, column, 5, 5) : '';
+    const hint = filename ? ` in ${filename}` : '';
+    throw new VeskError(`${cleanMessage}${hint}`, {
+      file: filename,
+      line,
+      column,
+      code: frame,
+      nextSteps: [
+        'Check the line indicated by the ^ marker for missing brackets, quotes, or JSX syntax.',
+        'If you wrote literal { or } inside JSX text, escape them as {\'{\'} and {\'}\'} or use &lbrace; &rbrace;.',
+        'Ensure all JSX tags are properly closed and component names start with an uppercase letter.',
+      ],
+      tip: 'Vesk parses with Acorn + TypeScript + JSX — use the code frame above to locate the error.',
+    });
   }
-  return ast;
 }

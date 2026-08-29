@@ -22,7 +22,7 @@ import {
   SlotNode,
 } from '@vesk/compiler/src/ir';
 import type { IRNode } from '@vesk/compiler/src/ir';
-import { VeskError } from '@vesk/compiler/src/errors';
+import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
 import { createBaseParser } from '@vesk/compiler/src/parser';
 import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, collapseNewlineWhitespace } from '@vesk/compiler/src/scan';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
@@ -821,7 +821,7 @@ function processTryStatement(source: string, stmt: any): IRNode[] {
   return [new TryCatch(bodyTemplate, catchBody, catchParamName)];
 }
 
-function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
+function processStatementModeBody(source: string, bodyStmts: any[], filename?: string): IRNode[] {
   const nodes: IRNode[] = [];
   for (let i = 0; i < bodyStmts.length; i++) {
     const stmt = bodyStmts[i];
@@ -845,7 +845,7 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
       }
     } else if (stmt.type === 'VeskBlock') {
       if (stmt.tag === 'empty') continue;
-      const inner = processStatementModeBody(source, stmt.body);
+      const inner = processStatementModeBody(source, stmt.body, filename);
       if (stmt.tag === 'server') {
         nodes.push(new ServerBlock(inner));
       } else if (stmt.tag === 'client') {
@@ -866,7 +866,7 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
       let consumed = 1;
       const next = bodyStmts[i + 1];
       if (next && next.type === 'VeskBlock' && next.tag === 'empty') {
-        alternate = processStatementModeBody(source, next.body);
+        alternate = processStatementModeBody(source, next.body, filename);
         consumed = 2;
       }
       nodes.push(...processForStatement(source, stmt, alternate));
@@ -895,7 +895,8 @@ function processStatementModeBody(source: string, bodyStmts: any[]): IRNode[] {
         if (raw) nodes.push(new RuntimeStatement(raw, stmt, source));
       }
     } else if (stmt.type === 'ClassDeclaration') {
-      throw VeskError.classDecl();
+      const { line, column } = offsetToLineCol(source, (stmt as unknown as { start: number }).start ?? 0);
+      throw VeskError.classDecl({ file: filename || '', line, column, code: codeFrame(source, line, column) });
     } else {
       const raw = getSource(source, stmt);
       if (raw) nodes.push(new RuntimeStatement(raw, stmt, source));
@@ -921,19 +922,35 @@ function extractStyle(body: IRNode[]): { body: IRNode[]; css: string | null } {
   return { body: filtered, css: cssParts.join('\n') || null };
 }
 
-function validateBlocks(compName: string, isClient: boolean, body: IRNode[]): void {
+function validateBlocks(compName: string, isClient: boolean, body: IRNode[], file?: string, source?: string): void {
   for (const node of body) {
     if (isClient) {
       if (node instanceof ServerBlock) {
-        throw VeskError.serverBlockInClient(compName);
+        const opts: Record<string, unknown> = file ? { file } : {};
+        if (source && (node as unknown as { start?: number }).start !== undefined) {
+          const pos = (node as unknown as { start: number }).start;
+          const { line, column } = offsetToLineCol(source, pos);
+          (opts as { line: number; column: number; code: string }).line = line;
+          (opts as { line: number; column: number; code: string }).column = column;
+          (opts as { code: string }).code = codeFrame(source, line, column);
+        }
+        throw VeskError.serverBlockInClient(compName, opts as { file?: string });
       }
     } else {
       if (node instanceof ClientBlock) {
-        throw VeskError.clientBlockInServer(compName);
+        const opts: Record<string, unknown> = file ? { file } : {};
+        if (source && (node as unknown as { start?: number }).start !== undefined) {
+          const pos = (node as unknown as { start: number }).start;
+          const { line, column } = offsetToLineCol(source, pos);
+          (opts as { line: number; column: number; code: string }).line = line;
+          (opts as { line: number; column: number; code: string }).column = column;
+          (opts as { code: string }).code = codeFrame(source, line, column);
+        }
+        throw VeskError.clientBlockInServer(compName, opts as { file?: string });
       }
     }
     if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock) {
-      validateBlocks(compName, isClient, (node as any).children || []);
+      validateBlocks(compName, isClient, (node as any).children || [], file, source);
     }
   }
 }
@@ -989,8 +1006,9 @@ function idxOfQuote(s: string, from: number): number {
   return -1;
 }
 
-export function generateIR(ast: any, source: string): IRRoot {
+export function generateIR(ast: any, source: string, filename?: string): IRRoot {
   __vskAnnotations = (ast as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations ?? [];
+  const file = filename || '';
   const components: ComponentIR[] = [];
   const imports: string[] = [];
   const importedNames = new Set<string>();
@@ -1055,7 +1073,8 @@ export function generateIR(ast: any, source: string): IRRoot {
     if (inner.type === 'ComponentDeclaration') {
       // handled below
     } else if (inner.type === 'ClassDeclaration') {
-      throw VeskError.classDecl();
+      const { line, column } = offsetToLineCol(source, (inner as unknown as { start: number }).start ?? 0);
+      throw VeskError.classDecl({ file, line, column, code: codeFrame(source, line, column) });
     } else if (inner.type === 'TSEnumDeclaration') {
       const code = processEnum(inner, source, exported);
       topLevelCode.push(code);
@@ -1072,9 +1091,9 @@ export function generateIR(ast: any, source: string): IRRoot {
     const isClientComp = !!inner.client;
 
     if (isStatementMode(bodyStmts)) {
-      const raw = processStatementModeBody(source, bodyStmts);
+      const raw = processStatementModeBody(source, bodyStmts, file);
       const { body, css } = extractStyle(raw);
-      validateBlocks(name, isClientComp, body);
+      validateBlocks(name, isClientComp, body, file, source);
       const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
       comp.style = css;
       components.push(comp);
@@ -1085,7 +1104,7 @@ export function generateIR(ast: any, source: string): IRRoot {
 
       for (const stmt of bodyStmts) {
         if (stmt.type === 'VeskBlock') {
-          const innerBody = processStatementModeBody(source, stmt.body);
+          const innerBody = processStatementModeBody(source, stmt.body, file);
           if (stmt.tag === 'server') {
             preamble.push(new ServerBlock(innerBody));
           } else if (stmt.tag === 'client') {
@@ -1104,7 +1123,8 @@ export function generateIR(ast: any, source: string): IRRoot {
         } else if (stmt.type === 'IfStatement' && !mainReturn && stmt.consequent.type !== 'ThrowStatement') {
           guardClauses.push(stmt);
         } else if (stmt.type === 'ClassDeclaration') {
-          throw VeskError.classDecl();
+          const { line, column } = offsetToLineCol(source, (stmt as unknown as { start: number }).start ?? 0);
+          throw VeskError.classDecl({ file, line, column, code: codeFrame(source, line, column) });
         } else {
           const raw = getSource(source, stmt);
           if (raw) preamble.push(new RuntimeStatement(raw, stmt, source));
@@ -1113,7 +1133,7 @@ export function generateIR(ast: any, source: string): IRRoot {
 
       const guardBody = buildGuardChain(source, guardClauses, mainReturn);
       const { body, css } = extractStyle([...preamble, ...guardBody]);
-      validateBlocks(name, isClientComp, body);
+      validateBlocks(name, isClientComp, body, file, source);
       const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
       comp.style = css;
       components.push(comp);
@@ -1128,7 +1148,7 @@ export function generateIR(ast: any, source: string): IRRoot {
     for (const [childName, start] of called) {
       if (!asyncNames.has(childName)) continue;
       const { line, column } = offsetToLineCol(source, start >= 0 ? start : 0);
-      throw VeskError.asyncChildInSyncParent(comp.name, childName, { line, column });
+      throw VeskError.asyncChildInSyncParent(comp.name, childName, { file, line, column, code: codeFrame(source, line, column) });
     }
   }
 

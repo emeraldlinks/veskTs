@@ -1,0 +1,112 @@
+import type { Component } from '@vesk/types';
+import { Link, NavLink } from '@vesk/runtime/router';
+
+interface LayoutProps {
+	children?: Component
+}
+
+component Layout(props: LayoutProps) {
+	<Head>
+		<link rel="preconnect" href="https://fonts.googleapis.com" />
+		<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+		<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet" />
+	</Head>
+	<div class="min-h-screen bg-black text-zinc-100 antialiased selection:bg-zinc-900 selection:text-white">
+		<header class="sticky top-0 z-50 backdrop-blur-xl bg-black/80 border-b border-zinc-800">
+			<div class="mx-auto max-w-[1200px] px-6 h-[64px] flex items-center justify-between gap-8">
+				<div class="flex items-center gap-10">
+<Link href="/" class="flex items-center gap-3 no-underline">
+					<div class="w-8 h-8 border border-emerald-400 bg-black flex items-center justify-center">
+						<span class="text-emerald-400 font-black text-[13px] tracking-[-0.04em]">&gt;_</span>
+					</div>
+					<span class="font-semibold tracking-[-0.03em] text-[17px] text-zinc-100">vesk</span>
+					<span class="hidden sm:inline-flex items-center border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[10px] font-medium tracking-widest uppercase text-zinc-500">Compiler-first</span>
+				</Link>
+				<nav class="hidden lg:flex items-center gap-1">
+					<Link href="/#why" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Why Vesk</Link>
+					<Link href="/#native" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Native</Link>
+					<Link href="/#compiler" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Compiler</Link>
+					<Link href="/#features" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Features</Link>
+					<Link href="/#ecosystem" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Ecosystem</Link>
+					<NavLink href="/docs" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Docs</NavLink>
+					<NavLink href="/posts" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Posts</NavLink>
+					<NavLink href="/blog" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Blog</NavLink>
+				</nav>
+			</div>
+			<div class="flex items-center gap-3">
+				<a href="https://github.com/anomalyco/vesk" target="_blank" rel="noreferrer" class="hidden md:inline-flex items-center gap-2 border border-zinc-800 bg-zinc-950 px-3.5 py-1.5 text-[13px] font-medium text-zinc-300 hover:text-white hover:border-zinc-600 transition-colors no-underline runtime-transition">
+						<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" class="opacity-80"><path d="M12 .5C5.73.5.5 5.73.5 12a11.5 11.5 0 0 0 7.86 10.94c.58.11.79-.25.79-.55v-1.95c-3.2.7-3.88-1.35-3.88-1.35-.52-1.33-1.27-1.69-1.27-1.69-1.04-.71.08-.7.08-.7 1.15.08 1.76 1.18 1.76 1.18 1.02 1.75 2.68 1.24 3.33.95.1-.74.4-1.24.72-1.53-2.55-.29-5.23-1.28-5.23-5.7 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.47.11-3.06 0 0 .97-.31 3.18 1.18a11.1 11.1 0 0 1 5.8 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.24 2.77.12 3.06.74.81 1.19 1.84 1.19 3.1 0 4.43-2.69 5.41-5.25 5.7.41.35.77 1.04.77 2.1v3.11c0 .31.21.67.8.55A11.5 11.5 0 0 0 23.5 12C23.5 5.73 18.27.5 12 .5Z"/></svg>
+						GitHub
+					</a>
+					<NavLink href="/docs" class="hidden sm:inline-flex items-center px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Docs</NavLink>
+				<Link href="/#dx" class="inline-flex items-center bg-emerald-400 px-4 py-2 text-[13px] font-bold text-black hover:bg-emerald-300 transition-colors shadow-[0_0_24px_rgba(52,211,153,0.35)] no-underline">Get Started</Link>
+			</div>
+		</div>
+	</header>
+
+	<main>{props.children}</main>
+
+	<footer class="border-t border-zinc-800 bg-zinc-950">
+		<div class="mx-auto max-w-[1200px] px-6 py-14">
+			<div class="grid grid-cols-2 md:grid-cols-5 gap-10">
+				<div class="col-span-2 md:col-span-1">
+					<div class="flex items-center gap-2.5 mb-3">
+						<div class="w-7 h-7 border border-emerald-400 bg-black flex items-center justify-center">
+							<span class="text-emerald-400 font-black text-[11px]">&gt;_</span>
+						</div>
+						<span class="font-semibold tracking-[-0.03em] text-[15px]">vesk</span>
+					</div>
+					<p class="text-[13px] leading-5 text-zinc-400 max-w-[240px]">
+						The compiler-first framework for modern applications. Build once. Compile everywhere.
+					</p>
+					<p class="mt-4 text-[12px] text-zinc-500">© 2026 Vesk. MIT Licensed.</p>
+				</div>
+				<div>
+					<h4 class="text-[11px] font-semibold tracking-widest uppercase text-emerald-400 mb-3">Product</h4>
+					<ul class="space-y-2.5 text-[13.5px] leading-none">
+						<li><Link href="/#native" class="text-zinc-400 hover:text-emerald-400 no-underline">Vesk Native</Link></li>
+						<li><Link href="/#compiler" class="text-zinc-400 hover:text-emerald-400 no-underline">Compiler</Link></li>
+						<li><Link href="/#features" class="text-zinc-400 hover:text-emerald-400 no-underline">Features</Link></li>
+						<li><Link href="/#showcase" class="text-zinc-400 hover:text-emerald-400 no-underline">Showcase</Link></li>
+						<li><Link href="/#roadmap" class="text-zinc-400 hover:text-emerald-400 no-underline">Roadmap</Link></li>
+					</ul>
+				</div>
+				<div>
+					<h4 class="text-[11px] font-semibold tracking-widest uppercase text-emerald-400 mb-3">Developers</h4>
+					<ul class="space-y-2.5 text-[13.5px] leading-none">
+						<li><NavLink href="/docs" class="text-zinc-400 hover:text-emerald-400 no-underline">Documentation</NavLink></li>
+						<li><Link href="/#dx" class="text-zinc-400 hover:text-emerald-400 no-underline">Getting Started</Link></li>
+						<li><Link href="/posts" class="text-zinc-400 hover:text-emerald-400 no-underline">Examples</Link></li>
+						<li><Link href="/blog" class="text-zinc-400 hover:text-emerald-400 no-underline">API</Link></li>
+						<li><a href="https://github.com/anomalyco/vesk" class="text-zinc-400 hover:text-emerald-400 no-underline">GitHub</a></li>
+					</ul>
+				</div>
+				<div>
+					<h4 class="text-[11px] font-semibold tracking-widest uppercase text-emerald-400 mb-3">Community</h4>
+					<ul class="space-y-2.5 text-[13.5px] leading-none">
+						<li><a href="https://github.com/anomalyco/vesk" class="text-zinc-400 hover:text-emerald-400 no-underline">GitHub</a></li>
+						<li><Link href="#" class="text-zinc-400 hover:text-emerald-400 no-underline">Discord</Link></li>
+						<li><Link href="/blog" class="text-zinc-400 hover:text-emerald-400 no-underline">Discussions</Link></li>
+						<li><Link href="#" class="text-zinc-400 hover:text-emerald-400 no-underline">Contributors</Link></li>
+					</ul>
+				</div>
+				<div>
+					<h4 class="text-[11px] font-semibold tracking-widest uppercase text-emerald-400 mb-3">Company</h4>
+					<ul class="space-y-2.5 text-[13.5px] leading-none">
+						<li><Link href="/about" class="text-zinc-400 hover:text-emerald-400 no-underline">About</Link></li>
+						<li><Link href="/blog" class="text-zinc-400 hover:text-emerald-400 no-underline">Blog</Link></li>
+						<li><Link href="#" class="text-zinc-400 hover:text-emerald-400 no-underline">Contact</Link></li>
+					</ul>
+				</div>
+			</div>
+			<div class="mt-10 pt-6 border-t border-zinc-800 flex flex-col md:flex-row items-center justify-between gap-4">
+				<p class="text-[12.5px] text-zinc-500">A unified, compiler-driven way to build modern applications. Crafted for builders.</p>
+				<div class="flex items-center gap-2 text-[12px] font-mono text-zinc-500">
+					<span class="inline-flex h-2 w-2 bg-emerald-500 animate-pulse"></span>
+					<span>Compiler v0.2.9 • All systems operational</span>
+				</div>
+			</div>
+		</div>
+	</footer>
+	</div>
+}

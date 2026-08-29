@@ -160,7 +160,7 @@ export async function generateClientBundle(
     // One parse/IR pass feeds both client modes AND the component-name
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
-    const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null);
+    const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null, filePath);
     const compCode = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
     const hydCode = rawHyd ? stripExports(stripVskImports(stripRuntimeImport(rawHyd))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
     if (rawComp) collectRuntimeImports(rawComp);
@@ -302,14 +302,14 @@ export async function generateClientBundle(
 
       resolveVskImports(filePath, (p, n) => compileFileMono(p, n || ''));
 
-      const compCode = compileClient(src, null, { forceClient: true });
+      const compCode = compileClient(src, null, { forceClient: true, sourcePath: filePath });
       if (compCode) {
         collectRuntimeImports(compCode);
         const stripped = stripExports(stripVskImports(stripRuntimeImport(compCode)));
         componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
       }
 
-      const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false });
+      const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false, sourcePath: filePath });
       if (hydCode) {
         collectRuntimeImports(hydCode);
         const stripped = stripExports(stripVskImports(stripRuntimeImport(hydCode)))

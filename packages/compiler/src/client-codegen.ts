@@ -1503,8 +1503,8 @@ export function compileClient(source: string, _componentName: string | null, opt
   if (options.sourcePath) {
     source = inlineMdImportsFrom(source, options.sourcePath, options.mdRoots || []);
   }
-  const ast = parse(source);
-  const ir = generateIR(ast, source);
+  const ast = parse(source, options.sourcePath ? { filename: options.sourcePath } : {});
+  const ir = generateIR(ast, source, options.sourcePath);
   return emitClientFromIR(ir, options);
 }
 
@@ -1516,14 +1516,14 @@ export function compileClient(source: string, _componentName: string | null, opt
  * `resolveComponentName`, so callers don't need a second full parse just
  * to learn the name.
  */
-export function compileClientBoth(source: string, _componentName: string | null): { comp: string; hyd: string; name: string | null } {
-  const ast = parse(source);
+export function compileClientBoth(source: string, _componentName: string | null, sourcePath?: string): { comp: string; hyd: string; name: string | null } {
+  const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
   // Downstream type-stripping mutates AST nodes in place (stripTsTypes),
   // so each emit mode needs its own tree. Cloning is far cheaper than the
   // second full acorn+TS parse this replaces.
   const hydAst = structuredClone(ast);
-  const ir = generateIR(ast, source);
-  const irHyd = generateIR(hydAst, source);
+  const ir = generateIR(ast, source, sourcePath);
+  const irHyd = generateIR(hydAst, source, sourcePath);
   const defaultComp = ir.components.find((c) => c.defaultExport);
   let name: string | null = null;
   if (defaultComp) name = defaultComp.name;

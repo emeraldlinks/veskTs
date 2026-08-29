@@ -68,6 +68,26 @@ function findKeywordNumber(message: string, keywords: string[]): number {
   return 0;
 }
 
+export function codeFrame(source: string, line: number, column: number, before = 5, after = 5): string {
+  if (line <= 0) return '';
+  const lines = source.split('\n');
+  const start = Math.max(1, line - before);
+  const end = Math.min(lines.length, line + after);
+  const width = String(end).length;
+  let out = '';
+  for (let i = start; i <= end; i++) {
+    const text = lines[i - 1] ?? '';
+    const ln = String(i).padStart(width, ' ');
+    out += `${ln} | ${text}\n`;
+    if (i === line) {
+      const pointerCol = Math.max(0, column - 1);
+      const prefix = ' '.repeat(width) + ' | ';
+      out += prefix + ' '.repeat(pointerCol) + '^\n';
+    }
+  }
+  return out.trimEnd();
+}
+
 export interface VeskErrorOptions {
   file?: string;
   line?: number;
@@ -237,7 +257,17 @@ export class VeskError extends Error {
 
   toString(): string {
     let out = `[vesk] ${this.message}`;
-    if (this.file) out += `\n  File: ${this.file}${this.line ? `:${this.line}` : ''}`;
+    if (this.file) {
+      out += `\n  File: ${this.file}`;
+      if (this.line) {
+        out += `:${this.line}`;
+        if (this.column) out += `:${this.column}`;
+      }
+      if (this.line && this.column) out += ` (line ${this.line}, column ${this.column})`;
+      else if (this.line) out += ` (line ${this.line})`;
+    } else if (this.line) {
+      out += `\n  at line ${this.line}${this.column ? `, column ${this.column}` : ''}`;
+    }
     if (this.code) out += `\n\n${this.code}`;
     if (this.suggestions.length) {
       out += '\n\n  Suggestions:';

@@ -410,13 +410,26 @@ export async function startDevServer(port: number, projectDir: string, config: R
                       if (fileMatch) file = fileMatch[1];
                     }
                     let code = '';
-                    if (line > 0 && fileExists) {
+                    // Prefer the compiler's rich code frame (5 lines before/after + ^ pointer) if available
+                    if (errDetails?.code && typeof errDetails.code === 'string' && (errDetails.code as string).trim()) {
+                      code = errDetails.code as string;
+                    } else if (line > 0 && fileExists) {
                       try {
                         const src = readFileSync(fullPath, 'utf-8');
                         const lines = src.split('\n');
-                        const start = Math.max(0, line - 3);
-                        const end = Math.min(lines.length, line + 2);
-                        code = lines.slice(start, end).map((l, i) => `${start + i + 1}: ${l}`).join('\n');
+                        const start = Math.max(0, line - 6);
+                        const end = Math.min(lines.length, line + 5);
+                        const width = String(end).length;
+                        const out: string[] = [];
+                        for (let i = start; i < end; i++) {
+                          const ln = String(i + 1).padStart(width, ' ');
+                          out.push(`${ln} | ${lines[i] ?? ''}`);
+                          if (i + 1 === line) {
+                            const pointerCol = Math.max(0, col - 1);
+                            out.push(`${' '.repeat(width)} | ${' '.repeat(pointerCol)}^`);
+                          }
+                        }
+                        code = out.join('\n');
                       } catch {}
                     }
                     const tips: string[] = [];
