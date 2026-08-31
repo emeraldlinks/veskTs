@@ -5,12 +5,39 @@ import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
-import { createHmrServer } from '@vesk/adapter/src/hmr';
+import { createHmrServer } from './hmr';
+import * as hmrApi from './hmr';
+import { createDevApiRouter } from './dev-api';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
-import type { RouteNode, DevServerOptions, Manifest } from '@vesk/adapter/src/types';
+import type { RouteNode, DevServerOptions, Manifest, VeskPlugin } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Shape returned by the dev HMR state endpoint. Mirrors what the parallel
+ * `hmr.ts` agent's `getHmrState()` returns; we tolerate its absence at
+ * module-load time (see `devHmrState`) so this module stays importable even
+ * before the state provider lands.
+ */
+export interface DevHmrState {
+  status: 'up' | 'compiling' | 'error' | 'down';
+  lastCompileMs: number | null;
+  error: Record<string, unknown> | null;
+  hasError: boolean;
+  componentCount: number;
+}
+
+/** Default state when no HMR provider is available (no server). */
+export function defaultDevHmrState(): DevHmrState {
+  return { status: 'up', lastCompileMs: null, error: null, hasError: false, componentCount: 0 };
+}
+
+/** The live HMR state provider: the parallel agent's `getHmrState` if present, else a safe no-server default. */
+const devHmrState: () => DevHmrState =
+  typeof (hmrApi as unknown as { getHmrState?: () => DevHmrState }).getHmrState === 'function'
+    ? (hmrApi as unknown as { getHmrState: () => DevHmrState }).getHmrState
+    : defaultDevHmrState;
 
 interface ExtendedRequest extends Request {
   json(): Promise<unknown>;
@@ -65,6 +92,105 @@ async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAU
   return Buffer.concat(chunks);
 }
 
+export interface DevPanelResponse {
+  status: number;
+  headers: Record<string, string>;
+  body: string;
+  /** When 'base64', the dev server writes Buffer.from(body, 'base64') to the socket (binary payloads like icons). */
+  encoding?: 'utf8' | 'base64';
+}
+
+export interface PluginRouterChangeEvent {
+  type: 'activate' | 'deactivate' | 'install' | 'uninstall' | 'update';
+  name?: string;
+}
+
+export interface PluginStateRouterOptions {
+  appDir: string;
+  veskDir: string;
+  configPluginNames: string[];
+  getHmrState?: () => DevHmrState;
+  /** Called after a mutation so the caller can rebuild + notify HMR clients. */
+  onPluginChange?: (event: PluginRouterChangeEvent) => void | Promise<void>;
+}
+
+/**
+ * Pure, dependency-injectable router for the dev panel HTTP endpoints
+ * (`/__vesk/...`). Everything is testable with fake inputs — no socket, no
+ * listener. Returns `null` for paths that are not dev-panel endpoints so the
+ * dev server can fall through to its normal route handling.
+ *
+ * Endpoints:
+ *   GET  /__vesk/hmr/state                       → { ...DevHmrState }
+ *   GET  /__vesk/plugins                         → { plugins: PluginRecord[] } (registry-enriched)
+ *   POST /__vesk/plugins/activate                → { ok, record }
+ *   POST /__vesk/plugins/deactivate              → { ok, record }
+ *   POST /__vesk/plugins/install                 → { ok, record }
+ *   POST /__vesk/plugins/uninstall               → { ok }
+ *   POST /__vesk/plugins/update                  → { ok, record }
+ *   GET  /__vesk/plugins/search?q=<query>        → { results: PluginSearchResult[] }
+ *   GET  /__vesk/plugins/:name/icon              → { base64 + mime } (or 404)
+ *   GET  /__vesk/plugins/:name/exports           → { PluginExportsInfo }
+ *   (anything else under /__vesk/*)              → 404 { error }
+ */
+export function createPluginStateRouter(opts: PluginStateRouterOptions): {
+  route: (method: string, pathname: string, body?: unknown, search?: string) => Promise<DevPanelResponse | null>;
+} {
+  // Delegates to the unified DevTools router (dev-api.ts) for the plugin +
+  // HMR-state surface, preserving the exact wire contract.
+  return createDevApiRouter({
+    appDir: opts.appDir,
+    veskDir: opts.veskDir,
+    configPluginNames: opts.configPluginNames,
+    getHmrState: opts.getHmrState,
+    onPluginChange: opts.onPluginChange,
+  });
+}
+
+/**
+ * Inline bootstrap script injected after the dev/HMR scripts on every served
+ * dev page. On DOMContentLoaded it polls `/__vesk/hmr/state` and — if the
+ * server reports a persisted error — calls the client's registered
+ * `globalThis.__vesk_hmr_show(payload)` to re-open the error overlay. This
+ * satisfies the Nuxt-like "a refresh during an active error should still show
+ * the overlay" requirement, because the client bundle's own state fetch only
+ * fires after its module runs.
+ *
+ * Idempotency: the `window.__vesk_hmr_bootstrap` guard makes the inline script
+ * run at most once per page even if it is injected at multiple `</body>` sites
+ * (or on a page served more than once). The overlay itself cannot be duplicated
+ * because the client's `showOverlay` reuses a single `#__vesk_overlay` element
+ * (guarded in `createOverlay`), and `__vesk_hmr_show` is registered once by
+ * `registerGlobalHmr`. So a double-show (inline bootstrap + client's own
+ * `loadPersistedState`) re-renders the same overlay rather than stacking a
+ * second one.
+ */
+export function devBootstrapScript(): string {
+  return (
+    "<script>\n" +
+    "if(!window.__vesk_hmr_bootstrap){window.__vesk_hmr_bootstrap=1;" +
+    "(function(){function boot(){fetch('/__vesk/hmr/state')" +
+    ".then(function(r){return r.ok?r.json():null;}).then(function(s){" +
+    "if(s&&s.error&&window.__vesk_hmr_show){window.__vesk_hmr_show(s.error);}" +
+    "}).catch(function(){});}" +
+    "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}" +
+    "})();" +
+    "}\n" +
+    "</script>"
+  );
+}
+
+/**
+ * Inject the dev/HMR client script plus the inline state bootstrap into an HTML
+ * page at its first `</body>`. Idempotent when there is no `</body>`: the HTML
+ * is returned unchanged (never injected twice / never appended uncontrolled).
+ */
+export function injectDevScripts(html: string): string {
+  if (!html.includes('</body>')) return html;
+  const scripts = '\t<script type="module" src="/_vesk/hmr.js"></script>\n' + devBootstrapScript() + '\n';
+  return html.replace('</body>', scripts + '</body>');
+}
+
 function makeWebRequest(nodeReq: IncomingMessage, url: string, maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES): ExtendedRequest {
   const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
   const method = nodeReq.method || 'GET';
@@ -117,6 +243,33 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
   installMdReadHook([publicDir, resolve(devDir, 'static', 'public')]);
 
+  // Dev-panel plugin list: plugin / module names declared in the dev server's own config.
+  const configPluginNames: string[] = (options?.plugins || []).map((p) => {
+    if (typeof p === 'string') return p;
+    return (p as VeskPlugin).name;
+  }).filter((n): n is string => typeof n === 'string' && !!n);
+
+  // Late-bound so the router's onPluginChange can broadcast over the HMR
+  // WebSocket, which is only created further down in this function.
+  let hmrSession: ReturnType<typeof createHmrServer> | null = null;
+
+  const devPanel = createPluginStateRouter({
+    appDir,
+    veskDir: resolve(appDir, '..', '.vesk'),
+    configPluginNames,
+    getHmrState: devHmrState,
+    onPluginChange: async (event) => {
+      try {
+        await doBuild();
+        if (hmrSession) {
+          hmrSession.broadcast('reload', { reason: `Plugin ${event.type}: ${event.name ?? ''}`, time: Date.now() });
+        }
+      } catch {
+        /* plugin change rebuild is best-effort; the server keeps serving */
+      }
+    },
+  });
+
   let componentMap = new Map<string, string>();
   const monorepoRouter = resolve(__dirname, '..', '..', 'compiler', 'dist', 'router.js');
   const pkgRouter = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'router.js');
@@ -159,6 +312,28 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
+
+    // Dev panel endpoints (/__vesk/...): HMR state, plugin list, activate/
+    // deactivate/install/uninstall. Routed through the pure injectable router.
+    if (url.pathname.startsWith('/__vesk/')) {
+      let body: unknown = undefined;
+      if ((req.method || 'GET') === 'POST') {
+        try {
+          const buf = await readBody(req, maxBodyBytes);
+          body = buf.length > 0 ? JSON.parse(buf.toString()) : {};
+        } catch (e) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+          return;
+        }
+      }
+      const result = await devPanel.route(req.method || 'GET', url.pathname, body, url.search);
+      if (result) {
+        res.writeHead(result.status, result.headers);
+        res.end(result.encoding === 'base64' ? Buffer.from(result.body, 'base64') : result.body);
+        return;
+      }
+    }
 
     if (url.pathname === '/_vesk/hmr.js') {
       const monorepoRoot = resolve(__dirname, '..', '..', '..');
@@ -233,10 +408,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
               const contentType = headers['content-type'] || '';
               let finalBody = body;
               if (contentType.includes('text/html')) {
-                finalBody = body.replace(
-                  '</body>',
-                  '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'
-                );
+                finalBody = injectDevScripts(body);
               }
               res.writeHead(response.status, headers);
               res.end(finalBody);
@@ -290,10 +462,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
             const contentType = headers['content-type'] || '';
             let finalBody = body;
             if (contentType.includes('text/html')) {
-              finalBody = body.replace(
-                '</body>',
-                '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'
-              );
+              finalBody = injectDevScripts(body);
             }
             res.writeHead(response.status, headers);
             res.end(finalBody);
@@ -320,10 +489,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
             const contentType = headers['content-type'] || '';
             let finalBody = body;
             if (contentType.includes('text/html')) {
-              finalBody = body.replace(
-                '</body>',
-                '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'
-              );
+              finalBody = injectDevScripts(body);
             }
             res.writeHead(200, headers);
             res.end(finalBody);
@@ -341,6 +507,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   });
 
   const hmr = createHmrServer(server, appDir, devDir, componentMap);
+  hmrSession = hmr;
 
   const srcDir = resolve(appDir, '..', 'src');
 

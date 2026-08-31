@@ -152,13 +152,42 @@ try {
     assert(typeof pageUpdateMsg.time === 'number', 'update has numeric time field');
   }
 
-  // --- Compilation error ---
-  writeFileSync(pagePath, 'invalid vesk code {{{', 'utf-8');
+  // --- Compilation error (multi-line file, syntax error at line 11) ---
+  const brokenLines = Array.from({ length: 21 }, (_, i) => `const n${i} = ${i};`);
+  brokenLines[10] = 'const {{{ break;';
+  writeFileSync(pagePath, brokenLines.join('\n'), 'utf-8');
   await new Promise(r => setTimeout(r, 1500));
 
   const errMsg = messages.find(m => m.type === 'error');
   assert(errMsg !== undefined, 'error message sent for broken file');
-  if (errMsg) assert(errMsg.message, 'error has message');
+  if (errMsg) {
+    assert(typeof errMsg.message === 'string' && errMsg.message.length > 0, 'enriched error has a string message');
+    assert(Number.isInteger(errMsg.line) && Number.isInteger(errMsg.column), 'enriched error has integer line/column');
+    assert(errMsg.line === 11 && errMsg.column > 0, 'enriched error line points at the syntax-error line (11)');
+    assert(Array.isArray(errMsg.tips) && errMsg.tips.length >= 1, 'enriched error has tips array');
+    assert(Array.isArray(errMsg.suggestions) && errMsg.suggestions.length >= 1, 'enriched error has suggestions array');
+    assert(Array.isArray(errMsg.nextSteps) && errMsg.nextSteps.length >= 1, 'enriched error has nextSteps array');
+    assert(errMsg.codeframe && Array.isArray(errMsg.codeframe.code), 'enriched error includes a codeframe (source + line available)');
+    if (errMsg.codeframe) {
+      const errLines = errMsg.codeframe.code.filter(l => l.isError);
+      assert(errLines.length === 1 && errLines[0].no === errMsg.line, 'codeframe has exactly one isError line at the error line');
+      assert(errMsg.codeframe.code.length === 11, 'codeframe spans 5 up + error + 5 down (11 lines)');
+      assert(
+        errMsg.codeframe.code[0].no === errMsg.line - 5 && errMsg.codeframe.code[10].no === errMsg.line + 5,
+        'codeframe window is exactly ±5 lines'
+      );
+    }
+  }
+
+  // Live HMR state reflects the error over the state endpoint.
+  const stErrRes = await fetch(`http://127.0.0.1:${PORT}/__vesk/hmr/state`);
+  const stErr = await stErrRes.json();
+  assert(stErrRes.ok, 'state endpoint responds 200');
+  assert(stErr.status === 'up', 'getHmrState status is up while serving');
+  assert(stErr.hasError === true && stErr.error && stErr.error.message === errMsg.message,
+    'getHmrState reflects the live (enriched) error');
+  assert(stErr.error && stErr.error.codeframe && stErr.error.codeframe.code.length === 11,
+    'getHmrState carries the enriched error with codeframe');
 
   // --- Fix file ---
   writeFileSync(pagePath, originalPageSrc, 'utf-8');
@@ -166,6 +195,10 @@ try {
 
   const updatesAfterFix = messages.filter(m => m.type === 'update');
   assert(updatesAfterFix.length >= 1, 'update sent after fixing file');
+
+  const stFixed = await (await fetch(`http://127.0.0.1:${PORT}/__vesk/hmr/state`)).json();
+  assert(stFixed.hasError === false && stFixed.error === null, 'getHmrState error cleared on update');
+  assert(typeof stFixed.lastCompileMs === 'number', 'getHmrState tracks lastCompileMs after a successful update');
 
   // --- Standalone component ---
   const compSrc = 'component Counter {\n\t<p>Count: 0</p>\n}';

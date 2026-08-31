@@ -1,0 +1,43 @@
+/**
+ * @license lucide-vesk v0.511.0 - ISC
+ * @name wallpaper
+ * @see https://lucide.dev/icons/wallpaper
+ * Auto-generated — do not edit. Generated from lucide@wallpaper.
+ * Never scoped — no style tag.
+ */
+import createLucideIcon from "../createLucideIcon.js";
+import type { IconNode } from "../types.js";
+
+export const __iconNode: IconNode = [
+  [
+    "circle",
+    {
+      "cx": "8",
+      "cy": "9",
+      "r": "2"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "m9 17 6.1-6.1a2 2 0 0 1 2.81.01L22 15V5a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M8 21h8"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M12 17v4"
+    }
+  ]
+] as unknown as IconNode;
+
+const Wallpaper = createLucideIcon("wallpaper", __iconNode);
+
+export default Wallpaper;
+export { Wallpaper };

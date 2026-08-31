@@ -1147,6 +1147,59 @@ describe('Async Discipline', () => {
 		`, 'Parent', 'Parent', 'Fetcher');
 	});
 
+	it('useFetch text inside a template literal does not make a child async (statement mode)', () => {
+		const html = render(`
+			component Snippet() {
+				const md = \`const res = useFetch.stream(() => '/api/docs/' + active)\`
+				<p>{md}</p>
+			}
+			component Parent() {
+				<Snippet />
+			}
+		`, 'Parent');
+		expect(html).toContain('useFetch.stream');
+		expect(html).toContain("'/api/docs/'");
+	});
+
+	it('useFetch text inside a string does not make an expression-mode child async', () => {
+		const html = render(`
+			component Snippet() {
+				const md = 'useFetch("/api/x") text'
+				return <p>{md}</p>
+			}
+			component Parent() {
+				<Snippet />
+			}
+		`, 'Parent');
+		expect(html).toContain('useFetch(&quot;/api/x&quot;) text');
+	});
+
+	it('a template literal bound in JSX does not make an expression-mode child async', () => {
+		const html = render(`
+			component Snippet() {
+				const show = (t: string) => \`the docs example calls useFetch.stream(\${t})\`
+				return <p>{show('x')}</p>
+			}
+			component Parent() {
+				<Snippet />
+			}
+		`, 'Parent');
+		expect(html).toContain('useFetch.stream(x)');
+	});
+
+	it('a real useFetch call stays async even when strings also mention useFetch', () => {
+		mustError(`
+			component Fetcher() {
+				const md = \`hint: useFetch.stream()\`
+				const data = useFetch('/api/x')
+				<p>{data.data}{md}</p>
+			}
+			component Parent() {
+				<Fetcher />
+			}
+		`, 'Parent', 'Parent', 'Fetcher');
+	});
+
 	it('useFetch parent may render a useFetch child without declared async', async () => {
 		const savedFetch = globalThis.fetch;
 		globalThis.fetch = () => Promise.resolve({

@@ -1,8 +1,9 @@
-import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync, rmSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from './esbuild-fallback.js';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { parse } from '@vesk/compiler/src/parser';
 import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
@@ -43,6 +44,155 @@ function findRuntimeSrc(appDir: string): string {
   throw new Error('@vesk/runtime/dist not found — run "npm run build" first');
 }
 
+/**
+ * Pure name-collection used by `generateClientBundle`'s tree-shake request.
+ *
+ * Parses the (already compiled) client module with the compiler's AST pass and
+ * keeps only genuine top-level `import { … } from '@vesk/runtime…'` declarations.
+ * Import-shaped text inside template literals, strings, or comments — e.g. a
+ * doc code sample stored as `const md = \`import { VeskResponse } from
+ * '@vesk/runtime/server'\`` — never becomes an ImportDeclaration node, so those
+ * server-only names cannot poison the client runtime request. This is
+ * deliberately AST-only (no text scanning): text heuristics are what let
+ * server-only names leak into the client tree-shake request in the first
+ * place. If the compiled module ever fails to parse, we collect nothing rather
+ * than guess.
+ */
+export function extractRuntimeImportNames(code: string): string[] {
+  const names: string[] = [];
+  let ast: unknown;
+  try {
+    ast = parse(code);
+  } catch {
+    return names;
+  }
+  const body = (ast as { body?: Array<unknown> }).body ?? [];
+  for (const raw of body) {
+    const node = raw as {
+      type?: string;
+      importKind?: string;
+      source?: { value?: unknown };
+      specifiers?: Array<{
+        type?: string;
+        imported?: { name?: string } | null;
+        local?: { name?: string } | null;
+      }>;
+    };
+    if (node.type !== 'ImportDeclaration') continue;
+    const src = node.source?.value;
+    if (typeof src !== 'string' || !(src === '@vesk/runtime' || src.startsWith('@vesk/runtime/'))) continue;
+    if (node.importKind === 'type') continue;
+    for (const spec of node.specifiers ?? []) {
+      const name = spec.type === 'ImportSpecifier' ? spec.imported?.name : spec.local?.name;
+      if (name) names.push(name);
+    }
+  }
+  return names;
+}
+
+/**
+ * Minimal structural view of a compiled client module's top-level statements.
+ * Everything here is read from the compiler's AST — no text scanning — so
+ * import-shaped doc samples inside template literals are never treated as real
+ * statements (see `removeCompiledNodes`).
+ */
+interface CompiledNode {
+  type?: string;
+  importKind?: string;
+  source?: { value?: unknown };
+  id?: { name?: string };
+  declarations?: Array<{ id?: { name?: string }; init?: { type?: string; object?: { type?: string; name?: string } } }>;
+  declaration?: {
+    type?: string;
+    object?: { type?: string; name?: string };
+    declarations?: Array<{ init?: { type?: string; object?: { type?: string; name?: string } } }>;
+  };
+  start?: number;
+  end?: number;
+}
+
+function isRuntimeImport(node: CompiledNode): boolean {
+  if (node.type !== 'ImportDeclaration') return false;
+  const src = node.source?.value;
+  return src === '@vesk/runtime' || (typeof src === 'string' && src.startsWith('@vesk/runtime/'));
+}
+
+function isVskImport(node: CompiledNode): boolean {
+  if (node.type !== 'ImportDeclaration') return false;
+  const src = node.source?.value;
+  return typeof src === 'string' && src.endsWith('.vsk');
+}
+
+function isAnyImport(node: CompiledNode): boolean {
+  return node.type === 'ImportDeclaration';
+}
+
+/**
+ * Generated client-preamble nodes the bundle must not re-emit: the local
+ * `const __components = {}` registry plus the `__cleanup` / `__place` helpers —
+ * the chunk IIFEs already define their own `__components`, so a second
+ * declaration in the same scope would be a syntax error.
+ */
+function isRuntimePreamble(node: CompiledNode): boolean {
+  if (node.type === 'FunctionDeclaration' && (node.id?.name === '__cleanup' || node.id?.name === '__place')) {
+    return true;
+  }
+  if (node.type === 'VariableDeclaration') {
+    return node.declarations?.[0]?.id?.name === '__components';
+  }
+  return false;
+}
+
+/**
+ * `export default __components[<name>];` / `export const <name> = __components[<name>];`
+ * aliases emitted by codegen. The bundle registers components on `__components`
+ * directly, so these module-level re-exports must go.
+ */
+function isComponentExport(node: CompiledNode): boolean {
+  if (node.type === 'ExportDefaultDeclaration') {
+    const d = node.declaration;
+    return !!d && d.type === 'MemberExpression' && d.object?.type === 'Identifier' && d.object.name === '__components';
+  }
+  if (node.type === 'ExportNamedDeclaration') {
+    const init = node.declaration?.type === 'VariableDeclaration' ? node.declaration.declarations?.[0]?.init : undefined;
+    return !!init && init.type === 'MemberExpression' && init.object?.type === 'Identifier' && init.object.name === '__components';
+  }
+  return false;
+}
+
+/**
+ * Removes matched top-level statements from a compiled client module using the
+ * parser's exact `start`/`end` offsets — never a text scan, so a doc sample
+ * stored inside a template literal can never be mistaken for a real statement.
+ * If the module cannot be parsed it is returned untouched (the compiler's own
+ * output is always valid ESM, so that branch is unreachable in practice).
+ */
+function removeCompiledNodes(code: string, isTarget: (node: CompiledNode) => boolean): string {
+  let ast: unknown;
+  try {
+    ast = parse(code);
+  } catch {
+    return code;
+  }
+  const ranges: Array<[number, number]> = [];
+  for (const raw of (ast as { body?: Array<unknown> }).body ?? []) {
+    const node = raw as CompiledNode;
+    if (isTarget(node) && typeof node.start === 'number' && typeof node.end === 'number') {
+      ranges.push([node.start, node.end]);
+    }
+  }
+  if (ranges.length === 0) return code;
+  ranges.sort((a, b) => b[0] - a[0]);
+  for (const [start, end] of ranges) {
+    let cut = end;
+    if (code[cut] === ';') cut++;
+    if (code.startsWith('\r\n', cut)) cut += 2;
+    else if (code[cut] === '\n' || code[cut] === '\r') cut++;
+    code = code.slice(0, start) + code.slice(cut);
+  }
+  return code;
+}
+
 export async function generateClientBundle(
   routeTree: RouteNode[],
   appDir: string,
@@ -67,28 +217,23 @@ export async function generateClientBundle(
     return !!only && !only.has(filePath);
   }
 
+  /**
+   * Collects the runtime names a module genuinely imports from `@vesk/runtime*`
+   * (see `extractRuntimeImportNames`). Deliberately AST-only — import-shaped
+   * text inside template literals (e.g. a doc sample `const md = \`import {
+   * VeskResponse } from '@vesk/runtime/server'\``) must NOT force a client
+   * tree-shake request for a server-only name.
+   */
   function collectRuntimeImports(code: string): void {
-    // matches bare '@vesk/runtime' and any of its subpaths
-    // ('@vesk/runtime/router', '@vesk/runtime/server', …)
-    const re = /^import\s*\{([^}]*)\}\s*from\s*['"]@vesk\/runtime(\/[a-zA-Z0-9-]+)*['"];?\s*\n?/gm;
-    for (const m of code.matchAll(re)) {
-      for (const name of m[1].split(',')) {
-        const trimmed = name.trim().replace(/^(\w+)\s+as\s+.*$/, '$1');
-        if (!trimmed || /^(type|typeof)\s/.test(trimmed)) continue;
-        runtimeImportNames.add(trimmed);
-      }
-    }
+    for (const name of extractRuntimeImportNames(code)) runtimeImportNames.add(name);
   }
 
   function stripRuntimeImport(code: string): string {
-    return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"]@vesk\/runtime(\/[a-zA-Z0-9-]+)*['"];?\s*\n?/gm, '')
-               .replace(/const\s+__components\s*=\s*\{\};\s*\n?/g, '')
-               .replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/gm, '')
-               .replace(/^function __place\(start, end, nodes, fallback\) \{[\s\S]*?\n\}\s*\n?/gm, '');
+    return removeCompiledNodes(code, (node) => isRuntimeImport(node) || isRuntimePreamble(node));
   }
 
   function stripVskImports(code: string): string {
-    return code.replace(/^import\s*\{[^}]*\}\s*from\s*['"][^'"]*\.vsk['"];?\s*\n?/gm, '');
+    return removeCompiledNodes(code, isVskImport);
   }
 
   function resolveVskImports(filePath: string, compile: (path: string, resolvedName: string | null) => void): string[] {
@@ -111,9 +256,7 @@ export async function generateClientBundle(
   }
 
   function stripExports(code: string): string {
-    return code
-      .replace(/^export\s+default\s+__components\[.*?\];?\s*\n?/gm, '')
-      .replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+    return removeCompiledNodes(code, isComponentExport);
   }
 
   function compileFile(filePath: string, resolvedName: string | null, output: string[]): void {
@@ -171,8 +314,7 @@ export async function generateClientBundle(
       // remaining top-level import so the snippet can be eval'd in the page
       // context where runtime globals already exist.
       const bare = rawComp
-        ? stripExports(stripVskImports(stripRuntimeImport(rawComp)))
-            .replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '')
+        ? removeCompiledNodes(stripExports(stripVskImports(stripRuntimeImport(rawComp))), isAnyImport)
         : '';
       editedSources!.set(filePath, bare);
       editedNames!.set(filePath, actualName);
@@ -414,6 +556,14 @@ export function runtimeExportNames(runtimeDir: string): Set<string> {
 let runtimeEntryId = 0;
 
 /**
+ * Fixed entry filename for the runtime tree-shake. A stable entry path keeps
+ * esbuild's banner comment constant, so the output is deterministic across
+ * builds (a per-call unique filename would embed a new path into the bundle
+ * every time).
+ */
+const RUNTIME_ENTRY = '.runtime-tree-entry.mjs';
+
+/**
  * Builds a single self-contained runtime module for the given used names.
  *
  * The runtime's real module graph is bundled by esbuild into one IIFE whose
@@ -430,8 +580,9 @@ export async function buildTreeShakenRuntime(runtimeDir: string, usedNames: stri
     console.error(`vesk: runtime names not exported — ${missing.join(', ')}; falling back to full runtime`);
     return buildRuntimeCode(runtimeDir);
   }
-  const entry = join(runtimeDir, `.runtime-tree-entry-${runtimeEntryId++}.mjs`);
+  const entry = join(runtimeDir, RUNTIME_ENTRY);
   try {
+    try { rmSync(entry); } catch { /* not present yet */ }
     writeFileSync(entry, `export { ${unique.join(', ')} } from './index-client.js';\n`);
     const result = await build({
       entryPoints: [entry],
@@ -441,7 +592,14 @@ export async function buildTreeShakenRuntime(runtimeDir: string, usedNames: stri
       platform: 'browser',
       target: ['es2022'],
       treeShaking: true,
-      minify: true,
+      // Do not let esbuild rename identifiers here. This bundle is one large
+      // IIFE built from many runtime modules, and the renaming pass of some
+      // esbuild versions (observed on 0.25.12) emits a free reference to an
+      // undefined minified name (ReferenceError: m is not defined) that kills
+      // client hydration for the whole app. Whitespace-only output keeps the
+      // runtime deterministic at a modest size cost; tree-shaking still prunes
+      // unreachable modules, so names coming out of the IIFE are untouched.
+      minify: false,
       write: false,
       logLevel: 'silent',
     });

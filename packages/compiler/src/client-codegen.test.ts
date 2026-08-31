@@ -1176,6 +1176,46 @@ component X {
 }
 
 
+describe('OpaqueDynamicRegion guard scoping inside list items', () => {
+	const guardLine = 'let __iv = get(sel) === it.name;';
+
+	// Statement-mode `for...of` whose item markup contains a tracked conditional
+	// text expression. The conditional's reactivity guard effect must be collected
+	// by the item's `__e` bucket — not leaked to the component top level where the
+	// loop variable `it` is out of scope (ReferenceError on hydration).
+	bothModes('keeps for-of item conditional guard in item scope (statement)', `
+		component App {
+			const ITEMS = [{ name: 'a' }, { name: 'b' }];
+			let &[sel] = track('');
+			<div>
+				for (const it of ITEMS) {
+					<button>{sel === it.name ? 'Done' : 'Copy'}</button>
+				}
+			</div>
+		}
+	`, (code) => {
+		expect(code).toContain('for (const it of ITEMS) {');
+		expect(code).toContain('__e.push((() => {');
+		expect(code.split('\n').filter((l) => l.trim() === guardLine).length).toBe(1);
+		expect(code.indexOf(guardLine) > code.indexOf('__e.push((() => {')).toBe(true);
+	});
+
+	// Expression mode: `{ARR.map((it) => ...)}` compiles to the same MapRegion,
+	// so the identical scoping rule applies.
+	bothModes('keeps map-callback conditional guard in item scope (expression)', `
+		component App {
+			const ITEMS = [{ name: 'a' }, { name: 'b' }];
+			let &[sel] = track('');
+			return <div>{ITEMS.map((it) => <button>{sel === it.name ? 'Done' : 'Copy'}</button>)}</div>;
+		}
+	`, (code) => {
+		expect(code).toContain('__e.push((() => {');
+		expect(code.split('\n').filter((l) => l.trim() === guardLine).length).toBe(1);
+		expect(code.indexOf(guardLine) > code.indexOf('__e.push((() => {')).toBe(true);
+	});
+});
+
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

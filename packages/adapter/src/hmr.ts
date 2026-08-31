@@ -7,9 +7,136 @@ import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
 import { resolveErrorFile } from '@vesk/adapter/src/ssr-function';
 import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
+import { parseCompilerError, buildCodeframe, type Codeframe } from '@vesk/adapter/src/error-codeframe';
+import { suggestFor } from '@vesk/adapter/src/error-tips';
 import type { RouteNode, AncestorLayout } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/**
+ * Canonical HMR error payload emitted on `'error'` broadcasts and exposed via
+ * `getHmrState()` (served at `/__vesk/hmr/state`). This is the wire contract
+ * between the HMR server and the client's `HmrErrorPayload` renderer.
+ */
+export interface HmrErrorPayload {
+  file: string;
+  filePath?: string;
+  line: number | null;
+  column: number | null;
+  message: string;
+  codeframe?: Codeframe;
+  tips?: string[];
+  suggestions?: string[];
+  nextSteps?: string[];
+  stack?: string;
+}
+
+/**
+ * The last enriched error payload broadcast over HMR, plus the last successful
+ * compile duration (ms). Cleared invariants:
+ *   - `lastError` set ONLY on `'error'` broadcasts; cleared on every
+ *     `'update'`/`'reload'` broadcast and on HMR watch start.
+ *   - `lastCompileMs` set from `'update'`/`'reload'` `time`; cleared on error.
+ */
+let lastError: HmrErrorPayload | null = null;
+let lastCompileMs: number | null = null;
+let lastComponentCount: number | null = null;
+
+export function getHmrState(): {
+  status: 'up' | 'closed';
+  lastCompileMs: number | null;
+  error: HmrErrorPayload | null;
+  hasError: boolean;
+  componentCount?: number;
+} {
+  return {
+    status: 'up',
+    lastCompileMs,
+    error: lastError,
+    hasError: lastError !== null,
+    ...(lastComponentCount !== null ? { componentCount: lastComponentCount } : {}),
+  };
+}
+
+export interface BuildErrorPayloadOptions {
+  /** Absolute app dir, used to resolve `filename` to disk for the codeframe. */
+  appDir?: string;
+  /** Extra fields merged into the returned payload (last writer wins). */
+  extra?: Record<string, unknown>;
+}
+
+/**
+ * Build the canonical HMR error payload from an arbitrary thrown value. Handles
+ * Error instances, plain strings, and objects exposing `.loc`/`.position`
+ * (acorn / VeskError shapes). When a line is recoverable it best-effort reads
+ * the source file from disk to attach a ±context codeframe; otherwise line/
+ * column are null and no codeframe is included (the client handles that case).
+ */
+export function buildErrorPayload(
+  error: unknown,
+  filename: string,
+  opts: BuildErrorPayloadOptions = {},
+): HmrErrorPayload {
+  const file = typeof filename === 'string' && filename ? filename : 'unknown';
+  const parsed = parseCompilerError(error, file);
+
+  const fallbackMessage =
+    error instanceof Error ? error.message
+    : typeof error === 'string' ? error
+    : (() => { try { return String(error); } catch { return 'Unknown error'; } })();
+
+  const message = parsed && parsed.message ? parsed.message : fallbackMessage;
+  const line = parsed ? parsed.line : null;
+  const column = parsed ? parsed.column : null;
+  const stack = parsed && typeof parsed.stack === 'string' && parsed.stack
+    ? parsed.stack
+    : error instanceof Error && error.stack
+      ? error.stack
+      : undefined;
+
+  let codeframe: Codeframe | undefined;
+  if (line !== null && line >= 1 && typeof opts.appDir === 'string') {
+    let src: string | undefined;
+    try {
+      const absPath = resolve(opts.appDir, file);
+      if (existsSync(absPath)) src = readFileSync(absPath, 'utf-8');
+    } catch {
+      src = undefined;
+    }
+    if (typeof src === 'string' && src.length > 0) {
+      const cf = buildCodeframe(src, line, column ?? 1);
+      if (cf) {
+        cf.file = file;
+        codeframe = cf;
+      }
+    }
+  }
+
+  const tipsData = suggestFor(message);
+
+  const filePath = typeof opts.appDir === 'string'
+    ? resolve(opts.appDir, file)
+    : undefined;
+
+  const payload: HmrErrorPayload = {
+    file,
+    line,
+    column,
+    message,
+  };
+  if (filePath) payload.filePath = filePath;
+  if (codeframe) payload.codeframe = codeframe;
+  if (tipsData.tips && tipsData.tips.length) payload.tips = tipsData.tips;
+  if (tipsData.suggestions && tipsData.suggestions.length) payload.suggestions = tipsData.suggestions;
+  if (tipsData.nextSteps && tipsData.nextSteps.length) payload.nextSteps = tipsData.nextSteps;
+  if (stack) payload.stack = stack;
+  if (opts.extra) {
+    for (const [k, v] of Object.entries(opts.extra)) {
+      (payload as unknown as Record<string, unknown>)[k] = v;
+    }
+  }
+  return payload;
+}
 
 function findRouteForSource(routeTree: RouteNode[], sourceDir: string): RouteNode | null {
   for (const node of routeTree) {
@@ -297,11 +424,21 @@ export function createHmrServer(
   appDir: string,
   devDir: string,
   componentMap?: Map<string, string>,
-): { broadcast: (type: string, data?: Record<string, unknown>) => void; handleFileChange: (filename: string | null, doFullBuild: () => Promise<void>, routeTree: RouteNode[]) => Promise<void> } {
+): {
+  broadcast: (type: string, data?: Record<string, unknown>) => void;
+  handleFileChange: (filename: string | null, doFullBuild: () => Promise<void>, routeTree: RouteNode[]) => Promise<void>;
+  getHmrState: () => ReturnType<typeof getHmrState>;
+} {
   // Per-session nonce gating the client-side HMR eval hook (see
   // appendHmrGlobals in client-bundle.ts). Broadcast with every update.
   const hmrNonce = randomToken(16);
   (globalThis as Record<string, unknown>).__vesk_hmr_nonce = hmrNonce;
+
+  // HMR watch start — clear any stale error state so a fresh session starts
+  // clean (the client also pulls live state via /__vesk/hmr/state).
+  lastError = null;
+  lastCompileMs = null;
+  lastComponentCount = null;
 
   const wss = new WebSocketServer({ noServer: true });
   const clients = new Set<import('ws').WebSocket>();
@@ -324,7 +461,21 @@ export function createHmrServer(
     ws.on('error', () => clients.delete(ws));
   });
 
-  function broadcast(type: string, data?: Record<string, unknown>): void {
+  function broadcast(type: string, data?: Record<string, unknown> | HmrErrorPayload): void {
+    // Keep live state in lockstep with what clients receive. `lastError` is set
+    // ONLY on 'error' broadcasts and cleared on any successful update/reload;
+    // `lastCompileMs` tracks the most recent successful compile duration.
+    const d = (data ?? {}) as Record<string, unknown>;
+    if (type === 'error') {
+      lastError = (d && typeof d.message === 'string') ? (d as unknown as HmrErrorPayload) : null;
+      lastCompileMs = null;
+    } else if (type === 'update' || type === 'reload') {
+      lastError = null;
+      if (typeof d.time === 'number') lastCompileMs = d.time;
+      if (type === 'update' && d && typeof d.components === 'object' && d.components !== null) {
+        lastComponentCount = Object.keys(d.components as Record<string, unknown>).length;
+      }
+    }
     const msg = JSON.stringify({ type, nonce: hmrNonce, ...data });
     for (const ws of clients) {
       try { ws.send(msg); } catch { clients.delete(ws); }
@@ -371,9 +522,9 @@ export function createHmrServer(
 
         console.error(`vesk hmr: ${assignments.map(a => a.name).join(', ')} (${Date.now() - start}ms)`);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        broadcast('error', { message, file: filename });
-        console.error(`vesk hmr: error — ${message}`);
+        const payload = buildErrorPayload(e, filename, { appDir });
+        broadcast('error', payload);
+        console.error(`vesk hmr: error — ${payload.message}`);
       }
       return;
     }
@@ -384,8 +535,7 @@ export function createHmrServer(
         await doFullBuild();
         broadcast('reload', { reason: `API: ${filename}`, time: Date.now() - start });
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        broadcast('error', { message, file: filename });
+        broadcast('error', buildErrorPayload(e, filename, { appDir }));
       }
       return;
     }
@@ -397,8 +547,7 @@ export function createHmrServer(
         broadcast('reload', { reason: `Middleware: ${filename}`, time: Date.now() - start });
         console.error(`vesk hmr: middleware ${filename} rebuilt (${Date.now() - start}ms)`);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        broadcast('error', { message, file: filename });
+        broadcast('error', buildErrorPayload(e, filename, { appDir }));
       }
       return;
     }
@@ -411,8 +560,7 @@ export function createHmrServer(
         broadcast('reload', { reason: `Config: ${filename}`, time: Date.now() - start });
         console.error(`vesk hmr: ${filename} rebuilt (${Date.now() - start}ms)`);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        broadcast('error', { message, file: filename });
+        broadcast('error', buildErrorPayload(e, filename, { appDir }));
       }
       return;
     }
@@ -422,10 +570,9 @@ export function createHmrServer(
       await doFullBuild();
       broadcast('reload', { reason: `${filename} changed`, time: Date.now() - start });
     } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      broadcast('error', { message, file: filename });
+      broadcast('error', buildErrorPayload(e, filename, { appDir }));
     }
   }
 
-  return { broadcast, handleFileChange };
+  return { broadcast, handleFileChange, getHmrState };
 }

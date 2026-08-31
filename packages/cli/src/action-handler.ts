@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import {
   compileFile,
   renderPage,
@@ -14,6 +14,26 @@ import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/ser
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { getAction, validateActionInput, issuesToFieldMap } from '@vesk/runtime/src/action';
 import type { RouteNode } from '@vesk/compiler/src/types';
+
+function actionCssUrls(appDirPath: string): string[] {
+  try {
+    const veskDir = join(resolve(appDirPath, '..'), '.vesk');
+    const statePath = join(veskDir, 'plugins.json');
+    if (existsSync(statePath)) {
+      const raw = readFileSync(statePath, 'utf-8');
+      const state = JSON.parse(raw) as { plugins?: Array<{ name: string; active: boolean }> };
+      const entries = state?.plugins || [];
+      const inactiveTailwind = entries.some(
+        (p) => String(p.name).toLowerCase().includes('tailwind') && p.active === false,
+      );
+      if (inactiveTailwind) return ['/_vesk/static/global.css'];
+    }
+  } catch {}
+  return ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'];
+}
+function actionCssLinkTags(appDirPath: string): string {
+  return actionCssUrls(appDirPath).map((u) => `\t<link rel="stylesheet" href="${u}" />`).join('\n') + '\n';
+}
 
 export interface ActionHandlerContext {
   url: URL;
@@ -159,14 +179,14 @@ async function renderPageHtml(pagePathname: string, params: Record<string, strin
   const hasLayout = chain.some(n => n.layout && existsSync(resolve(ctx.appDirPath, n.sourceDir as string, 'layout.vsk')));
   if (hasLayout) {
     const secMeta = securityMeta(ctx.security);
-    return `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n\t<link rel="stylesheet" href="/_vesk/static/_tailwind.css" />\n\t<link rel="stylesheet" href="/_vesk/static/global.css" />\n${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+    return `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${actionCssLinkTags(ctx.appDirPath)}${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
   }
 
   const leaf = chain.find(n => n.page);
   if (!leaf) return null;
   const src = readFileSync(resolve(ctx.appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
   const compName = resolveComponentName(src) || (leaf.page as string);
-  const html = await renderFullPage(src, compName, { params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'], security: ctx.security, sourcePath: resolve(ctx.appDirPath, leaf.sourceDir as string, 'page.vsk') });
+  const html = await renderFullPage(src, compName, { params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: actionCssUrls(ctx.appDirPath), security: ctx.security, sourcePath: resolve(ctx.appDirPath, leaf.sourceDir as string, 'page.vsk') });
   return html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
 }
 

@@ -1,0 +1,35 @@
+/**
+ * @license lucide-vesk v0.511.0 - ISC
+ * @name lamp-ceiling
+ * @see https://lucide.dev/icons/lamp-ceiling
+ * Auto-generated — do not edit. Generated from lucide@lamp-ceiling.
+ * Never scoped — no style tag.
+ */
+import createLucideIcon from "../createLucideIcon.js";
+import type { IconNode } from "../types.js";
+
+export const __iconNode: IconNode = [
+  [
+    "path",
+    {
+      "d": "M12 2v5"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M14.829 15.998a3 3 0 1 1-5.658 0"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M20.92 14.606A1 1 0 0 1 20 16H4a1 1 0 0 1-.92-1.394l3-7A1 1 0 0 1 7 7h10a1 1 0 0 1 .92.606z"
+    }
+  ]
+] as unknown as IconNode;
+
+const LampCeiling = createLucideIcon("lamp-ceiling", __iconNode);
+
+export default LampCeiling;
+export { LampCeiling };

@@ -1,0 +1,107 @@
+/**
+ * @license lucide-vesk v0.511.0 - ISC
+ * @name text-select
+ * @see https://lucide.dev/icons/text-select
+ * Auto-generated — do not edit. Generated from lucide@text-select.
+ * Never scoped — no style tag.
+ */
+import createLucideIcon from "../createLucideIcon.js";
+import type { IconNode } from "../types.js";
+
+export const __iconNode: IconNode = [
+  [
+    "path",
+    {
+      "d": "M14 21h1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M14 3h1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M19 3a2 2 0 0 1 2 2"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M21 14v1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M21 19a2 2 0 0 1-2 2"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M21 9v1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M3 14v1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M3 9v1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M5 21a2 2 0 0 1-2-2"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M5 3a2 2 0 0 0-2 2"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M7 12h10"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M7 16h6"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M7 8h8"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M9 21h1"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M9 3h1"
+    }
+  ]
+] as unknown as IconNode;
+
+const TextSelect = createLucideIcon("text-select", __iconNode);
+
+export default TextSelect;
+export { TextSelect };

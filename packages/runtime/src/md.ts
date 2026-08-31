@@ -1916,44 +1916,72 @@ function renderBlocks(blocks: Block[], ctx: RenderCtx): string {
 // ── Base stylesheet (opt-in via <Md css>) ────────────────────
 
 export const MD_BASE_CSS = `
-.vesk-md { color: #24292f; font-size: 16px; line-height: 1.7; word-wrap: break-word; }
+.vesk-md { color: inherit; font-size: 16px; line-height: 1.7; word-wrap: break-word; }
 .vesk-md h1,.vesk-md h2,.vesk-md h3,.vesk-md h4,.vesk-md h5,.vesk-md h6 { margin: 1.4em 0 .6em; font-weight: 650; line-height: 1.25; }
 .vesk-md h1 { font-size: 2em; }
 .vesk-md h2 { font-size: 1.5em; }
 .vesk-md h3 { font-size: 1.25em; } .vesk-md h4 { font-size: 1em; }
 .vesk-md p { margin: .8em 0; }
-.vesk-md a { color: #0969da; text-decoration: none; } .vesk-md a:hover { text-decoration: underline; }
+.vesk-md a { color: color-mix(in srgb, currentColor 50%, #0969da); text-decoration: none; } .vesk-md a:hover { text-decoration: underline; }
 .vesk-md img { max-width: 100%; border-radius: 6px; }
-.vesk-md hr { border: 0; height: 1px; background: #d0d7de; margin: 1.6em 0; }
-.vesk-md blockquote { margin: .8em 0; padding: .2em 1em; color: #57606a; border-left: .25em solid #d0d7de; }
+.vesk-md hr { border: 0; height: 1px; background: color-mix(in srgb, currentColor 18%, transparent); margin: 1.6em 0; }
+.vesk-md blockquote { margin: .8em 0; padding: .2em 1em; color: color-mix(in srgb, currentColor 62%, transparent); border-left: .25em solid color-mix(in srgb, currentColor 18%, transparent); }
 .vesk-md ul,.vesk-md ol { margin: .8em 0; padding-left: 2em; }
 .vesk-md ul { list-style: disc; } .vesk-md ul ul { list-style: circle; } .vesk-md ul ul ul { list-style: square; }
 .vesk-md ol { list-style: decimal; } .vesk-md ol ol { list-style: lower-alpha; }
 .vesk-md li { margin: .25em 0; }
 .vesk-md li.md-task { list-style: none; margin-left: -1.4em; display: flex; gap: .5em; align-items: baseline; }
-.vesk-md code:not(pre code) { background: rgba(175,184,193,.2); padding: .15em .35em; border-radius: 5px; font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 85%; }
+.vesk-md code:not(pre code) { background: color-mix(in srgb, currentColor 12%, transparent); padding: .15em .35em; border-radius: 5px; font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 85%; }
 .vesk-md .md-table-wrap { overflow-x: auto; margin: .8em 0; }
 .vesk-md table.md-table { border-collapse: collapse; width: max-content; max-width: 100%; font-size: .95em; }
-.vesk-md .md-table th,.vesk-md .md-table td { border: 1px solid #d0d7de; padding: 6px 13px; }
-.vesk-md .md-table th { background: #f6f8fa; font-weight: 650; }
-.vesk-md .md-table tr:nth-child(2n) td { background: #f6f8fa80; }
-.vesk-md .md-code { --md-code-bg: #f6f8fa; margin: 1em 0; border-radius: 8px; overflow: hidden; background: var(--md-code-bg); border: 1px solid #d1d9e0; }
-.vesk-md .md-code-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--md-code-bg); border-bottom: 1px solid #d1d9e0; }
-.vesk-md .md-code-lang { font-family: ui-monospace,monospace; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: #59636e; }
-.vesk-md .md-copy { all: unset; cursor: pointer; font: 11px ui-monospace,monospace; color: #59636e; padding: 2px 8px; border-radius: 6px; }
-.vesk-md .md-copy:hover { color: #1f2328; background: #eaeef2; }
-.vesk-md .md-copy.md-copied { color: #1a7f37; }
+.vesk-md .md-table th,.vesk-md .md-table td { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); padding: 6px 13px; }
+.vesk-md .md-table th { background: color-mix(in srgb, currentColor 8%, transparent); font-weight: 650; }
+.vesk-md .md-table tr:nth-child(2n) td { background: color-mix(in srgb, currentColor 5%, transparent); }
+.vesk-md .md-code { --md-code-bg: color-mix(in srgb, currentColor 6%, transparent); margin: 1em 0; border-radius: 8px; overflow: hidden; background: var(--md-code-bg); border: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+.vesk-md .md-code-bar { display: flex; justify-content: space-between; align-items: center; padding: 6px 12px; background: var(--md-code-bg); border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent); }
+.vesk-md .md-code-lang { font-family: ui-monospace,monospace; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: color-mix(in srgb, currentColor 60%, transparent); }
+.vesk-md .md-copy { all: unset; cursor: pointer; font: 11px ui-monospace,monospace; color: color-mix(in srgb, currentColor 60%, transparent); padding: 2px 8px; border-radius: 6px; }
+.vesk-md .md-copy:hover { color: inherit; background: color-mix(in srgb, currentColor 10%, transparent); }
+.vesk-md .md-copy.md-copied { color: color-mix(in srgb, currentColor 70%, transparent); }
 .vesk-md .md-code pre { margin: 0; overflow-x: auto; padding: 14px 16px; }
-.vesk-md .md-code code { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 13.5px; line-height: 1.55; color: var(--md-code-fg,#1f2328); background: none; padding: 0; }
+.vesk-md .md-code code { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size: 13.5px; line-height: 1.55; color: var(--md-code-fg,inherit); background: none; padding: 0; }
 .vesk-md code[md-lines] { counter-reset: ln; display: block; }
 .vesk-md code[md-lines] .tok-line { display: block; counter-increment: ln; padding-left: 3.2em; position: relative; }
-.vesk-md code[md-lines] .tok-line::before { content: counter(ln); position: absolute; left: 0; width: 2.4em; text-align: right; color: #8c959f; user-select: none; }
-.tok-kw { color: #cf222e; } .tok-lit { color: #0550ae; } .tok-str { color: #0a3069; }
-.tok-num { color: #0550ae; } .tok-com { color: #59636e; font-style: italic; }
-.tok-fn { color: #8250df; } .tok-attr { color: #0550ae; } .tok-prop { color: #0550ae; }
-.tok-sel { color: #116329; } .tok-add { color: #116329; background: #dafbe1; display: inline-block; width: 100%; }
-.tok-del { color: #cf222e; background: #ffebe9; display: inline-block; width: 100%; }
-.vesk-md-dark { --md-code-bg: #0d1117; --md-code-fg: #c9d1d9; }
+.vesk-md code[md-lines] .tok-line::before { content: counter(ln); position: absolute; left: 0; width: 2.4em; text-align: right; color: color-mix(in srgb, currentColor 50%, transparent); user-select: none; }
+.tok-kw { color: color-mix(in srgb, currentColor 85%, transparent); } .tok-lit { color: color-mix(in srgb, currentColor 80%, transparent); } .tok-str { color: color-mix(in srgb, currentColor 72%, transparent); }
+.tok-num { color: color-mix(in srgb, currentColor 80%, transparent); } .tok-com { color: color-mix(in srgb, currentColor 52%, transparent); font-style: italic; }
+.tok-fn { color: color-mix(in srgb, currentColor 72%, transparent); } .tok-attr { color: color-mix(in srgb, currentColor 72%, transparent); } .tok-prop { color: color-mix(in srgb, currentColor 72%, transparent); }
+.tok-sel { color: color-mix(in srgb, currentColor 74%, transparent); } .tok-add { color: color-mix(in srgb, currentColor 86%, transparent); background: color-mix(in srgb, currentColor 10%, transparent); display: inline-block; width: 100%; }
+.tok-del { color: color-mix(in srgb, currentColor 86%, transparent); background: color-mix(in srgb, currentColor 10%, transparent); display: inline-block; width: 100%; }
+.vesk-md-light { color: #24292f; --md-code-bg: #f6f8fa; --md-code-fg: #1f2328; --md-link: #0969da; }
+.vesk-md-light a { color: #0969da; }
+.vesk-md-light hr { background: #d0d7de; }
+.vesk-md-light blockquote { color: #57606a; border-left-color: #d0d7de; }
+.vesk-md-light code:not(pre code) { background: rgba(175,184,193,.2); }
+.vesk-md-light .md-table th,.vesk-md-light .md-table td { border-color: #d0d7de; }
+.vesk-md-light .md-table th { background: #f6f8fa; }
+.vesk-md-light .md-table tr:nth-child(2n) td { background: #f6f8fa80; }
+.vesk-md-light .md-code { border-color: #d1d9e0; }
+.vesk-md-light .md-code-bar { border-bottom-color: #d1d9e0; }
+.vesk-md-light .md-code-lang { color: #59636e; }
+.vesk-md-light .md-copy { color: #59636e; }
+.vesk-md-light .md-copy:hover { color: #1f2328; background: #eaeef2; }
+.vesk-md-light .md-copy.md-copied { color: #1a7f37; }
+.vesk-md-light code[md-lines] .tok-line::before { color: #8c959f; }
+.vesk-md-light .tok-kw { color: #cf222e; } .vesk-md-light .tok-lit { color: #0550ae; } .vesk-md-light .tok-str { color: #0a3069; }
+.vesk-md-light .tok-num { color: #0550ae; } .vesk-md-light .tok-com { color: #59636e; font-style: italic; }
+.vesk-md-light .tok-fn { color: #8250df; } .vesk-md-light .tok-attr { color: #0550ae; } .vesk-md-light .tok-prop { color: #0550ae; }
+.vesk-md-light .tok-sel { color: #116329; } .vesk-md-light .tok-add { color: #116329; background: #dafbe1; }
+.vesk-md-light .tok-del { color: #cf222e; background: #ffebe9; }
+.vesk-md-dark { --md-code-bg: #0d1117; --md-code-fg: #c9d1d9; color: #f0f6fc; --md-link: #4493f8; }
+.vesk-md-dark a { color: #4493f8; }
+.vesk-md-dark hr { background: #30363d; }
+.vesk-md-dark blockquote { color: #8b949e; border-left-color: #30363d; }
+.vesk-md-dark code:not(pre code) { background: rgba(110,118,129,.4); }
+.vesk-md-dark .md-table th,.vesk-md-dark .md-table td { border-color: #30363d; }
+.vesk-md-dark .md-table th { background: #161b22; }
+.vesk-md-dark .md-table tr:nth-child(2n) td { background: #161b2280; }
+.vesk-md-dark .md-code { border-color: #30363d; }
 .vesk-md-dark .md-code-bar { border-bottom-color: #30363d; }
 .vesk-md-dark .md-code-lang { color: #8b949e; }
 .vesk-md-dark .md-copy { color: #8b949e; }
@@ -2049,7 +2077,9 @@ export interface MdProps {
 	codeBg?: string;
 	/** Default code text color. Fence-level fg= wins. */
 	codeFg?: string;
-	/** Code theme preset: 'light' (default) or 'dark'. Per-fence bg=/fg= still win. */
+	/** Code theme preset: 'light' or 'dark'. When omitted, <Md> is
+	 *  backgroundless and inherits the page's background/theme (transparent
+	 *  wrapper, neutral currentColor-based surfaces). Per-fence bg=/fg= still win. */
 	theme?: 'light' | 'dark';
 	class?: string;
 	className?: string;
@@ -2282,7 +2312,9 @@ export function Md(props: MdProps, _registry?: Map<string, unknown>, hydrate?: H
 	const content = String(unwrapMaybeCell(contentCell) ?? '');
 	const html = buildHtml(resolveMdSource(content), props);
 	const classNameRaw = props.className != null ? String(props.className) : props.class != null ? String(props.class) : '';
-	const themeClass = props.theme === 'dark' ? ' vesk-md-dark' : '';
+	// No theme → inherit/transparent (no theme class). Explicit theme applies
+	// the matching preset: 'light' → .vesk-md-light, 'dark' → .vesk-md-dark.
+	const themeClass = props.theme === 'dark' ? ' vesk-md-dark' : props.theme === 'light' ? ' vesk-md-light' : '';
 	const className = `vesk-md${themeClass}${classNameRaw ? ' ' + classNameRaw : ''}`;
 	const style = props.style != null ? String(props.style) : '';
 

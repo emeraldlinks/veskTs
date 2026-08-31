@@ -18,7 +18,8 @@
     "packages/runtime",
     "packages/types",
     "packages/lsp",
-    "packages/prettier-plugin"
+    "packages/prettier-plugin",
+    "packages/lucide-vesk"
   ],
   "scripts": {
     "build": "npx tsx packages/cli/build.ts",

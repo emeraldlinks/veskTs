@@ -19,6 +19,7 @@ const INTERNAL_NAMES = new Set([
   '@vesk/vesk-cli',
   'create-vesk',
   'vite-plugin-vesk',
+  'lucide-vesk',
 ]);
 
 const PUBLISH_ORDER = [
@@ -32,6 +33,7 @@ const PUBLISH_ORDER = [
   // '@vesk/lsp' — broken imports (LiveTypecheckProgram, createTypecheckOptions,
   // ./context, ./text-utils missing from compiler); re-enable when fixed.
   '@vesk/vesk-cli',
+  'lucide-vesk',
   'create-vesk',
 ];
 
@@ -121,6 +123,7 @@ const BUILD_ORDER = [
   '@vesk/prettier-plugin',
   // '@vesk/lsp' — see PUBLISH_ORDER note
   '@vesk/vesk-cli',
+  'lucide-vesk',
   'create-vesk',
 ];
 for (const name of BUILD_ORDER) {

@@ -27,7 +27,7 @@ import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
-import { importBindingPairs } from '@vesk/compiler/src/module-imports';
+import { importBindingPairs, localValueImportNames } from '@vesk/compiler/src/module-imports';
 import { stripTrackGeneric } from '@vesk/compiler/src/scan';
 import { inlineMdImportsFrom } from '@vesk/compiler/src/md-inline';
 import { stripTsTypes, hasTsSyntax } from '@vesk/compiler/src/strip-ts';
@@ -287,7 +287,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
   }
   if (node instanceof ComponentRef) return null;
   if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked, effectsVar, parentVar, compPrefix);
-  if (node instanceof OpaqueDynamicRegion) return emitOpaque(ctx, node, tracked, parentVar);
+  if (node instanceof OpaqueDynamicRegion) return emitOpaque(ctx, node, tracked, effectsVar, parentVar);
   if (node instanceof MapRegion) return emitMap(ctx, node, tracked, parentVar);
   if (node instanceof ServerBlock) return null;
   if (node instanceof ClientBlock) {
@@ -719,7 +719,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   return null;
 }
 
-function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, TrackedInfo>, effTarget: string | null, parentVar?: string): string | null {
   const condExpr = transformTracked(node.condition as any, tracked);
   const hasElse = node.alternateNodes.length > 0;
   const anchor = ctx.n();
@@ -777,21 +777,32 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
 
   ctx.push(`if (${condExpr}) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : ''));
 
-  ctx.effects.push(`{
-    let __iv = ${condExpr};
-    let __first = true;
-    effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
+  const renderBranch = `if (__nv) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : '');
+  const effectBody = `effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
       if (__first) { __first = false; return; }
       const __nv = ${condExpr};
       if (__nv !== __iv) {
         for (const e of ${effectsVar}) destroy_block(e);
         ${effectsVar}.length = 0;
         __cleanup(${anchor}, ${endAnchor});
-        if (__nv) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : '') + `
+        ${renderBranch}
         __iv = __nv;
       }
-    });
+    });`;
+
+  if (effTarget) {
+    ctx.push(`${effTarget}.push((() => {
+    let __iv = ${condExpr};
+    let __first = true;
+    return ${effectBody}
+  })());`);
+  } else {
+    ctx.effects.push(`{
+    let __iv = ${condExpr};
+    let __first = true;
+    ${effectBody}
   }`);
+  }
 
   return null;
 }
@@ -1254,7 +1265,7 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
       mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
-    const code = generateComponent(comp, new Set(extractRuntimeNames(irRoot.imports)), hydrate, asyncComps);
+    const code = generateComponent(comp, new Set([...extractRuntimeNames(irRoot.imports), ...localValueImportNames(irRoot.imports)]), hydrate, asyncComps);
     mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
   }
 

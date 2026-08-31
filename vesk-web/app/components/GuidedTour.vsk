@@ -1,0 +1,125 @@
+import { Md } from '@vesk/runtime'
+import { track, derived } from '@vesk/runtime'
+
+component GuidedTour {
+	let &[activeTopic] = track(0)
+
+	const mdComponents = `\`\`\`vsk bg=black
+component Nav {
+  let &[open] = track(false)
+
+  <nav>
+    {#client}
+    if (open) {
+      <Menu>
+        <Link href="/docs">Docs</Link>
+        <a href="https://github.com/anomalyco/vesk">GitHub</a>
+      </Menu>
+    }
+  </nav>
+}
+\`\`\``
+
+	const mdStreaming = `\`\`\`vsk bg=black
+let &[content] = track('')
+
+const docRes = useFetch.stream(() => '/api/docs/' + active, {
+  into: content,
+  staleTime: 30000,
+})
+
+<Md content={content} css />   // progressive markdown, chunk by chunk
+\`\`\``
+
+	const mdRouting = `\`\`\`text
+app/
+├── page.vsk                  → /
+├── about/page.vsk            → /about
+├── blog/[slug]/page.vsk      → /blog/:slug
+├── docs/[...path]/page.vsk   → /docs/* (params.path = "a/b/c")
+└── api/hello/route.ts        → /api/hello
+\`\`\``
+
+	const mdNative = `\`\`\`kotlin bg=black
+// app/about/page.vsk
+//   <h1 class="text-4xl font-bold mb-4">About</h1>    ← Tailwind utilities
+//   <p class="text-gray-600">This is the about page.</p>
+
+@Composable
+fun About(content: @Composable () -> Unit = {}) {
+	Text(
+		text = "About",
+		modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
+		style = TextStyle(fontSize = 36.sp, lineHeight = 40.sp, fontWeight = FontWeight.Bold),
+	)
+	Text(
+		text = "This is the about page.",
+		modifier = Modifier.fillMaxWidth(),
+		style = TextStyle(color = MaterialTheme.colorScheme.onSurfaceVariant),
+	)
+}
+
+// .ts / .js module helpers compile to Kotlin declarations
+//   import { titleCase } from './utils.ts'   import { jsTagline } from './js-helper.js'
+import app.lab_utils_titleCase as titleCase
+import app.lab_js_helper_jsTagline as jsTagline
+val lab_js_helper_jsTagline = "imported from a plain .js file"
+fun lab_utils_titleCase(s: String): String = run<String> __veskfn0@ {
+	return@__veskfn0 s.split(" ").toMutableList().map { w -> w.uppercase().get(0) + w.lowercase().substring(1) }.joinToString(" ");
+}
+\`\`\``
+
+	const PATHS = [
+		'app/components/Nav.vsk',
+		'app/docs/page.vsk · /api/docs/guide/data-fetching',
+		'app/ — scanned route tree',
+		'dist/client/*.js · dist/native/*.kt',
+	]
+
+	const topicMd = derived(() => activeTopic === 0 ? mdComponents : activeTopic === 1 ? mdStreaming : activeTopic === 2 ? mdRouting : mdNative)
+
+	<section class="border-b border-zinc-800 bg-black text-white">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="flex flex-col lg:flex-row lg:items-end justify-between gap-6">
+				<div>
+					<div class="inline-flex items-center gap-2 border border-white/10 bg-white/5 px-3 py-1 text-[11px] font-medium tracking-widest uppercase text-zinc-400">
+						<span class="h-1.5 w-1.5 bg-emerald-400"></span>
+						The basics
+					</div>
+					<h2 class="mt-4 text-[28px] md:text-[36px] font-bold tracking-[-0.04em] leading-none">Write it once. Ship it everywhere.</h2>
+					<p class="mt-3 max-w-[560px] text-[14px] leading-6 text-zinc-400">
+						One component model, compiled per platform. Statement mode and expression mode are both first-class — the compiler understands your intent and emits optimized output.
+					</p>
+				</div>
+
+				<div class="flex items-center gap-2 border border-white/10 bg-white/5 p-1 overflow-x-auto">
+					<button onClick={() => activeTopic = 0} class={activeTopic === 0 ? "bg-zinc-900 px-4 py-1.5 text-[13px] font-semibold text-white" : "px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-white"}>Components</button>
+					<button onClick={() => activeTopic = 1} class={activeTopic === 1 ? "bg-zinc-900 px-4 py-1.5 text-[13px] font-semibold text-white" : "px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-white"}>Streaming</button>
+					<button onClick={() => activeTopic = 2} class={activeTopic === 2 ? "bg-zinc-900 px-4 py-1.5 text-[13px] font-semibold text-white" : "px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-white"}>Routing</button>
+					<button onClick={() => activeTopic = 3} class={activeTopic === 3 ? "bg-zinc-900 px-4 py-1.5 text-[13px] font-semibold text-white" : "px-4 py-1.5 text-[13px] font-medium text-zinc-400 hover:text-white"}>Native</button>
+				</div>
+			</div>
+
+			<div class="mt-10 border border-white/10 bg-[#0d1117] overflow-hidden">
+				<div class="flex items-center justify-between border-b border-white/10 bg-zinc-900/[0.04] px-4 py-3">
+					<div class="flex items-center gap-2">
+						<span class="h-2.5 w-2.5 bg-zinc-800"></span>
+						<span class="h-2.5 w-2.5 bg-zinc-800"></span>
+						<span class="h-2.5 w-2.5 bg-zinc-800"></span>
+						<span class="ml-3 font-mono text-[12px] text-zinc-400">{PATHS[activeTopic]}</span>
+					</div>
+					<span class="hidden sm:inline-flex border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-medium tracking-widest uppercase text-zinc-600">.vsk → optimized</span>
+				</div>
+
+				<div class="p-5 md:p-6 overflow-x-auto">
+					<Md content={topicMd} css theme="dark" />
+				</div>
+
+				<div class="border-t border-white/10 bg-zinc-900/[0.03] px-4 py-3 flex items-center justify-between">
+					<span class="font-mono text-[11px] text-zinc-400">compiled to web ESM · Kotlin target · verified at build time</span>
+					<span class="text-[11px] font-medium text-zinc-500">Read the guide →</span>
+				</div>
+			</div>
+		</div>
+	</section>
+}

@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname, relative } from 'node:path';
+import { resolve, dirname, relative, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { cssBlockEnd } from '@vesk/compiler/src/scan';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
@@ -14,6 +14,7 @@ import type {
   RouteNode, ApiRouteNode, BuildOptions, BuildResult, AncestorLayout,
   MiddlewareChainItem, VeskPlugin, Manifest,
 } from '@vesk/adapter/src/types';
+import type { PluginRecord } from '@vesk/adapter/src/plugins';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,69 @@ async function resolveCompilerApi<T = Record<string, unknown>>(name: string): Pr
   return import(`@vesk/compiler/src/${name.replace(/\.js$/, '')}`) as Promise<T>;
 }
 
+/**
+ * Plugin activation record as consumed by the build gate. At runtime these come
+ * from the plugin-manager module (`@vesk/adapter/src/plugins`): either
+ * `getPluginRecords` (full `PluginRecord[]` — only `name` + `active` are used
+ * here) or `readPluginState` (`.vesk/plugins.json` entries). This local shape is
+ * the minimal dual-view of those two sources.
+ */
+export interface PluginStateRecord {
+  name: string;
+  active: boolean;
+}
+export interface PluginStateFile {
+  version: number;
+  plugins: PluginStateRecord[];
+}
+
+/**
+ * Defensive local mirror of the plugin-manager's `filterActivePlugins`
+ * (`@vesk/adapter/src/plugins`): keep when there is no matching record, or the
+ * record's `active` is true; drop when a name-matched record is explicitly
+ * inactive. Names match CASE-INSENSITIVELY to stay aligned with the manager —
+ * it reads/writes state via `eqIgnoreCase`. Only used as the fallback when the
+ * plugin-manager module is unavailable during a build; the live build gate in
+ * `build()` calls the module's own filter.
+ */
+export function filterActivePlugins(
+  plugins: VeskPlugin[],
+  records: PluginStateRecord[] | null | undefined
+): VeskPlugin[] {
+  if (!records || records.length === 0) return plugins;
+  return plugins.filter(p => {
+    const record = records.find(r =>
+      String(r.name || '').toLowerCase() === String(p.name || '').toLowerCase(),
+    );
+    return record ? record.active : true;
+  });
+}
+
+/**
+ * Build-time enforcement gate (fallback): an INACTIVE plugin must NEVER ship —
+ * it must not have any hook invoked and must not appear in CSS / transformed
+ * JS / platform output. Returns the actives-only list. A null/absent state
+ * degrades to "all config plugins stay active" (defensive). The live gate in
+ * `build()` prefers `@vesk/adapter/src/plugins#filterActivePlugins`; this
+ * helper exists for the no-module fallback and for direct unit testing.
+ */
+export function filterPluginsForBuild(
+  plugins: VeskPlugin[],
+  state: PluginStateFile | null | undefined
+): VeskPlugin[] {
+  if (!state || !Array.isArray(state.plugins)) return plugins;
+  return filterActivePlugins(plugins, state.plugins);
+}
+
+/** Resolve the `.vesk` dir that owns plugin activation state. `outDir` is
+ * `.vesk` itself (versioned builds) or `.vesk/{dev|build}`; in both cases the
+ * `.vesk` parent holds `plugins.json`. */
+function veskDirFromOutDir(outDir: string): string {
+  const base = basename(outDir);
+  if (base === 'dev' || base === 'build') return dirname(outDir);
+  return outDir;
+}
+
 export async function build(appDir: string, options?: BuildOptions): Promise<BuildResult | undefined> {
   appDir = resolve(appDir);
   const outDir = resolve(options?.outDir || resolve(appDir, '..', '.vesk'));
@@ -42,7 +106,43 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     configureMd(options.md);
   }
 
+  // Build-time plugin activation gate. Read plugin activation from the
+  // plugin-manager module (`@vesk/adapter/src/plugins`): `getPluginRecords`
+  // returns full `PluginRecord[]` (name + active are the fields we consume);
+  // `readPluginState` is the `.vesk/plugins.json` fallback. An INACTIVE plugin
+  // must never ship — drop it from `pluginsPipelines`, which is the ONLY list
+  // every plugin hook / CSS pipeline iterates. If the module is missing
+  // (pre-rebuild) or throws, degrade to all-active.
+  const veskDir = veskDirFromOutDir(outDir);
+  let pluginsPipelines: VeskPlugin[] = plugins;
+  try {
+    const pluginApi = await import('@vesk/adapter/src/plugins') as {
+      getPluginRecords?: (appDir: string, veskDir: string, names: string[]) => PluginRecord[];
+      readPluginState?: (veskDir: string) => PluginStateFile;
+      filterActivePlugins?: (configPlugins: VeskPlugin[], records: PluginRecord[]) => VeskPlugin[];
+    };
+    let records: PluginRecord[] = [];
+    if (typeof pluginApi.getPluginRecords === 'function') {
+      records = pluginApi.getPluginRecords(appDir, veskDir, plugins.map(p => p.name));
+    } else if (typeof pluginApi.readPluginState === 'function') {
+      const st = pluginApi.readPluginState(veskDir);
+      records = (st && Array.isArray(st.plugins) ? st.plugins : []) as PluginRecord[];
+    }
+    if (typeof pluginApi.filterActivePlugins === 'function') {
+      pluginsPipelines = pluginApi.filterActivePlugins(plugins, records);
+    } else {
+      pluginsPipelines = filterPluginsForBuild(plugins, { version: 1, plugins: records });
+    }
+  } catch {
+    pluginsPipelines = plugins;
+  }
   for (const plugin of plugins) {
+    if (!pluginsPipelines.includes(plugin)) {
+      console.error(`vesk build: skipping inactive plugin "${plugin.name}"`);
+    }
+  }
+
+  for (const plugin of pluginsPipelines) {
     if (typeof plugin.onBuildStart === 'function') {
       await plugin.onBuildStart();
     }
@@ -222,30 +322,36 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     writeFileSync(userCssTarget, userCss, 'utf-8');
     console.error(`vesk build: css  → static/global.css  (${userCss.length} bytes)`);
 
-    let twCss = cssContent;
-    for (const plugin of plugins) {
-      if (typeof plugin.onCSS === 'function') {
-        const result = await plugin.onCSS(twCss, cssSourcePath!);
-        if (result !== null && typeof result === 'string') {
-          twCss = result;
+    const twCssTarget = resolve(outDir, 'static', '_tailwind.css');
+    const isTailwindActive = pluginsPipelines.some((p) => String(p.name).toLowerCase().includes('tailwind'));
+    if (!isTailwindActive) {
+      writeFileSync(twCssTarget, '', 'utf-8');
+      console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind plugin inactive)');
+    } else {
+      let twCss = cssContent;
+      for (const plugin of pluginsPipelines) {
+        if (typeof plugin.onCSS === 'function') {
+          const result = await plugin.onCSS(twCss, cssSourcePath!);
+          if (result !== null && typeof result === 'string') {
+            twCss = result;
+          }
         }
       }
-    }
-    const twCssTarget = resolve(outDir, 'static', '_tailwind.css');
-    const hasUnresolvedTailwindImport = /@import\s+['"]tailwindcss['"]/.test(twCss);
-    if (hasUnresolvedTailwindImport) {
-      const lines = twCss.split('\n').filter(l => !/^\s*@import\s+['"]tailwindcss['"]/.test(l));
-      twCss = lines.join('\n').trim();
-      if (twCss.length === 0) {
-        writeFileSync(twCssTarget, '', 'utf-8');
-        console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind unresolved)');
+      const hasUnresolvedTailwindImport = /@import\s+['"]tailwindcss['"]/.test(twCss);
+      if (hasUnresolvedTailwindImport) {
+        const lines = twCss.split('\n').filter(l => !/^\s*@import\s+['"]tailwindcss['"]/.test(l));
+        twCss = lines.join('\n').trim();
+        if (twCss.length === 0) {
+          writeFileSync(twCssTarget, '', 'utf-8');
+          console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind unresolved)');
+        } else {
+          writeFileSync(twCssTarget, twCss, 'utf-8');
+          console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes, tailwind partially unresolved)`);
+        }
       } else {
         writeFileSync(twCssTarget, twCss, 'utf-8');
-        console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes, tailwind partially unresolved)`);
+        console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
       }
-    } else {
-      writeFileSync(twCssTarget, twCss, 'utf-8');
-      console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
     }
   }
 
@@ -324,7 +430,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
-  for (const plugin of plugins) {
+  for (const plugin of pluginsPipelines) {
     if (typeof plugin.onBuildEnd === 'function') {
       await plugin.onBuildEnd();
     }
@@ -335,3 +441,22 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
 }
 
 export { startProdServer } from '@vesk/adapter/src/prod-server';
+
+// DevTools unified API surface — the shared, exportable connector both the
+// adapter and CLI dev servers route their `/__vesk/*` panel through.
+export {
+  createDevApiRouter,
+  DEFAULT_CAPABILITIES,
+  DEFAULT_COMMAND_ALLOWLIST,
+  CapabilityTable,
+} from '@vesk/adapter/src/dev-api';
+export type {
+  DevApiRouterOptions,
+  DevApiRouter,
+  DevApiCapabilities,
+  CapabilityName,
+  DiagnosticFinding,
+  DevPanelResponse,
+  RebuildResult,
+  CommandResult,
+} from '@vesk/adapter/src/dev-api';

@@ -1,0 +1,76 @@
+import { Link } from '@vesk/runtime/router'
+import { track } from '@vesk/runtime'
+
+component Modules {
+	let &[copied] = track('')
+
+	const MODULES = [
+		{ pkg: '@vesk/compiler', role: 'parse → IR → codegen', chips: 'AST-first · no-regex · tsc-in-.vsk' },
+		{ pkg: '@vesk/runtime', role: 'reactivity · SSR · Md', chips: 'signals · islands · streaming' },
+		{ pkg: '@vesk/adapter', role: 'build .vesk/ output', chips: 'node · deno serverless' },
+		{ pkg: '@vesk/types', role: 'shared public types', chips: 'single source · .d.ts' },
+		{ pkg: '@vesk/vesk-cli', role: 'dev · build · typecheck', chips: 'create-vesk · zero config' },
+		{ pkg: '@vesk/plugin-tailwind', role: 'tailwind css v4', chips: 'utility-first · plugin' },
+		{ pkg: '@vesk/lsp', role: 'language server', chips: 'diagnostics · completions' },
+		{ pkg: '@vesk/prettier-plugin', role: 'prettier for .vsk', chips: 'format on save' },
+	]
+
+	function copyCmd(pkg: string) {
+		if (typeof navigator !== 'undefined' && navigator.clipboard) {
+			navigator.clipboard.writeText('npm i ' + pkg)
+			copied = pkg
+			setTimeout(() => { copied = '' }, 1600)
+		}
+	}
+
+	<section id="ecosystem" class="border-b border-zinc-800 bg-black">
+		<div class="mx-auto max-w-[1200px] px-6 py-16 md:py-24">
+			<div class="border border-zinc-800 bg-zinc-900 p-6 md:p-8 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+				<div>
+					<div class="flex items-center gap-3">
+						<span class="h-2 w-2 bg-emerald-400"></span>
+						<span class="text-[15px] font-semibold tracking-[-0.02em] text-zinc-100">One source. Compiled per platform.</span>
+					</div>
+					<p class="mt-2 max-w-[520px] text-[13.5px] leading-5 text-zinc-400">
+						The compiler adapts to the stack you already use — not the other way around. TypeScript, Tailwind, npm, Kotlin, Material 3, Motion.
+					</p>
+				</div>
+				<div class="divide-y divide-zinc-800 text-[13px]">
+					<div class="py-1.5"><Link href="/docs" class="font-semibold text-emerald-400 hover:text-emerald-300 no-underline">Start reading docs →</Link></div>
+					<div class="py-1.5"><a href="https://github.com/anomalyco/vesk" target="_blank" rel="noreferrer" class="font-semibold text-emerald-400 hover:text-emerald-300 no-underline">Start contributing →</a></div>
+				</div>
+			</div>
+
+			<div class="mt-14 text-center">
+				<div class="inline-flex items-center border border-zinc-800 bg-zinc-950 px-3 py-1 text-[11px] font-semibold tracking-widest uppercase text-zinc-400">Ecosystem</div>
+				<h2 class="mt-4 text-[28px] md:text-[36px] font-black tracking-[-0.04em] leading-none text-zinc-100">The packages behind<br />the compiler.</h2>
+				<div class="mt-4 flex flex-wrap items-center justify-center gap-x-6 gap-y-2 font-mono text-[12px]">
+					<a href="https://www.typescriptlang.org" target="_blank" rel="noreferrer" class="font-semibold text-[#3178C6] hover:opacity-80 no-underline">TypeScript</a>
+					<a href="https://tailwindcss.com" target="_blank" rel="noreferrer" class="font-semibold text-sky-400 hover:opacity-80 no-underline">Tailwind</a>
+					<a href="https://www.npmjs.com" target="_blank" rel="noreferrer" class="font-semibold text-[#CB3837] hover:opacity-80 no-underline">npm</a>
+					<a href="https://kotlinlang.org" target="_blank" rel="noreferrer" class="font-semibold text-[#7F52FF] hover:opacity-80 no-underline">Kotlin</a>
+					<a href="https://m3.material.io" target="_blank" rel="noreferrer" class="font-semibold text-violet-400 hover:opacity-80 no-underline">Material 3</a>
+					<a href="https://motion.dev" target="_blank" rel="noreferrer" class="font-semibold text-emerald-400 hover:opacity-80 no-underline">Motion</a>
+				</div>
+			</div>
+
+			<div class="mt-10 grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
+				for (const m of MODULES) {
+					<div class="flex flex-col border border-zinc-800 bg-zinc-900 hover:border-zinc-700 transition-colors">
+						<div class="p-4 flex-1">
+							<div class="inline-flex bg-black border border-zinc-800 px-2 py-0.5 text-[10px] font-mono font-semibold text-emerald-400">{m.pkg}</div>
+							<div class="mt-2.5 text-[13px] font-semibold text-zinc-100">{m.role}</div>
+							<div class="mt-2 text-[12px] leading-4 text-zinc-500">{m.chips}</div>
+						</div>
+						<div class="border-t border-zinc-800 bg-black px-3 py-2.5 flex items-center justify-between gap-2">
+							<span class="font-mono text-[11px] text-zinc-500 truncate">npm i {m.pkg}</span>
+							<button onClick={() => copyCmd(m.pkg)} class={copied === m.pkg ? "shrink-0 border border-emerald-400/40 bg-emerald-400/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-400" : "shrink-0 border border-zinc-800 px-2.5 py-1 text-[11px] font-semibold text-zinc-300 hover:text-white hover:border-zinc-600"}>
+								{copied === m.pkg ? 'Copied!' : 'Copy'}
+							</button>
+						</div>
+					</div>
+				}
+			</div>
+		</div>
+	</section>
+}

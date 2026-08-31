@@ -26,6 +26,7 @@ const PACKAGES: Record<string, PackageBuild> = {
     copy: [{ from: 'src/acorn-ts-plugin', to: 'acorn-ts-plugin' }],
   },
   adapter: { name: '@vesk/adapter', entry: 'index' },
+  'lucide-vesk': { name: 'lucide-vesk', entry: 'index' },
 };
 
 function newestSourceMtime(srcDir: string): number {
@@ -93,7 +94,24 @@ export function buildPackages(force = false): void {
     }
 
     const srcPkg = JSON.parse(readFileSync(join(pkgDir, 'package.json'), 'utf-8'));
-    writeFileSync(join(distDir, 'package.json'), distPackageJson(cfg.name, cfg.entry, cfg.serverEntry, srcPkg.version || '1.0.0'));
+    if (pkg === 'lucide-vesk') {
+      // lucide-vesk has custom icons/* subpath — dist is package root for published files
+      const lucideDistPkg = {
+        name: srcPkg.name,
+        version: srcPkg.version || '1.0.0',
+        type: 'module' as const,
+        main: './index.js',
+        types: './index.d.ts',
+        exports: {
+          '.': { types: './index.d.ts', default: './index.js' },
+          './icons/*': { types: './icons/*.d.ts', default: './icons/*.js' },
+          './package.json': './package.json',
+        },
+      };
+      writeFileSync(join(distDir, 'package.json'), JSON.stringify(lucideDistPkg, null, 2) + '\n');
+    } else {
+      writeFileSync(join(distDir, 'package.json'), distPackageJson(cfg.name, cfg.entry, cfg.serverEntry, srcPkg.version || '1.0.0'));
+    }
     console.log(`[build] ${cfg.name} -> dist`);
   }
 }

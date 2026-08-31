@@ -1,0 +1,35 @@
+/**
+ * @license lucide-vesk v0.511.0 - ISC
+ * @name cuboid
+ * @see https://lucide.dev/icons/cuboid
+ * Auto-generated — do not edit. Generated from lucide@cuboid.
+ * Never scoped — no style tag.
+ */
+import createLucideIcon from "../createLucideIcon.js";
+import type { IconNode } from "../types.js";
+
+export const __iconNode: IconNode = [
+  [
+    "path",
+    {
+      "d": "m21.12 6.4-6.05-4.06a2 2 0 0 0-2.17-.05L2.95 8.41a2 2 0 0 0-.95 1.7v5.82a2 2 0 0 0 .88 1.66l6.05 4.07a2 2 0 0 0 2.17.05l9.95-6.12a2 2 0 0 0 .95-1.7V8.06a2 2 0 0 0-.88-1.66Z"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M10 22v-8L2.25 9.15"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "m10 14 11.77-6.87"
+    }
+  ]
+] as unknown as IconNode;
+
+const Cuboid = createLucideIcon("cuboid", __iconNode);
+
+export default Cuboid;
+export { Cuboid };

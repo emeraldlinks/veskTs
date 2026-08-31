@@ -1,0 +1,47 @@
+/**
+ * @license lucide-vesk v0.511.0 - ISC
+ * @name variable
+ * @see https://lucide.dev/icons/variable
+ * Auto-generated — do not edit. Generated from lucide@variable.
+ * Never scoped — no style tag.
+ */
+import createLucideIcon from "../createLucideIcon.js";
+import type { IconNode } from "../types.js";
+
+export const __iconNode: IconNode = [
+  [
+    "path",
+    {
+      "d": "M8 21s-4-3-4-9 4-9 4-9"
+    }
+  ],
+  [
+    "path",
+    {
+      "d": "M16 3s4 3 4 9-4 9-4 9"
+    }
+  ],
+  [
+    "line",
+    {
+      "x1": "15",
+      "x2": "9",
+      "y1": "9",
+      "y2": "15"
+    }
+  ],
+  [
+    "line",
+    {
+      "x1": "9",
+      "x2": "15",
+      "y1": "9",
+      "y2": "15"
+    }
+  ]
+] as unknown as IconNode;
+
+const Variable = createLucideIcon("variable", __iconNode);
+
+export default Variable;
+export { Variable };

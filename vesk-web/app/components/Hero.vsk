@@ -1,32 +1,103 @@
-import { Link } from '@vesk/runtime/router'
+import { Link, NavLink } from '@vesk/runtime/router'
+import { Md } from '@vesk/runtime'
+import { track } from '@vesk/runtime'
 
 component Hero {
+	let &[activeTab] = track(0)
+
+	const mdPage = `\`\`\`vsk bg=black
+component Home {
+  let &[count] = track(0)
+
+  <main class="min-h-screen flex items-center justify-center">
+    <button onClick={() => count++}>
+      count: {count}
+    </button>
+  </main>
+}
+\`\`\``
+
+	const mdLayout = `\`\`\`vsk
+import type { Component } from '@vesk/types'
+import { Footer } from './components/Footer.vsk'
+
+component Layout(props: { children?: Component }) {
+  <div class="min-h-screen bg-black text-zinc-100">
+    <main>{props.children}</main>
+    <Footer />
+  </div>
+}
+\`\`\``
+
+	const mdRoute = `\`\`\`ts
+import type { VeskRequest } from '@vesk/types'
+import { VeskResponse } from '@vesk/runtime/server'
+
+export async function GET(req: VeskRequest) {
+  return VeskResponse.json({ message: 'Hello from Vesk!' })
+    .setCookie('session', 'abc123', { httpOnly: true, secure: true })
+}
+\`\`\``
+
 	<section class="relative overflow-hidden border-b border-zinc-800">
 		<div class="absolute inset-0 pointer-events-none">
 			<div class="absolute inset-0 bg-[linear-gradient(to_right,rgba(255,255,255,0.07)_1px,transparent_1px),linear-gradient(to_bottom,rgba(255,255,255,0.07)_1px,transparent_1px)] bg-[size:32px_32px] opacity-40"></div>
-			<div class="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-[radial-gradient(ellipse_at_center,rgba(255,255,255,0.06),transparent_70%)]"></div>
+			<div class="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-[radial-gradient(ellipse_at_center,rgba(52,211,153,0.08),transparent_70%)]"></div>
 		</div>
-		<div class="relative mx-auto max-w-[1200px] px-6">
-			<div class="mx-auto max-w-[880px] px-6 py-24 md:py-32 lg:py-40 text-center">
-				<p class="font-mono text-[12px] text-zinc-600">
-					<span class="text-emerald-400">$</span>
-					<span class="text-zinc-400">npm create vesk@latest</span>
-					<span class="inline-block w-[7px] h-4 bg-emerald-400 align-middle animate-pulse"></span>
-				</p>
-				<h1 class="mt-8 text-[44px] md:text-[64px] lg:text-[76px] font-bold tracking-[-0.04em] leading-[0.92] text-zinc-100">
-					Build once.<br />
-					<span class="text-zinc-600">Compile</span> everywhere.
-				</h1>
-				<p class="mx-auto mt-6 max-w-[560px] text-[15px] md:text-[16px] leading-7 text-zinc-500">
-					Vesk is a compiler-first framework. One component model — compiled to web ESM and native Kotlin, with build-time guarantees instead of runtime guesses.
-				</p>
-				<div class="mt-10 flex items-center justify-center gap-8 font-mono text-[13px]">
-					<Link href="#dx" class="text-emerald-400 hover:text-emerald-300 no-underline transition-colors">[ start ]</Link>
-					<Link href="/docs" class="text-zinc-500 hover:text-emerald-400 no-underline transition-colors">[ docs ]</Link>
+
+		<div class="relative mx-auto max-w-[1200px] px-6 pt-14 md:pt-20 text-center">
+			<Link href="/blog" class="inline-flex items-center gap-2 border border-zinc-800 bg-zinc-950 px-3 py-1.5 text-[11px] font-mono text-zinc-400 hover:text-emerald-400 hover:border-emerald-400/40 transition-colors no-underline">
+				<span class="h-1.5 w-1.5 bg-emerald-400"></span>
+				v0.2.9 ships the compiler-first runtime
+				<span class="text-zinc-600">→</span>
+			</Link>
+
+			<h1 class="mt-8 text-[44px] md:text-[64px] lg:text-[76px] font-bold tracking-[-0.05em] leading-[0.9] text-zinc-100">
+				Build once.
+				<span class="text-zinc-600">Compile</span> everywhere.
+			</h1>
+
+			<p class="mx-auto mt-6 max-w-[560px] text-[15px] md:text-[16px] leading-7 text-zinc-500">
+				Vesk is a compiler-first framework. One component model — compiled to web ESM and native Kotlin, with build-time guarantees instead of runtime guesses.
+			</p>
+
+			<div class="mt-10 flex flex-wrap items-center justify-center gap-3">
+				<NavLink href="/docs" class="inline-flex items-center bg-emerald-400 px-6 py-3 text-[14px] font-bold text-black hover:bg-emerald-300 transition-colors shadow-[0_0_24px_rgba(52,211,153,0.35)] no-underline">Get started</NavLink>
+				<Link href="#dx" class="inline-flex items-center border border-zinc-800 bg-zinc-900 px-6 py-3 text-[14px] font-semibold text-white hover:border-zinc-700 hover:bg-zinc-800 transition-colors no-underline">npm create vesk@latest</Link>
+			</div>
+
+			<p class="mt-8 font-mono text-[11px] text-zinc-700">
+				TypeScript · Tailwind · Kotlin / Material 3 · MIT
+			</p>
+		</div>
+
+		<div class="relative mx-auto max-w-[1000px] px-6 pt-10 pb-16 md:pb-20 text-left">
+			<div class="border border-zinc-800 bg-[#0d1117] overflow-hidden">
+				<div class="flex items-center justify-between border-b border-zinc-800 bg-black px-4 py-3">
+					<div class="flex items-center gap-2">
+						<span class="h-2.5 w-2.5 bg-zinc-800"></span>
+						<span class="h-2.5 w-2.5 bg-zinc-800"></span>
+						<span class="h-2.5 w-2.5 bg-zinc-800"></span>
+						<span class="ml-3 font-mono text-[12px] text-zinc-500">vsk · compile</span>
+					</div>
+					<span class="hidden sm:inline-flex items-center border border-zinc-800 bg-zinc-950 px-2.5 py-1 text-[10px] font-medium tracking-widest uppercase text-emerald-400">0.9 kb · no runtime vdom</span>
 				</div>
-				<p class="mt-14 font-mono text-[11px] text-zinc-700">
-					TypeScript · Tailwind · Kotlin / Material 3 · MIT
-				</p>
+
+				<div class="flex items-center gap-1 border-b border-zinc-800 bg-zinc-950 px-3 overflow-x-auto">
+					<button onClick={() => activeTab = 0} class={activeTab === 0 ? "px-3 py-2.5 text-[12.5px] font-mono text-white border-b-2 border-emerald-400 bg-transparent whitespace-nowrap" : "px-3 py-2.5 text-[12.5px] font-mono text-zinc-500 hover:text-zinc-300 whitespace-nowrap"}>app/page.vsk</button>
+					<button onClick={() => activeTab = 1} class={activeTab === 1 ? "px-3 py-2.5 text-[12.5px] font-mono text-white border-b-2 border-emerald-400 bg-transparent whitespace-nowrap" : "px-3 py-2.5 text-[12.5px] font-mono text-zinc-500 hover:text-zinc-300 whitespace-nowrap"}>app/layout.vsk</button>
+					<button onClick={() => activeTab = 2} class={activeTab === 2 ? "px-3 py-2.5 text-[12.5px] font-mono text-white border-b-2 border-emerald-400 bg-transparent whitespace-nowrap" : "px-3 py-2.5 text-[12.5px] font-mono text-zinc-500 hover:text-zinc-300 whitespace-nowrap"}>app/api/hello/route.ts</button>
+				</div>
+
+				<div class="p-4 md:p-6 overflow-x-auto"items-center>
+ // console.log("tab: ", activeTab)
+					<Md content={activeTab === 0 ? mdPage : activeTab === 1 ? mdLayout : mdRoute} css theme="dark"  />
+				</div>
+
+				<div class="flex items-center justify-between border-t border-zinc-800 bg-black px-4 py-3">
+					<span class="font-mono text-[11px] text-zinc-500">transform in 12ms · deterministic · no hidden runtime</span>
+					<span class="font-mono text-[11px] text-emerald-400">compiled ✓</span>
+				</div>
 			</div>
 		</div>
 	</section>

@@ -104,14 +104,56 @@ function offsetToLineCol(source: string, offset: number): { line: number; column
   return { line, column };
 }
 
+function calleeIsFetch(callee: unknown): boolean {
+  if (!callee || typeof callee !== 'object') return false;
+  const c = callee as Record<string, unknown>;
+  if (c.type === 'Identifier') return c.name === 'useFetch';
+  if (c.type === 'MemberExpression') {
+    const object = c.object as Record<string, unknown> | null | undefined;
+    if (object && object.type === 'Identifier') return object.name === 'useFetch';
+  }
+  return false;
+}
+
+/**
+ * Walks an ESTree subtree looking for a real `useFetch(...)` / `useFetch.stream(...)`
+ * call. String and template-literal *content* is not part of the expression tree,
+ * so `const md = \`useFetch.stream(...)\`` no longer counts as a fetch usage.
+ */
+function estreeCallsFetch(ast: ESTreeNode | null): boolean {
+  if (!ast) return false;
+  const stack: unknown[] = [ast];
+  while (stack.length > 0) {
+    const candidate = stack.pop();
+    if (!candidate || typeof candidate !== 'object') continue;
+    const node = candidate as Record<string, unknown>;
+    if (
+      (node.type === 'CallExpression' || node.type === 'NewExpression') &&
+      calleeIsFetch(node.callee)
+    ) {
+      return true;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === 'parent' || key === 'loc' || key === 'start' || key === 'end' || key === 'range') continue;
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) stack.push(item);
+      } else {
+        stack.push(value);
+      }
+    }
+  }
+  return false;
+}
+
 function componentUsesFetch(nodes: IRNode[]): boolean {
   for (const node of nodes) {
     if (node instanceof ServerBlock || node instanceof ClientBlock) {
       if (componentUsesFetch(node.children)) return true;
     } else if (node instanceof RuntimeStatement) {
-      if (node.raw.includes('useFetch(') || node.raw.includes('useFetch.')) return true;
+      if (estreeCallsFetch(node.ast)) return true;
     } else if (node instanceof DynamicBinding) {
-      if (node.expression.raw.includes('useFetch(') || node.expression.raw.includes('useFetch.')) return true;
+      if (estreeCallsFetch(node.expression.ast)) return true;
     } else if (node instanceof MapRegion) {
       if (componentUsesFetch(node.bodyTemplate)) return true;
       if (componentUsesFetch(node.alternateNodes)) return true;

@@ -1,16 +1,15 @@
 import { Hero } from './components/Hero.vsk'
-import { CodeShowcase } from './components/CodeShowcase.vsk'
+import { GuidedTour } from './components/GuidedTour.vsk'
 import { WhyVesk } from './components/WhyVesk.vsk'
 import { VeskNative } from './components/VeskNative.vsk'
 import { CompilerArchitecture } from './components/CompilerArchitecture.vsk'
-import { WebNative } from './components/WebNative.vsk'
 import { Features } from './components/Features.vsk'
-import { DeveloperExperience } from './components/DeveloperExperience.vsk'
+import { Modules } from './components/Modules.vsk'
 import { DocsSection } from './components/DocsSection.vsk'
-import { Ecosystem } from './components/Ecosystem.vsk'
 import { Showcase } from './components/Showcase.vsk'
-import { Community } from './components/Community.vsk'
+import { DeveloperExperience } from './components/DeveloperExperience.vsk'
 import { Roadmap } from './components/Roadmap.vsk'
+import { Community } from './components/Community.vsk'
 import { FinalCta } from './components/FinalCta.vsk'
 
 component Home {
@@ -20,18 +19,17 @@ component Home {
 	</Head>
 	<div class="bg-black text-zinc-100">
 		<Hero />
-		<CodeShowcase />
+		<GuidedTour />
 		<WhyVesk />
 		<VeskNative />
 		<CompilerArchitecture />
-		<WebNative />
 		<Features />
-		<DeveloperExperience />
+		<Modules />
 		<DocsSection />
-		<Ecosystem />
 		<Showcase />
-		<Community />
+		<DeveloperExperience />
 		<Roadmap />
+		<Community />
 		<FinalCta />
 	</div>
 }

@@ -21,7 +21,7 @@ component Layout(props: LayoutProps) {
 						<span class="text-emerald-400 font-black text-[13px] tracking-[-0.04em]">&gt;_</span>
 					</div>
 					<span class="font-semibold tracking-[-0.03em] text-[17px] text-zinc-100">vesk</span>
-					<span class="hidden sm:inline-flex items-center border border-zinc-800 bg-zinc-950 px-2 py-0.5 text-[10px] font-medium tracking-widest uppercase text-zinc-500">Compiler-first</span>
+					<span class="hidden sm:inline-flex items-center border border-emerald-400/30 bg-black px-2 py-0.5 font-mono text-[10px] font-medium text-emerald-400">v0.2.9</span>
 				</Link>
 				<nav class="hidden lg:flex items-center gap-1">
 					<Link href="/#why" class="px-3 py-2 text-[13.5px] font-medium text-zinc-400 hover:text-emerald-400 transition-colors no-underline">Why Vesk</Link>

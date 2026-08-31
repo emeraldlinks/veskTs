@@ -485,6 +485,39 @@ describe('Component-level code theming', () => {
     expect(MD_BASE_CSS).toContain('.vesk-md-dark { --md-code-bg: #0d1117');
   });
 
+  it('no theme adds no theme class (inherits page background)', () => {
+    const html = Md({ content: 'x' }) as string;
+    expect(html).toBe('<div class="vesk-md"><p>x</p></div>');
+    expect(html).notToContain('vesk-md-light');
+    expect(html).notToContain('vesk-md-dark');
+  });
+
+  it('theme=light adds the light scope class', () => {
+    const html = Md({ content: 'x', theme: 'light' }) as string;
+    expect(html).toContain('class="vesk-md vesk-md-light"');
+    expect(html).notToContain('vesk-md-dark');
+    expect(MD_BASE_CSS).toContain('.vesk-md-light { color: #24292f; --md-code-bg: #f6f8fa');
+  });
+
+  it('MD_BASE_CSS wrapper is backgroundless by default', () => {
+    // The .vesk-md rule itself must never set an opaque background color.
+    const wrapperRule = MD_BASE_CSS.split('\n').find((l) => l.startsWith('.vesk-md {')) || '';
+    expect(wrapperRule).toContain('color: inherit');
+    expect(wrapperRule).notToContain('background:');
+    // Default (inherit) surfaces neutral code surfaces via currentColor, not
+    // hardcoded white; the light preset supplies the explicit light palette.
+    expect(MD_BASE_CSS).toContain('.vesk-md .md-code { --md-code-bg: color-mix(in srgb, currentColor 6%, transparent)');
+    expect(MD_BASE_CSS).notToContain('.vesk-md .md-code { --md-code-bg: #f6f8fa');
+  });
+
+  it('theme presets drive explicit code/table surfaces', () => {
+    expect(MD_BASE_CSS).toContain('.vesk-md-light .md-code { border-color: #d1d9e0');
+    expect(MD_BASE_CSS).toContain('.vesk-md-dark .md-code { border-color: #30363d');
+    expect(MD_BASE_CSS).toContain('.vesk-md-dark .md-table th { background: #161b22');
+    expect(MD_BASE_CSS).toContain('.vesk-md-dark .tok-kw { color: #ff7b72');
+    expect(MD_BASE_CSS).toContain('.vesk-md-light .tok-kw { color: #cf222e');
+  });
+
   it('fence bg= overrides component codeBg (content wins)', () => {
     const html = Md({ content: '```js bg=red\nx\n```', codeBg: 'green' }) as string;
     expect(html).toContain('--md-code-bg:red');   // per-block

@@ -207,6 +207,8 @@ export interface DevServerOptions {
   block?: boolean;
   /** Request body size cap in bytes. Default 1 MiB. */
   maxBodyBytes?: number;
+  /** Dev plugin / module config — names feed the dev panel plugin list. */
+  plugins?: VeskPlugin[];
 }
 
 export interface ProdServerOptions {

@@ -20,6 +20,7 @@ const e2eFiles = new Set([
   'code-split.test.ts',
   'hmr.test.ts',
   'hydration.test.ts',
+  'panel-e2e.test.ts',
 ])
 
 function runTestFile(filePath, env) {
