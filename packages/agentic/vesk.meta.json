@@ -1,0 +1,48 @@
+{
+  "name": "@vesk/agentic",
+  "description": "Agentic AI plugin for Vesk — zero-deps agent loop, provider abstraction, permissions, tools, checkpoints",
+  "vesk": ">=0.2.10",
+  "capabilities": ["agent", "checkpoints"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "provider": {
+        "type": "string",
+        "enum": ["openai", "openai-compatible", "anthropic", "google", "ollama"],
+        "default": "openai",
+        "description": "LLM provider"
+      },
+      "model": {
+        "type": "string",
+        "description": "Model name (e.g. gpt-4o-mini, claude-sonnet-4-6, gemini-2.0-flash, llama3.1)"
+      },
+      "apiKey": {
+        "type": "string",
+        "description": "API key. Prefer env var VESK_AGENTIC_API_KEY — never commit secrets to git"
+      },
+      "baseUrl": {
+        "type": "string",
+        "description": "Custom base URL for OpenAI-compatible providers or self-hosted Ollama (e.g. http://localhost:11434)"
+      },
+      "maxTokens": {
+        "type": "number",
+        "minimum": 1,
+        "description": "Max tokens for completion"
+      },
+      "mode": {
+        "type": "string",
+        "enum": ["explore", "debug", "agent"],
+        "default": "explore",
+        "description": "Default agent mode (capability-gated via Dev Server: explore=read-only, debug=controlled fixes, agent=per-capability toggles)"
+      },
+      "maxSteps": {
+        "type": "number",
+        "minimum": 1,
+        "maximum": 50,
+        "default": 10,
+        "description": "Max agent loop steps"
+      }
+    },
+    "additionalProperties": false
+  }
+}

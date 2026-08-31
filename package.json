@@ -11,6 +11,7 @@
   "workspaces": [
     "packages/adapter",
     "packages/adapters/vite",
+    "packages/agentic",
     "packages/cli",
     "packages/compiler",
     "packages/create-vesk",

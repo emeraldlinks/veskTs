@@ -8,6 +8,47 @@ The Vesk Dev Server acts as the operating core behind these capabilities.
 
 ---
 
+## Architecture Decision — Agent as Plugin (@vesk/agentic)
+
+**Decision (2026-08-31): AI is an installable plugin `@vesk/agentic`, not built into Vesk core.**
+
+Previously these notes described a built-in agentic AI framework. That is superseded: the
+Vesk core and Dev Server remain lean and AI-free by default. All agent runtime, provider
+abstraction, tools, context assembly, transactions/checkpoints, and permission enforcement
+are implemented **inside the optional plugin `@vesk/agentic`**. The plugin is installed,
+activated/deactivated, and versioned like any other Vesk plugin (Note 1).
+
+Rationale:
+
+- **Lean core / footprint audit gate.** Vendoring a 20.7kB zero-deps loop avoids the
+  6MB+ hard-dependency bloat that failed the Pi audit (see AI Agent Runtime Integration
+  Plan). Core ships no `openai`/`@anthropic-ai/sdk`/`@google/genai`/`@aws-sdk`.
+- **Installable & toggleable.** Teams that want AI install `@vesk/agentic`; teams that
+  don't pay zero cost. An inactive plugin is fully excluded from the build/bundle (same
+  `filterActivePlugins` guarantee as Note 1).
+- **Dev Server as backbone.** The plugin talks to the project only through the
+  capability-gated Vesk Dev Server API (`createDevApiRouter` — config, file, command,
+  diagnostics, build, checkpoints). No raw `child_process` or filesystem access from the
+  browser/agent runtime.
+- **Own the intelligence, rent the machinery.** `@vesk/agentic` vendors a zero-deps clone
+  of `@narimangardi/agent-loop` as its generic machinery; Vesk owns the intelligence
+  (Vesk-native tools, layered context, permissions, transactions, teaching surface).
+- **Independent evolution.** Plugin versioning decouples AI iteration from compiler/runtime
+  releases. Alternative agent plugins remain possible — the contract is the Dev Server API,
+  not a built-in framework slot.
+
+Consequences:
+
+- `plans/devtools.md` references to "built-in AI" now mean "via `@vesk/agentic` when
+  installed & active".
+- B6 is `B6-plug` (plugin-scoped). B2 (Dev Server API) must expose AI-relevant
+  capabilities (`ai`, `checkpoint`) so the plugin — not the core — can implement modes,
+  tools, and history.
+- Docs, `llm.txt`, and DevTools UI surface AI affordances conditionally on plugin
+  presence/active state.
+
+---
+
 ## Note 1 — Installable and Toggleable Vesk Plugins
 
 Vesk DevTools should support plugin/module installation and management, similar to the Node.js package ecosystem.
@@ -67,11 +108,15 @@ The Dev Server becomes the controlled bridge between:
 
 ---
 
-## Note 3 — First-Class AI Integration
+## Note 3 — First-Class AI Integration (via @vesk/agentic — superseded built-in; see Architecture Decision)
 
-Vesk DevTools should include a built-in, minimal agentic AI framework.
+> **Superseded:** AI is **not** built-in. This note now describes the surface of the
+> installable plugin `@vesk/agentic` when installed & active. See Architecture Decision
+> — Agent as Plugin (@vesk/agentic).
 
-Developers should be able to configure an AI provider directly from the DevTools.
+Vesk DevTools (with `@vesk/agentic` installed) should provide a minimal agentic AI framework
+(via the plugin). Developers should be able to configure an AI provider directly from the
+DevTools when the plugin is active.
 
 Possible providers include:
 
@@ -370,32 +415,36 @@ Vesk becomes an **AI-native compiler and software development platform** with:
 
 - Browser-first DevTools.
 - A centralized development server.
-- First-class plugin management.
+- First-class plugin management (including AI).
 - Browser-based project configuration.
-- Integrated AI agents.
-- Granular AI permissions.
-- Framework and project-aware AI context.
-- AI-assisted debugging and teaching.
+- Optional AI plugin (`@vesk/agentic` — installable, toggleable; zero-deps loop) instead of built-in AI.
+- Granular AI permissions (enforced via Dev Server when plugin is active).
+- Framework and project-aware AI context (provided by the plugin).
+- AI-assisted debugging and teaching (plugin surface).
 - Compiler extensions.
 - Predictive development.
-- Transactional AI operations.
-- Checkpoints, rollback, history, and replay.
+- Transactional AI operations (plugin-mediated).
+- Checkpoints, rollback, history, and replay (plugin + Dev Server).
 
 ## Architectural Principle
 
-The Vesk Dev Server should be the backbone.
+The Vesk Dev Server should be the backbone. AI is **not** a core layer — it is an
+installable plugin `@vesk/agentic` that plugs into the same Dev Server capabilities as
+any other plugin.
 
 ```text
                     Vesk DevTools
                          │
               ┌──────────┼──────────┐
               │          │          │
-             AI       Plugins    Config
+     @vesk/agentic    Plugins    Config
+      (AI plugin)    (incl. AI)    │
               │          │          │
               └──────────┼──────────┘
                          │
-                 Vesk Dev Server
-                         │
+                 Vesk Dev Server  ← capability-gated API
+                         │           (config · file · command · diagnostics
+                         │            · build · checkpoints · ai*)
         ┌────────────────┼────────────────┐
         │                │                │
    Project Files     Compiler          Commands
@@ -403,9 +452,14 @@ The Vesk Dev Server should be the backbone.
         └────────────────┼────────────────┘
                          │
                     Vesk Project
+
+  * ai/checkpoint capabilities are implemented by @vesk/agentic when installed;
+    core ships the API surface, the plugin ships the runtime (vendored
+    @narimangardi/agent-loop, 20.7kB zero-deps).
 ```
 
-The same APIs should power the browser, CLI, IDE integrations, plugins, and AI agents.
+The same APIs should power the browser, CLI, IDE integrations, plugins, and (when
+installed) the AI agent plugin.
 
 The overarching goal is to make Vesk feel less like a framework developers configure manually and more like an intelligent development environment that understands, builds, explains, and safely operates their application.
 
@@ -414,41 +468,57 @@ The overarching goal is to make Vesk feel less like a framework developers confi
 
 # AI Agent Runtime Integration Plan
 
-## Selected Runtime — Pi Agent Core + Pi AI
+## Selected Runtime — Vendored zero-deps clone of @narimangardi/agent-loop (inside @vesk/agentic)
 
-Vesk DevTools should use a lightweight, highly configurable agent runtime rather than implementing the complete agent loop and model-provider abstraction from scratch.
+Vesk DevTools uses a lightweight, highly configurable agent runtime rather than implementing
+the complete agent loop and model-provider abstraction from scratch.
 
-The initial candidate is:
+**Selected:** a vendored, zero-dependency clone of `@narimangardi/agent-loop` — **20.7kB
+zero-deps** (single package, no runtime deps) — embedded **inside the installable plugin
+`@vesk/agentic`**. The plugin, not the Vesk core, owns the loop, provider wiring, tools,
+permissions, context, and checkpoint/transaction integration via the Vesk Dev Server API.
 
-- `pi-agent-core` — lightweight agent loop, state, and tool-calling foundation.
-- `pi-ai` — model/provider abstraction.
+**Rejected — Pi:**
 
-Do **not** immediately integrate the full Pi coding-agent application. Prefer the smallest useful packages so Vesk owns the user experience, permissions, tools, project context, and development-server integration.
+- Bare names `pi-agent-core` / `pi-ai` resolve to **486B stub packages** (empty placeholders,
+  no implementation) — not a runtime.
+- Namespaced `@earendil-works/pi-agent-core` (**4.1MB**) + `@earendil-works/pi-ai`
+  (**1.9MB**) **fail the footprint audit**: hard dependencies on `openai`,
+  `@anthropic-ai/sdk`, `@google/genai`, `@aws-sdk` (and transitive SDK graphs) force
+  ~6MB+ into the dependency tree even when only one provider is used, with Node-specific
+  SDK code incompatible with browser/worker execution and no tree-shakeable provider split.
+  They also couple the agent to a full coding-agent product surface otherwise unnecessary
+  for Vesk's Dev Server-mediated tools/permissions model.
+
+Do **not** integrate the full Pi coding-agent application or `@earendil-works/*`. Prefer
+the smallest useful primitive so `@vesk/agentic` owns the UX, permissions, tools, project
+context, and Dev Server integration; the vendored loop is generic machinery only.
 
 ## Mandatory Inspection Before Integration
 
-Before adding Pi to the Vesk DevTools dependency tree, inspect the current upstream implementation and determine whether it actually meets Vesk's resource and architectural requirements.
-
-The inspection must happen **before writing integration code**.
+Before vendoring `@narimangardi/agent-loop` into `@vesk/agentic` (and before any Vesk
+core dependency change), inspect the upstream implementation and verify it meets Vesk's
+resource and architectural requirements. The inspection must happen **before writing
+integration code**; record results in `plans/devtools-agentic-audit.md` (successor to
+`plans/devtools-pi-audit.md`).
 
 Inspect and document:
 
 ### Dependency footprint
 
-- Direct dependencies.
+- Direct dependencies (target: **zero** — verified for `@narimangardi/agent-loop`).
 - Transitive dependencies.
-- Optional dependencies.
-- Runtime-only dependencies.
-- Build-time dependencies.
-- Node-specific dependencies.
-- Browser-incompatible dependencies.
+- Optional/peer dependencies.
+- Runtime-only vs build-time dependencies.
+- Node-specific or browser-incompatible dependencies.
+- Contrast with rejected Pi footprint: 486B stubs vs 4.1MB+1.9MB + hard SDK deps.
 
 ### Runtime footprint
 
 Measure or reasonably benchmark:
 
-- Package/install size.
-- Bundled size where applicable.
+- Package/install size (20.7kB unpacked for the loop).
+- Bundled size (plugin bundle impact; DevTools panel impact where applicable).
 - Startup time.
 - Baseline memory usage.
 - Memory growth during an agent task.
@@ -461,13 +531,14 @@ Determine which parts can execute safely in:
 - Browser environments.
 - Web Workers.
 - A browser-based Vesk DevTools client.
-- The Vesk Dev Server.
+- The Vesk Dev Server (plugin host).
 
-Identify anything that must remain server-side.
+Identify anything that must remain server-side. The vendored loop must be browser-safe;
+provider SDK calls stay server-side behind the Dev Server capability gate.
 
 ### Configurability
 
-Determine whether Vesk can control:
+Determine whether `@vesk/agentic` (wrapping the vendored loop) can control:
 
 - Model providers.
 - Models.
@@ -484,7 +555,8 @@ Determine whether Vesk can control:
 
 ### Architecture compatibility
 
-Determine whether Pi can be embedded as a library without forcing Vesk to adopt:
+Determine whether the loop can be embedded as a library inside the plugin without forcing
+Vesk (or the plugin host) to adopt:
 
 - Its CLI.
 - Its terminal UI.
@@ -496,13 +568,17 @@ Determine whether Pi can be embedded as a library without forcing Vesk to adopt:
 
 ## Integration Rule
 
-Only integrate the smallest Pi components required after the inspection confirms that they satisfy Vesk's requirements.
+Only vendor the minimal `@narimangardi/agent-loop` primitives required after the
+inspection confirms they satisfy Vesk's footprint, browser-compat, and configurability
+requirements. Core Vesk gains **no** new AI dependency; `@vesk/agentic` depends only on
+the vendored zero-deps loop plus the Dev Server API.
 
 The goal is:
 
-**Vesk owns the platform. Pi provides the minimal agent engine.**
+**Vesk owns the platform. @vesk/agentic owns the agent experience. The vendored
+`@narimangardi/agent-loop` provides the minimal agent engine (20.7kB, zero-deps).**
 
-Do not make Vesk dependent on Pi's complete coding-agent product.
+Do not make Vesk core dependent on Pi, its stubs, or its heavy SDK-coupled packages.
 
 ---
 
@@ -514,18 +590,21 @@ Do not make Vesk dependent on Pi's complete coding-agent product.
                 ┌─────────────┼─────────────┐
                 │             │             │
              AI Panel      Plugins       Config
+             (plugin)        │             │
                 │             │             │
                 └─────────────┼─────────────┘
                               │
-                       Vesk Agent Layer
+                     @vesk/agentic  ← installable AI plugin
                               │
-                    ┌─────────┴─────────┐
-                    │                   │
-             pi-agent-core           pi-ai
-                    │                   │
-                    └─────────┬─────────┘
+              ┌───────────────┴───────────────┐
+              │  vendored @narimangardi/agent-loop │
+              │        20.7kB · zero-deps      │
+              │  (rejected: pi-agent-core/pi-ai │
+              │   486B stubs; @earendil-works/* │
+              │   4.1MB+1.9MB + hard SDK deps) │
+              └───────────────┬───────────────┘
                               │
-                       Vesk Dev Server
+                       Vesk Dev Server  ← capability gate
                               │
             ┌─────────────────┼─────────────────┐
             │                 │                 │
@@ -536,13 +615,14 @@ Do not make Vesk dependent on Pi's complete coding-agent product.
                          Vesk Project
 ```
 
-## Vesk Agent Layer
+## Vesk Agent Layer (inside @vesk/agentic)
 
-Create a thin Vesk-owned abstraction around the selected Pi components.
+Create a thin Vesk-owned abstraction around the vendored `@narimangardi/agent-loop`
+clone. The abstraction lives **inside the plugin**, not in Vesk core, and prevents the
+rest of Vesk (and the plugin's consumers) from becoming tightly coupled to the loop
+implementation.
 
-The abstraction should prevent the rest of Vesk from becoming tightly coupled to Pi.
-
-Conceptually:
+Conceptually (inside `@vesk/agentic`):
 
 ```ts
 interface VeskAgent {
@@ -552,9 +632,13 @@ interface VeskAgent {
 }
 ```
 
-The implementation can internally use `pi-agent-core` and `pi-ai`.
+The implementation internally uses the vendored `@narimangardi/agent-loop` (20.7kB
+zero-deps). Previous Pi candidates are rejected: bare `pi-agent-core`/`pi-ai` are 486B
+stubs; `@earendil-works/*` variants fail the footprint audit (4.1MB+1.9MB, hard deps
+`openai`/`@anthropic-ai/sdk`/`@google/genai`/`@aws-sdk`).
 
-This allows Vesk to replace or evolve the underlying runtime later without redesigning DevTools.
+This allows `@vesk/agentic` to replace or evolve the underlying loop later without
+redesigning DevTools or Vesk core; core Vesk never imports an agent runtime.
 
 ---
 
@@ -960,37 +1044,55 @@ ready they are to start. Each entry: scope, where it lives, acceptance.
   picks it up without manual file edits.
 - **Depends on:** B1 (config writeback) + B4 (schema declaration).
 
-### B6. AI integration (Notes 3–6, 8–9, 12–13; devtools-prompt §4–8)
-The largest remaining chunk. Mandatory order:
-1. **Footprint audit first** — `plans/devtools-pi-audit.md` covering dependencies, install
-   size, startup, memory, browser/worker compatibility, configurability, embeddability for
-   `pi-agent-core` + `pi-ai`. Write BEFORE any integration code. If they don't pass, report
-   and stop — never ship a heavier agent framework.
-2. **Provider layer** — provider/model/API-key config in the devtool, provider-agnostic
-   client abstraction; ≥2 providers from config alone.
-3. **Modes + permissions (server-enforced)** — Explore (read-only) / Debug (controlled fixes)
-   / Agent (per-capability toggles: readFiles, writeFiles, deleteFiles, executeCommands,
-   installPackages, modifyConfig, managePlugins, runBuild, runTests, modifyAgentsMd,
-   createCheckpoint, rollback). `agents.md` readable by default, writable only on grant.
-4. **Layered context** — framework knowledge (docs, `llm.txt`, framework agents.md) +
-   project knowledge (project `agents.md`, rule precedence) + live project context
-   (files, config, deps, compiler state, diagnostics, git state, active plugins, running
-   processes where permitted).
-5. **Vesk-native tools** — `vesk.inspectProject`, `vesk.inspectComponent`, `vesk.readConfig`,
+### B6-plug. AI integration as plugin @vesk/agentic (Notes 3–6, 8–9, 12–13; devtools-prompt §4–8)
+> AI is **not** built-in. All items below are scoped to the installable plugin
+> `@vesk/agentic` (vendored `@narimangardi/agent-loop`). Core Vesk ships no agent runtime.
+
+The largest remaining chunk. Mandatory order — plugin-local, gated by footprint audit:
+1. **Footprint audit first** — `plans/devtools-agentic-audit.md` (successor to
+   `plans/devtools-pi-audit.md`) covering dependencies, install size, startup, memory,
+   browser/worker compatibility, configurability, embeddability for the **vendored
+   `@narimangardi/agent-loop` (20.7kB zero-deps)**. Document Pi rejection: bare
+   `pi-agent-core`/`pi-ai` are **486B stubs**; `@earendil-works/pi-agent-core`
+   (**4.1MB**) + `@earendil-works/pi-ai` (**1.9MB**) fail footprint audit due to hard
+   deps `openai`/`@anthropic-ai/sdk`/`@google/genai`/`@aws-sdk`. Write BEFORE any
+   integration code. If the vendored loop doesn't pass, report and stop — never ship a
+   heavier agent framework; do not fall back to Pi.
+2. **Plugin package + provider layer** — scaffold `packages/agentic` as `@vesk/agentic`;
+   plugin manifest + activation lifecycle; provider/model/API-key config in the devtool
+   (shown only when plugin is installed & active), provider-agnostic client abstraction;
+   ≥2 providers from config alone without touching the vendored loop.
+3. **Modes + permissions (server-enforced via Dev Server, implemented in plugin)** — Explore
+   (read-only) / Debug (controlled fixes) / Agent (per-capability toggles: readFiles,
+   writeFiles, deleteFiles, executeCommands, installPackages, modifyConfig, managePlugins,
+   runBuild, runTests, modifyAgentsMd, createCheckpoint, rollback). `agents.md` readable
+   by default, writable only on grant. Checks enforced through `createDevApiRouter`
+   capabilities — browser cannot bypass.
+4. **Layered context (assembled by plugin)** — framework knowledge (docs, `llm.txt`,
+   framework agents.md) + project knowledge (project `agents.md`, rule precedence) + live
+   project context (files, config, deps, compiler state, diagnostics, git state, active
+   plugins, running processes where permitted) — injected via Dev Server reads.
+5. **Vesk-native tools (exposed by plugin, gated by permissions, routed through Dev Server)**
+   — `vesk.inspectProject`, `vesk.inspectComponent`, `vesk.readConfig`,
    `vesk.updateConfig`, `vesk.getDiagnostics`, `vesk.getCompilerErrors`, `vesk.runBuild`,
    `vesk.runTests`, `vesk.installPlugin`, `vesk.uninstallPlugin`, `vesk.enablePlugin`,
    `vesk.disablePlugin`, `vesk.createCheckpoint`, `vesk.rollback`; generic tools
    (`filesystem.*`, `command.execute`) gated behind permissions and routed through the dev
-   server.
+   server's allowlisted runner.
 6. **Transactions + checkpoints + history + replay** — Preview → Approve → Execute → Validate
    → Checkpoint; every checkpoint records files/commands/deps/before-after/build-test
-   outcome; rollback restores prior state, replay re-runs a task; a history UI shows it all.
+   outcome; rollback restores prior state, replay re-runs a task; a history UI shows it all
+   (plugin panel, conditionally rendered).
 7. **Teaching assistant surface (Note 8)** — the AI explains "why" (patterns, errors, build
    failures, components) alongside doing.
-- **Acceptance:** all three modes enforced server-side; every agent action checkpoints;
-  rollback practically restores file state; footprint audit committed before code.
-- **Depends on:** B2 (command runner, file access, diagnostics) — do B6 in phases, B1/B2/
-  B3 can land first.
+- **Acceptance:** plugin installs/activates/deactivates like any Vesk plugin (inactive ⇒ zero
+  bundle/build impact); footprint audit (`devtools-agentic-audit.md`) committed before code
+  and documents Pi rejection (486B stubs vs 4.1MB+1.9MB + SDK hard deps) and vendored loop
+  20.7kB zero-deps; all three modes enforced server-side via Dev Server capabilities; every
+  agent action checkpoints; rollback practically restores file state.
+- **Depends on:** B2 (command runner, file access, diagnostics) — do B6-plug in phases,
+  B1/B2/B3 can land first; no core Vesk dependency on `openai`/`@anthropic-ai/sdk`/
+  `@google/genai`/`@aws-sdk`.
 
 ### B7. Full-page DevTools as a `.vsk` app (devtools-prompt §2)
 - **Goal:** a dev-only route (e.g. `/__vesk`) serving the same DevTools as a full page built

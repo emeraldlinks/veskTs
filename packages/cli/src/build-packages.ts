@@ -26,6 +26,7 @@ const PACKAGES: Record<string, PackageBuild> = {
     copy: [{ from: 'src/acorn-ts-plugin', to: 'acorn-ts-plugin' }],
   },
   adapter: { name: '@vesk/adapter', entry: 'index' },
+  agentic: { name: '@vesk/agentic', entry: 'index' },
   'lucide-vesk': { name: 'lucide-vesk', entry: 'index' },
 };
 
