@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.10-ci.1788240529484.tgz",
-    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.10-ci.1788240529484.tgz",
-    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.10-ci.1788240529484.tgz",
-    "@vesk/prettier-plugin": "file:./tarballs/vesk-prettier-plugin-0.2.10-ci.1788240529484.tgz",
-    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.10-ci.1788240529484.tgz",
-    "@vesk/types": "file:./tarballs/vesk-types-0.2.10-ci.1788240529484.tgz",
-    "@vesk/vesk-cli": "file:./tarballs/vesk-vesk-cli-0.2.10-ci.1788240529484.tgz"
+    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.10-ci.1788243410621.tgz",
+    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.10-ci.1788243410621.tgz",
+    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.10-ci.1788243410621.tgz",
+    "@vesk/prettier-plugin": "file:./tarballs/vesk-prettier-plugin-0.2.10-ci.1788243410621.tgz",
+    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.10-ci.1788243410621.tgz",
+    "@vesk/types": "file:./tarballs/vesk-types-0.2.10-ci.1788243410621.tgz",
+    "@vesk/vesk-cli": "file:./tarballs/vesk-vesk-cli-0.2.10-ci.1788243410621.tgz"
   },
   "devDependencies": {
     "tailwindcss": "^4.3.3",
