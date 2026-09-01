@@ -1483,19 +1483,84 @@ export function renderAgenticSlashHint(): string {
 	return html;
 }
 
-export function renderAgenticChatInput(input?: string, running?: boolean): string {
+export function getAgenticSlashSuggestions(
+	input: string,
+	models: string[],
+	providers: string[] = AGENTIC_PROVIDERS,
+	tools: string[] = []
+): Array<{ label: string; value: string; desc?: string }> {
+	if (!input || !input.startsWith('/')) return [];
+	const trimmed = input.trim();
+	const spaceIdx = trimmed.indexOf(' ');
+	const cmd = spaceIdx === -1 ? trimmed : trimmed.slice(0, spaceIdx);
+	const arg = spaceIdx === -1 ? '' : trimmed.slice(spaceIdx + 1);
+	const q = arg.toLowerCase();
+	if (cmd === '/models' || cmd === '/model') {
+		const filtered = filterAgenticModels(models, q);
+		return filtered.slice(0, 20).map((m) => ({ label: m, value: cmd + ' ' + m, desc: 'model' }));
+	}
+	if (cmd === '/provider') {
+		const filtered = providers.filter((p) => !q || p.toLowerCase().indexOf(q) !== -1);
+		return filtered.map((p) => ({ label: p, value: '/provider ' + p, desc: agenticProviderLabel(p) }));
+	}
+	if (cmd === '/mode') {
+		const modes = ['explore', 'debug', 'agent'];
+		const filtered = modes.filter((m) => !q || m.indexOf(q) !== -1);
+		return filtered.map((m) => ({ label: m, value: '/mode ' + m }));
+	}
+	if (cmd === '/tools' || cmd === '/tool') {
+		const t = tools.length ? tools : ['vesk.inspectProject', 'filesystem.write', 'web.search', 'browser.open'];
+		const filtered = t.filter((x) => !q || x.toLowerCase().indexOf(q) !== -1);
+		return filtered.slice(0, 20).map((x) => ({ label: x, value: '/tool ' + x }));
+	}
+	if (trimmed === '/' || cmd === '/') {
+		return AGENTIC_SLASH_COMMANDS.map((c) => ({ label: c, value: c }));
+	}
+	const filteredCmds = AGENTIC_SLASH_COMMANDS.filter((c) => c.toLowerCase().indexOf(cmd.toLowerCase()) !== -1);
+	return filteredCmds.map((c) => ({ label: c, value: c }));
+}
+
+export function renderAgenticSlashPopup(
+	input: string,
+	models: string[],
+	providers: string[] = AGENTIC_PROVIDERS,
+	tools: string[] = []
+): string {
+	const suggestions = getAgenticSlashSuggestions(input, models, providers, tools);
+	if (suggestions.length === 0) return '';
+	let html = '<div class="__kp_ag_popup" data-agentic-popup="1">';
+	for (const s of suggestions) {
+		html +=
+			'<button class="__kp_ag_popup_item" data-agentic-pick="' +
+			escapeHtml(s.value) +
+			'">' +
+			'<span class="__kp_ag_popup_label">' +
+			escapeHtml(s.label) +
+			'</span>' +
+			(s.desc ? '<span class="__kp_ag_popup_desc">' + escapeHtml(s.desc) + '</span>' : '') +
+			'</button>';
+	}
+	html += '</div>';
+	return html;
+}
+
+export function renderAgenticChatInput(input?: string, running?: boolean, models: string[] = [], providers: string[] = AGENTIC_PROVIDERS, tools: string[] = []): string {
+	const popup = !running && input && input.startsWith('/') ? renderAgenticSlashPopup(input, models, providers, tools) : '';
 	return (
+		'<div class="__kp_ag_input_wrap" style="position:relative">' +
+		popup +
 		'<div class="__kp_ag_input_row">' +
 		'<input class="__kp_ag_input" data-agentic-input="1" placeholder="ask agentic... (try /help)" value="' +
 		escapeHtml(input || '') +
 		'"' +
 		(running ? ' disabled' : '') +
-		'>' +
+		' autocomplete="off">' +
 		'<button class="__kp_pl_btn" data-agentic-send="1"' +
 		(running ? ' disabled' : '') +
 		'>' +
 		(running ? 'running...' : 'send') +
 		'</button>' +
+		'</div>' +
 		'</div>'
 	);
 }
@@ -1706,6 +1771,13 @@ const CSS =
 	'#__vesk_dev .__kp_ag_msg_body{font-size:12px;color:var(--vk-fg);white-space:pre-wrap;word-break:break-word;margin-top:2px;}' +
 	'#__vesk_dev .__kp_ag_msg[data-role="assistant"] .__kp_ag_msg_body{color:var(--vk-muted);}' +
 	'#__vesk_dev .__kp_ag_msg[data-role="system"] .__kp_ag_msg_body{color:var(--vk-dim);font-style:italic;}' +
+	'#__vesk_dev .__kp_ag_input_wrap{position:relative;display:flex;flex-direction:column;}' +
+	'#__vesk_dev .__kp_ag_popup{position:absolute;bottom:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--vk-bg);border:1px solid var(--vk-border);border-bottom:none;z-index:10;box-shadow:0 -4px 12px rgba(0,0,0,0.3);}' +
+	'#__vesk_dev .__kp_ag_popup_item{all:unset;display:flex;justify-content:space-between;align-items:center;width:100%;padding:6px 8px;font-family:inherit;font-size:11px;color:var(--vk-fg);cursor:pointer;border-bottom:1px solid var(--vk-line-soft);}' +
+	'#__vesk_dev .__kp_ag_popup_item:hover{background:var(--vk-soft);}' +
+	'#__vesk_dev .__kp_ag_popup_item:active{background:var(--vk-soft-hi);}' +
+	'#__vesk_dev .__kp_ag_popup_label{font-weight:700;}' +
+	'#__vesk_dev .__kp_ag_popup_desc{font-size:10px;color:var(--vk-dim);margin-left:8px;}' +
 	'#__vesk_dev .__kp_ag_input_row{display:flex;gap:6px;margin:8px 0;}' +
 	'#__vesk_dev .__kp_ag_input{flex:1;background:var(--vk-codebg);border:1px solid var(--vk-line-soft);color:var(--vk-fg);font-family:inherit;font-size:12px;padding:6px 8px;}' +
 	'#__vesk_dev .__kp_ag_input::placeholder{color:var(--vk-dim);}' +
@@ -2318,8 +2390,8 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			const target = e.target as HTMLElement;
 			if (target && target.getAttribute('data-agentic-input') === '1') {
 				agenticInput = (target as HTMLInputElement).value;
-				// slash hint toggle — keep pure helper visible always, but we could auto-show
-				void target;
+				// re-render to show/hide slash popup (position absolute above textbox)
+				renderPanel();
 				return;
 			}
 			const cfgSrc = target.closest('[data-cfg-source]') as HTMLTextAreaElement | null;
@@ -2405,7 +2477,11 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		ui.settingsSubTab = sub as SettingsSubTab;
 		persistUi();
 		if (sub === 'vesk' && !cfgState && !cfgLoading) refreshVeskConfig();
-		if (sub === 'agentic' && !agenticConfigState && !agenticConfigLoading) refreshAgenticConfig();
+		if (sub === 'agentic') {
+			if (!agenticConfigState && !agenticConfigLoading) refreshAgenticConfig();
+			// Always refresh live models via {PROVIDER}/models (through dev server proxy) when Agentic settings opened
+			refreshAgenticModels();
+		}
 		renderPanel();
 	}
 
@@ -3510,6 +3586,20 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				saveAgenticConfigPatch({ mode: m });
 				if (agenticConfigState) agenticConfigState.mode = m as AgenticMode;
 			}
+			return;
+		}
+		const agenticPick = target.closest('[data-agentic-pick]') as HTMLElement | null;
+		if (agenticPick) {
+			const val = agenticPick.getAttribute('data-agentic-pick') || '';
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) {
+				inputEl.value = val + ' ';
+				agenticInput = val + ' ';
+				inputEl.focus();
+			} else {
+				agenticInput = val + ' ';
+			}
+			renderPanel();
 			return;
 		}
 		const actBtn = target.closest('[data-pl-act]') as HTMLElement | null;
