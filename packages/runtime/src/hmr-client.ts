@@ -1334,18 +1334,6 @@ export function renderAgenticProviderSelect(provider: string): string {
 			'</button>';
 	}
 	html += '</div>';
-	html += '<select class="__kp_ag_select" data-agentic-provider-select="1" aria-label="provider">';
-	for (const p of AGENTIC_PROVIDERS) {
-		html +=
-			'<option value="' +
-			escapeHtml(p) +
-			'"' +
-			(p === provider ? ' selected' : '') +
-			'>' +
-			escapeHtml(agenticProviderLabel(p)) +
-			'</option>';
-	}
-	html += '</select>';
 	return html;
 }
 
@@ -1358,33 +1346,28 @@ export function renderAgenticModelSelect(
 	let html = '<div class="__kp_setlabel">MODEL <span class="__kp_ag_hint">via ' + escapeHtml(AGENTIC_MODELS_URL) + '</span></div>';
 	html += '<div class="__kp_ag_model_row">';
 	html +=
-		'<select class="__kp_ag_select" data-agentic-model="1" aria-label="model"' +
-		(loading ? ' disabled' : '') +
-		'>';
-	if (models.length === 0) {
-		html += '<option value="' + escapeHtml(model) + '" selected>' + escapeHtml(model || 'no models') + '</option>';
-	} else {
-		let found = false;
-		for (const m of models) {
-			if (m === model) found = true;
-			html +=
-				'<option value="' +
-				escapeHtml(m) +
-				'"' +
-				(m === model ? ' selected' : '') +
-				'>' +
-				escapeHtml(m) +
-				'</option>';
-		}
-		if (!found && model) {
-			html += '<option value="' + escapeHtml(model) + '" selected>' + escapeHtml(model) + '</option>';
-		}
-	}
-	html += '</select>';
-	html += '<button class="__kp_pl_btn" data-agentic-refresh-models="1"' + (loading ? ' disabled' : '') + '>' + (loading ? 'loading...' : 'refresh') + '</button>';
+		'<button class="__kp_pl_btn" data-agentic-refresh-models="1"' + (loading ? ' disabled' : '') + '>' + (loading ? 'loading...' : 'refresh') + '</button>';
 	html += '</div>';
 	if (error) html += '<div class="__kp_pl_err">' + escapeHtml(String(error)) + '</div>';
 	if (loading) html += '<div class="__kp_line">loading models from ' + escapeHtml(AGENTIC_MODELS_URL) + '...</div>';
+	html += '<div class="__kp_ag_models" data-agentic="models">';
+	if (models.length === 0 && !loading) {
+		html += '<div class="__kp_line">no models — click refresh</div>';
+	} else {
+		for (const m of models) {
+			html +=
+				'<button class="__kp_opt' +
+				(m === model ? ' active' : '') +
+				'" data-agentic-model="' +
+				escapeHtml(m) +
+				'" data-key="agenticModel" data-val="' +
+				escapeHtml(m) +
+				'">' +
+				escapeHtml(m) +
+				'</button>';
+		}
+	}
+	html += '</div>';
 	return html;
 }
 
@@ -1676,7 +1659,9 @@ const CSS =
 	'#__vesk_dev .__kp_sec{font-size:11px;font-weight:700;color:var(--vk-fg);text-transform:uppercase;letter-spacing:.1em;border-bottom:1px solid var(--vk-line-soft);padding-bottom:4px;margin:14px 0 8px;}' +
 	'#__vesk_dev .__kp_sec:first-child{margin-top:0;}' +
 	'#__vesk_dev .__kp_setlabel{font-size:11px;font-weight:700;color:var(--vk-muted);text-transform:uppercase;letter-spacing:.1em;margin-top:6px;}' +
-	'#__vesk_dev .__kp_optrow{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 14px;}' +
+		'#__vesk_dev .__kp_optrow{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 14px;}' +
+	'#__vesk_dev .__kp_ag_models{display:flex;gap:6px;flex-wrap:wrap;max-height:150px;overflow-y:auto;margin:6px 0 14px;padding:2px;}' +
+	'#__vesk_dev .__kp_ag_model_row{display:flex;gap:8px;align-items:center;margin:6px 0 4px;}' +
 	'#__vesk_dev .__kp_opt{all:unset;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:var(--vk-muted);border:1px solid var(--vk-line-soft);padding:4px 10px;transition:color .12s ease,background .12s ease,border-color .12s ease;}' +
 	'#__vesk_dev .__kp_opt:hover{color:var(--vk-fg);border-color:var(--vk-dim);}' +
 	'#__vesk_dev .__kp_opt.active{color:var(--vk-inv-fg);background:var(--vk-inv-bg);border-color:var(--vk-border);}' +
@@ -3003,6 +2988,14 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 					// reflect the resolved provider/baseUrl so the subtab is self-consistent
 					agenticConfigState.provider = ui.agenticProvider;
 					agenticConfigState.baseUrl = agenticBaseUrl;
+					// If the current model is not among the fetched models for this
+					// provider, fall back to the first valid model (no hardcoding).
+					if (list.length > 0 && list.indexOf(ui.agenticModel) === -1) {
+						ui.agenticModel = list[0] as string;
+						agenticConfigState.model = ui.agenticModel;
+						persistUi();
+						saveAgenticConfigPatch({ model: ui.agenticModel });
+					}
 				}
 				persistUi();
 				agenticModelsLoading = false;

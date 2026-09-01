@@ -162,7 +162,7 @@ export async function routeDevPanel(
         const cfg = (providerConfig || {}) as Record<string, unknown>;
         const providerName = String(cfg.provider as string || loadAgenticConfig(deps.projectDir).provider || 'openai');
         const apiKey = (cfg.apiKey as string) || getApiKey(deps.projectDir, providerName) || '';
-        const model = (cfg.model as string) || (loadAgenticConfig(deps.projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'opencode' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
+        const model = (cfg.model as string) || (loadAgenticConfig(deps.projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'claude-sonnet-4-6' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
         const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(deps.projectDir).baseUrl as string) || undefined;
         const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
         let provider: import('@vesk/agentic/src/loop').Provider;
@@ -561,10 +561,18 @@ export async function startDevServer(port: number, projectDir: string, config: R
     const cfg = (providerConfig || {}) as Record<string, unknown>;
     const providerName = String(cfg.provider as string || loadAgenticConfig(projectDir).provider || 'openai');
     const apiKey = (cfg.apiKey as string) || getApiKey(projectDir, providerName) || '';
-    const model = (cfg.model as string) || (loadAgenticConfig(projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
+    const model = (cfg.model as string) || (loadAgenticConfig(projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'claude-sonnet-4-6' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
     const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(projectDir).baseUrl as string) || undefined;
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
-    const provider = providerName === 'anthropic' ? anthropicProvider({ apiKey, model, baseUrl, maxTokens }) : openAiProvider({ apiKey, model, baseUrl });
+    let provider: import('@vesk/agentic/src/loop').Provider;
+    if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
+    else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
+    else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
+    else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
+    else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
+    else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
+    else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
+    else provider = openAiProvider({ apiKey, model, baseUrl });
     const tools = createVeskTools({ projectDir, appDir: appDirPath, veskDir: veskStateDir });
     const agent = new Agent({ provider, tools });
     return agent.run(prompt);
