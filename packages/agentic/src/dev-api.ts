@@ -120,7 +120,7 @@ function denied(cap: string): DevPanelResponse {
 
 // per-provider helpers — shared with config.ts but duplicated here to avoid circular
 // Strongly avoid leaking raw keys — only masked previews leave this module.
-const SUPPORTED_PROVIDERS: readonly string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama'] as const;
+const SUPPORTED_PROVIDERS: readonly string[] = ['openai', 'anthropic', 'google', 'ollama'] as const;
 
 function maskPreview(key: string | null | undefined): string | null {
   if (!key) return null;
@@ -168,7 +168,7 @@ function getPerProviderKeyRaw(projectDir: string, provider: string): string | nu
     }
   } catch {}
   // 3. for openai family, fallback to legacy .key and generic env (backwards compat)
-  if (prov === 'openai' || prov === 'openai-compatible') {
+  if (prov === 'openai' ) {
     try {
       const generic = getApiKey(projectDir);
       if (generic && generic.trim()) return generic.trim();
@@ -615,8 +615,14 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
       const baseUrl = params.get('baseUrl') || (cfg as unknown as { baseUrl?: string }).baseUrl;
       let models: string[] = [];
       try {
-        if (provider === 'openai' || provider === 'openai-compatible' || provider === 'opencode' || provider === 'loopers' || provider === 'custom') {
-          const effectiveBase = baseUrl || (provider === 'opencode' ? 'http://localhost:4096' : provider === 'loopers' ? 'http://localhost:8080' : undefined);
+        if (provider === 'openai' || provider === 'opencode' || provider === 'opencode-go' || provider === 'openrouter' || provider === 'loopers' || provider === 'custom') {
+          let effectiveBase = baseUrl;
+          if (!effectiveBase) {
+            if (provider === 'opencode') effectiveBase = 'https://opencode.ai/zen/v1';
+            else if (provider === 'opencode-go') effectiveBase = 'https://opencode.ai/zen/go/v1';
+            else if (provider === 'openrouter') effectiveBase = 'https://openrouter.ai/api/v1';
+            else if (provider === 'loopers') effectiveBase = 'http://localhost:8080';
+          }
           const p = openAiProvider({ apiKey, baseUrl: effectiveBase });
           models = p.listModels ? await p.listModels({ apiKey, baseUrl: effectiveBase }) : [];
         } else if (provider === 'anthropic') {

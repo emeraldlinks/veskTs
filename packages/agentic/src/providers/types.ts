@@ -18,7 +18,7 @@ export interface ProviderWithModels extends Provider {
   listModels?(options: ListModelsOptions): Promise<string[]>;
 }
 
-export type ProviderName = 'openai' | 'openai-compatible' | 'anthropic' | 'google' | 'ollama' | 'opencode' | 'opencode-go' | 'openrouter' | 'loopers' | 'custom';
+export type ProviderName = 'openai' | 'anthropic' | 'google' | 'ollama' | 'opencode' | 'opencode-go' | 'openrouter' | 'loopers' | 'custom';
 
 export interface ProviderConfig {
   provider: ProviderName;
@@ -28,12 +28,12 @@ export interface ProviderConfig {
   maxTokens?: number;
 }
 
-export const SUPPORTED_PROVIDERS: ProviderName[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama', 'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom'];
+export const SUPPORTED_PROVIDERS: ProviderName[] = ['openai', 'anthropic', 'google', 'ollama', 'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom'];
 
 export function describeProvider(name: ProviderName): string {
   switch (name) {
     case 'openai': return 'OpenAI (api.openai.com)';
-    case 'openai-compatible': return 'OpenAI-compatible (Groq/Together/custom)';
+    
     case 'anthropic': return 'Anthropic Claude (api.anthropic.com)';
     case 'google': return 'Google Gemini (generativelanguage.googleapis.com)';
     case 'ollama': return 'Ollama (localhost:11434, no key)';

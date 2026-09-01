@@ -8,7 +8,7 @@
     "properties": {
       "provider": {
         "type": "string",
-        "enum": ["openai", "openai-compatible", "anthropic", "google", "ollama"],
+        "enum": ["openai", "anthropic", "google", "ollama"],
         "default": "openai",
         "description": "LLM provider"
       },

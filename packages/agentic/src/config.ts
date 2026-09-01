@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodS
 import { resolve, dirname } from 'node:path';
 
 export interface AgenticConfig {
-  provider: 'openai' | 'openai-compatible' | 'anthropic' | 'google' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'google' | 'ollama';
   model: string;
   baseUrl?: string;
   mode: 'explore' | 'debug' | 'agent';
@@ -16,7 +16,7 @@ const DEFAULT_CONFIG: AgenticConfig = {
   maxSteps: 10,
 };
 
-export const SUPPORTED_PROVIDERS: string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama'];
+export const SUPPORTED_PROVIDERS: string[] = ['openai', 'anthropic', 'google', 'ollama'];
 
 // ---------------------------------------------------------------------------
 // Paths

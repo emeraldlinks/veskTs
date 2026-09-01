@@ -209,7 +209,7 @@ export const PANEL_MIN_H = 200;
 export const PANEL_MARGIN = 8;
 export const PANEL_EDGE = 16;
 
-export const AGENTIC_PROVIDERS: string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama', 'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom'];
+export const AGENTIC_PROVIDERS: string[] = ['openai', 'anthropic', 'google', 'ollama', 'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom'];
 
 export const AGENTIC_MODES = ['explore', 'debug', 'agent'] as const;
 export type AgenticMode = (typeof AGENTIC_MODES)[number];
@@ -993,7 +993,7 @@ export function renderSettingsAgenticSubtab(state: AgenticConfigState | null | u
 	html += renderAgenticModelSelect(model, models, !!s.modelsLoading, s.modelsError || null);
 	html += '<div class="__kp_setlabel">BASE URL</div>';
 	html += '<input class="__kp_cfg_input" data-agentic-key="baseUrl" data-agentic-baseurl placeholder="https://api.openai.com/v1" value="' + escapeHtml(baseUrl) + '">';
-	html += '<div class="__kp_cfg_hint">override provider baseUrl (openai-compatible)</div>';
+	html += '<div class="__kp_cfg_hint">override provider baseUrl ()</div>';
 	html += renderAgenticModeToggle(mode);
 	html += '<div class="__kp_setlabel">MAX STEPS</div>';
 	html += '<input class="__kp_cfg_input" data-agentic-key="maxSteps" data-agentic-maxsteps type="number" min="1" max="100" step="1" value="' + escapeHtml(String(maxSteps)) + '">';
@@ -1295,7 +1295,7 @@ export interface AgenticPanelState {
 export function agenticProviderLabel(p: string): string {
 	switch (p) {
 		case 'openai': return 'OpenAI';
-		case 'openai-compatible': return 'OpenAI-compatible';
+		
 		case 'anthropic': return 'Anthropic';
 		case 'google': return 'Google Gemini';
 		case 'ollama': return 'Ollama';
@@ -1950,6 +1950,8 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			agenticModelsCache = [];
 			ui.agenticModels = [];
 			refreshAgenticModels();
+			// also refresh for settings sub-tab if open
+			if (activeTab === 'settings' && settingsSubtab === 'agentic') refreshAgenticModels();
 		} else if (key === 'agenticModel' && val.length > 0) {
 			ui.agenticModel = val;
 		} else if (key === 'agenticMode' && isAgenticMode(val)) {

@@ -11,7 +11,7 @@
 
 export interface AgenticOptions {
   /** LLM provider. Default 'openai'. */
-  provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'google' | 'ollama';
+  provider?: 'openai' | 'anthropic' | 'google' | 'ollama';
   /** Model name (e.g. gpt-4o-mini, claude-sonnet-4-6, gemini-2.0-flash, llama3.1). */
   model?: string;
   /** API key. Prefer env var VESK_AGENTIC_API_KEY — never commit to git. */

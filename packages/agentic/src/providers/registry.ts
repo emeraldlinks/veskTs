@@ -22,7 +22,7 @@ export function createProvider(config: ProviderConfig): Provider {
   // Synchronous fallback: create directly without registry for core providers.
   // This avoids async import for the common case; callers needing lazy can
   // pre-register via registerProvider.
-  if (name === 'openai' || name === 'openai-compatible') {
+  if (name === 'openai') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     // Use dynamic import via function to avoid top-level side effects.
     // For sync path we instantiate inline via require-like dynamic.
@@ -34,7 +34,7 @@ export function createProvider(config: ProviderConfig): Provider {
       `Provider "${name}" not registered. Import " @vesk/agentic/src/providers/openai.js" and call registerProvider("openai", openAiProvider) or use createProviderWithImport.`,
     );
   }
-  throw new Error(`Unknown provider "${String(name)}". Supported: ${['openai','openai-compatible','anthropic','google','ollama'].join(', ')}`);
+  throw new Error(`Unknown provider "${String(name)}". Supported: ${['openai','anthropic','google','ollama'].join(', ')}`);
 }
 
 export function listProviders(): ProviderName[] {
