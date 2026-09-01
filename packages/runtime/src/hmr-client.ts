@@ -200,7 +200,7 @@ export function renderLogRow(entry: HmrLogEntry): string {
 	return '<div class="kl-row">' + escapeHtml(stamp) + '  ' + escapeHtml(type) + '  ' + time + 'ms' + '</div>';
 }
 
-export const DEV_TABS: string[] = ['overview', 'errors', 'diagnostics', 'plugins', 'log', 'settings'];
+export const DEV_TABS: string[] = ['overview', 'agentic', 'errors', 'diagnostics', 'plugins', 'log', 'settings'];
 
 export const DEV_STATE_KEY = 'veskDevPrefs';
 
@@ -208,6 +208,19 @@ export const PANEL_MIN_W = 320;
 export const PANEL_MIN_H = 200;
 export const PANEL_MARGIN = 8;
 export const PANEL_EDGE = 16;
+
+export const AGENTIC_PROVIDERS: string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama'];
+
+export const AGENTIC_MODES = ['explore', 'debug', 'agent'] as const;
+export type AgenticMode = (typeof AGENTIC_MODES)[number];
+
+export const AGENTIC_SLASH_COMMANDS: string[] = ['/help', '/clear', '/checkpoint', '/rollback', '/provider', '/model', '/models', '/tools', '/commands', '/mode', '/config', '/history'];
+
+export const AGENTIC_MODELS_URL = '/__vesk/agent/models';
+
+export function isAgenticMode(v: string): v is AgenticMode {
+	return (AGENTIC_MODES as readonly string[]).indexOf(v) !== -1;
+}
 
 export interface DevtoolState {
 	theme: 'system' | 'light' | 'dark';
@@ -219,6 +232,10 @@ export interface DevtoolState {
 	maxed: boolean;
 	pluginsView: 'cards' | 'list';
 	sidebarMode: 'expanded' | 'rail';
+	agenticProvider: string;
+	agenticModel: string;
+	agenticMode: AgenticMode;
+	agenticModels: string[];
 }
 
 export function defaultDevtoolState(): DevtoolState {
@@ -232,6 +249,10 @@ export function defaultDevtoolState(): DevtoolState {
 		maxed: false,
 		pluginsView: 'cards',
 		sidebarMode: 'expanded',
+		agenticProvider: 'openai',
+		agenticModel: 'gpt-4o-mini',
+		agenticMode: 'explore',
+		agenticModels: [],
 	};
 }
 
@@ -253,6 +274,18 @@ export function loadDevtoolState(store: object | null | undefined): DevtoolState
 			if (typeof parsed.maxed === 'boolean') state.maxed = parsed.maxed;
 			if (parsed.pluginsView === 'cards' || parsed.pluginsView === 'list') state.pluginsView = parsed.pluginsView;
 			if (parsed.sidebarMode === 'expanded' || parsed.sidebarMode === 'rail') state.sidebarMode = parsed.sidebarMode;
+			if (typeof parsed.agenticProvider === 'string' && AGENTIC_PROVIDERS.indexOf(parsed.agenticProvider) !== -1) {
+				state.agenticProvider = parsed.agenticProvider;
+			}
+			if (typeof parsed.agenticModel === 'string' && parsed.agenticModel.length > 0) {
+				state.agenticModel = parsed.agenticModel;
+			}
+			if (typeof parsed.agenticMode === 'string' && isAgenticMode(parsed.agenticMode)) {
+				state.agenticMode = parsed.agenticMode;
+			}
+			if (Array.isArray(parsed.agenticModels)) {
+				state.agenticModels = (parsed.agenticModels as unknown[]).filter((v) => typeof v === 'string' && (v as string).length > 0) as string[];
+			}
 		}
 	} catch {
 		/* devtool state is optional */
@@ -269,8 +302,9 @@ export function saveDevtoolState(store: object | null | undefined, state: Devtoo
 	}
 }
 
-const TAB_GLYPHS: Record<string, string> = {
+export const TAB_GLYPHS: Record<string, string> = {
 	overview: 'Ov',
+	agentic: 'Ag',
 	errors: 'Er',
 	plugins: 'Pl',
 	log: 'Lg',
@@ -821,6 +855,265 @@ export function renderSettingsPanel(prefs: DevPrefs): string {
 	return html;
 }
 
+// ── Agentic panel — pure helpers ──────────────────────────────────────────
+
+export interface AgenticMessage {
+	role: 'user' | 'assistant' | 'system' | 'tool';
+	content: string;
+	ts?: number;
+}
+
+export interface AgenticCheckpoint {
+	id: string;
+	message: string;
+	timestamp: number;
+	label?: string;
+}
+
+export interface AgenticPanelState {
+	provider: string;
+	model: string;
+	models: string[];
+	modelsLoading?: boolean;
+	modelsError?: string | null;
+	mode: AgenticMode;
+	messages: AgenticMessage[];
+	history: AgenticCheckpoint[];
+	historyLoading?: boolean;
+	input?: string;
+	running?: boolean;
+	error?: string | null;
+	slashHintVisible?: boolean;
+}
+
+export function agenticProviderLabel(p: string): string {
+	switch (p) {
+		case 'openai': return 'OpenAI';
+		case 'openai-compatible': return 'OpenAI-compatible';
+		case 'anthropic': return 'Anthropic';
+		case 'google': return 'Google Gemini';
+		case 'ollama': return 'Ollama';
+		default: return p;
+	}
+}
+
+export function buildAgenticModelsUrl(provider: string): string {
+	return AGENTIC_MODELS_URL + '?provider=' + encodeURIComponent(provider);
+}
+
+export function filterAgenticModels(models: string[], query: string): string[] {
+	if (!query) return models.slice();
+	const q = query.toLowerCase();
+	const out: string[] = [];
+	for (const m of models) {
+		if (m.toLowerCase().indexOf(q) !== -1) out.push(m);
+	}
+	return out;
+}
+
+export function renderAgenticProviderSelect(provider: string): string {
+	let html = '<div class="__kp_setlabel">PROVIDER</div><div class="__kp_optrow" data-agentic="provider">';
+	for (const p of AGENTIC_PROVIDERS) {
+		html +=
+			'<button class="__kp_opt' +
+			(p === provider ? ' active' : '') +
+			'" data-agentic-provider="' +
+			escapeHtml(p) +
+			'" data-key="agenticProvider" data-val="' +
+			escapeHtml(p) +
+			'">' +
+			escapeHtml(agenticProviderLabel(p)) +
+			'</button>';
+	}
+	html += '</div>';
+	html += '<select class="__kp_ag_select" data-agentic-provider-select="1" aria-label="provider">';
+	for (const p of AGENTIC_PROVIDERS) {
+		html +=
+			'<option value="' +
+			escapeHtml(p) +
+			'"' +
+			(p === provider ? ' selected' : '') +
+			'>' +
+			escapeHtml(agenticProviderLabel(p)) +
+			'</option>';
+	}
+	html += '</select>';
+	return html;
+}
+
+export function renderAgenticModelSelect(
+	model: string,
+	models: string[],
+	loading?: boolean,
+	error?: string | null
+): string {
+	let html = '<div class="__kp_setlabel">MODEL <span class="__kp_ag_hint">via ' + escapeHtml(AGENTIC_MODELS_URL) + '</span></div>';
+	html += '<div class="__kp_ag_model_row">';
+	html +=
+		'<select class="__kp_ag_select" data-agentic-model="1" aria-label="model"' +
+		(loading ? ' disabled' : '') +
+		'>';
+	if (models.length === 0) {
+		html += '<option value="' + escapeHtml(model) + '" selected>' + escapeHtml(model || 'no models') + '</option>';
+	} else {
+		let found = false;
+		for (const m of models) {
+			if (m === model) found = true;
+			html +=
+				'<option value="' +
+				escapeHtml(m) +
+				'"' +
+				(m === model ? ' selected' : '') +
+				'>' +
+				escapeHtml(m) +
+				'</option>';
+		}
+		if (!found && model) {
+			html += '<option value="' + escapeHtml(model) + '" selected>' + escapeHtml(model) + '</option>';
+		}
+	}
+	html += '</select>';
+	html += '<button class="__kp_pl_btn" data-agentic-refresh-models="1"' + (loading ? ' disabled' : '') + '>' + (loading ? 'loading...' : 'refresh') + '</button>';
+	html += '</div>';
+	if (error) html += '<div class="__kp_pl_err">' + escapeHtml(String(error)) + '</div>';
+	if (loading) html += '<div class="__kp_line">loading models from ' + escapeHtml(AGENTIC_MODELS_URL) + '...</div>';
+	return html;
+}
+
+export function renderAgenticModeToggle(mode: AgenticMode): string {
+	let html = '<div class="__kp_setlabel">MODE</div><div class="__kp_optrow" data-agentic="mode">';
+	for (const m of AGENTIC_MODES) {
+		html +=
+			'<button class="__kp_opt' +
+			(m === mode ? ' active' : '') +
+			'" data-agentic-mode="' +
+			escapeHtml(m) +
+			'" data-key="agenticMode" data-val="' +
+			escapeHtml(m) +
+			'">' +
+			escapeHtml(m) +
+			'</button>';
+	}
+	html += '</div>';
+	return html;
+}
+
+export function renderAgenticMessages(messages: AgenticMessage[]): string {
+	if (!messages || messages.length === 0) {
+		return '<div class="__kp_line">no messages yet — start a conversation</div>';
+	}
+	let html = '<div class="__kp_ag_messages" data-agentic="messages">';
+	for (let i = 0; i < messages.length; i++) {
+		const m = messages[i];
+		const role = m.role || 'user';
+		const time = m.ts ? new Date(m.ts).toLocaleTimeString() : '';
+		html +=
+			'<div class="__kp_ag_msg" data-role="' +
+			escapeHtml(role) +
+			'" data-idx="' +
+			i +
+			'">' +
+			'<div class="__kp_ag_msg_head"><span class="__kp_ag_role">' +
+			escapeHtml(role) +
+			'</span>' +
+			(time ? '<span class="__kp_ag_time">' + escapeHtml(time) + '</span>' : '') +
+			'</div>' +
+			'<div class="__kp_ag_msg_body">' +
+			escapeHtml(m.content) +
+			'</div>' +
+			'</div>';
+	}
+	html += '</div>';
+	return html;
+}
+
+export function renderAgenticHistory(
+	history: AgenticCheckpoint[],
+	loading?: boolean
+): string {
+	let html = '<div class="__kp_sec">&gt; HISTORY</div>';
+	if (loading) html += '<div class="__kp_line">loading history...</div>';
+	if (!history || history.length === 0) {
+		if (!loading) html += '<div class="__kp_line">no checkpoints yet</div>';
+		return html;
+	}
+	html += '<div class="__kp_ag_history" data-agentic="history">';
+	for (const cp of history) {
+		const when = cp.timestamp ? new Date(cp.timestamp).toLocaleString() : '';
+		const label = cp.label || cp.message || cp.id;
+		html +=
+			'<div class="__kp_ag_hist_row" data-checkpoint="' +
+			escapeHtml(cp.id) +
+			'">' +
+			'<div class="__kp_ag_hist_info">' +
+			'<div class="__kp_ag_hist_label">' +
+			escapeHtml(label) +
+			'</div>' +
+			'<div class="__kp_ag_hist_meta">' +
+			escapeHtml(when) +
+			'  id:' +
+			escapeHtml(cp.id) +
+			'</div>' +
+			'</div>' +
+			'<button class="__kp_pl_btn" data-agentic-rollback="' +
+			escapeHtml(cp.id) +
+			'">rollback</button>' +
+			'</div>';
+	}
+	html += '</div>';
+	return html;
+}
+
+export function renderAgenticSlashHint(): string {
+	let html = '<div class="__kp_ag_slash" data-agentic="slash-hint">';
+	html += '<span class="__kp_ag_slash_label">slash commands:</span> ';
+	for (let i = 0; i < AGENTIC_SLASH_COMMANDS.length; i++) {
+		const cmd = AGENTIC_SLASH_COMMANDS[i];
+		html += '<code class="__kp_ag_slash_cmd">' + escapeHtml(cmd) + '</code>';
+		if (i < AGENTIC_SLASH_COMMANDS.length - 1) html += ' ';
+	}
+	html += '<span class="__kp_ag_hint"> — type / to see hints</span>';
+	html += '</div>';
+	return html;
+}
+
+export function renderAgenticChatInput(input?: string, running?: boolean): string {
+	return (
+		'<div class="__kp_ag_input_row">' +
+		'<input class="__kp_ag_input" data-agentic-input="1" placeholder="ask agentic... (try /help)" value="' +
+		escapeHtml(input || '') +
+		'"' +
+		(running ? ' disabled' : '') +
+		'>' +
+		'<button class="__kp_pl_btn" data-agentic-send="1"' +
+		(running ? ' disabled' : '') +
+		'>' +
+		(running ? 'running...' : 'send') +
+		'</button>' +
+		'</div>'
+	);
+}
+
+export function renderAgenticPanel(state: AgenticPanelState): string {
+	const provider = state.provider || 'openai';
+	const model = state.model || 'gpt-4o-mini';
+	const models = Array.isArray(state.models) ? state.models : [];
+	const mode = isAgenticMode(state.mode) ? state.mode : 'explore';
+	const messages = Array.isArray(state.messages) ? state.messages : [];
+	const history = Array.isArray(state.history) ? state.history : [];
+	let html = '<div class="__kp_sec">&gt; AGENTIC</div>';
+	html += renderAgenticProviderSelect(provider);
+	html += renderAgenticModelSelect(model, models, !!state.modelsLoading, state.modelsError || null);
+	html += renderAgenticModeToggle(mode);
+	if (state.error) html += '<div class="__kp_pl_err">' + escapeHtml(String(state.error)) + '</div>';
+	html += '<div class="__kp_sec">&gt; CHAT</div>';
+	html += renderAgenticMessages(messages);
+	html += renderAgenticChatInput(state.input || '', !!state.running);
+	html += renderAgenticSlashHint();
+	html += renderAgenticHistory(history, !!state.historyLoading);
+	return html;
+}
+
 export function resolveUrls(opts?: DevClientOptions): { wsUrl: string; stateUrl: string; pluginsUrl: string; diagnosticsUrl: string } {
 	return {
 		wsUrl: (opts && opts.wsUrl) || '',
@@ -994,7 +1287,32 @@ const CSS =
 	'#__vesk_dev .__kp_pl_export dt{font-weight:700;color:var(--vk-fg);font-size:11px;text-transform:uppercase;letter-spacing:.08em;margin-top:8px;}' +
 	'#__vesk_dev .__kp_pl_export dd{font-size:11px;color:var(--vk-muted);margin:2px 0 0;word-break:break-all;}' +
 	'#__vesk_dev .__kp_pl_export .__kp_pl_ex_item{font-size:11px;color:var(--vk-muted);padding:1px 0;}' +
-	'#__vesk_dev .__kp_pl_toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;}';
+	'#__vesk_dev .__kp_pl_toolbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px;}' +
+	'#__vesk_dev .__kp_ag_select{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);color:var(--vk-fg);font-family:inherit;font-size:11px;padding:4px 8px;min-width:120px;}' +
+	'#__vesk_dev .__kp_ag_select:focus{border-color:var(--vk-dim);outline:none;}' +
+	'#__vesk_dev .__kp_ag_model_row{display:flex;gap:6px;align-items:center;margin:6px 0 8px;}' +
+	'#__vesk_dev .__kp_ag_messages{max-height:240px;overflow-y:auto;border:1px solid var(--vk-line-soft);background:var(--vk-codebg);padding:6px;margin:6px 0;}' +
+	'#__vesk_dev .__kp_ag_msg{border-bottom:1px solid var(--vk-line-soft);padding:6px 0;}' +
+	'#__vesk_dev .__kp_ag_msg:last-child{border-bottom:none;}' +
+	'#__vesk_dev .__kp_ag_msg_head{display:flex;gap:8px;align-items:baseline;font-size:10px;color:var(--vk-dim);text-transform:uppercase;letter-spacing:.06em;}' +
+	'#__vesk_dev .__kp_ag_role{font-weight:700;color:var(--vk-fg);}' +
+	'#__vesk_dev .__kp_ag_time{color:var(--vk-dim);}' +
+	'#__vesk_dev .__kp_ag_msg_body{font-size:12px;color:var(--vk-fg);white-space:pre-wrap;word-break:break-word;margin-top:2px;}' +
+	'#__vesk_dev .__kp_ag_msg[data-role="assistant"] .__kp_ag_msg_body{color:var(--vk-muted);}' +
+	'#__vesk_dev .__kp_ag_msg[data-role="system"] .__kp_ag_msg_body{color:var(--vk-dim);font-style:italic;}' +
+	'#__vesk_dev .__kp_ag_input_row{display:flex;gap:6px;margin:8px 0;}' +
+	'#__vesk_dev .__kp_ag_input{flex:1;background:var(--vk-codebg);border:1px solid var(--vk-line-soft);color:var(--vk-fg);font-family:inherit;font-size:12px;padding:6px 8px;}' +
+	'#__vesk_dev .__kp_ag_input::placeholder{color:var(--vk-dim);}' +
+	'#__vesk_dev .__kp_ag_input:focus{border-color:var(--vk-dim);outline:none;}' +
+	'#__vesk_dev .__kp_ag_history{border:1px solid var(--vk-line-soft);margin-top:6px;max-height:200px;overflow-y:auto;}' +
+	'#__vesk_dev .__kp_ag_hist_row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-bottom:1px solid var(--vk-line-soft);}' +
+	'#__vesk_dev .__kp_ag_hist_row:hover{background:var(--vk-soft);}' +
+	'#__vesk_dev .__kp_ag_hist_info{flex:1;min-width:0;}' +
+	'#__vesk_dev .__kp_ag_hist_label{font-size:12px;color:var(--vk-fg);font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}' +
+	'#__vesk_dev .__kp_ag_hist_meta{font-size:10px;color:var(--vk-dim);}' +
+	'#__vesk_dev .__kp_ag_slash{font-size:11px;color:var(--vk-dim);margin:6px 0;padding:4px 6px;border:1px dashed var(--vk-line-soft);background:var(--vk-codebg);}' +
+	'#__vesk_dev .__kp_ag_slash_cmd{font-size:10px;color:var(--vk-muted);background:var(--vk-soft);border:1px solid var(--vk-line-soft);padding:1px 4px;margin-right:2px;}' +
+	'#__vesk_dev .__kp_ag_hint{color:var(--vk-dim);font-size:10px;}';
 
 
 export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
@@ -1023,6 +1341,18 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	let diagnostics: DevDiagnostic[] = [];
 	let diagnosticsError: string | null = null;
 	const log: HmrLogEntry[] = [];
+
+	// Agentic state
+	let agenticMessages: AgenticMessage[] = [];
+	let agenticHistory: AgenticCheckpoint[] = [];
+	let agenticHistoryError: string | null = null;
+	let agenticModelsCache: string[] = [];
+	let agenticModelsLoading = false;
+	let agenticModelsError: string | null = null;
+	let agenticRunning = false;
+	let agenticError: string | null = null;
+	let agenticInput = '';
+	let agenticHistoryLoading = false;
 
 	let pluginDetail: string | null = null;
 	let pluginDetailMsg: string | null = null;
@@ -1096,6 +1426,15 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			ui.pluginsView = val;
 		} else if (key === 'sidebarMode' && (val === 'expanded' || val === 'rail')) {
 			ui.sidebarMode = val;
+		} else if (key === 'agenticProvider' && AGENTIC_PROVIDERS.indexOf(val) !== -1) {
+			ui.agenticProvider = val;
+			agenticModelsCache = [];
+			ui.agenticModels = [];
+			refreshAgenticModels();
+		} else if (key === 'agenticModel' && val.length > 0) {
+			ui.agenticModel = val;
+		} else if (key === 'agenticMode' && isAgenticMode(val)) {
+			ui.agenticMode = val;
 		} else {
 			return;
 		}
@@ -1353,11 +1692,45 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				const tab = btn.getAttribute('data-tab') || 'overview';
 				if (tab === 'plugins') refreshPlugins();
 				if (tab === 'diagnostics') refreshDiagnostics();
+				if (tab === 'agentic') {
+					refreshAgenticModels();
+					refreshAgenticHistory();
+				}
 				setTab(tab);
 			});
 		}
-		(doc.getElementById('__kp_content') as HTMLElement).addEventListener('click', function (e) {
+		const contentEl = doc.getElementById('__kp_content') as HTMLElement;
+		contentEl.addEventListener('click', function (e) {
 			gpClickHandler(e);
+		});
+		contentEl.addEventListener('change', function (e) {
+			const target = e.target as HTMLElement;
+			const providerSel = target.closest('[data-agentic-provider-select]') as HTMLSelectElement | null;
+			if (providerSel) {
+				changePref('agenticProvider', providerSel.value);
+				return;
+			}
+			const modelSel = target.closest('[data-agentic-model]') as HTMLSelectElement | null;
+			if (modelSel) {
+				changePref('agenticModel', modelSel.value);
+				return;
+			}
+		});
+		contentEl.addEventListener('input', function (e) {
+			const target = e.target as HTMLElement;
+			if (target && target.getAttribute('data-agentic-input') === '1') {
+				agenticInput = (target as HTMLInputElement).value;
+				// slash hint toggle — keep pure helper visible always, but we could auto-show
+				void target;
+			}
+		});
+		contentEl.addEventListener('keydown', function (e) {
+			const ke = e as KeyboardEvent;
+			const t = ke.target as HTMLElement;
+			if (t && t.getAttribute('data-agentic-input') === '1' && ke.key === 'Enter') {
+				e.preventDefault();
+				sendAgenticMessage();
+			}
 		});
 		initResize();
 		refreshPlugins();
@@ -1463,6 +1836,21 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 					lastCompileMs,
 					lastError,
 				}),
+			agentic: () =>
+				renderAgenticPanel({
+					provider: ui.agenticProvider,
+					model: ui.agenticModel,
+					models: agenticModelsCache.length ? agenticModelsCache : ui.agenticModels,
+					modelsLoading: agenticModelsLoading,
+					modelsError: agenticModelsError,
+					mode: ui.agenticMode,
+					messages: agenticMessages,
+					history: agenticHistory,
+					historyLoading: agenticHistoryLoading,
+					input: agenticInput,
+					running: agenticRunning,
+					error: agenticError || agenticHistoryError,
+				}),
 			errors: () => renderErrorsPanel(lastError),
 			diagnostics: () =>
 				diagnosticsError
@@ -1559,6 +1947,345 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			})
 			.catch(function (e: unknown) {
 				diagnosticsError = 'diagnostics unavailable: ' + (e instanceof Error ? e.message : String(e));
+				renderPanel();
+			});
+	}
+
+	function refreshAgenticModels(): void {
+		if (typeof fetch === 'undefined') return;
+		agenticModelsLoading = true;
+		agenticModelsError = null;
+		renderPanel();
+		const url = buildAgenticModelsUrl(ui.agenticProvider);
+		fetch(url)
+			.then(function (r) {
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				return r.json();
+			})
+			.then(function (data: unknown) {
+				const d = data as { models?: unknown; error?: string };
+				let list: string[] = [];
+				if (Array.isArray(d.models)) {
+					list = (d.models as unknown[]).filter(function (v) { return typeof v === 'string' && (v as string).length > 0; }) as string[];
+				} else if (Array.isArray(data)) {
+					list = (data as unknown[]).filter(function (v) { return typeof v === 'string'; }) as string[];
+				}
+				agenticModelsCache = list;
+				ui.agenticModels = list.slice();
+				persistUi();
+				agenticModelsLoading = false;
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				agenticModelsLoading = false;
+				agenticModelsError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function refreshAgenticHistory(): void {
+		if (typeof fetch === 'undefined') return;
+		agenticHistoryLoading = true;
+		agenticHistoryError = null;
+		renderPanel();
+		fetch('/__vesk/agent/history')
+			.then(function (r) {
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				return r.json();
+			})
+			.then(function (data: unknown) {
+				const d = data as { history?: unknown; checkpoints?: unknown };
+				const raw = Array.isArray(d.history) ? d.history : Array.isArray(d.checkpoints) ? d.checkpoints : Array.isArray(data) ? data : [];
+				const list = raw as unknown[];
+				agenticHistory = [];
+				for (let i = 0; i < list.length; i++) {
+					const c = list[i] as Record<string, unknown>;
+					agenticHistory.push({
+						id: String(c.id || c.checkpointId || i),
+						message: String(c.message || c.label || c.id || ''),
+						timestamp: typeof c.timestamp === 'number' ? c.timestamp as number : typeof c.createdAt === 'string' ? Date.parse(c.createdAt as string) || Date.now() : Date.now(),
+						label: typeof c.label === 'string' ? c.label as string : typeof c.message === 'string' ? c.message as string : undefined,
+					});
+				}
+				agenticHistoryLoading = false;
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				agenticHistoryLoading = false;
+				agenticHistoryError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function sendAgenticMessage(): void {
+		if (agenticRunning) return;
+		const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+		const text = inputEl ? inputEl.value : agenticInput;
+		const prompt = (text || '').trim();
+		if (!prompt) return;
+		if (prompt.charAt(0) === '/') {
+			const cmd = prompt.split(/\s+/)[0];
+			if (AGENTIC_SLASH_COMMANDS.indexOf(cmd) !== -1) {
+				handleAgenticSlash(cmd, prompt);
+				return;
+			}
+		}
+		agenticRunning = true;
+		agenticError = null;
+		agenticMessages.push({ role: 'user', content: prompt, ts: Date.now() });
+		if (inputEl) inputEl.value = '';
+		agenticInput = '';
+		renderPanel();
+		if (typeof fetch === 'undefined') {
+			agenticRunning = false;
+			agenticError = 'fetch unavailable';
+			renderPanel();
+			return;
+		}
+		fetch('/__vesk/agent/run', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ prompt: prompt, provider: ui.agenticProvider, model: ui.agenticModel, mode: ui.agenticMode, providerConfig: { provider: ui.agenticProvider, model: ui.agenticModel } }),
+		})
+			.then(function (r) {
+				return r.json().then(function (body: { error?: string; result?: { text?: string; error?: string } }) {
+					if (!r.ok) throw new Error(body.error || 'HTTP ' + r.status);
+					return body;
+				});
+			})
+			.then(function (body) {
+				const result = body.result as { text?: string } | undefined;
+				const reply = result && typeof result.text === 'string' ? result.text : 'done';
+				agenticMessages.push({ role: 'assistant', content: reply, ts: Date.now() });
+				agenticRunning = false;
+				renderPanel();
+				refreshAgenticHistory();
+			})
+			.catch(function (e: unknown) {
+				agenticRunning = false;
+				agenticError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function handleAgenticSlash(cmd: string, full: string): void {
+		// normalize /models -> /model
+		const normalizedCmd = cmd === '/models' ? '/model' : cmd;
+		if (normalizedCmd === '/help' || normalizedCmd === '/commands') {
+			let help = 'slash commands: ' + AGENTIC_SLASH_COMMANDS.join(', ') + ' — provider: ' + ui.agenticProvider + ' model: ' + ui.agenticModel + ' mode: ' + ui.agenticMode + '\n';
+			help += '/provider <openai|anthropic|google|ollama> — switch provider\n';
+			help += '/model [name] — switch model or list models (no arg = list)\n';
+			help += '/mode <explore|debug|agent> — switch mode\n';
+			help += '/tools — list available vesk tools\n';
+			help += '/commands — list this help\n';
+			help += '/config — show current agentic config\n';
+			help += '/history — refresh checkpoints\n';
+			agenticMessages.push({ role: 'system', content: help, ts: Date.now() });
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/clear') {
+			agenticMessages = [];
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/provider') {
+			const arg = full.slice(cmd.length).trim().split(/\s+/)[0] || '';
+			if (!arg || AGENTIC_PROVIDERS.indexOf(arg) === -1) {
+				agenticMessages.push({ role: 'system', content: 'usage: /provider <' + AGENTIC_PROVIDERS.join('|') + '>  — current: ' + ui.agenticProvider, ts: Date.now() });
+				renderPanel();
+				return;
+			}
+			changePref('agenticProvider', arg);
+			// also persist server-side via POST /__vesk/agent/config
+			if (typeof fetch !== 'undefined') fetch('/__vesk/agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ provider: arg }) }).catch(function () {});
+			agenticMessages.push({ role: 'system', content: 'provider → ' + arg, ts: Date.now() });
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/model') {
+			const arg = full.slice(cmd.length).trim();
+			if (!arg) {
+				// list models for current provider
+				agenticMessages.push({ role: 'system', content: 'fetching models for ' + ui.agenticProvider + '...', ts: Date.now() });
+				renderPanel();
+				if (typeof fetch !== 'undefined') {
+					fetch(buildAgenticModelsUrl(ui.agenticProvider)).then(function (r) { return r.json(); }).then(function (data: { models?: string[] }) {
+						const list = Array.isArray(data.models) ? data.models : [];
+						agenticModelsCache = list; ui.agenticModels = list.slice(); persistUi();
+						agenticMessages.push({ role: 'system', content: 'models (' + ui.agenticProvider + '): ' + (list.length ? list.join(', ') : 'none (fallback)'), ts: Date.now() });
+						renderPanel();
+					}).catch(function (e: unknown) {
+						agenticMessages.push({ role: 'system', content: 'model list error: ' + (e instanceof Error ? e.message : String(e)), ts: Date.now() });
+						renderPanel();
+					});
+				}
+				const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+				if (inputEl) inputEl.value = '';
+				agenticInput = '';
+				return;
+			}
+			// set model
+			const modelName = arg.split(/\s+/)[0];
+			changePref('agenticModel', modelName);
+			if (typeof fetch !== 'undefined') fetch('/__vesk/agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ model: modelName }) }).catch(function () {});
+			agenticMessages.push({ role: 'system', content: 'model → ' + modelName, ts: Date.now() });
+			const inputEl2 = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl2) inputEl2.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/mode') {
+			const arg = full.slice(cmd.length).trim().split(/\s+/)[0] || '';
+			if (!arg || AGENTIC_MODES.indexOf(arg as AgenticMode) === -1) {
+				agenticMessages.push({ role: 'system', content: 'usage: /mode <' + AGENTIC_MODES.join('|') + '>  — current: ' + ui.agenticMode, ts: Date.now() });
+				renderPanel();
+				return;
+			}
+			changePref('agenticMode', arg);
+			if (typeof fetch !== 'undefined') fetch('/__vesk/agent/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: arg }) }).catch(function () {});
+			agenticMessages.push({ role: 'system', content: 'mode → ' + arg, ts: Date.now() });
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/tools') {
+			agenticMessages.push({ role: 'system', content: 'fetching tools...', ts: Date.now() });
+			renderPanel();
+			if (typeof fetch !== 'undefined') {
+				fetch('/__vesk/agent/tools').then(function (r) { return r.json(); }).then(function (data: { tools?: Array<{ name: string; description: string; capability: string }> }) {
+					const tools = Array.isArray(data.tools) ? data.tools : [];
+					const lines = tools.map(function (t) { return t.name + ' — ' + t.description + ' [' + t.capability + ']'; });
+					agenticMessages.push({ role: 'system', content: 'tools (' + tools.length + '):\n' + lines.join('\n'), ts: Date.now() });
+					renderPanel();
+				}).catch(function (e: unknown) {
+					agenticMessages.push({ role: 'system', content: 'tools error: ' + (e instanceof Error ? e.message : String(e)), ts: Date.now() });
+					renderPanel();
+				});
+			}
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			return;
+		}
+		if (normalizedCmd === '/config') {
+			if (typeof fetch !== 'undefined') {
+				fetch('/__vesk/agent/config').then(function (r) { return r.json(); }).then(function (data: unknown) {
+					agenticMessages.push({ role: 'system', content: 'config: ' + JSON.stringify(data, null, 2), ts: Date.now() });
+					renderPanel();
+				}).catch(function (e: unknown) {
+					agenticMessages.push({ role: 'system', content: 'config error: ' + (e instanceof Error ? e.message : String(e)), ts: Date.now() });
+					renderPanel();
+				});
+			}
+			const inputElc = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputElc) inputElc.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/history') {
+			refreshAgenticHistory();
+			agenticMessages.push({ role: 'system', content: 'refreshing history...', ts: Date.now() });
+			const inputElh = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputElh) inputElh.value = '';
+			agenticInput = '';
+			renderPanel();
+			return;
+		}
+		if (normalizedCmd === '/tool') {
+			const name = full.slice(cmd.length).trim().split(/\s+/)[0] || '';
+			if (!name) { agenticMessages.push({ role: 'system', content: 'usage: /tool <name> — try /tools to list', ts: Date.now() }); renderPanel(); return; }
+			if (typeof fetch !== 'undefined') {
+				fetch('/__vesk/agent/tools').then(function (r) { return r.json(); }).then(function (data: { tools?: Array<{ name: string; description: string }> }) {
+					const hit = (data.tools || []).find(function (t) { return t.name === name; });
+					if (hit) agenticMessages.push({ role: 'system', content: hit.name + ': ' + hit.description, ts: Date.now() });
+					else agenticMessages.push({ role: 'system', content: 'tool not found: ' + name, ts: Date.now() });
+					renderPanel();
+				}).catch(function (e: unknown) { agenticMessages.push({ role: 'system', content: 'error: ' + (e instanceof Error ? e.message : String(e)), ts: Date.now() }); renderPanel(); });
+			}
+			const inputElt = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputElt) inputElt.value = '';
+			agenticInput = '';
+			return;
+		}
+		if (normalizedCmd === '/checkpoint') {
+			agenticRunning = true;
+			renderPanel();
+			fetch('/__vesk/agent/checkpoint', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify({ message: full.slice('/checkpoint'.length).trim() || 'checkpoint' }),
+			}).then(function (r) { return r.json().then(function (b: { error?: string }) { if (!r.ok) throw new Error(b.error || 'HTTP ' + r.status); return b; }); }).then(function () {
+				agenticRunning = false;
+				agenticMessages.push({ role: 'system', content: 'checkpoint created', ts: Date.now() });
+				renderPanel();
+				refreshAgenticHistory();
+			}).catch(function (e: unknown) {
+				agenticRunning = false;
+				agenticError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			return;
+		}
+		if (normalizedCmd === '/rollback') {
+			const id = full.slice('/rollback'.length).trim();
+			if (!id) {
+				agenticMessages.push({ role: 'system', content: 'usage: /rollback <checkpointId>', ts: Date.now() });
+				renderPanel();
+				return;
+			}
+			rollbackAgenticCheckpoint(id);
+			const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+			if (inputEl) inputEl.value = '';
+			agenticInput = '';
+			return;
+		}
+		agenticMessages.push({ role: 'system', content: 'unknown slash command: ' + cmd + ' — try /help', ts: Date.now() });
+		renderPanel();
+	}
+
+	function rollbackAgenticCheckpoint(id: string): void {
+		if (typeof fetch === 'undefined') {
+			agenticHistoryError = 'fetch unavailable';
+			renderPanel();
+			return;
+		}
+		agenticHistoryError = null;
+		renderPanel();
+		fetch('/__vesk/agent/rollback', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ checkpointId: id }),
+		})
+			.then(function (r) {
+				return r.json().then(function (body: { error?: string }) {
+					if (!r.ok) throw new Error(body.error || 'HTTP ' + r.status);
+					return body;
+				});
+			})
+			.then(function () {
+				agenticMessages.push({ role: 'system', content: 'rolled back to ' + id, ts: Date.now() });
+				renderPanel();
+				refreshAgenticHistory();
+			})
+			.catch(function (e: unknown) {
+				agenticHistoryError = e instanceof Error ? e.message : String(e);
 				renderPanel();
 			});
 	}
@@ -1811,6 +2538,34 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		if (exportsBtn) {
 			const name = exportsBtn.getAttribute('data-name') || '';
 			loadPluginExports(name);
+			return;
+		}
+		const agenticSend = target.closest('[data-agentic-send]') as HTMLElement | null;
+		if (agenticSend) {
+			sendAgenticMessage();
+			return;
+		}
+		const agenticRefresh = target.closest('[data-agentic-refresh-models]') as HTMLElement | null;
+		if (agenticRefresh) {
+			refreshAgenticModels();
+			return;
+		}
+		const agenticRollback = target.closest('[data-agentic-rollback]') as HTMLElement | null;
+		if (agenticRollback) {
+			const id = agenticRollback.getAttribute('data-agentic-rollback') || '';
+			if (id) rollbackAgenticCheckpoint(id);
+			return;
+		}
+		const agenticProvider = target.closest('[data-agentic-provider]') as HTMLElement | null;
+		if (agenticProvider) {
+			const p = agenticProvider.getAttribute('data-agentic-provider') || '';
+			if (p) changePref('agenticProvider', p);
+			return;
+		}
+		const agenticModeBtn = target.closest('[data-agentic-mode]') as HTMLElement | null;
+		if (agenticModeBtn) {
+			const m = agenticModeBtn.getAttribute('data-agentic-mode') || '';
+			if (m) changePref('agenticMode', m);
 			return;
 		}
 		const actBtn = target.closest('[data-pl-act]') as HTMLElement | null;

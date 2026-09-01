@@ -11,6 +11,15 @@ import { createDevApiRouter } from './dev-api';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import type { RouteNode, DevServerOptions, Manifest, VeskPlugin } from '@vesk/adapter/src/types';
+import { getPluginRecords } from './plugins';
+// @vesk/agentic — optional AI plugin; gated by active state if installed
+import { createAgentRouter } from '@vesk/agentic/src/dev-api';
+import { CheckpointManager } from '@vesk/agentic/src/checkpoints';
+import { AgentCapabilityTable } from '@vesk/agentic/src/permissions';
+import { openAiProvider } from '@vesk/agentic/src/providers/openai';
+import { anthropicProvider } from '@vesk/agentic/src/providers/anthropic';
+import { Agent } from '@vesk/agentic/src/loop';
+import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -249,6 +258,72 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     return (p as VeskPlugin).name;
   }).filter((n): n is string => typeof n === 'string' && !!n);
 
+  // ── @vesk/agentic dev API (B6-plug) — chained BEFORE the core dev API ─────
+  // Chain: createAgentRouter (CheckpointManager + AgentCapabilityTable + Provider
+  // via openAiProvider/anthropicProvider, VESK_AGENTIC_API_KEY server-side) →
+  // createDevApiRouter. Gate: only expose /__vesk/agent/* when @vesk/agentic
+  // is installed AND active (otherwise lean core, no agent surface).
+  const agenticCheckpointManager = new CheckpointManager();
+  const agenticVeskDir = resolve(appDir, '..', '.vesk');
+  const agenticProjectDir = resolve(appDir, '..');
+  function isAgenticActive(): boolean {
+    if (process.env.VESK_AGENTIC_API_KEY) return true;
+    try {
+      const records = getPluginRecords(appDir, agenticVeskDir, configPluginNames);
+      const rec = records.find((r) => r.name === '@vesk/agentic' || r.package === '@vesk/agentic');
+      // Gate only if installed; if not installed at all, no agent surface unless key is set (live testing).
+      if (!rec) return false;
+      return rec.active;
+    } catch {
+      return false;
+    }
+  }
+  function getAgenticPermissions(): AgentCapabilityTable {
+    const rawMode = (process.env.VESK_AGENTIC_MODE as string) || 'explore';
+    const valid: string[] = ['explore', 'debug', 'agent'];
+    const mode = (valid.includes(rawMode) ? rawMode : 'explore') as 'explore' | 'debug' | 'agent';
+    return new AgentCapabilityTable(mode);
+  }
+  async function runAgenticAgent(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
+    // API key is server-side only via VESK_AGENTIC_API_KEY env — never trust client-supplied key alone.
+    const cfg = (providerConfig || {}) as Record<string, unknown>;
+    const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
+    const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || '';
+    const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
+    const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || undefined;
+    const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
+    const provider = providerName === 'anthropic'
+      ? anthropicProvider({ apiKey, model, baseUrl, maxTokens })
+      : openAiProvider({ apiKey, model, baseUrl });
+    const tools = createVeskTools({ projectDir: agenticProjectDir, appDir, veskDir: agenticVeskDir });
+    const agent = new Agent({ provider, tools });
+    return agent.run(prompt);
+  }
+  let agentRouter: ReturnType<typeof createAgentRouter> | null = null;
+  try {
+    if (isAgenticActive()) {
+      agentRouter = createAgentRouter({
+        projectDir: agenticProjectDir,
+        appDir,
+        veskDir: agenticVeskDir,
+        getPermissions: getAgenticPermissions as unknown as () => import('@vesk/agentic/src/permissions').AgentCapabilityTable,
+        runAgent: runAgenticAgent as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => Promise<import('@vesk/agentic/src/loop').AgentResult>,
+        listCheckpoints: () => agenticCheckpointManager.listNewestFirst(),
+        rollback: (id: string) => agenticCheckpointManager.get(id) ?? null,
+        createCheckpoint: (...args: unknown[]) => {
+          const first = args[0] as Record<string, unknown> | string | undefined;
+          if (first && typeof first === 'object' && ('label' in first || 'message' in first)) {
+            return agenticCheckpointManager.create(first as unknown as import('@vesk/agentic/src/checkpoints').CreateCheckpointOptions);
+          }
+          const msg = typeof first === 'string' ? first : 'checkpoint';
+          return agenticCheckpointManager.create({ label: msg, message: msg });
+        },
+      });
+    }
+  } catch {
+    agentRouter = null;
+  }
+
   // Late-bound so the router's onPluginChange can broadcast over the HMR
   // WebSocket, which is only created further down in this function.
   let hmrSession: ReturnType<typeof createHmrServer> | null = null;
@@ -315,6 +390,9 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
 
     // Dev panel endpoints (/__vesk/...): HMR state, plugin list, activate/
     // deactivate/install/uninstall. Routed through the pure injectable router.
+    // Chain: agent router (CheckpointManager + AgentCapabilityTable + Provider
+    // via openAiProvider/anthropicProvider, VESK_AGENTIC_API_KEY server-side)
+    // is tried BEFORE the core dev panel, gated by @vesk/agentic active.
     if (url.pathname.startsWith('/__vesk/')) {
       let body: unknown = undefined;
       if ((req.method || 'GET') === 'POST') {
@@ -324,6 +402,14 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         } catch (e) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+          return;
+        }
+      }
+      if (agentRouter) {
+        const agentResult = await agentRouter.route(req.method || 'GET', url.pathname, body, url.search);
+        if (agentResult) {
+          res.writeHead(agentResult.status, agentResult.headers);
+          res.end(agentResult.encoding === 'base64' ? Buffer.from(agentResult.body, 'base64') : agentResult.body);
           return;
         }
       }

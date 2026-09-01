@@ -49,6 +49,7 @@ export type CompletionResponse =
 
 export interface Provider {
   complete(request: CompletionRequest): Promise<CompletionResponse>;
+  listModels?(options: { apiKey?: string; baseUrl?: string }): Promise<string[]>;
 }
 
 export interface AgentOptions {

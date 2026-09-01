@@ -7,9 +7,33 @@ export interface AnthropicOptions {
   baseUrl?: string;
 }
 
+const ANTHROPIC_FALLBACK_MODELS = ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5'] as const;
+
+export async function listModels(options: { apiKey?: string; baseUrl?: string } = {}): Promise<string[]> {
+  const baseUrl = options.baseUrl ?? 'https://api.anthropic.com/v1';
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: {
+        'x-api-key': options.apiKey ?? '',
+        'anthropic-version': '2023-06-01',
+      },
+    });
+    if (!res.ok) return [...ANTHROPIC_FALLBACK_MODELS];
+    const data = (await res.json()) as { data?: Array<{ id: string }> };
+    if (Array.isArray(data.data) && data.data.length > 0) {
+      const ids = data.data.map((m) => m.id).filter((v): v is string => typeof v === 'string' && v.length > 0);
+      if (ids.length > 0) return ids;
+    }
+    return [...ANTHROPIC_FALLBACK_MODELS];
+  } catch {
+    return [...ANTHROPIC_FALLBACK_MODELS];
+  }
+}
+
 export function anthropicProvider(options: AnthropicOptions): Provider {
   const { apiKey, model = 'claude-sonnet-4-6', maxTokens = 1024, baseUrl = 'https://api.anthropic.com/v1' } = options;
   return {
+    listModels: (opts: { apiKey?: string; baseUrl?: string } = {}) => listModels({ apiKey: opts.apiKey ?? apiKey, baseUrl: opts.baseUrl ?? baseUrl }),
     async complete({ messages, tools }: CompletionRequest): Promise<CompletionResponse> {
       const { system, messages: anthropicMessages } = toAnthropic(messages);
       const res = await fetch(`${baseUrl}/messages`, {

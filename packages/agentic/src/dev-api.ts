@@ -32,6 +32,12 @@ import type { AgentResult } from './loop.js';
 import type { ProviderConfig } from './providers/types.js';
 import type { Checkpoint } from './checkpoints.js';
 import { CheckpointManager } from './checkpoints.js';
+import { loadAgenticConfig, saveAgenticConfig, getApiKey, saveApiKey } from './config.js';
+import { openAiProvider } from './providers/openai.js';
+import { anthropicProvider } from './providers/anthropic.js';
+import { googleProvider } from './providers/google.js';
+import { ollamaProvider } from './providers/ollama.js';
+import { SLASH_COMMANDS } from './slash.js';
 
 // ---------------------------------------------------------------------------
 // Response type — mirrors `@vesk/adapter/src/dev-api.ts#DevPanelResponse`
@@ -480,6 +486,105 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
       } catch (e) {
         return jsonStatus(500, { error: e instanceof Error ? e.message : String(e) });
       }
+    }
+
+    // ── GET /__vesk/agent/models?provider= ———— list models for provider
+    if (pathname === '/__vesk/agent/models') {
+      if (method !== 'GET' && method !== 'HEAD') return jsonStatus(405, { error: 'method not allowed' });
+      if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('readFiles');
+      try { if (!table.allows('readFiles' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('readFiles'); } catch { return denied('readFiles'); }
+      const params = new URLSearchParams(_search ?? '');
+      const provider = (params.get('provider') || params.get('p') || loadAgenticConfig(projectDir).provider) as string;
+      const cfg = loadAgenticConfig(projectDir);
+      const apiKey = getApiKey(projectDir) || '';
+      const baseUrl = params.get('baseUrl') || (cfg as unknown as { baseUrl?: string }).baseUrl;
+      let models: string[] = [];
+      try {
+        if (provider === 'openai' || provider === 'openai-compatible') {
+          const p = openAiProvider({ apiKey, baseUrl });
+          models = p.listModels ? await p.listModels({ apiKey, baseUrl }) : [];
+        } else if (provider === 'anthropic') {
+          const p = anthropicProvider({ apiKey, baseUrl });
+          models = p.listModels ? await p.listModels({ apiKey, baseUrl }) : [];
+        } else if (provider === 'google') {
+          const p = googleProvider({ apiKey, baseUrl });
+          models = p.listModels ? await p.listModels({ apiKey, baseUrl }) : [];
+        } else if (provider === 'ollama') {
+          const p = ollamaProvider({ baseUrl });
+          models = p.listModels ? await p.listModels({ baseUrl }) : [];
+        } else {
+          return badRequest(`unknown provider: ${provider}`);
+        }
+      } catch (e) {
+        return jsonStatus(500, { error: e instanceof Error ? e.message : String(e) });
+      }
+      return jsonStatus(200, { provider, models });
+    }
+
+    // ── GET /__vesk/agent/config + POST /__vesk/agent/config ──
+    if (pathname === '/__vesk/agent/config') {
+      if (method === 'GET' || method === 'HEAD') {
+        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('readFiles');
+        try { if (!table.allows('readFiles' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('readFiles'); } catch { return denied('readFiles'); }
+        const cfg = loadAgenticConfig(projectDir);
+        // never leak full key
+        const key = getApiKey(projectDir);
+        const masked = key ? key.slice(0, 7) + '***' + key.slice(-4) : null;
+        return jsonStatus(200, { provider: cfg.provider, model: cfg.model, baseUrl: (cfg as unknown as { baseUrl?: string }).baseUrl ?? null, mode: cfg.mode, maxSteps: cfg.maxSteps, hasKey: cfg.hasKey, keyPreview: masked });
+      }
+      if (method === 'POST') {
+        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('modifyConfig');
+        try { if (!table.allows('modifyConfig' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('modifyConfig'); } catch { return denied('modifyConfig'); }
+        const b = (body ?? {}) as Record<string, unknown>;
+        const patch: Record<string, unknown> = {};
+        if (typeof b.provider === 'string') patch.provider = b.provider;
+        if (typeof b.model === 'string') patch.model = b.model;
+        if (typeof b.baseUrl === 'string') patch.baseUrl = b.baseUrl;
+        if (typeof b.mode === 'string' && ['explore','debug','agent'].includes(b.mode as string)) patch.mode = b.mode;
+        if (typeof b.maxSteps === 'number') patch.maxSteps = b.maxSteps;
+        if (typeof b.apiKey === 'string' && b.apiKey.trim()) {
+          saveApiKey(projectDir, b.apiKey as string);
+        }
+        const next = saveAgenticConfig(projectDir, patch as never);
+        return jsonStatus(200, { ok: true, provider: next.provider, model: next.model, mode: next.mode });
+      }
+      return jsonStatus(405, { error: 'method not allowed' });
+    }
+
+    // ── GET /__vesk/agent/tools ──
+    if (pathname === '/__vesk/agent/tools') {
+      if (method !== 'GET' && method !== 'HEAD') return jsonStatus(405, { error: 'method not allowed' });
+      if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('readFiles');
+      try { if (!table.allows('readFiles' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('readFiles'); } catch { return denied('readFiles'); }
+      // Filter tools by permissions: expose what current mode allows
+      // We don't have full tool list here without deps, so return capability map + known tool names
+      const allTools = [
+        { name: 'vesk.inspectProject', description: 'inspect project structure', capability: 'readFiles' },
+        { name: 'vesk.inspectComponent', description: 'read component source', capability: 'readFiles' },
+        { name: 'vesk.readConfig', description: 'read vesk.config.ts', capability: 'readFiles' },
+        { name: 'vesk.updateConfig', description: 'update config', capability: 'modifyConfig' },
+        { name: 'vesk.getDiagnostics', description: 'get diagnostics', capability: 'readFiles' },
+        { name: 'vesk.runBuild', description: 'run build', capability: 'runBuild' },
+        { name: 'vesk.runTests', description: 'run tests', capability: 'runTests' },
+        { name: 'vesk.installPlugin', description: 'install plugin', capability: 'installPackages' },
+        { name: 'vesk.enablePlugin', description: 'enable plugin', capability: 'managePlugins' },
+        { name: 'filesystem.read', description: 'read file', capability: 'readFiles' },
+        { name: 'filesystem.write', description: 'write file', capability: 'writeFiles' },
+        { name: 'filesystem.delete', description: 'delete file', capability: 'deleteFiles' },
+        { name: 'command.execute', description: 'execute allowlisted command', capability: 'executeCommands' },
+        { name: 'vesk.createCheckpoint', description: 'create checkpoint', capability: 'createCheckpoint' },
+        { name: 'vesk.rollback', description: 'rollback', capability: 'rollback' },
+      ];
+      const allowed = allTools.filter(t => {
+        try { return table.allows(t.capability as unknown as Parameters<AgentCapabilityTable['allows']>[0]); } catch { return false; }
+      });
+      return jsonStatus(200, { tools: allowed, allTools });
+    }
+
+    // ── GET /__vesk/agent/commands ──
+    if (pathname === '/__vesk/agent/commands') {
+      if (method !== 'GET' && method !== 'HEAD') return jsonStatus(405, { error: 'method not allowed' });
+      return jsonStatus(200, { commands: SLASH_COMMANDS });
     }
 
     // ── Unknown /__vesk/agent/* subpath → 404 ────────────────────────────

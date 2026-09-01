@@ -17,11 +17,22 @@ import { createDevApiRouter } from '@vesk/adapter/src/dev-api';
 import type { DevPanelResponse, DiagnosticFinding } from '@vesk/adapter/src/dev-api';
 import type { DevHmrState } from '@vesk/adapter/src/dev-server';
 import { produceDiagnostics } from './dev-diagnostics';
+// @vesk/agentic — optional AI plugin; gated by active state if installed
+import { createAgentRouter } from '@vesk/agentic/src/dev-api';
+import { CheckpointManager } from '@vesk/agentic/src/checkpoints';
+import { AgentCapabilityTable } from '@vesk/agentic/src/permissions';
+import { openAiProvider } from '@vesk/agentic/src/providers/openai';
+import { anthropicProvider } from '@vesk/agentic/src/providers/anthropic';
+import { Agent } from '@vesk/agentic/src/loop';
+import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
+
+// Shared @vesk/agentic checkpoint manager — module singleton so history persists across requests
+const agenticCheckpointManager = new CheckpointManager();
 
 function resolveRuntimeDir(projectDir: string): string | null {
   const candidates = [
@@ -124,10 +135,68 @@ export async function routeDevPanel(
 
   const veskDir = deps.veskDir;
   const appDir = deps.appDir || resolve(deps.projectDir, 'app');
+  const configPluginNames = deps.configNames();
+  // ── @vesk/agentic — chain createAgentRouter BEFORE createDevApiRouter ─────
+  // Uses CheckpointManager + AgentCapabilityTable + Provider via
+  // openAiProvider/anthropicProvider; API key server-side via VESK_AGENTIC_API_KEY.
+  // Gate: only expose /__vesk/agent/* when @vesk/agentic is installed AND active.
+  try {
+    const records = getPluginRecords(appDir, veskDir, configPluginNames);
+    const rec = records.find((r) => r.name === '@vesk/agentic' || r.package === '@vesk/agentic');
+    // Gate: plugin active OR API key present (for live testing without full install)
+    const isAgenticActive = (!!rec && rec.active) || !!process.env.VESK_AGENTIC_API_KEY;
+    if (isAgenticActive) {
+      const getPermissions = (): AgentCapabilityTable => {
+        const rawMode = (process.env.VESK_AGENTIC_MODE as string) || 'explore';
+        const valid = ['explore', 'debug', 'agent'];
+        const mode = (valid.includes(rawMode) ? rawMode : 'explore') as 'explore' | 'debug' | 'agent';
+        return new AgentCapabilityTable(mode);
+      };
+      const runAgent = async (prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> => {
+        const cfg = (providerConfig || {}) as Record<string, unknown>;
+        const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
+        // Store API key server-side via VESK_AGENTIC_API_KEY env — never expose to browser.
+        const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || '';
+        const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
+        const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || undefined;
+        const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
+        const provider = providerName === 'anthropic'
+          ? anthropicProvider({ apiKey, model, baseUrl, maxTokens })
+          : openAiProvider({ apiKey, model, baseUrl });
+        const tools = createVeskTools({ projectDir: deps.projectDir, appDir, veskDir });
+        const agent = new Agent({ provider, tools });
+        return agent.run(prompt);
+      };
+      const agentRouter = createAgentRouter({
+        projectDir: deps.projectDir,
+        appDir,
+        veskDir,
+        getPermissions: getPermissions as unknown as () => import('@vesk/agentic/src/permissions').AgentCapabilityTable,
+        runAgent: runAgent as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => Promise<import('@vesk/agentic/src/loop').AgentResult>,
+        listCheckpoints: () => agenticCheckpointManager.listNewestFirst(),
+        rollback: (id: string) => agenticCheckpointManager.get(id) ?? null,
+        createCheckpoint: (...args: unknown[]) => {
+          const first = args[0] as Record<string, unknown> | string | undefined;
+          if (first && typeof first === 'object' && ('label' in first || 'message' in first)) {
+            return agenticCheckpointManager.create(first as unknown as import('@vesk/agentic/src/checkpoints').CreateCheckpointOptions);
+          }
+          const msg = typeof first === 'string' ? first : 'checkpoint';
+          return agenticCheckpointManager.create({ label: msg, message: msg });
+        },
+      });
+      const agentRes = await agentRouter.route(req.method || 'GET', url.pathname, body, url.search);
+      if (agentRes) {
+        writeDevPanelResponse(res, agentRes);
+        return;
+      }
+    }
+  } catch {
+    // agentic wiring is best-effort; fall through to core dev API
+  }
   const router = createDevApiRouter({
     appDir,
     veskDir,
-    configPluginNames: deps.configNames(),
+    configPluginNames,
     projectDir: deps.projectDir,
     getHmrState: deps.getHmrState as unknown as () => DevHmrState,
     rebuild: deps.rebuild,
@@ -448,6 +517,55 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     },
   });
+
+  // ── @vesk/agentic — agent router for startDevServer (also gated by VESK_AGENTIC_API_KEY for live testing)
+  const agenticCheckpointManagerMain = new CheckpointManager();
+  function isAgenticActiveMain(): boolean {
+    if (process.env.VESK_AGENTIC_API_KEY) return true;
+    try {
+      const recs = getPluginRecords(appDirPath, veskStateDir, configPluginNames);
+      const rec = recs.find((r) => r.name === '@vesk/agentic' || r.package === '@vesk/agentic');
+      return !!rec && rec.active;
+    } catch { return false; }
+  }
+  function getAgenticPermissionsMain(): AgentCapabilityTable {
+    const rawMode = (process.env.VESK_AGENTIC_MODE as string) || 'explore';
+    const valid = ['explore', 'debug', 'agent'];
+    const mode = (valid.includes(rawMode) ? rawMode : 'explore') as 'explore' | 'debug' | 'agent';
+    return new AgentCapabilityTable(mode);
+  }
+  async function runAgenticAgentMain(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
+    const cfg = (providerConfig || {}) as Record<string, unknown>;
+    const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
+    const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || '';
+    const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
+    const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || undefined;
+    const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
+    const provider = providerName === 'anthropic' ? anthropicProvider({ apiKey, model, baseUrl, maxTokens }) : openAiProvider({ apiKey, model, baseUrl });
+    const tools = createVeskTools({ projectDir, appDir: appDirPath, veskDir: veskStateDir });
+    const agent = new Agent({ provider, tools });
+    return agent.run(prompt);
+  }
+  let agentRouterMain: ReturnType<typeof createAgentRouter> | null = null;
+  if (isAgenticActiveMain()) {
+    try {
+      agentRouterMain = createAgentRouter({
+        projectDir,
+        appDir: appDirPath,
+        veskDir: veskStateDir,
+        getPermissions: getAgenticPermissionsMain as unknown as () => import('@vesk/agentic/src/permissions').AgentCapabilityTable,
+        runAgent: runAgenticAgentMain as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => Promise<import('@vesk/agentic/src/loop').AgentResult>,
+        listCheckpoints: () => agenticCheckpointManagerMain.listNewestFirst(),
+        rollback: (id: string) => agenticCheckpointManagerMain.get(id) ?? null,
+        createCheckpoint: (...args: unknown[]) => {
+          const first = args[0] as Record<string, unknown> | string | undefined;
+          if (first && typeof first === 'object' && ('label' in first || 'message' in first)) return agenticCheckpointManagerMain.create(first as unknown as import('@vesk/agentic/src/checkpoints').CreateCheckpointOptions);
+          const msg = typeof first === 'string' ? first : 'checkpoint';
+          return agenticCheckpointManagerMain.create({ label: msg, message: msg });
+        },
+      });
+    } catch { agentRouterMain = null; }
+  }
 
   async function rebuildTailwindCss(): Promise<boolean> {
     if (!rawCss) return false;
@@ -841,6 +959,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
           return;
         }
         throw e;
+      }
+      if (agentRouterMain) {
+        const agentRes = await agentRouterMain.route(req.method || 'GET', url.pathname, body, url.search);
+        if (agentRes) { writeDevPanelResponse(res, agentRes); return; }
       }
       const devResponse = await devRouter.route(req.method || 'GET', url.pathname, body, url.search);
       if (devResponse) {

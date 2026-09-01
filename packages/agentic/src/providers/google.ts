@@ -6,9 +6,31 @@ export interface GoogleOptions {
   baseUrl?: string;
 }
 
+const GOOGLE_FALLBACK_MODELS = ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'] as const;
+
+export async function listModels(options: { apiKey?: string; baseUrl?: string } = {}): Promise<string[]> {
+  const baseUrl = options.baseUrl ?? 'https://generativelanguage.googleapis.com';
+  try {
+    const res = await fetch(`${baseUrl}/v1beta/models?key=${encodeURIComponent(options.apiKey ?? '')}`);
+    if (!res.ok) return [...GOOGLE_FALLBACK_MODELS];
+    const data = (await res.json()) as { models?: Array<{ name: string }> };
+    if (Array.isArray(data.models) && data.models.length > 0) {
+      const ids = data.models
+        .map((m) => m.name)
+        .filter((v): v is string => typeof v === 'string' && v.length > 0)
+        .map((n) => (n.startsWith('models/') ? n.slice(7) : n));
+      if (ids.length > 0) return ids;
+    }
+    return [...GOOGLE_FALLBACK_MODELS];
+  } catch {
+    return [...GOOGLE_FALLBACK_MODELS];
+  }
+}
+
 export function googleProvider(options: GoogleOptions): Provider {
   const { apiKey, model = 'gemini-2.0-flash', baseUrl = 'https://generativelanguage.googleapis.com' } = options;
   return {
+    listModels: (opts: { apiKey?: string; baseUrl?: string } = {}) => listModels({ apiKey: opts.apiKey ?? apiKey, baseUrl: opts.baseUrl ?? baseUrl }),
     async complete({ messages, tools }: CompletionRequest): Promise<CompletionResponse> {
       const { systemInstruction, contents } = toGoogle(messages);
       const body: Record<string, unknown> = { contents, systemInstruction };

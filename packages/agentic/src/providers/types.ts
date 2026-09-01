@@ -1,7 +1,22 @@
 /**
  * Provider types and config — fetch-only, zero deps.
  */
-import type { Provider } from '../loop.js';
+import type { CompletionRequest, CompletionResponse } from '../loop.js';
+import type { Provider as BaseProvider } from '../loop.js';
+
+export interface ListModelsOptions {
+  apiKey?: string;
+  baseUrl?: string;
+}
+
+export interface Provider extends BaseProvider {
+  listModels?(options: ListModelsOptions): Promise<string[]>;
+}
+
+export interface ProviderWithModels extends Provider {
+  complete(request: CompletionRequest): Promise<CompletionResponse>;
+  listModels?(options: ListModelsOptions): Promise<string[]>;
+}
 
 export type ProviderName = 'openai' | 'openai-compatible' | 'anthropic' | 'google' | 'ollama';
 

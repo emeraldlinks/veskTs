@@ -6,9 +6,30 @@ export interface OpenAiOptions {
   baseUrl?: string;
 }
 
+const OPENAI_FALLBACK_MODELS = ['gpt-4o-mini', 'gpt-4o', 'gpt-3.5-turbo'] as const;
+
+export async function listModels(options: { apiKey?: string; baseUrl?: string } = {}): Promise<string[]> {
+  const baseUrl = options.baseUrl ?? 'https://api.openai.com/v1';
+  try {
+    const res = await fetch(`${baseUrl}/models`, {
+      headers: { authorization: `Bearer ${options.apiKey ?? ''}` },
+    });
+    if (!res.ok) return [...OPENAI_FALLBACK_MODELS];
+    const data = (await res.json()) as { data?: Array<{ id: string }> };
+    if (Array.isArray(data.data) && data.data.length > 0) {
+      const ids = data.data.map((m) => m.id).filter((v): v is string => typeof v === 'string' && v.length > 0);
+      if (ids.length > 0) return ids;
+    }
+    return [...OPENAI_FALLBACK_MODELS];
+  } catch {
+    return [...OPENAI_FALLBACK_MODELS];
+  }
+}
+
 export function openAiProvider(options: OpenAiOptions): Provider {
   const { apiKey, model = 'gpt-4o-mini', baseUrl = 'https://api.openai.com/v1' } = options;
   return {
+    listModels: (opts: { apiKey?: string; baseUrl?: string } = {}) => listModels({ apiKey: opts.apiKey ?? apiKey, baseUrl: opts.baseUrl ?? baseUrl }),
     async complete({ messages, tools }: CompletionRequest): Promise<CompletionResponse> {
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',

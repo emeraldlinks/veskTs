@@ -5,9 +5,30 @@ export interface OllamaOptions {
   baseUrl?: string;
 }
 
+const OLLAMA_FALLBACK_MODELS = ['llama3.1', 'mistral', 'gemma2'] as const;
+
+export async function listModels(options: { apiKey?: string; baseUrl?: string } = {}): Promise<string[]> {
+  const baseUrl = options.baseUrl ?? 'http://localhost:11434';
+  try {
+    const res = await fetch(`${baseUrl}/api/tags`);
+    if (!res.ok) return [...OLLAMA_FALLBACK_MODELS];
+    const data = (await res.json()) as { models?: Array<{ name: string; model?: string }> };
+    if (Array.isArray(data.models) && data.models.length > 0) {
+      const ids = data.models
+        .map((m) => m.name ?? m.model ?? '')
+        .filter((v): v is string => typeof v === 'string' && v.length > 0);
+      if (ids.length > 0) return ids;
+    }
+    return [...OLLAMA_FALLBACK_MODELS];
+  } catch {
+    return [...OLLAMA_FALLBACK_MODELS];
+  }
+}
+
 export function ollamaProvider(options: OllamaOptions = {}): Provider {
   const { model = 'llama3.1', baseUrl = 'http://localhost:11434' } = options;
   return {
+    listModels: (opts: { apiKey?: string; baseUrl?: string } = {}) => listModels({ baseUrl: opts.baseUrl ?? baseUrl }),
     async complete({ messages, tools }: CompletionRequest): Promise<CompletionResponse> {
       const res = await fetch(`${baseUrl}/api/chat`, {
         method: 'POST',
