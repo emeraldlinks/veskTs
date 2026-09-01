@@ -295,8 +295,8 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
     let provider: import('@vesk/agentic/src/loop').Provider;
     if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
-    else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google.js'); provider = googleProvider({ apiKey, model, baseUrl }); }
-    else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama.js'); provider = ollamaProvider({ model, baseUrl }); }
+    else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
+    else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
     else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:4096' });
     else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
     else provider = openAiProvider({ apiKey, model, baseUrl });

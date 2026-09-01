@@ -163,8 +163,8 @@ export async function routeDevPanel(
         const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
         let provider: import('@vesk/agentic/src/loop').Provider;
         if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
-        else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google.js'); provider = googleProvider({ apiKey, model, baseUrl }); }
-        else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama.js'); provider = ollamaProvider({ model, baseUrl }); }
+        else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
+        else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
         else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
         else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
         else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
@@ -175,7 +175,7 @@ export async function routeDevPanel(
         const browserTools = createBrowserTools();
         const allTools = [...veskTools, ...webTools, ...browserTools];
         // Filter by permissions table for the requested mode (server-enforced)
-        const modeTable = new (await import('@vesk/agentic/src/permissions.js')).AgentCapabilityTable(providerName === 'opencode' || providerName === 'opencode-go' ? 'agent' : (_mode as 'explore' | 'debug' | 'agent') || 'explore');
+        const modeTable = new (await import('@vesk/agentic/src/permissions')).AgentCapabilityTable(providerName === 'opencode' || providerName === 'opencode-go' ? 'agent' : (_mode as 'explore' | 'debug' | 'agent') || 'explore');
         const filtered = allTools.filter(t => {
           // web and browser are read-only, allow for explore+
           if (t.name.startsWith('web.') || t.name.startsWith('browser.')) return modeTable.allows('readFiles');
