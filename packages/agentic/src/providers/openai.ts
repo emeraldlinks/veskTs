@@ -26,11 +26,22 @@ export async function listModels(options: { apiKey?: string; baseUrl?: string } 
   }
 }
 
+function sanitizeToolName(name: string): string {
+  return name.replace(/\./g, '__').replace(/[^a-zA-Z0-9_-]/g, '_');
+}
+
 export function openAiProvider(options: OpenAiOptions): Provider {
   const { apiKey, model = 'gpt-4o-mini', baseUrl = 'https://api.openai.com/v1' } = options;
   return {
     listModels: (opts: { apiKey?: string; baseUrl?: string } = {}) => listModels({ apiKey: opts.apiKey ?? apiKey, baseUrl: opts.baseUrl ?? baseUrl }),
     async complete({ messages, tools }: CompletionRequest): Promise<CompletionResponse> {
+      // Sanitize tool names for OpenAI (only alphanum _ - allowed)
+      const nameMap = new Map<string, string>();
+      const sanitizedTools = tools.map((t) => {
+        const sane = sanitizeToolName(t.name);
+        nameMap.set(sane, t.name);
+        return { name: sane, description: t.description, parameters: t.parameters };
+      });
       const res = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: {
@@ -40,7 +51,7 @@ export function openAiProvider(options: OpenAiOptions): Provider {
         body: JSON.stringify({
           model,
           messages: messages.map(toOpenAiMessage),
-          tools: tools.length > 0 ? tools.map((t) => ({ type: 'function', function: t })) : undefined,
+          tools: sanitizedTools.length > 0 ? sanitizedTools.map((t) => ({ type: 'function', function: t })) : undefined,
         }),
       });
       if (!res.ok) throw new Error(`OpenAI request failed: ${res.status} ${await res.text()}`);
@@ -51,7 +62,7 @@ export function openAiProvider(options: OpenAiOptions): Provider {
           kind: 'tool_calls',
           toolCalls: msg.tool_calls.map((c) => ({
             id: c.id,
-            name: c.function.name,
+            name: nameMap.get(c.function.name) || c.function.name,
             arguments: JSON.parse(c.function.arguments) as Record<string, unknown>,
           })),
         };
