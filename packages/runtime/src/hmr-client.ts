@@ -209,7 +209,7 @@ export const PANEL_MIN_H = 200;
 export const PANEL_MARGIN = 8;
 export const PANEL_EDGE = 16;
 
-export const AGENTIC_PROVIDERS: string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama'];
+export const AGENTIC_PROVIDERS: string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama', 'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom'];
 
 export const AGENTIC_MODES = ['explore', 'debug', 'agent'] as const;
 export type AgenticMode = (typeof AGENTIC_MODES)[number];
@@ -220,6 +220,13 @@ export const AGENTIC_MODELS_URL = '/__vesk/agent/models';
 
 export function isAgenticMode(v: string): v is AgenticMode {
 	return (AGENTIC_MODES as readonly string[]).indexOf(v) !== -1;
+}
+
+export const SETTINGS_SUB_TABS = ['devtools', 'agentic', 'vesk'] as const;
+export type SettingsSubTab = (typeof SETTINGS_SUB_TABS)[number];
+
+export function isSettingsSubTab(v: string): v is SettingsSubTab {
+	return (SETTINGS_SUB_TABS as readonly string[]).indexOf(v) !== -1;
 }
 
 export interface DevtoolState {
@@ -236,6 +243,7 @@ export interface DevtoolState {
 	agenticModel: string;
 	agenticMode: AgenticMode;
 	agenticModels: string[];
+	settingsSubTab: SettingsSubTab;
 }
 
 export function defaultDevtoolState(): DevtoolState {
@@ -253,6 +261,7 @@ export function defaultDevtoolState(): DevtoolState {
 		agenticModel: 'gpt-4o-mini',
 		agenticMode: 'explore',
 		agenticModels: [],
+		settingsSubTab: 'devtools',
 	};
 }
 
@@ -286,6 +295,9 @@ export function loadDevtoolState(store: object | null | undefined): DevtoolState
 			if (Array.isArray(parsed.agenticModels)) {
 				state.agenticModels = (parsed.agenticModels as unknown[]).filter((v) => typeof v === 'string' && (v as string).length > 0) as string[];
 			}
+			if (typeof parsed.settingsSubTab === 'string' && isSettingsSubTab(parsed.settingsSubTab)) {
+				state.settingsSubTab = parsed.settingsSubTab;
+			}
 		}
 	} catch {
 		/* devtool state is optional */
@@ -300,6 +312,53 @@ export function saveDevtoolState(store: object | null | undefined, state: Devtoo
 	} catch {
 		/* devtool state is optional */
 	}
+}
+
+export interface AgenticConfigState {
+	provider: string;
+	model: string;
+	models: string[];
+	modelsLoading?: boolean;
+	modelsError?: string | null;
+	baseUrl: string;
+	mode: AgenticMode;
+	maxSteps: number;
+	apiKeys: Record<string, string>;
+	hasKeys: Record<string, boolean>;
+	keyPreviews: Record<string, string | null>;
+	loading?: boolean;
+	error?: string | null;
+	saving?: boolean;
+	saveError?: string | null;
+	saveOk?: string | null;
+}
+
+export function defaultAgenticConfigState(): AgenticConfigState {
+	return {
+		provider: 'openai',
+		model: 'gpt-4o-mini',
+		models: [],
+		modelsLoading: false,
+		modelsError: null,
+		baseUrl: '',
+		mode: 'explore',
+		maxSteps: 10,
+		apiKeys: {},
+		hasKeys: {},
+		keyPreviews: {},
+		loading: false,
+		error: null,
+		saving: false,
+		saveError: null,
+		saveOk: null,
+	};
+}
+
+export function maskApiKey(key: string): string {
+	if (!key) return '';
+	const s = String(key).trim();
+	if (s.length <= 8) return '***';
+	return s.slice(0, 4) + '***' + s.slice(-4);
 }
 
 export const TAB_GLYPHS: Record<string, string> = {
@@ -808,6 +867,64 @@ export interface DevPrefs {
 	sidebarMode: DevtoolState['sidebarMode'];
 }
 
+export type MdHtmlMode = 'escape' | 'allow' | 'allowlist';
+
+export interface VeskMdConfig {
+	html?: MdHtmlMode | string;
+	allowTags?: string[];
+}
+
+export interface VeskSecurityCors {
+	origin?: string | string[];
+	methods?: string;
+	headers?: string;
+	credentials?: boolean;
+	maxAge?: number;
+}
+
+export interface VeskSecurityRateLimit {
+	windowMs?: number;
+	max?: number;
+}
+
+export interface VeskSecurity {
+	xFrameOptions?: string | false;
+	hsts?: string | false;
+	referrerPolicy?: string | false;
+	contentSecurityPolicy?: boolean | string;
+	autoEscape?: boolean;
+	csrf?: boolean;
+	cors?: VeskSecurityCors;
+	trustProxy?: boolean | string;
+	rateLimit?: VeskSecurityRateLimit;
+	redactLogs?: boolean;
+	[key: string]: unknown;
+}
+
+export interface VeskConfigData {
+	appDir?: string;
+	outDir?: string;
+	publicDir?: string;
+	routeDataCache?: number;
+	md?: VeskMdConfig;
+	security?: VeskSecurity | string | false | Record<string, unknown>;
+	ssg?: unknown;
+	[key: string]: unknown;
+}
+
+export interface VeskConfigState {
+	path: string | null;
+	exists: boolean;
+	source: string;
+	config: VeskConfigData;
+	loading?: boolean;
+	error?: string | null;
+	saving?: boolean;
+	saveError?: string | null;
+	saveOk?: string | null;
+	draftSource?: string;
+}
+
 function settingsOptRow(
 	label: string,
 	key: string,
@@ -830,11 +947,11 @@ function settingsOptRow(
 	return html + '</div>';
 }
 
-export function renderSettingsPanel(prefs: DevPrefs): string {
+export function renderSettingsDevToolsSubtab(prefs: DevPrefs): string {
 	const themes: ('system' | 'light' | 'dark')[] = ['system', 'light', 'dark'];
 	const positions: ('left' | 'right')[] = ['left', 'right'];
 	const pluginViews: DevtoolState['pluginsView'][] = ['cards', 'list'];
-	let html = '<div class="__kp_sec">&gt; SETTINGS</div>';
+	let html = '<div class="__kp_sec">&gt; DEVTOOLS</div>';
 	html += settingsOptRow('THEME', 'theme', themes.map((t) => ({ val: t, label: t })), prefs.theme);
 	html += settingsOptRow('PANEL POSITION', 'pos', positions.map((p) => ({ val: p, label: p })), prefs.pos);
 	html += settingsOptRow(
@@ -853,6 +970,295 @@ export function renderSettingsPanel(prefs: DevPrefs): string {
 		prefs.sidebarMode
 	);
 	return html;
+}
+
+export function renderSettingsAgenticSubtab(state: AgenticConfigState | null | undefined): string {
+	const s: AgenticConfigState = state || defaultAgenticConfigState();
+	const provider = typeof s.provider === 'string' && AGENTIC_PROVIDERS.indexOf(s.provider) !== -1 ? s.provider : 'openai';
+	const model = typeof s.model === 'string' ? s.model : 'gpt-4o-mini';
+	const models = Array.isArray(s.models) ? s.models : [];
+	const baseUrl = typeof s.baseUrl === 'string' ? s.baseUrl : '';
+	const mode = isAgenticMode(s.mode) ? s.mode : 'explore';
+	const maxSteps = typeof s.maxSteps === 'number' && Number.isFinite(s.maxSteps) ? s.maxSteps : 10;
+	const apiKeys = s.apiKeys && typeof s.apiKeys === 'object' ? s.apiKeys : {};
+	const hasKeys = s.hasKeys && typeof s.hasKeys === 'object' ? s.hasKeys : {};
+	const keyPreviews = s.keyPreviews && typeof s.keyPreviews === 'object' ? s.keyPreviews : {};
+	let html = '<div class="__kp_sec">&gt; AGENTIC</div>';
+	if (s.loading) html += '<div class="__kp_line">loading agentic config...</div>';
+	if (s.error) html += '<div class="__kp_pl_err">' + escapeHtml(String(s.error)) + '</div>';
+	if (s.saveOk) html += '<div class="__kp_line" style="color:var(--vk-fg)"><b>' + escapeHtml(String(s.saveOk)) + '</b></div>';
+	if (s.saveError) html += '<div class="__kp_pl_err">' + escapeHtml(String(s.saveError)) + '</div>';
+	if (s.saving) html += '<div class="__kp_line">saving agentic config...</div>';
+	html += renderAgenticProviderSelect(provider);
+	html += renderAgenticModelSelect(model, models, !!s.modelsLoading, s.modelsError || null);
+	html += '<div class="__kp_setlabel">BASE URL</div>';
+	html += '<input class="__kp_cfg_input" data-agentic-key="baseUrl" data-agentic-baseurl placeholder="https://api.openai.com/v1" value="' + escapeHtml(baseUrl) + '">';
+	html += '<div class="__kp_cfg_hint">override provider baseUrl (openai-compatible)</div>';
+	html += renderAgenticModeToggle(mode);
+	html += '<div class="__kp_setlabel">MAX STEPS</div>';
+	html += '<input class="__kp_cfg_input" data-agentic-key="maxSteps" data-agentic-maxsteps type="number" min="1" max="100" step="1" value="' + escapeHtml(String(maxSteps)) + '">';
+	html += '<div class="__kp_cfg_hint">max agent loop steps (1-100)</div>';
+	html += '<div class="__kp_sec">&gt; API KEYS</div>';
+	html += '<div class="__kp_cfg_hint">per-provider keys — stored server-side, previews are masked</div>';
+	for (const p of AGENTIC_PROVIDERS) {
+		const rawKey = typeof (apiKeys as Record<string, unknown>)[p] === 'string' ? String((apiKeys as Record<string, unknown>)[p]) : '';
+		const preview = (keyPreviews as Record<string, unknown>)[p] != null ? String((keyPreviews as Record<string, unknown>)[p]) : (hasKeys as Record<string, unknown>)[p] ? '••••' : '';
+		const masked = rawKey ? maskApiKey(rawKey) : preview ? String(preview) : '';
+		const hasKey = !!(hasKeys as Record<string, unknown>)[p];
+		html += '<div class="__kp_ag_key_row" data-provider="' + escapeHtml(p) + '">';
+		html += '<div class="__kp_setlabel">' + escapeHtml(p.toUpperCase()) + ' API KEY' + (hasKey ? ' <span class="__kp_key_has" data-has-key="' + escapeHtml(p) + '">● hasKey</span>' : ' <span class="__kp_key_nohas" data-has-key="' + escapeHtml(p) + '">○ no key</span>') + (masked ? ' <span class="__kp_key_preview" data-key-preview="' + escapeHtml(p) + '">' + escapeHtml(masked) + '</span>' : '') + '</div>';
+		html += '<div class="__kp_ag_key_input_row">';
+		html += '<input class="__kp_cfg_input __kp_ag_key_input" data-agentic-key-input="' + escapeHtml(p) + '" data-provider="' + escapeHtml(p) + '" type="password" placeholder="sk-..." value="' + escapeHtml(rawKey) + '" autocomplete="off">';
+		html += '<button class="__kp_pl_btn" data-agentic-save-key="' + escapeHtml(p) + '" data-provider="' + escapeHtml(p) + '">save</button>';
+		html += '</div>';
+		if (masked) html += '<div class="__kp_cfg_hint">preview: ' + escapeHtml(masked) + ' ' + (hasKey ? '[hasKey=true]' : '[hasKey=false]') + '</div>';
+		html += '</div>';
+	}
+	return html;
+}
+
+export function renderSettingsVeskConfigSubtab(state: VeskConfigState | null | undefined): string {
+	return renderVeskConfigPanel(state);
+}
+
+export function renderSettingsSubtabs(active: string): string {
+	const tabs: { id: SettingsSubTab; label: string }[] = [
+		{ id: 'devtools', label: 'DEVTOOLS' },
+		{ id: 'agentic', label: 'AGENTIC' },
+		{ id: 'vesk', label: 'VESK CONFIG' },
+	];
+	let html = '<nav class="__kp_settings_tabs" data-settings-subtabs="1">';
+	for (const t of tabs) {
+		html +=
+			'<button class="__kp_settings_tab' +
+			(t.id === active ? ' active' : '') +
+			'" data-settings-subtab="' +
+			t.id +
+			'" data-settings-tab="' +
+			t.id +
+			'">' +
+			escapeHtml(t.label) +
+			'</button>';
+	}
+	html += '</nav>';
+	return html;
+}
+
+export function renderSettingsPanel(
+	prefs: DevPrefs,
+	agentic?: AgenticConfigState | null,
+	vesk?: VeskConfigState | null,
+	activeSubTab?: string
+): string {
+	const sub = isSettingsSubTab(activeSubTab || '') ? (activeSubTab as SettingsSubTab) : 'devtools';
+	// Keep backward compat: if only prefs supplied, render full panel with nav defaulting to devtools
+	let html = '<div class="__kp_sec">&gt; SETTINGS</div>';
+	html += renderSettingsSubtabs(sub);
+	html += '<div class="__kp_settings_pane" data-settings-pane="' + escapeHtml(sub) + '">';
+	if (sub === 'agentic') {
+		html += renderSettingsAgenticSubtab(agentic || null);
+	} else if (sub === 'vesk') {
+		html += renderSettingsVeskConfigSubtab(vesk || null);
+	} else {
+		html += renderSettingsDevToolsSubtab(prefs);
+	}
+	html += '</div>';
+	return html;
+}
+
+export function renderVeskConfigPanel(state: VeskConfigState | null | undefined): string {
+	if (!state) {
+		return (
+			'<div class="__kp_sec">&gt; VESK CONFIG</div>' +
+			'<div class="__kp_line">loading config...</div>' +
+			'<div class="__kp_cfg_hint">fetching GET /__vesk/config</div>'
+		);
+	}
+	if (state.loading) {
+		return (
+			'<div class="__kp_sec">&gt; VESK CONFIG</div>' +
+			'<div class="__kp_line">loading config...</div>'
+		);
+	}
+	if (state.error) {
+		return (
+			'<div class="__kp_sec">&gt; VESK CONFIG</div>' +
+			'<div class="__kp_pl_err">' +
+			escapeHtml(String(state.error)) +
+			'</div>' +
+			'<button class="__kp_pl_btn" data-cfg-reload="1">retry</button>'
+		);
+	}
+	const cfg = state.config || {};
+	const md = (cfg.md || {}) as VeskMdConfig;
+	const secRaw = cfg.security as unknown;
+	let sec: VeskSecurity | null = null;
+	let secIsObject = false;
+	let secPreset: string | null = null;
+	if (secRaw === false) {
+		secPreset = 'off';
+	} else if (typeof secRaw === 'string') {
+		secPreset = String(secRaw);
+	} else if (secRaw && typeof secRaw === 'object') {
+		sec = secRaw as VeskSecurity;
+		secIsObject = true;
+	} else if (secRaw == null) {
+		sec = {};
+		secIsObject = true;
+	}
+
+	const appDir = typeof cfg.appDir === 'string' ? cfg.appDir : '';
+	const outDir = typeof cfg.outDir === 'string' ? cfg.outDir : '';
+	const publicDir = typeof cfg.publicDir === 'string' ? cfg.publicDir : '';
+	const routeDataCache = typeof cfg.routeDataCache === 'number' ? cfg.routeDataCache : 0;
+	const mdHtml = typeof md.html === 'string' ? md.html : 'escape';
+	const allowTags = Array.isArray(md.allowTags) ? md.allowTags.join(', ') : '';
+
+	let html = '<div class="__kp_sec">&gt; VESK CONFIG</div>';
+	const pathLabel = state.path ? escapeHtml(state.path) : 'vesk.config.ts (not found)';
+	html += '<div class="__kp_cfg_meta">PATH: <b>' + pathLabel + '</b> ' + (state.exists ? '' : '(will create on save)') + '</div>';
+	if (state.saveOk) html += '<div class="__kp_line" style="color:var(--vk-fg)"><b>' + escapeHtml(String(state.saveOk)) + '</b></div>';
+	if (state.saveError) html += '<div class="__kp_pl_err">' + escapeHtml(String(state.saveError)) + '</div>';
+	if (state.saving) html += '<div class="__kp_line">saving...</div>';
+
+	// ── core dirs + cache ─────────────────────────────────────────────
+	html += '<div class="__kp_sec">&gt; CORE</div>';
+	html += '<div class="__kp_setlabel">APP DIR</div>';
+	html += '<input class="__kp_cfg_input" data-cfg-key="appDir" placeholder="app" value="' + escapeHtml(appDir) + '">';
+	html += '<div class="__kp_setlabel">OUT DIR</div>';
+	html += '<input class="__kp_cfg_input" data-cfg-key="outDir" placeholder=".vesk" value="' + escapeHtml(outDir) + '">';
+	html += '<div class="__kp_setlabel">PUBLIC DIR</div>';
+	html += '<input class="__kp_cfg_input" data-cfg-key="publicDir" placeholder="public" value="' + escapeHtml(publicDir) + '">';
+	html += '<div class="__kp_setlabel">ROUTE DATA CACHE (ms)</div>';
+	html += '<input class="__kp_cfg_input" data-cfg-key="routeDataCache" type="number" min="0" step="100" value="' + escapeHtml(String(routeDataCache)) + '">';
+	html += '<div class="__kp_cfg_hint">0 = always fetch fresh on SPA nav</div>';
+
+	// ── Markdown ──────────────────────────────────────────────────────
+	html += '<div class="__kp_sec">&gt; MARKDOWN (MD)</div>';
+	html += '<div class="__kp_setlabel">MD.HTML</div>';
+	html += '<select class="__kp_cfg_select" data-cfg-md-html aria-label="md html">';
+	for (const opt of ['escape', 'allow', 'allowlist']) {
+		html += '<option value="' + opt + '"' + (mdHtml === opt ? ' selected' : '') + '>' + escapeHtml(opt) + '</option>';
+	}
+	html += '</select>';
+	html += '<div class="__kp_setlabel">MD.ALLOW TAGS</div>';
+	html += '<input class="__kp_cfg_input" data-cfg-md-tags placeholder="a, em, strong, code" value="' + escapeHtml(allowTags) + '"' + (mdHtml !== 'allowlist' ? ' disabled' : '') + '>';
+	html += '<div class="__kp_cfg_hint">comma-separated, only used when html=allowlist</div>';
+	if (mdHtml === 'allowlist' && !allowTags) {
+		html += '<div class="__kp_cfg_hint">default allowlist: ' + escapeHtml('a, abbr, b, code, em, strong ...') + '</div>';
+	}
+
+	// ── Security ──────────────────────────────────────────────────────
+	html += '<div class="__kp_sec">&gt; SECURITY</div>';
+	if (secPreset) {
+		html += '<div class="__kp_cfg_meta">SECURITY PRESET: <b>' + escapeHtml(secPreset) + '</b></div>';
+		html += '<div class="__kp_cfg_hint">object editing disabled for preset/false. Save raw source to change preset or switch to object.</div>';
+		html += '<div class="__kp_setlabel">SECURITY PRESET</div>';
+		html += '<select class="__kp_cfg_select" data-cfg-sec-preset aria-label="security preset">';
+		for (const p of ['strict', 'default', 'minimal', 'off', 'custom']) {
+			const sel = (secPreset === p || (p === 'custom' && !secPreset)) ? ' selected' : '';
+			html += '<option value="' + p + '"' + sel + '>' + escapeHtml(p) + '</option>';
+		}
+		html += '</select>';
+		// still render object fields disabled when preset
+	}
+	if (secIsObject || !secPreset) {
+		const s = (sec || {}) as VeskSecurity;
+		const xfo = typeof s.xFrameOptions === 'string' ? s.xFrameOptions : s.xFrameOptions === false ? '' : (s.xFrameOptions == null ? 'DENY' : String(s.xFrameOptions));
+		const xfoDisabled = s.xFrameOptions === false;
+		html += '<div class="__kp_setlabel">X-FRAME-OPTIONS</div>';
+		html += '<div class="__kp_cfg_row">';
+		html += '<input class="__kp_cfg_input" data-sec-key="xFrameOptions" placeholder="DENY" value="' + escapeHtml(xfo) + '"' + (xfoDisabled ? ' disabled' : '') + '>';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="xFrameOptions" ' + (xfoDisabled ? 'checked' : '') + '> disable</label>';
+		html += '</div>';
+
+		const hsts = typeof s.hsts === 'string' ? s.hsts : s.hsts === false ? '' : (s.hsts == null ? '' : String(s.hsts));
+		const hstsDisabled = s.hsts === false;
+		html += '<div class="__kp_setlabel">HSTS</div>';
+		html += '<div class="__kp_cfg_row">';
+		html += '<input class="__kp_cfg_input" data-sec-key="hsts" placeholder="max-age=31536000; includeSubDomains" value="' + escapeHtml(hsts) + '"' + (hstsDisabled ? ' disabled' : '') + '>';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="hsts" ' + (hstsDisabled ? 'checked' : '') + '> disable</label>';
+		html += '</div>';
+
+		const rp = typeof s.referrerPolicy === 'string' ? s.referrerPolicy : s.referrerPolicy === false ? '' : (s.referrerPolicy == null ? '' : String(s.referrerPolicy));
+		const rpDisabled = s.referrerPolicy === false;
+		html += '<div class="__kp_setlabel">REFERRER-POLICY</div>';
+		html += '<div class="__kp_cfg_row">';
+		html += '<input class="__kp_cfg_input" data-sec-key="referrerPolicy" placeholder="strict-origin-when-cross-origin" value="' + escapeHtml(rp) + '"' + (rpDisabled ? ' disabled' : '') + '>';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="referrerPolicy" ' + (rpDisabled ? 'checked' : '') + '> disable</label>';
+		html += '</div>';
+
+		const csp = s.contentSecurityPolicy;
+		let cspVal = '';
+		let cspDisabled = false;
+		if (csp === false) cspDisabled = true;
+		else if (typeof csp === 'string') cspVal = csp;
+		else if (csp === true) cspVal = "default-src 'self'";
+		html += '<div class="__kp_setlabel">CONTENT-SECURITY-POLICY</div>';
+		html += '<div class="__kp_cfg_row">';
+		html += '<input class="__kp_cfg_input" data-sec-key="contentSecurityPolicy" placeholder="default-src \'self\' ..." value="' + escapeHtml(cspVal) + '"' + (cspDisabled ? ' disabled' : '') + '>';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="contentSecurityPolicy" ' + (cspDisabled ? 'checked' : '') + '> disable</label>';
+		html += '</div>';
+
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="autoEscape" ' + (s.autoEscape !== false ? 'checked' : '') + '> AUTO ESCAPE</label>';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="csrf" ' + (s.csrf !== false ? 'checked' : '') + '> CSRF</label>';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="redactLogs" ' + (s.redactLogs !== false ? 'checked' : '') + '> REDACT LOGS</label>';
+
+		const tp = s.trustProxy;
+		let tpVal = '';
+		let tpChecked = false;
+		if (typeof tp === 'string') tpVal = tp;
+		else if (tp === true) tpChecked = true;
+		html += '<div class="__kp_setlabel">TRUST PROXY</div>';
+		html += '<div class="__kp_cfg_row">';
+		html += '<input class="__kp_cfg_input" data-sec-key="trustProxy" placeholder="127.0.0.1 or CIDR" value="' + escapeHtml(tpVal) + '">';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="trustProxy" ' + (tpChecked ? 'checked' : '') + '> enabled</label>';
+		html += '</div>';
+
+		// cors
+		const cors = (s.cors || {}) as VeskSecurityCors;
+		const corsOrigin = Array.isArray(cors.origin) ? cors.origin.join(', ') : typeof cors.origin === 'string' ? cors.origin : '';
+		html += '<div class="__kp_setlabel">CORS ORIGIN</div>';
+		html += '<input class="__kp_cfg_input" data-sec-key="cors.origin" placeholder="* or https://example.com" value="' + escapeHtml(corsOrigin) + '">';
+		html += '<div class="__kp_setlabel">CORS METHODS</div>';
+		html += '<input class="__kp_cfg_input" data-sec-key="cors.methods" placeholder="GET, POST" value="' + escapeHtml(typeof cors.methods === 'string' ? cors.methods : '') + '">';
+		html += '<div class="__kp_setlabel">CORS HEADERS</div>';
+		html += '<input class="__kp_cfg_input" data-sec-key="cors.headers" placeholder="Content-Type" value="' + escapeHtml(typeof cors.headers === 'string' ? cors.headers : '') + '">';
+		html += '<label class="__kp_cfg_check"><input type="checkbox" data-sec-toggle="cors.credentials" ' + (cors.credentials ? 'checked' : '') + '> CORS CREDENTIALS</label>';
+		html += '<div class="__kp_setlabel">CORS MAX AGE</div>';
+		html += '<input class="__kp_cfg_input" data-sec-key="cors.maxAge" type="number" min="0" value="' + escapeHtml(String(cors.maxAge != null ? cors.maxAge : '')) + '">';
+
+		// rateLimit
+		const rl = (s.rateLimit || {}) as VeskSecurityRateLimit;
+		html += '<div class="__kp_setlabel">RATE LIMIT WINDOW MS</div>';
+		html += '<input class="__kp_cfg_input" data-sec-key="rateLimit.windowMs" type="number" min="0" value="' + escapeHtml(String(rl.windowMs != null ? rl.windowMs : '')) + '">';
+		html += '<div class="__kp_setlabel">RATE LIMIT MAX</div>';
+		html += '<input class="__kp_cfg_input" data-sec-key="rateLimit.max" type="number" min="0" value="' + escapeHtml(String(rl.max != null ? rl.max : '')) + '">';
+	}
+
+	// ── Raw editor ────────────────────────────────────────────────────
+	html += '<div class="__kp_sec">&gt; RAW vesk.config.ts</div>';
+	const src = state.draftSource != null ? state.draftSource : state.source;
+	html += '<textarea class="__kp_cfg_textarea" data-cfg-source rows="12" spellcheck="false">' + escapeHtml(src) + '</textarea>';
+	html += '<div class="__kp_cfg_row">';
+	html += '<button class="__kp_pl_btn" data-cfg-save="1"' + (state.saving ? ' disabled' : '') + '>' + (state.saving ? 'saving...' : 'save source') + '</button>';
+	html += '<button class="__kp_pl_btn" data-cfg-reload="1">reload</button>';
+	html += '</div>';
+	html += '<div class="__kp_cfg_hint">POST /__vesk/config {source} — invalid source returns 400 and never clobbers</div>';
+
+	return html;
+}
+
+export function renderSettingsWithConfig(
+	prefs: DevPrefs,
+	activeSubtab: string,
+	cfgState: VeskConfigState | null | undefined
+): string {
+	const norm = activeSubtab === 'prefs' ? 'devtools' : activeSubtab === 'config' ? 'vesk' : activeSubtab;
+	if (isSettingsSubTab(norm)) {
+		return renderSettingsPanel(prefs, null, cfgState || null, norm);
+	}
+	return renderSettingsPanel(prefs, null, cfgState || null, 'devtools');
 }
 
 // ── Agentic panel — pure helpers ──────────────────────────────────────────
@@ -1312,7 +1718,31 @@ const CSS =
 	'#__vesk_dev .__kp_ag_hist_meta{font-size:10px;color:var(--vk-dim);}' +
 	'#__vesk_dev .__kp_ag_slash{font-size:11px;color:var(--vk-dim);margin:6px 0;padding:4px 6px;border:1px dashed var(--vk-line-soft);background:var(--vk-codebg);}' +
 	'#__vesk_dev .__kp_ag_slash_cmd{font-size:10px;color:var(--vk-muted);background:var(--vk-soft);border:1px solid var(--vk-line-soft);padding:1px 4px;margin-right:2px;}' +
-	'#__vesk_dev .__kp_ag_hint{color:var(--vk-dim);font-size:10px;}';
+	'#__vesk_dev .__kp_ag_hint{color:var(--vk-dim);font-size:10px;}' +
+	'#__vesk_dev .__kp_cfg_input{width:100%;background:var(--vk-codebg);border:1px solid var(--vk-line-soft);color:var(--vk-fg);font-family:inherit;font-size:12px;padding:6px 8px;margin:4px 0 8px;box-sizing:border-box;}' +
+	'#__vesk_dev .__kp_cfg_input:focus{border-color:var(--vk-dim);outline:none;}' +
+	'#__vesk_dev .__kp_cfg_input[disabled]{opacity:.4;}' +
+	'#__vesk_dev .__kp_cfg_select{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);color:var(--vk-fg);font-family:inherit;font-size:11px;padding:4px 8px;min-width:140px;margin:4px 0 8px;}' +
+	'#__vesk_dev .__kp_cfg_select:focus{border-color:var(--vk-dim);outline:none;}' +
+	'#__vesk_dev .__kp_cfg_textarea{width:100%;min-height:180px;background:var(--vk-codebg);border:1px solid var(--vk-line-soft);color:var(--vk-fg);font-family:ui-monospace,monospace;font-size:11px;padding:8px;resize:vertical;margin:6px 0 8px;box-sizing:border-box;}' +
+	'#__vesk_dev .__kp_cfg_textarea:focus{border-color:var(--vk-dim);outline:none;}' +
+	'#__vesk_dev .__kp_cfg_row{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:4px 0 8px;}' +
+	'#__vesk_dev .__kp_cfg_check{display:flex;gap:6px;align-items:center;font-size:11px;color:var(--vk-muted);margin:4px 0;cursor:pointer;}' +
+	'#__vesk_dev .__kp_cfg_check input{accent-color:var(--vk-fg);}' +
+	'#__vesk_dev .__kp_cfg_hint{font-size:10px;color:var(--vk-dim);margin:2px 0 6px;}' +
+	'#__vesk_dev .__kp_cfg_meta{font-size:11px;color:var(--vk-dim);margin:6px 0;word-break:break-all;}' +
+	'#__vesk_dev .__kp_cfg_meta b{color:var(--vk-fg);}' +
+	'#__vesk_dev .__kp_settings_tabs{display:flex;gap:6px;border-bottom:1px solid var(--vk-line);margin:8px 0;padding-bottom:6px;flex-wrap:wrap;}' +
+	'#__vesk_dev .__kp_settings_tab{all:unset;cursor:pointer;font-family:inherit;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.08em;color:var(--vk-muted);border:1px solid var(--vk-line-soft);padding:4px 10px;transition:color .12s ease,background .12s ease,border-color .12s ease;}' +
+	'#__vesk_dev .__kp_settings_tab:hover{color:var(--vk-fg);border-color:var(--vk-dim);background:var(--vk-soft);}' +
+	'#__vesk_dev .__kp_settings_tab.active{color:var(--vk-inv-fg);background:var(--vk-inv-bg);border-color:var(--vk-border);}' +
+	'#__vesk_dev .__kp_settings_pane{animation:__v_tab .18s cubic-bezier(.22,.61,.36,1);}' +
+	'#__vesk_dev .__kp_ag_key_row{border:1px solid var(--vk-line-soft);padding:8px;margin:6px 0;background:var(--vk-codebg);}' +
+	'#__vesk_dev .__kp_ag_key_input_row{display:flex;gap:6px;align-items:center;margin:4px 0;}' +
+	'#__vesk_dev .__kp_ag_key_input{flex:1;}' +
+	'#__vesk_dev .__kp_key_has{color:#3fb950;font-size:10px;font-weight:700;}' +
+	'#__vesk_dev .__kp_key_nohas{color:var(--vk-dim);font-size:10px;}' +
+	'#__vesk_dev .__kp_key_preview{font-size:10px;color:var(--vk-muted);border:1px solid var(--vk-line-soft);padding:1px 4px;background:var(--vk-soft);}' ;
 
 
 export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
@@ -1376,6 +1806,23 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	let panelW = ui.w;
 	let panelH = ui.h;
+
+	// Settings subtab — persisted via ui.settingsSubTab
+	let settingsSubtab: string = ui.settingsSubTab || 'devtools';
+	// Vesk Config state
+	let cfgState: VeskConfigState | null = null;
+	let cfgLoading = false;
+	let cfgError: string | null = null;
+	let cfgSaving = false;
+	let cfgSaveError: string | null = null;
+	let cfgSaveOk: string | null = null;
+	// Agentic Config state (settings agentic subtab)
+	let agenticConfigState: AgenticConfigState | null = null;
+	let agenticConfigLoading = false;
+	let agenticConfigError: string | null = null;
+	let agenticConfigSaving = false;
+	let agenticConfigSaveError: string | null = null;
+	let agenticConfigSaveOk: string | null = null;
 
 	function logEvent(type: string, ms: number | undefined): void {
 		log.push({ type, ms, time: ms, ts: Date.now() });
@@ -1696,6 +2143,11 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 					refreshAgenticModels();
 					refreshAgenticHistory();
 				}
+				if (tab === 'settings') {
+					if (settingsSubtab === 'vesk' && !cfgState && !cfgLoading) refreshVeskConfig();
+					if (settingsSubtab === 'agentic' && !agenticConfigState && !agenticConfigLoading) refreshAgenticConfig();
+					if ((settingsSubtab as string) === 'config' && !cfgState && !cfgLoading) refreshVeskConfig();
+				}
 				setTab(tab);
 			});
 		}
@@ -1708,11 +2160,157 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			const providerSel = target.closest('[data-agentic-provider-select]') as HTMLSelectElement | null;
 			if (providerSel) {
 				changePref('agenticProvider', providerSel.value);
+				saveAgenticConfigPatch({ provider: providerSel.value });
 				return;
 			}
 			const modelSel = target.closest('[data-agentic-model]') as HTMLSelectElement | null;
 			if (modelSel) {
 				changePref('agenticModel', modelSel.value);
+				saveAgenticConfigPatch({ model: modelSel.value });
+				return;
+			}
+			// Agentic settings: baseUrl, maxSteps, mode, provider/model via settings subtab also use same keys
+			const agBaseEl = target.closest('[data-agentic-baseurl]') as HTMLInputElement | null;
+			if (agBaseEl) {
+				const v = agBaseEl.value || '';
+				saveAgenticConfigPatch({ baseUrl: v });
+				if (agenticConfigState) agenticConfigState.baseUrl = v;
+				return;
+			}
+			const agBaseKeyEl = target.closest('[data-agentic-key="baseUrl"]') as HTMLInputElement | null;
+			if (agBaseKeyEl) {
+				const v = agBaseKeyEl.value || '';
+				saveAgenticConfigPatch({ baseUrl: v });
+				if (agenticConfigState) agenticConfigState.baseUrl = v;
+				return;
+			}
+			const agMaxEl = target.closest('[data-agentic-maxsteps]') as HTMLInputElement | null;
+			if (agMaxEl) {
+				const n = parseInt(agMaxEl.value, 10);
+				if (!isNaN(n) && n >= 1 && n <= 100) {
+					saveAgenticConfigPatch({ maxSteps: n });
+					if (agenticConfigState) agenticConfigState.maxSteps = n;
+				}
+				return;
+			}
+			const agMaxKeyEl = target.closest('[data-agentic-key="maxSteps"]') as HTMLInputElement | null;
+			if (agMaxKeyEl) {
+				const n = parseInt(agMaxKeyEl.value, 10);
+				if (!isNaN(n) && n >= 1 && n <= 100) {
+					saveAgenticConfigPatch({ maxSteps: n });
+					if (agenticConfigState) agenticConfigState.maxSteps = n;
+				}
+				return;
+			}
+			// Vesk Config: core fields (appDir, outDir, publicDir, routeDataCache)
+			const cfgKeyEl = target.closest('[data-cfg-key]') as HTMLInputElement | null;
+			if (cfgKeyEl) {
+				const k = cfgKeyEl.getAttribute('data-cfg-key') || '';
+				if (k === 'routeDataCache') {
+					const n = parseInt(cfgKeyEl.value, 10);
+					if (!isNaN(n) && n >= 0) postVeskConfigKey(k, n);
+					else if (cfgKeyEl.value === '' || cfgKeyEl.value == null) postVeskConfigKey(k, 0);
+					return;
+				}
+				if (k === 'appDir' || k === 'outDir' || k === 'publicDir') {
+					postVeskConfigKey(k, cfgKeyEl.value);
+					return;
+				}
+			}
+			const mdHtmlEl = target.closest('[data-cfg-md-html]') as HTMLSelectElement | null;
+			if (mdHtmlEl) {
+				const htmlMode = mdHtmlEl.value;
+				const curMd = (cfgState && cfgState.config && cfgState.config.md) ? cfgState.config.md as VeskMdConfig : {};
+				const curTags = Array.isArray(curMd.allowTags) ? curMd.allowTags : [];
+				postVeskConfigKey('md', { html: htmlMode, allowTags: curTags });
+				return;
+			}
+			const mdTagsEl = target.closest('[data-cfg-md-tags]') as HTMLInputElement | null;
+			if (mdTagsEl) {
+				const raw = mdTagsEl.value || '';
+				const tags = raw.split(',').map(function (s) { return s.trim().toLowerCase().replace(/[^a-z0-9-]/g, ''); }).filter(Boolean);
+				const curMd2 = (cfgState && cfgState.config && cfgState.config.md) ? cfgState.config.md as VeskMdConfig : {};
+				const htmlMode2 = typeof curMd2.html === 'string' ? curMd2.html : 'escape';
+				postVeskConfigKey('md', { html: htmlMode2, allowTags: tags });
+				return;
+			}
+			const secPresetEl = target.closest('[data-cfg-sec-preset]') as HTMLSelectElement | null;
+			if (secPresetEl) {
+				const v = secPresetEl.value;
+				if (v === 'custom') {
+					postVeskConfigKey('security', {});
+				} else if (v === 'off') {
+					postVeskConfigKey('security', false);
+				} else {
+					postVeskConfigKey('security', v);
+				}
+				return;
+			}
+			const secKeyEl = target.closest('[data-sec-key]') as HTMLInputElement | null;
+			if (secKeyEl) {
+				const sk = secKeyEl.getAttribute('data-sec-key') || '';
+				const rawVal = secKeyEl.value;
+				// Build security patch
+				const curSecRaw = cfgState && cfgState.config ? cfgState.config.security : {};
+				let curSec: Record<string, unknown> = {};
+				if (curSecRaw && typeof curSecRaw === 'object' && !Array.isArray(curSecRaw)) curSec = Object.assign({}, curSecRaw as Record<string, unknown>);
+				if (sk.indexOf('.') !== -1) {
+					const parts = sk.split('.');
+					const top = parts[0];
+					const sub = parts[1];
+					let nested = curSec[top] as Record<string, unknown> | undefined;
+					if (!nested || typeof nested !== 'object') nested = {};
+					else nested = Object.assign({}, nested);
+					if (sk === 'cors.origin') {
+						const list = rawVal.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+						nested[sub] = list.length === 1 ? list[0] : list.length ? list : undefined;
+					} else if (sk === 'rateLimit.windowMs' || sk === 'rateLimit.max') {
+						const num = rawVal === '' ? undefined : parseInt(rawVal, 10);
+						if (num != null && !isNaN(num)) nested[sub] = num;
+						else delete nested[sub];
+					} else {
+						if (rawVal === '') delete nested[sub];
+						else nested[sub] = rawVal;
+					}
+					// clean nested if empty and top is cors/rateLimit
+					if (Object.keys(nested).length === 0) delete curSec[top];
+					else curSec[top] = nested;
+				} else {
+					if (rawVal === '') delete curSec[sk];
+					else curSec[sk] = rawVal;
+				}
+				postVeskConfigKey('security', curSec);
+				return;
+			}
+			const secToggleEl = target.closest('[data-sec-toggle]') as HTMLInputElement | null;
+			if (secToggleEl) {
+				const tk = secToggleEl.getAttribute('data-sec-toggle') || '';
+				const checked = !!secToggleEl.checked;
+				const curSecRaw2 = cfgState && cfgState.config ? cfgState.config.security : {};
+				let curSec2: Record<string, unknown> = {};
+				if (curSecRaw2 && typeof curSecRaw2 === 'object' && !Array.isArray(curSecRaw2)) curSec2 = Object.assign({}, curSecRaw2 as Record<string, unknown>);
+				if (tk === 'xFrameOptions' || tk === 'hsts' || tk === 'referrerPolicy' || tk === 'contentSecurityPolicy') {
+					if (checked) curSec2[tk] = false;
+					else {
+						if (tk === 'xFrameOptions') curSec2[tk] = 'DENY';
+						else if (tk === 'hsts') curSec2[tk] = 'max-age=31536000; includeSubDomains';
+						else if (tk === 'referrerPolicy') curSec2[tk] = 'strict-origin-when-cross-origin';
+						else if (tk === 'contentSecurityPolicy') curSec2[tk] = "default-src 'self'";
+					}
+				} else if (tk === 'autoEscape' || tk === 'csrf' || tk === 'redactLogs') {
+					curSec2[tk] = checked;
+				} else if (tk === 'trustProxy') {
+					curSec2[tk] = checked ? true : false;
+				} else if (tk === 'cors.credentials') {
+					let corsObj = curSec2['cors'] as Record<string, unknown> | undefined;
+					if (!corsObj || typeof corsObj !== 'object') corsObj = {};
+					else corsObj = Object.assign({}, corsObj);
+					if (checked) corsObj['credentials'] = true;
+					else delete corsObj['credentials'];
+					if (Object.keys(corsObj).length === 0) delete curSec2['cors'];
+					else curSec2['cors'] = corsObj;
+				}
+				postVeskConfigKey('security', curSec2);
 				return;
 			}
 		});
@@ -1722,6 +2320,12 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				agenticInput = (target as HTMLInputElement).value;
 				// slash hint toggle — keep pure helper visible always, but we could auto-show
 				void target;
+				return;
+			}
+			const cfgSrc = target.closest('[data-cfg-source]') as HTMLTextAreaElement | null;
+			if (cfgSrc) {
+				if (cfgState) cfgState.draftSource = cfgSrc.value;
+				return;
 			}
 		});
 		contentEl.addEventListener('keydown', function (e) {
@@ -1795,6 +2399,16 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		});
 	}
 
+	function setSettingsSubTab(sub: string): void {
+		if (!isSettingsSubTab(sub)) return;
+		settingsSubtab = sub;
+		ui.settingsSubTab = sub as SettingsSubTab;
+		persistUi();
+		if (sub === 'vesk' && !cfgState && !cfgLoading) refreshVeskConfig();
+		if (sub === 'agentic' && !agenticConfigState && !agenticConfigLoading) refreshAgenticConfig();
+		renderPanel();
+	}
+
 	function setTab(tab: string): void {
 		activeTab = tab;
 		ui.activeTab = tab;
@@ -1804,6 +2418,12 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			Array.prototype.forEach.call(tabs, function (t: HTMLElement) {
 				t.classList.toggle('active', t.getAttribute('data-tab') === tab);
 			});
+		}
+		if (tab === 'settings') {
+			if (settingsSubtab === 'vesk' && !cfgState && !cfgLoading) refreshVeskConfig();
+			if (settingsSubtab === 'agentic' && !agenticConfigState && !agenticConfigLoading) refreshAgenticConfig();
+			// legacy mapping: old prefs/config -> new ids already handled via isSettingsSubTab, but ensure legacy 'config' still triggers
+			if ((settingsSubtab === 'config' as string) && !cfgState && !cfgLoading) refreshVeskConfig();
 		}
 		renderPanel();
 	}
@@ -1858,7 +2478,78 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 					: renderDiagnosticsPanel(diagnostics),
 			plugins: () => renderPluginsTab(),
 			log: () => renderLogPanel(log),
-			settings: () => renderSettingsPanel(ui),
+			settings: () => {
+				// Build config render state for subtab
+				let cfgRender: VeskConfigState | null = null;
+				if (cfgLoading) {
+					cfgRender = {
+						path: cfgState ? cfgState.path : null,
+						exists: cfgState ? cfgState.exists : false,
+						source: cfgState ? cfgState.source : '',
+						config: cfgState ? cfgState.config : {},
+						loading: true,
+						error: null,
+						saving: cfgSaving,
+						saveError: cfgSaveError,
+						saveOk: cfgSaveOk,
+						draftSource: cfgState ? cfgState.draftSource : '',
+					};
+				} else if (cfgError) {
+					cfgRender = {
+						path: cfgState ? cfgState.path : null,
+						exists: cfgState ? cfgState.exists : false,
+						source: cfgState ? cfgState.source : '',
+						config: cfgState ? cfgState.config : {},
+						loading: false,
+						error: cfgError,
+						saving: cfgSaving,
+						saveError: cfgSaveError,
+						saveOk: cfgSaveOk,
+						draftSource: cfgState ? cfgState.draftSource : '',
+					};
+				} else if (cfgState) {
+					cfgRender = {
+						path: cfgState.path,
+						exists: cfgState.exists,
+						source: cfgState.source,
+						config: cfgState.config,
+						loading: false,
+						error: null,
+						saving: cfgSaving,
+						saveError: cfgSaveError,
+						saveOk: cfgSaveOk,
+						draftSource: cfgState.draftSource,
+					};
+				}
+				// Build agentic render state
+				let agenticRender: AgenticConfigState | null = null;
+				if (agenticConfigLoading) {
+					agenticRender = agenticConfigState ? { ...agenticConfigState, loading: true } : { ...defaultAgenticConfigState(), loading: true, provider: ui.agenticProvider, model: ui.agenticModel, mode: ui.agenticMode, models: agenticModelsCache.slice() };
+				} else if (agenticConfigError) {
+					agenticRender = agenticConfigState ? { ...agenticConfigState, error: agenticConfigError } : { ...defaultAgenticConfigState(), error: agenticConfigError, provider: ui.agenticProvider, model: ui.agenticModel, mode: ui.agenticMode };
+				} else if (agenticConfigState) {
+					agenticRender = {
+						...agenticConfigState,
+						saving: agenticConfigSaving,
+						saveError: agenticConfigSaveError,
+						saveOk: agenticConfigSaveOk,
+						models: agenticConfigState.models.length ? agenticConfigState.models : agenticModelsCache.slice(),
+						modelsLoading: agenticModelsLoading,
+						modelsError: agenticModelsError,
+					};
+				} else {
+					agenticRender = {
+						...defaultAgenticConfigState(),
+						provider: ui.agenticProvider,
+						model: ui.agenticModel,
+						mode: ui.agenticMode,
+						models: agenticModelsCache.slice(),
+						modelsLoading: agenticModelsLoading,
+						modelsError: agenticModelsError,
+					};
+				}
+				return renderSettingsPanel(ui as DevPrefs, agenticRender, cfgRender, settingsSubtab);
+			},
 		};
 		const renderTab: (() => string) | undefined = renderers[activeTab];
 		const html = renderTab ? renderTab() : '<div class="__kp_line">unknown tab: ' + escapeHtml(activeTab) + '</div>';
@@ -1949,6 +2640,248 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				diagnosticsError = 'diagnostics unavailable: ' + (e instanceof Error ? e.message : String(e));
 				renderPanel();
 			});
+	}
+
+	function refreshVeskConfig(): void {
+		if (typeof fetch === 'undefined') return;
+		cfgLoading = true;
+		cfgError = null;
+		renderPanel();
+		fetch('/__vesk/config')
+			.then(function (r) {
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				return r.json();
+			})
+			.then(function (data: unknown) {
+				const d = data as { path?: string | null; exists?: boolean; source?: string; config?: VeskConfigData; error?: string };
+				if (d && d.error) throw new Error(String(d.error));
+				cfgState = {
+					path: d.path != null ? String(d.path) : null,
+					exists: !!d.exists,
+					source: typeof d.source === 'string' ? d.source : '',
+					config: (d.config && typeof d.config === 'object' ? d.config : {}) as VeskConfigData,
+					draftSource: typeof d.source === 'string' ? d.source : '',
+				};
+				cfgLoading = false;
+				cfgError = null;
+				cfgSaveError = null;
+				cfgSaveOk = null;
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				cfgLoading = false;
+				cfgError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function postVeskConfigKey(key: string, value: unknown): void {
+		if (typeof fetch === 'undefined') {
+			cfgSaveError = 'fetch unavailable';
+			renderPanel();
+			return;
+		}
+		cfgSaving = true;
+		cfgSaveError = null;
+		cfgSaveOk = null;
+		renderPanel();
+		fetch('/__vesk/config', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ key: key, value: value }),
+		})
+			.then(function (r) {
+				return r.json().then(function (body: { error?: string; ok?: boolean; path?: string; source?: string; config?: VeskConfigData }) {
+					if (!r.ok) throw new Error(body.error || 'HTTP ' + r.status);
+					return body;
+				});
+			})
+			.then(function (body) {
+				cfgSaving = false;
+				if (body.config && typeof body.config === 'object') {
+					if (!cfgState) cfgState = { path: body.path || null, exists: true, source: body.source || '', config: body.config as VeskConfigData, draftSource: body.source || '' };
+					else {
+						cfgState.config = body.config as VeskConfigData;
+						cfgState.source = body.source || cfgState.source;
+						cfgState.draftSource = body.source || cfgState.draftSource;
+						cfgState.path = body.path || cfgState.path;
+						cfgState.exists = true;
+					}
+				}
+				cfgSaveOk = 'saved ' + key;
+				setTimeout(function () { cfgSaveOk = null; renderPanel(); }, 2500);
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				cfgSaving = false;
+				cfgSaveError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function postVeskConfigSource(source: string): void {
+		if (typeof fetch === 'undefined') {
+			cfgSaveError = 'fetch unavailable';
+			renderPanel();
+			return;
+		}
+		cfgSaving = true;
+		cfgSaveError = null;
+		cfgSaveOk = null;
+		renderPanel();
+		fetch('/__vesk/config', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ source: source }),
+		})
+			.then(function (r) {
+				return r.json().then(function (body: { error?: string; ok?: boolean; path?: string; source?: string; config?: VeskConfigData }) {
+					if (!r.ok) throw new Error(body.error || 'HTTP ' + r.status);
+					return body;
+				});
+			})
+			.then(function (body) {
+				cfgSaving = false;
+				if (body.config && typeof body.config === 'object') {
+					if (!cfgState) cfgState = { path: body.path || null, exists: true, source: body.source || source, config: body.config as VeskConfigData, draftSource: body.source || source };
+					else {
+						cfgState.config = body.config as VeskConfigData;
+						cfgState.source = body.source || source;
+						cfgState.draftSource = body.source || source;
+						cfgState.path = body.path || cfgState.path;
+						cfgState.exists = true;
+					}
+				}
+				cfgSaveOk = 'config saved';
+				setTimeout(function () { cfgSaveOk = null; renderPanel(); }, 2500);
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				cfgSaving = false;
+				cfgSaveError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function refreshAgenticConfig(): void {
+		if (typeof fetch === 'undefined') return;
+		agenticConfigLoading = true;
+		agenticConfigError = null;
+		renderPanel();
+		fetch('/__vesk/agent/config')
+			.then(function (r) {
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				return r.json();
+			})
+			.then(function (data: unknown) {
+				const d = data as Record<string, unknown>;
+				const provider = typeof d.provider === 'string' && AGENTIC_PROVIDERS.indexOf(d.provider as string) !== -1 ? String(d.provider) : ui.agenticProvider;
+				const model = typeof d.model === 'string' ? String(d.model) : ui.agenticModel;
+				const baseUrl = typeof d.baseUrl === 'string' ? String(d.baseUrl) : (typeof (d as Record<string, unknown>).baseUrl === 'string' ? String((d as Record<string, unknown>).baseUrl) : '');
+				const mode = typeof d.mode === 'string' && isAgenticMode(d.mode as string) ? (d.mode as AgenticMode) : ui.agenticMode;
+				const maxSteps = typeof d.maxSteps === 'number' ? d.maxSteps as number : 10;
+				const hasKey = !!d.hasKey;
+				const keyPreview = typeof d.keyPreview === 'string' ? String(d.keyPreview) : null;
+				const previews: Record<string, string | null> = {};
+				const hasKeys: Record<string, boolean> = {};
+				for (const p of AGENTIC_PROVIDERS) {
+					if (p === provider) {
+						hasKeys[p] = hasKey;
+						previews[p] = keyPreview;
+					} else {
+						hasKeys[p] = false;
+						previews[p] = null;
+					}
+				}
+				agenticConfigState = {
+					provider: provider,
+					model: model,
+					models: Array.isArray(d.models) ? (d.models as string[]) : agenticModelsCache.slice(),
+					baseUrl: baseUrl,
+					mode: mode,
+					maxSteps: maxSteps,
+					apiKeys: {},
+					hasKeys: hasKeys,
+					keyPreviews: previews,
+					loading: false,
+					error: null,
+				};
+				agenticConfigLoading = false;
+				agenticConfigError = null;
+				// sync ui
+				ui.agenticProvider = provider;
+				ui.agenticModel = model;
+				ui.agenticMode = mode;
+				persistUi();
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				agenticConfigLoading = false;
+				agenticConfigError = e instanceof Error ? e.message : String(e);
+				renderPanel();
+			});
+	}
+
+	function saveAgenticConfigPatch(patch: Record<string, unknown>): void {
+		if (typeof fetch === 'undefined') {
+			agenticConfigSaveError = 'fetch unavailable';
+			renderPanel();
+			return;
+		}
+		agenticConfigSaving = true;
+		agenticConfigSaveError = null;
+		agenticConfigSaveOk = null;
+		renderPanel();
+		fetch('/__vesk/agent/config', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify(patch),
+		})
+			.then(function (r) {
+				return r.json().then(function (body: Record<string, unknown>) {
+					if (!r.ok) throw new Error(String(body.error || 'HTTP ' + r.status));
+					return body;
+				});
+			})
+			.then(function () {
+				agenticConfigSaving = false;
+				agenticConfigSaveOk = 'saved';
+				setTimeout(function () { agenticConfigSaveOk = null; renderPanel(); }, 2000);
+				// update local state
+				if (agenticConfigState) {
+					if (typeof patch.provider === 'string') agenticConfigState.provider = String(patch.provider);
+					if (typeof patch.model === 'string') agenticConfigState.model = String(patch.model);
+					if (typeof patch.baseUrl === 'string') agenticConfigState.baseUrl = String(patch.baseUrl);
+					if (typeof patch.mode === 'string' && isAgenticMode(patch.mode as string)) agenticConfigState.mode = patch.mode as AgenticMode;
+					if (typeof patch.maxSteps === 'number') agenticConfigState.maxSteps = patch.maxSteps as number;
+					agenticConfigState.saveOk = agenticConfigSaveOk;
+				}
+				if (typeof patch.provider === 'string') { ui.agenticProvider = String(patch.provider); persistUi(); }
+				if (typeof patch.model === 'string') { ui.agenticModel = String(patch.model); persistUi(); }
+				if (typeof patch.mode === 'string') { ui.agenticMode = patch.mode as AgenticMode; persistUi(); }
+				renderPanel();
+			})
+			.catch(function (e: unknown) {
+				agenticConfigSaving = false;
+				agenticConfigSaveError = e instanceof Error ? e.message : String(e);
+				if (agenticConfigState) agenticConfigState.saveError = agenticConfigSaveError;
+				renderPanel();
+			});
+	}
+
+	function saveAgenticApiKey(provider: string, key: string): void {
+		if (!key.trim()) {
+			agenticConfigSaveError = 'api key empty';
+			renderPanel();
+			return;
+		}
+		saveAgenticConfigPatch({ provider: provider, apiKey: key });
+		// optimistic hasKey update
+		if (agenticConfigState) {
+			agenticConfigState.hasKeys[provider] = true;
+			agenticConfigState.keyPreviews[provider] = maskApiKey(key);
+		}
+		renderPanel();
 	}
 
 	function refreshAgenticModels(): void {
@@ -2478,6 +3411,9 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			const val = opt.getAttribute('data-val');
 			if (key && val) {
 				changePref(key, val);
+				if (key === 'agenticProvider') saveAgenticConfigPatch({ provider: val });
+				if (key === 'agenticModel') saveAgenticConfigPatch({ model: val });
+				if (key === 'agenticMode' && isAgenticMode(val)) saveAgenticConfigPatch({ mode: val });
 				return;
 			}
 		}
@@ -2559,13 +3495,21 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		const agenticProvider = target.closest('[data-agentic-provider]') as HTMLElement | null;
 		if (agenticProvider) {
 			const p = agenticProvider.getAttribute('data-agentic-provider') || '';
-			if (p) changePref('agenticProvider', p);
+			if (p) {
+				changePref('agenticProvider', p);
+				saveAgenticConfigPatch({ provider: p });
+				if (agenticConfigState) agenticConfigState.provider = p;
+			}
 			return;
 		}
 		const agenticModeBtn = target.closest('[data-agentic-mode]') as HTMLElement | null;
 		if (agenticModeBtn) {
 			const m = agenticModeBtn.getAttribute('data-agentic-mode') || '';
-			if (m) changePref('agenticMode', m);
+			if (m) {
+				changePref('agenticMode', m);
+				saveAgenticConfigPatch({ mode: m });
+				if (agenticConfigState) agenticConfigState.mode = m as AgenticMode;
+			}
 			return;
 		}
 		const actBtn = target.closest('[data-pl-act]') as HTMLElement | null;
@@ -2583,6 +3527,39 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		if (card) {
 			const name = card.getAttribute('data-plugin') || '';
 			openPlugin(name);
+			return;
+		}
+		const agenticSaveKey = target.closest('[data-agentic-save-key]') as HTMLElement | null;
+		if (agenticSaveKey) {
+			const prov = agenticSaveKey.getAttribute('data-agentic-save-key') || agenticSaveKey.getAttribute('data-provider') || '';
+			const inp = doc.querySelector('[data-agentic-key-input="' + prov + '"]') as HTMLInputElement | null;
+			const keyVal = inp ? inp.value : '';
+			if (prov) saveAgenticApiKey(prov, keyVal);
+			return;
+		}
+		const settingsSub = target.closest('[data-settings-subtab]') as HTMLElement | null;
+		if (settingsSub) {
+			const subRaw = settingsSub.getAttribute('data-settings-subtab') || settingsSub.getAttribute('data-settings-tab') || 'devtools';
+			// support legacy ids
+			let sub = subRaw;
+			if (sub === 'prefs') sub = 'devtools';
+			if (sub === 'config') sub = 'vesk';
+			if (isSettingsSubTab(sub)) {
+				setSettingsSubTab(sub);
+			} else if (sub === 'config' || sub === 'prefs') {
+				// fallback legacy
+				setSettingsSubTab(sub === 'config' ? 'vesk' : 'devtools');
+			}
+			return;
+		}
+		if (target.closest('[data-cfg-save]')) {
+			const ta = doc.querySelector('[data-cfg-source]') as HTMLTextAreaElement | null;
+			const src = ta ? ta.value : (cfgState ? cfgState.source : '');
+			postVeskConfigSource(src);
+			return;
+		}
+		if (target.closest('[data-cfg-reload]')) {
+			refreshVeskConfig();
 			return;
 		}
 	}

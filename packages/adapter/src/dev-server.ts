@@ -20,6 +20,8 @@ import { openAiProvider } from '@vesk/agentic/src/providers/openai';
 import { anthropicProvider } from '@vesk/agentic/src/providers/anthropic';
 import { Agent } from '@vesk/agentic/src/loop';
 import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
+import { createWebTools } from '@vesk/agentic/src/tools/web';
+import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -285,16 +287,19 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     return new AgentCapabilityTable(mode);
   }
   async function runAgenticAgent(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
-    // API key is server-side only via VESK_AGENTIC_API_KEY env — never trust client-supplied key alone.
     const cfg = (providerConfig || {}) as Record<string, unknown>;
     const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
-    const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || '';
-    const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
-    const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || undefined;
+    const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || (process.env[`VESK_AGENTIC_API_KEY_${String(providerName).toUpperCase()}`] as string) || '';
+    const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : 'gpt-4o-mini');
+    const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || (process.env[`VESK_AGENTIC_BASE_URL_${String(providerName).toUpperCase()}`] as string) || undefined;
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
-    const provider = providerName === 'anthropic'
-      ? anthropicProvider({ apiKey, model, baseUrl, maxTokens })
-      : openAiProvider({ apiKey, model, baseUrl });
+    let provider: import('@vesk/agentic/src/loop').Provider;
+    if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
+    else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google.js'); provider = googleProvider({ apiKey, model, baseUrl }); }
+    else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama.js'); provider = ollamaProvider({ model, baseUrl }); }
+    else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:4096' });
+    else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
+    else provider = openAiProvider({ apiKey, model, baseUrl });
     const tools = createVeskTools({ projectDir: agenticProjectDir, appDir, veskDir: agenticVeskDir });
     const agent = new Agent({ provider, tools });
     return agent.run(prompt);

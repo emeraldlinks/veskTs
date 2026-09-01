@@ -25,6 +25,8 @@ import { openAiProvider } from '@vesk/agentic/src/providers/openai';
 import { anthropicProvider } from '@vesk/agentic/src/providers/anthropic';
 import { Agent } from '@vesk/agentic/src/loop';
 import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
+import { createWebTools } from '@vesk/agentic/src/tools/web';
+import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
@@ -155,16 +157,31 @@ export async function routeDevPanel(
       const runAgent = async (prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> => {
         const cfg = (providerConfig || {}) as Record<string, unknown>;
         const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
-        // Store API key server-side via VESK_AGENTIC_API_KEY env — never expose to browser.
-        const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || '';
-        const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
-        const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || undefined;
+        const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || (process.env[`VESK_AGENTIC_API_KEY_${String(providerName).toUpperCase()}`] as string) || '';
+        const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'opencode' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
+        const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || (process.env[`VESK_AGENTIC_BASE_URL_${String(providerName).toUpperCase()}`] as string) || undefined;
         const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
-        const provider = providerName === 'anthropic'
-          ? anthropicProvider({ apiKey, model, baseUrl, maxTokens })
-          : openAiProvider({ apiKey, model, baseUrl });
-        const tools = createVeskTools({ projectDir: deps.projectDir, appDir, veskDir });
-        const agent = new Agent({ provider, tools });
+        let provider: import('@vesk/agentic/src/loop').Provider;
+        if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
+        else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google.js'); provider = googleProvider({ apiKey, model, baseUrl }); }
+        else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama.js'); provider = ollamaProvider({ model, baseUrl }); }
+        else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
+        else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
+        else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
+        else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
+        else provider = openAiProvider({ apiKey, model, baseUrl });
+        const veskTools = createVeskTools({ projectDir: deps.projectDir, appDir, veskDir });
+        const webTools = createWebTools();
+        const browserTools = createBrowserTools();
+        const allTools = [...veskTools, ...webTools, ...browserTools];
+        // Filter by permissions table for the requested mode (server-enforced)
+        const modeTable = new (await import('@vesk/agentic/src/permissions.js')).AgentCapabilityTable(providerName === 'opencode' || providerName === 'opencode-go' ? 'agent' : (_mode as 'explore' | 'debug' | 'agent') || 'explore');
+        const filtered = allTools.filter(t => {
+          // web and browser are read-only, allow for explore+
+          if (t.name.startsWith('web.') || t.name.startsWith('browser.')) return modeTable.allows('readFiles');
+          return true;
+        });
+        const agent = new Agent({ provider, tools: filtered });
         return agent.run(prompt);
       };
       const agentRouter = createAgentRouter({

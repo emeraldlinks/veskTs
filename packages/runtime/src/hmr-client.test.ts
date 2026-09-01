@@ -33,6 +33,9 @@ import {
 	renderLogPanel,
 	renderDiagnosticsPanel,
 	renderSettingsPanel,
+	renderVeskConfigPanel,
+	renderSettingsWithConfig,
+	renderSettingsSubtabs,
 	loadDevtoolState,
 	saveDevtoolState,
 	defaultDevtoolState,
@@ -43,7 +46,7 @@ import {
 	DEV_TABS,
 	PLUGIN_SEARCH_SUGGESTIONS,
 } from './hmr-client';
-import type { PluginRecord, PluginExportsData, PluginSearchResult, DevDiagnostic } from './hmr-client';
+import type { PluginRecord, PluginExportsData, PluginSearchResult, DevDiagnostic, VeskConfigState } from './hmr-client';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -208,7 +211,7 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 // --- tab bar ------------------------------------------------------------------
 {
 	const html = renderTabBar('errors');
-	assert(DEV_TABS.length === 6, 'DEV_TABS exposes overview/errors/diagnostics/plugins/log/settings');
+	assert(DEV_TABS.length === 7, 'DEV_TABS exposes overview/agentic/errors/diagnostics/plugins/log/settings');
 	assert(html.includes('data-tab="overview"'), 'tab bar includes overview tab');
 	assert(html.includes('data-tab="diagnostics"'), 'tab bar includes diagnostics tab');
 	assert(html.includes('data-tab="plugins"'), 'tab bar includes plugins tab');
@@ -409,6 +412,98 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(!html.includes('class="__kp_opt active" data-key="pos" data-val="left"'), 'inactive position options are not marked active');
 }
 
+// --- Vesk Config panel (settings subtab) ---------------------------------------
+{
+	const loading = renderVeskConfigPanel(null);
+	assert(loading.includes('VESK CONFIG'), 'vesk config panel has VESK CONFIG label when loading');
+	assert(loading.includes('loading config'), 'vesk config shows loading state when null');
+	assert(loading.includes('/__vesk/config'), 'vesk config loading hints at GET /__vesk/config');
+
+	const errState: VeskConfigState = { path: null, exists: false, source: '', config: {}, loading: false, error: 'fetch failed', draftSource: '' };
+	const errHtml = renderVeskConfigPanel(errState);
+	assert(errHtml.includes('fetch failed'), 'vesk config surfaces load error');
+	assert(errHtml.includes('data-cfg-reload'), 'vesk config error offers retry');
+
+	const full: VeskConfigState = {
+		path: '/proj/vesk.config.ts',
+		exists: true,
+		source: "import { defineConfig } from '@vesk/compiler'\nexport default defineConfig({ appDir: 'app' })\n",
+		config: {
+			appDir: 'app',
+			outDir: '.vesk',
+			publicDir: 'public',
+			routeDataCache: 1500,
+			md: { html: 'allowlist', allowTags: ['a', 'em', 'strong'] },
+			security: {
+				xFrameOptions: 'DENY',
+				hsts: 'max-age=31536000; includeSubDomains',
+				referrerPolicy: 'strict-origin-when-cross-origin',
+				contentSecurityPolicy: "default-src 'self'",
+				autoEscape: true,
+				csrf: true,
+				redactLogs: true,
+				trustProxy: true,
+				cors: { origin: '*', methods: 'GET, POST' },
+				rateLimit: { windowMs: 60000, max: 100 },
+			},
+		},
+		draftSource: "import { defineConfig } from '@vesk/compiler'\nexport default defineConfig({ appDir: 'app' })\n",
+	};
+	const html = renderVeskConfigPanel(full);
+	assert(html.includes('VESK CONFIG'), 'vesk config panel has VESK CONFIG label');
+	assert(html.includes('data-cfg-key="appDir"'), 'vesk config has appDir text input');
+	assert(html.includes('data-cfg-key="outDir"'), 'vesk config has outDir text input');
+	assert(html.includes('data-cfg-key="publicDir"'), 'vesk config has publicDir text input');
+	assert(html.includes('data-cfg-key="routeDataCache"') && html.includes('type="number"'), 'vesk config has routeDataCache number input');
+	assert(html.includes('data-cfg-md-html'), 'vesk config has md.html select');
+	for (const v of ['escape', 'allow', 'allowlist']) assert(html.includes('value="' + v + '"'), 'vesk config md.html offers option ' + v);
+	assert(html.includes('data-cfg-md-tags'), 'vesk config has allowTags multi-input');
+	assert(html.includes('a, em, strong') || html.includes('a,em'), 'vesk config allowTags shows current tags');
+	assert(html.includes('data-sec-key="xFrameOptions"'), 'vesk config has xFrameOptions input');
+	assert(html.includes('data-sec-key="hsts"'), 'vesk config has hsts input');
+	assert(html.includes('data-sec-key="referrerPolicy"'), 'vesk config has referrerPolicy input');
+	assert(html.includes('data-sec-key="contentSecurityPolicy"') || html.includes('contentSecurityPolicy'), 'vesk config has csp input');
+	assert(html.includes('data-sec-toggle="autoEscape"'), 'vesk config has autoEscape toggle');
+	assert(html.includes('data-sec-toggle="csrf"'), 'vesk config has csrf toggle');
+	assert(html.includes('data-sec-toggle="redactLogs"'), 'vesk config has redactLogs toggle');
+	assert(html.includes('data-sec-toggle="trustProxy"') || html.includes('trustProxy'), 'vesk config has trustProxy control');
+	assert(html.includes('data-sec-key="cors.origin"'), 'vesk config has cors.origin input');
+	assert(html.includes('data-sec-key="rateLimit.windowMs"'), 'vesk config has rateLimit window');
+	assert(html.includes('data-sec-key="rateLimit.max"'), 'vesk config has rateLimit max');
+	assert(html.includes('data-cfg-source'), 'vesk config has raw textarea editor');
+	assert(html.includes('data-cfg-save'), 'vesk config has save button');
+	assert(html.includes('POST /__vesk/config {source}'), 'vesk config hints at POST {source} validation');
+	// plugins must be excluded entirely
+	assert(!html.includes('data-cfg-key="plugins"') && !html.toLowerCase().includes('> plugins</div>'), 'vesk config excludes plugins section');
+	assert(!html.includes('plugins:') || html.includes('plugins excluded'), 'vesk config does not expose plugins field');
+	// security toggles are present but not as plugins
+	assert(html.includes('SECURITY'), 'vesk config renders security section');
+
+	const withSaveOk: VeskConfigState = Object.assign({}, full, { saveOk: 'saved appDir', saving: false });
+	const saveOkHtml = renderVeskConfigPanel(withSaveOk);
+	assert(saveOkHtml.includes('saved appDir'), 'vesk config shows saveOk feedback');
+
+	const withSaveErr: VeskConfigState = Object.assign({}, full, { saveError: 'invalid config', saving: false });
+	const saveErrHtml = renderVeskConfigPanel(withSaveErr);
+	assert(saveErrHtml.includes('invalid config'), 'vesk config shows saveError');
+
+	const subPrefs = renderSettingsSubtabs('devtools');
+	assert(subPrefs.includes('data-settings-subtab="devtools"'), 'settings subtabs has devtools/prefs');
+	assert(subPrefs.includes('data-settings-subtab="vesk"'), 'settings subtabs has vesk/config');
+	assert(subPrefs.includes('VESK CONFIG'), 'settings subtabs labels VESK CONFIG');
+
+	const subCfg = renderSettingsSubtabs('vesk');
+	assert(subCfg.includes('active') && subCfg.indexOf('data-settings-subtab="vesk"') < subCfg.indexOf('active') + 200, 'config subtab active is marked');
+
+	const combinedPrefs = renderSettingsWithConfig({ theme: 'dark', pos: 'left', pluginsView: 'list', sidebarMode: 'rail' }, 'devtools', null);
+	assert(combinedPrefs.includes('&gt; SETTINGS'), 'combined settings has SETTINGS label in prefs mode');
+	assert(combinedPrefs.includes('VESK CONFIG'), 'combined settings always hints at VESK CONFIG subtab');
+
+	const combinedCfg = renderSettingsWithConfig({ theme: 'dark', pos: 'left', pluginsView: 'list', sidebarMode: 'rail' }, 'vesk', full);
+	assert(combinedCfg.includes('data-cfg-key="appDir"'), 'combined settings in config mode renders vesk config panel');
+	assert(combinedCfg.includes('data-cfg-source'), 'combined settings config mode has raw editor');
+}
+
 // --- devtool state persistence ----------------------------------------------------
 {
 	const defaults = defaultDevtoolState();
@@ -505,6 +600,23 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(src.includes('__kp_pl_list'), 'source wraps search results in a scrollable list');
 	assert(src.includes('__kp_pl_badge on'), 'source marks installed npm search results with an installed badge');
 	assert(src.includes("isInstalled ? 'installed' : 'install'"), 'source disables install for already-installed search results');
+	assert(src.includes('/__vesk/config'), 'source fetches GET /__vesk/config on settings open');
+	assert(src.includes('renderVeskConfigPanel'), 'source has Vesk Config panel renderer');
+	assert(src.includes('renderSettingsWithConfig') || src.includes('renderSettingsSubtabs'), 'source has settings subtab for Vesk Config');
+	assert(src.includes('data-cfg-key="appDir"') || src.includes("data-cfg-key"), 'source has appDir/outDir/publicDir inputs');
+	assert(src.includes('data-cfg-key="routeDataCache"'), 'source has routeDataCache number input');
+	assert(src.includes('data-cfg-md-html'), 'source has md.html select');
+	assert(src.includes('data-cfg-md-tags'), 'source has allowTags multi-input');
+	assert(src.includes('data-sec-key="xFrameOptions"'), 'source has xFrameOptions security control');
+	assert(src.includes('data-sec-toggle="autoEscape"'), 'source has autoEscape security toggle');
+	assert(src.includes('data-sec-toggle="csrf"'), 'source has csrf security toggle');
+	assert(src.includes('data-cfg-source'), 'source has raw vesk.config.ts textarea editor');
+	assert(src.includes('data-cfg-save'), 'source has save + validation for config source');
+	assert(src.includes('postVeskConfigKey') || src.includes("POST") && src.includes("/__vesk/config"), 'source posts {key,value} or {source} to /__vesk/config');
+	assert(!src.includes('data-cfg-key="plugins"'), 'source excludes plugins from Vesk Config (plugins excluded entirely)');
+	assert(src.includes('__kp_cfg_input'), 'source styles config inputs');
+	assert(src.includes('__kp_cfg_textarea'), 'source styles raw editor textarea');
+	assert(src.includes('__kp_cfg_select'), 'source styles config selects');
 }
 
 console.log('\nResults: ' + passed + ' passed, ' + failed + ' failed, ' + (passed + failed) + ' total\n');

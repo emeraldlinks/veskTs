@@ -33,6 +33,8 @@ import type { ProviderConfig } from './providers/types.js';
 import type { Checkpoint } from './checkpoints.js';
 import { CheckpointManager } from './checkpoints.js';
 import { loadAgenticConfig, saveAgenticConfig, getApiKey, saveApiKey } from './config.js';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { openAiProvider } from './providers/openai.js';
 import { anthropicProvider } from './providers/anthropic.js';
 import { googleProvider } from './providers/google.js';
@@ -114,6 +116,113 @@ function badRequest(message: string): DevPanelResponse {
 
 function denied(cap: string): DevPanelResponse {
   return jsonStatus(403, { error: `capability denied: ${cap}` });
+}
+
+// per-provider helpers — shared with config.ts but duplicated here to avoid circular
+// Strongly avoid leaking raw keys — only masked previews leave this module.
+const SUPPORTED_PROVIDERS: readonly string[] = ['openai', 'openai-compatible', 'anthropic', 'google', 'ollama'] as const;
+
+function maskPreview(key: string | null | undefined): string | null {
+  if (!key) return null;
+  const trimmed = String(key).trim();
+  if (!trimmed) return null;
+  if (trimmed.length <= 8) return '***';
+  return trimmed.slice(0, 7) + '***' + trimmed.slice(-4);
+}
+
+function isValidProvider(provider: string): boolean {
+  const normalized = provider.trim().toLowerCase();
+  return (SUPPORTED_PROVIDERS as readonly string[]).includes(normalized);
+}
+
+function normalizeProvider(provider: string): string {
+  return provider.trim().toLowerCase();
+}
+
+function providerEnvName(provider: string): string {
+  return `VESK_AGENTIC_API_KEY_${provider.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+}
+
+function sanitizeProviderName(provider: string): string {
+  const p = provider.trim().toLowerCase();
+  if (!p) return 'default';
+  return p.replace(/[\/\\]+/g, '_').replace(/[^a-z0-9_.-]/g, '_') || 'default';
+}
+
+// Precise per-provider key lookup — does NOT fallback to generic legacy for non-openai.
+// For openai, legacy .key / generic env is considered fallback for backwards compat.
+function getPerProviderKeyRaw(projectDir: string, provider: string): string | null {
+  const prov = normalizeProvider(provider);
+  // 1. per-provider env
+  try {
+    const envName = providerEnvName(prov);
+    const v = process.env[envName];
+    if (v && v.trim()) return v.trim();
+  } catch {}
+  // 2. per-provider file .vesk/agentic/keys/{provider}.key
+  try {
+    const p = resolve(projectDir, '.vesk', 'agentic', 'keys', `${sanitizeProviderName(prov)}.key`);
+    if (existsSync(p)) {
+      const v = readFileSync(p, 'utf-8').trim();
+      if (v) return v;
+    }
+  } catch {}
+  // 3. for openai family, fallback to legacy .key and generic env (backwards compat)
+  if (prov === 'openai' || prov === 'openai-compatible') {
+    try {
+      const generic = getApiKey(projectDir);
+      if (generic && generic.trim()) return generic.trim();
+    } catch {}
+    try {
+      if (process.env.VESK_AGENTIC_API_KEY && process.env.VESK_AGENTIC_API_KEY.trim()) return process.env.VESK_AGENTIC_API_KEY.trim();
+      if (process.env.OPENCODE_API_KEY && process.env.OPENCODE_API_KEY.trim()) return process.env.OPENCODE_API_KEY.trim();
+    } catch {}
+    try {
+      const legacy = resolve(projectDir, '.vesk', 'agentic', '.key');
+      if (existsSync(legacy)) {
+        const v = readFileSync(legacy, 'utf-8').trim();
+        if (v) return v;
+      }
+    } catch {}
+  }
+  return null;
+}
+
+function buildKeysMap(projectDir: string): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const p of SUPPORTED_PROVIDERS) {
+    try {
+      const k = getPerProviderKeyRaw(projectDir, p);
+      out[p] = !!k && String(k).trim().length > 0;
+    } catch {
+      out[p] = false;
+    }
+  }
+  return out;
+}
+
+function buildPreviewsMap(projectDir: string): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const p of SUPPORTED_PROVIDERS) {
+    try {
+      const k = getPerProviderKeyRaw(projectDir, p);
+      out[p] = maskPreview(k);
+    } catch {
+      out[p] = null;
+    }
+  }
+  return out;
+}
+
+function allowsAny(table: AgentCapabilityTable, caps: string[]): boolean {
+  for (const cap of caps) {
+    try {
+      if (table.allows(cap as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return true;
+    } catch {
+      // ignore
+    }
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -496,13 +605,20 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
       const params = new URLSearchParams(_search ?? '');
       const provider = (params.get('provider') || params.get('p') || loadAgenticConfig(projectDir).provider) as string;
       const cfg = loadAgenticConfig(projectDir);
-      const apiKey = getApiKey(projectDir) || '';
+      // per-provider key: try provider-specific first, fallback generic
+      let apiKey: string = '';
+      try {
+        apiKey = getApiKey(projectDir, provider) || getApiKey(projectDir) || '';
+      } catch {
+        apiKey = getApiKey(projectDir) || '';
+      }
       const baseUrl = params.get('baseUrl') || (cfg as unknown as { baseUrl?: string }).baseUrl;
       let models: string[] = [];
       try {
-        if (provider === 'openai' || provider === 'openai-compatible') {
-          const p = openAiProvider({ apiKey, baseUrl });
-          models = p.listModels ? await p.listModels({ apiKey, baseUrl }) : [];
+        if (provider === 'openai' || provider === 'openai-compatible' || provider === 'opencode' || provider === 'loopers' || provider === 'custom') {
+          const effectiveBase = baseUrl || (provider === 'opencode' ? 'http://localhost:4096' : provider === 'loopers' ? 'http://localhost:8080' : undefined);
+          const p = openAiProvider({ apiKey, baseUrl: effectiveBase });
+          models = p.listModels ? await p.listModels({ apiKey, baseUrl: effectiveBase }) : [];
         } else if (provider === 'anthropic') {
           const p = anthropicProvider({ apiKey, baseUrl });
           models = p.listModels ? await p.listModels({ apiKey, baseUrl }) : [];
@@ -521,16 +637,102 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
       return jsonStatus(200, { provider, models });
     }
 
+    // ── GET /__vesk/agent/keys + POST /__vesk/agent/keys ───────────────
+    if (pathname === '/__vesk/agent/keys') {
+      if (method === 'GET' || method === 'HEAD') {
+        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('readFiles');
+        try { if (!table.allows('readFiles' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('readFiles'); } catch { return denied('readFiles'); }
+        const keys = buildKeysMap(projectDir);
+        const keyPreviews = buildPreviewsMap(projectDir);
+        // compatibility aliases: previews, hasKeys, keyPreview alias already handled
+        // never echo raw keys — only hasKey booleans + masked previews
+        return jsonStatus(200, {
+          keys,
+          keyPreviews,
+          previews: keyPreviews,
+          hasKeys: keys,
+          keyPreview: keyPreviews,
+          // also include top-level provider-agnostic hint matching old config shape
+          hasKey: Object.values(keys).some(Boolean),
+        });
+      }
+      if (method === 'POST') {
+        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('modifyConfig');
+        // capability gate: modifyConfig OR createCheckpoint (either sufficient)
+        if (!allowsAny(table, ['modifyConfig', 'createCheckpoint'])) {
+          return denied('modifyConfig');
+        }
+        const b = (body ?? {}) as Record<string, unknown>;
+        // accept {provider, apiKey} or {provider, key} or {provider, value}
+        const providerRaw = typeof b.provider === 'string' ? b.provider : typeof b.p === 'string' ? b.p : typeof (b as Record<string, unknown>).name === 'string' ? (b as Record<string, unknown>).name as string : '';
+        const provider = providerRaw ? normalizeProvider(providerRaw) : '';
+        if (!provider) return badRequest('missing "provider" in body');
+        if (!isValidProvider(provider)) return badRequest(`unknown provider: ${providerRaw}`);
+        // apiKey may be under apiKey | key | value | token
+        const apiKeyRaw = typeof b.apiKey === 'string' ? b.apiKey : typeof b.key === 'string' ? b.key : typeof b.value === 'string' ? b.value : typeof b.token === 'string' ? b.token : typeof (b as Record<string, unknown>).api_key === 'string' ? (b as Record<string, unknown>).api_key as string : '';
+        if (!apiKeyRaw || !String(apiKeyRaw).trim()) return badRequest('missing "apiKey" in body');
+        const apiKey = String(apiKeyRaw).trim();
+        // write via saveApiKey — 3-arg per-provider form (projectDir, provider, apiKey)
+        try {
+          // config's saveApiKey supports (projectDir, provider, apiKey) when 3 args
+          // fallback to 2-arg generic if provider is 'openai' for backwards compat? Keep per-provider always.
+          // Detect arity: if saveApiKey length >=3, call 3-arg; else call 2-arg generic + per-file
+          // Our config now supports 3-arg, so use it.
+          const fn = saveApiKey as unknown as (a: string, b: string, c?: string) => void;
+          if (fn.length >= 3) {
+            fn(projectDir, provider, apiKey);
+          } else {
+            // old signature — still try per-provider file via direct call
+            (saveApiKey as unknown as (projectDir: string, key: string) => void)(projectDir, apiKey);
+            // also try 3-arg for new config that may be loaded
+            try { (saveApiKey as unknown as (a: string, b: string, c: string) => void)(projectDir, provider, apiKey); } catch {}
+          }
+        } catch (e) {
+          return jsonStatus(500, { error: e instanceof Error ? e.message : String(e) });
+        }
+        const preview = maskPreview(apiKey);
+        // return ok + hasKey + preview — never raw key
+        return jsonStatus(200, {
+          ok: true,
+          provider,
+          hasKey: true,
+          preview,
+          keyPreview: preview,
+          masked: preview,
+          keys: buildKeysMap(projectDir),
+          keyPreviews: buildPreviewsMap(projectDir),
+        });
+      }
+      return jsonStatus(405, { error: 'method not allowed' });
+    }
+
     // ── GET /__vesk/agent/config + POST /__vesk/agent/config ──
     if (pathname === '/__vesk/agent/config') {
       if (method === 'GET' || method === 'HEAD') {
         if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('readFiles');
         try { if (!table.allows('readFiles' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('readFiles'); } catch { return denied('readFiles'); }
         const cfg = loadAgenticConfig(projectDir);
-        // never leak full key
+        // never leak full key — only masked
         const key = getApiKey(projectDir);
-        const masked = key ? key.slice(0, 7) + '***' + key.slice(-4) : null;
-        return jsonStatus(200, { provider: cfg.provider, model: cfg.model, baseUrl: (cfg as unknown as { baseUrl?: string }).baseUrl ?? null, mode: cfg.mode, maxSteps: cfg.maxSteps, hasKey: cfg.hasKey, keyPreview: masked });
+        const masked = maskPreview(key);
+        const keys = buildKeysMap(projectDir);
+        const keyPreviews = buildPreviewsMap(projectDir);
+        return jsonStatus(200, {
+          provider: cfg.provider,
+          model: cfg.model,
+          baseUrl: (cfg as unknown as { baseUrl?: string }).baseUrl ?? null,
+          mode: cfg.mode,
+          maxSteps: cfg.maxSteps,
+          hasKey: cfg.hasKey,
+          keyPreview: masked,
+          // per-provider extensions — never raw keys
+          keys,
+          hasKeys: keys,
+          keyPreviews,
+          previews: keyPreviews,
+          hasKeyMap: keys,
+          previewsMap: keyPreviews,
+        });
       }
       if (method === 'POST') {
         if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('modifyConfig');
@@ -542,11 +744,68 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
         if (typeof b.baseUrl === 'string') patch.baseUrl = b.baseUrl;
         if (typeof b.mode === 'string' && ['explore','debug','agent'].includes(b.mode as string)) patch.mode = b.mode;
         if (typeof b.maxSteps === 'number') patch.maxSteps = b.maxSteps;
-        if (typeof b.apiKey === 'string' && b.apiKey.trim()) {
-          saveApiKey(projectDir, b.apiKey as string);
+        // backwards compat: single apiKey
+        if (typeof b.apiKey === 'string' && (b.apiKey as string).trim()) {
+          // For backwards compat, save as generic + also as per-current/new provider if known
+          const targetProvider = typeof b.provider === 'string' && b.provider.trim() ? normalizeProvider(b.provider) : (loadAgenticConfig(projectDir).provider as string);
+          try {
+            // save generic legacy
+            (saveApiKey as unknown as (a: string, b: string) => void)(projectDir, (b.apiKey as string).trim());
+          } catch {}
+          // also save per-provider for future GET keys consistency
+          try {
+            const fn = saveApiKey as unknown as (a: string, b: string, c?: string) => void;
+            if (fn.length >= 3 && isValidProvider(targetProvider)) {
+              fn(projectDir, targetProvider, (b.apiKey as string).trim());
+            }
+          } catch {}
         }
+        // per-provider map: {apiKeys:{openai:"sk-...", anthropic:"..."}}
+        const apiKeysRaw = b.apiKeys ?? (b as Record<string, unknown>).keys ?? (b as Record<string, unknown>).keyMap;
+        if (apiKeysRaw && typeof apiKeysRaw === 'object' && !Array.isArray(apiKeysRaw)) {
+          const map = apiKeysRaw as Record<string, unknown>;
+          for (const [provRaw, val] of Object.entries(map)) {
+            if (typeof val !== 'string' || !val.trim()) continue;
+            const prov = normalizeProvider(provRaw);
+            if (!isValidProvider(prov)) continue;
+            const keyVal = String(val).trim();
+            if (!keyVal) continue;
+            try {
+              const fn = saveApiKey as unknown as (a: string, b: string, c?: string) => void;
+              if (fn.length >= 3) fn(projectDir, prov, keyVal);
+              else {
+                // old 2-arg — at least save generic if provider is current, otherwise try 3-arg anyway
+                try { (saveApiKey as unknown as (a: string, b: string, c: string) => void)(projectDir, prov, keyVal); } catch {}
+                if (prov === normalizeProvider(loadAgenticConfig(projectDir).provider as string)) {
+                  (saveApiKey as unknown as (a: string, b: string) => void)(projectDir, keyVal);
+                }
+              }
+            } catch {}
+          }
+        }
+        // also handle alternative shape: {openaiKey, anthropicKey, ...} or {keys:{...}} already handled
+        // also handle direct per-provider fields like b["openai_apiKey"]? Not needed, but be lenient
+        // Check for apiKey per provider via body[provider] keys? Skip
+
         const next = saveAgenticConfig(projectDir, patch as never);
-        return jsonStatus(200, { ok: true, provider: next.provider, model: next.model, mode: next.mode });
+        // build updated per-provider maps for response (never raw keys)
+        const keys = buildKeysMap(projectDir);
+        const keyPreviews = buildPreviewsMap(projectDir);
+        // masked preview for the current/single key for backward compat
+        const curKey = getApiKey(projectDir);
+        const curMasked = maskPreview(curKey);
+        return jsonStatus(200, {
+          ok: true,
+          provider: next.provider,
+          model: next.model,
+          mode: next.mode,
+          hasKey: Object.values(keys).some(Boolean) || !!curKey,
+          keyPreview: curMasked,
+          keys,
+          hasKeys: keys,
+          keyPreviews,
+          previews: keyPreviews,
+        });
       }
       return jsonStatus(405, { error: 'method not allowed' });
     }
