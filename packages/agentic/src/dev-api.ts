@@ -657,11 +657,9 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
         });
       }
       if (method === 'POST') {
-        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('modifyConfig');
-        // capability gate: modifyConfig OR createCheckpoint (either sufficient)
-        if (!allowsAny(table, ['modifyConfig', 'createCheckpoint'])) {
-          return denied('modifyConfig');
-        }
+        // Setting your own API key is allowed in any mode (readFiles) — it's not a project write
+        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('readFiles');
+        try { if (!table.allows('readFiles' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('readFiles'); } catch { return denied('readFiles'); }
         const b = (body ?? {}) as Record<string, unknown>;
         // accept {provider, apiKey} or {provider, key} or {provider, value}
         const providerRaw = typeof b.provider === 'string' ? b.provider : typeof b.p === 'string' ? b.p : typeof (b as Record<string, unknown>).name === 'string' ? (b as Record<string, unknown>).name as string : '';
@@ -735,9 +733,13 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
         });
       }
       if (method === 'POST') {
-        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied('modifyConfig');
-        try { if (!table.allows('modifyConfig' as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied('modifyConfig'); } catch { return denied('modifyConfig'); }
         const b = (body ?? {}) as Record<string, unknown>;
+        // If body is only apiKey(s), allow with readFiles (setting your own key shouldn't require modifyConfig)
+        const isOnlyKeys = (typeof b.apiKey === 'string' && Object.keys(b).every(k => ['apiKey','provider','apiKeys','keys','keyMap'].includes(k))) || (b.apiKeys && typeof b.apiKeys === 'object');
+        let neededCap: 'modifyConfig' | 'readFiles' = 'modifyConfig';
+        if (isOnlyKeys) neededCap = 'readFiles';
+        if (!table || typeof (table as unknown as { allows?: unknown }).allows !== 'function') return denied(neededCap);
+        try { if (!table.allows(neededCap as unknown as Parameters<AgentCapabilityTable['allows']>[0])) return denied(neededCap); } catch { return denied(neededCap); }
         const patch: Record<string, unknown> = {};
         if (typeof b.provider === 'string') patch.provider = b.provider;
         if (typeof b.model === 'string') patch.model = b.model;
