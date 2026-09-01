@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync, chmodS
 import { resolve, dirname } from 'node:path';
 
 export interface AgenticConfig {
-  provider: 'openai' | 'anthropic' | 'google' | 'ollama';
+  provider: 'openai' | 'anthropic' | 'google' | 'ollama' | 'opencode' | 'opencode-go' | 'openrouter' | 'loopers' | 'custom';
   model: string;
   baseUrl?: string;
   mode: 'explore' | 'debug' | 'agent';
@@ -16,7 +16,10 @@ const DEFAULT_CONFIG: AgenticConfig = {
   maxSteps: 10,
 };
 
-export const SUPPORTED_PROVIDERS: string[] = ['openai', 'anthropic', 'google', 'ollama'];
+export const SUPPORTED_PROVIDERS: string[] = [
+  'openai', 'anthropic', 'google', 'ollama',
+  'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom',
+];
 
 // ---------------------------------------------------------------------------
 // Paths
@@ -24,9 +27,6 @@ export const SUPPORTED_PROVIDERS: string[] = ['openai', 'anthropic', 'google', '
 
 function configPath(projectDir: string): string {
   return resolve(projectDir, '.vesk', 'agentic', 'config.json');
-}
-function keyPath(projectDir: string): string {
-  return resolve(projectDir, '.vesk', 'agentic', '.key');
 }
 function keysDir(projectDir: string): string {
   return resolve(projectDir, '.vesk', 'agentic', 'keys');
@@ -38,11 +38,90 @@ function sanitizeProvider(provider: string): string {
   // replace any slash/backslash or .. and non-alnum except - _ .
   return p.replace(/[\/\\]+/g, '_').replace(/[^a-z0-9_.-]/g, '_') || 'default';
 }
+function normalizeProvider(provider: string): string {
+  return provider.trim().toLowerCase();
+}
 function providerKeyPath(projectDir: string, provider: string): string {
   return resolve(keysDir(projectDir), `${sanitizeProvider(provider)}.key`);
 }
-function providerEnvVar(provider: string): string {
-  return `VESK_AGENTIC_API_KEY_${provider.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+
+// ── .env.local provider keys (VK_{PROVIDER}_KEY) ────────────────────────────
+// Primary key store: project `.env.local` holds one line per provider, e.g.
+//   VK_OPENAI_KEY=sk-...
+//   VK_OPENCODE_KEY=sk-...
+//   VK_OPENCODE_GO_KEY=sk-...
+// These are read into `process.env` at CLI startup via loadEnvFiles, so
+// reading `process.env` reflects the file. Saving rewrites the file so the
+// change persists for later `vesk dev`/`vesk start` runs.
+export function providerDotenvVar(provider: string): string {
+  const prov = sanitizeProvider(provider);
+  // opencode-go -> VK_OPENCODE_GO_KEY
+  return `VK_${prov.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY`;
+}
+export function dotenvPath(projectDir: string): string {
+  return resolve(projectDir, '.env.local');
+}
+
+/**
+ * Read a provider key from the project `.env.local` file.
+ * Note: normally `process.env` already reflects `.env.local` (loaded at CLI
+ * startup); this reads the file directly as a defensive fallback (e.g. when
+ * the file changed after startup, or callers didn't go through loadEnvFiles).
+ */
+export function readDotenvValue(projectDir: string, key: string, def: string | null = null): string | null {
+  try {
+    const p = dotenvPath(projectDir);
+    if (!existsSync(p)) return def;
+    const content = readFileSync(p, 'utf-8');
+    for (const rawLine of content.split('\n')) {
+      const line = rawLine.trim();
+      if (!line || line.startsWith('#')) continue;
+      const eq = line.indexOf('=');
+      if (eq === -1) continue;
+      if (line.slice(0, eq).trim() !== key) continue;
+      let val = line.slice(eq + 1).trim();
+      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) val = val.slice(1, -1);
+      return val;
+    }
+    return def;
+  } catch {
+    return def;
+  }
+}
+
+/**
+ * Set a `KEY=VALUE` line in the project `.env.local`, creating the file if
+ * missing, updating in place if present. Also mirrors into `process.env` so
+ * the current process sees it immediately. Returns true on success.
+ */
+export function writeDotenvValue(projectDir: string, key: string, value: string): boolean {
+  const p = dotenvPath(projectDir);
+  const pad = value && !value.startsWith('#');
+  const newLine = `${key}=${pad && /^[A-Za-z0-9_@./:+-]+$/.test(value) ? value : JSON.stringify(value)}`;
+  try {
+    let out = '';
+    let replaced = false;
+    if (existsSync(p)) {
+      const lines = readFileSync(p, 'utf-8').split('\n');
+      for (const rawLine of lines) {
+        const trimmed = rawLine.trim();
+        const eq = trimmed.indexOf('=');
+        if (eq !== -1 && trimmed.slice(0, eq).trim() === key) {
+          out += newLine + '\n';
+          replaced = true;
+        } else {
+          out += rawLine + '\n';
+        }
+      }
+    }
+    if (!replaced) out += newLine + '\n';
+    writeFileSync(p, out, { mode: 0o600 });
+    try { chmodSync(p, 0o600); } catch {}
+    process.env[key] = value;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -53,38 +132,11 @@ export function loadAgenticConfig(projectDir: string): AgenticConfig & { hasKey:
   const p = configPath(projectDir);
   let cfg: AgenticConfig = { ...DEFAULT_CONFIG };
   try { if (existsSync(p)) cfg = { ...cfg, ...JSON.parse(readFileSync(p, 'utf-8')) }; } catch {}
-  // hasKey = true if any key exists (per-provider or legacy or env)
+  // hasKey = true if any provider key is set (read from .env.local VK_*_KEY)
   let hasKey = false;
   try {
-    if (existsSync(keyPath(projectDir))) hasKey = true;
-    else if (process.env.VESK_AGENTIC_API_KEY && process.env.VESK_AGENTIC_API_KEY.trim()) hasKey = true;
-    else if (process.env.OPENCODE_API_KEY && process.env.OPENCODE_API_KEY.trim()) hasKey = true;
-    else {
-      // check per-provider env/files
-      for (const prov of SUPPORTED_PROVIDERS) {
-        const envName = providerEnvVar(prov);
-        if (process.env[envName] && process.env[envName]!.trim()) { hasKey = true; break; }
-        if (existsSync(providerKeyPath(projectDir, prov))) { hasKey = true; break; }
-      }
-      if (!hasKey) {
-        try {
-          const dir = keysDir(projectDir);
-          if (existsSync(dir)) {
-            const files = readdirSync(dir);
-            if (files.some(f => f.endsWith('.key') && f.trim() !== '')) {
-              // verify at least one file non-empty
-              for (const f of files) {
-                if (!f.endsWith('.key')) continue;
-                try {
-                  const full = resolve(dir, f);
-                  const v = readFileSync(full, 'utf-8').trim();
-                  if (v) { hasKey = true; break; }
-                } catch {}
-              }
-            }
-          }
-        } catch {}
-      }
+    for (const prov of SUPPORTED_PROVIDERS) {
+      if (getProviderSpecificKey(projectDir, prov)) { hasKey = true; break; }
     }
   } catch {}
   return { ...cfg, hasKey };
@@ -136,9 +188,13 @@ export function getKeyPreview(projectDir: string, provider: string): string | nu
 function getProviderSpecificKey(projectDir: string, provider: string): string | null {
   if (!provider || !provider.trim()) return null;
   const prov = provider.trim();
-  const envName = providerEnvVar(prov);
-  const specific = process.env[envName];
-  if (specific && specific.trim()) return specific.trim();
+  // 0. .env.local VK_*_KEY (primary) — process.env reflects the file at startup
+  const dotenvName = providerDotenvVar(prov);
+  const dotenvEnv = process.env[dotenvName];
+  if (dotenvEnv && dotenvEnv.trim()) return dotenvEnv.trim();
+  const dotenvFile = readDotenvValue(projectDir, dotenvName);
+  if (dotenvFile && dotenvFile.trim()) return dotenvFile.trim();
+  // 1. legacy per-provider file (compat fallback)
   try {
     const pp = providerKeyPath(projectDir, prov);
     if (existsSync(pp)) {
@@ -158,75 +214,54 @@ function getProviderSpecificKey(projectDir: string, provider: string): string | 
  *
  * Supports both new 3-arg form `saveApiKey(projectDir, provider, apiKey)`
  * and legacy 2-arg form `saveApiKey(projectDir, apiKey)` for backward compat.
- * Per-provider keys are stored at `.vesk/agentic/keys/{provider}.key` with 0600.
- * Legacy form writes to `.vesk/agentic/.key`.
+ * Keys are stored in project `.env.local` as VK_{PROVIDER}_KEY (0600).
+ * The legacy 2-arg form targets the currently-configured provider.
  */
 export function saveApiKey(projectDir: string, providerOrApiKey: string, apiKeyMaybe?: string): void {
   let provider: string | null;
   let apiKey: string;
   if (apiKeyMaybe === undefined) {
-    // legacy 2-arg
-    provider = null;
+    // legacy 2-arg — target the currently-configured provider
+    provider = loadAgenticConfig(projectDir).provider;
     apiKey = providerOrApiKey;
   } else {
     provider = providerOrApiKey;
     apiKey = apiKeyMaybe;
   }
   if (typeof apiKey !== 'string') apiKey = String(apiKey ?? '');
-  // normalize provider
   if (provider !== null) {
     provider = provider.trim();
     if (!provider) provider = null;
   }
 
   if (provider) {
-    const p = providerKeyPath(projectDir, provider);
-    try {
-      mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, apiKey, { mode: 0o600 });
-      try { chmodSync(p, 0o600); } catch {}
-    } catch {}
-    // set per-provider env for current process
-    try {
-      const envName = providerEnvVar(provider);
-      process.env[envName] = apiKey;
-      // also set generic env for backward compat if not already set? Do not overwrite generic if it already points elsewhere;
-      // but ensure generic is set for callers that use old getApiKey() without provider.
-      // We set generic only if provider is 'openai' or if generic not set — to avoid cross-contamination, prefer per-provider env only.
-      // For safety, also set generic when legacy file doesn't exist and generic env empty:
-      // (uncomment if needed)
-      // if (!process.env.VESK_AGENTIC_API_KEY) process.env.VESK_AGENTIC_API_KEY = apiKey;
-    } catch {}
+    // Primary: write/update the provider line in project .env.local (VK_*_KEY)
+    const dotenvName = providerDotenvVar(provider);
+    writeDotenvValue(projectDir, dotenvName, apiKey);
   } else {
-    // legacy
-    const p = keyPath(projectDir);
-    try {
-      mkdirSync(dirname(p), { recursive: true });
-      writeFileSync(p, apiKey, { mode: 0o600 });
-      try { chmodSync(p, 0o600); } catch {}
-    } catch {}
-    try { process.env.VESK_AGENTIC_API_KEY = apiKey; } catch {}
+    // no provider configured — fall back to the openai line
+    writeDotenvValue(projectDir, providerDotenvVar('openai'), apiKey);
   }
 }
 
 /**
- * Get API key. With `provider`, precedence:
- *   1. VESK_AGENTIC_API_KEY_{PROVIDER} env (uppercased, non-alnum -> _)
- *   2. .vesk/agentic/keys/{provider}.key
- *   3. legacy .vesk/agentic/.key
- *   4. VESK_AGENTIC_API_KEY env (generic)
- *   5. OPENCODE_API_KEY env (legacy alias)
- * Without provider: generic env -> legacy file -> null
+ * Get API key for a provider.
+ * Precedence:
+ *   1. .env.local VK_{PROVIDER}_KEY (primary store; reflected in process.env)
+ *   2. (fallback) legacy .vesk/agentic/keys/{provider}.key
+ * If `provider` is omitted, returns the key for the currently-configured
+ * provider, else null.
  */
 export function getApiKey(projectDir: string, provider?: string): string | null {
   const hasProvider = typeof provider === 'string' && provider.trim().length > 0;
   if (hasProvider) {
     const prov = provider!.trim();
-    // 1. per-provider env
-    const envName = providerEnvVar(prov);
-    const specific = process.env[envName];
-    if (specific && specific.trim()) return specific.trim();
-    // 2. per-provider file
+    const dotenvName = providerDotenvVar(prov);
+    if (process.env[dotenvName] && process.env[dotenvName]!.trim()) return process.env[dotenvName]!.trim();
+    try {
+      const df = readDotenvValue(projectDir, dotenvName);
+      if (df && df.trim()) return df.trim();
+    } catch {}
     try {
       const pp = providerKeyPath(projectDir, prov);
       if (existsSync(pp)) {
@@ -234,28 +269,14 @@ export function getApiKey(projectDir: string, provider?: string): string | null 
         if (v) return v;
       }
     } catch {}
-    // 3. legacy .key
-    try {
-      const lp = keyPath(projectDir);
-      if (existsSync(lp)) {
-        const v = readFileSync(lp, 'utf-8').trim();
-        if (v) return v;
-      }
-    } catch {}
-    // 4. generic env
-    if (process.env.VESK_AGENTIC_API_KEY && process.env.VESK_AGENTIC_API_KEY.trim()) return process.env.VESK_AGENTIC_API_KEY.trim();
-    if (process.env.OPENCODE_API_KEY && process.env.OPENCODE_API_KEY.trim()) return process.env.OPENCODE_API_KEY.trim();
     return null;
   } else {
-    // no provider — legacy behavior + also check if any provider env? Keep old order: env then legacy
-    if (process.env.VESK_AGENTIC_API_KEY && process.env.VESK_AGENTIC_API_KEY.trim()) return process.env.VESK_AGENTIC_API_KEY.trim();
-    if (process.env.OPENCODE_API_KEY && process.env.OPENCODE_API_KEY.trim()) return process.env.OPENCODE_API_KEY.trim();
+    const prov = normalizeProvider(loadAgenticConfig(projectDir).provider);
+    const dotenvName = providerDotenvVar(prov);
+    if (process.env[dotenvName] && process.env[dotenvName]!.trim()) return process.env[dotenvName]!.trim();
     try {
-      const lp = keyPath(projectDir);
-      if (existsSync(lp)) {
-        const v = readFileSync(lp, 'utf-8').trim();
-        if (v) return v;
-      }
+      const df = readDotenvValue(projectDir, dotenvName);
+      if (df && df.trim()) return df.trim();
     } catch {}
     return null;
   }
@@ -310,25 +331,28 @@ export const hasApiKeys = hasApiKey;
 export function listApiKeys(projectDir: string): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   const seen = new Set<string>(SUPPORTED_PROVIDERS);
-  // discover additional providers from keys directory
+  // discover additional providers from .env.local VK_*_KEY lines
   try {
-    const dir = keysDir(projectDir);
-    if (existsSync(dir)) {
-      const files = readdirSync(dir);
-      for (const f of files) {
-        if (f.endsWith('.key')) {
-          const name = f.slice(0, -4);
-          if (name) seen.add(name);
-        }
+    const p = dotenvPath(projectDir);
+    if (existsSync(p)) {
+      for (const rawLine of readFileSync(p, 'utf-8').split('\n')) {
+        const trimmed = rawLine.trim();
+        if (!trimmed.startsWith('VK_') || !trimmed.endsWith('_KEY=') && !trimmed.includes('_KEY=')) continue;
+        const eq = trimmed.indexOf('=');
+        if (eq === -1) continue;
+        const k = trimmed.slice(0, eq).trim();
+        if (!k.startsWith('VK_') || !k.endsWith('_KEY')) continue;
+        const prov = k.slice(3, -4).toLowerCase().replace(/_/g, '-');
+        if (prov) seen.add(prov);
       }
     }
   } catch {}
-  // also consider env vars for providers not in seen? Scan process.env for VESK_AGENTIC_API_KEY_* 
+  // also consider VK_*_KEY env vars not in seen
   try {
     for (const k of Object.keys(process.env)) {
-      if (k.startsWith('VESK_AGENTIC_API_KEY_') && k !== 'VESK_AGENTIC_API_KEY') {
-        const prov = k.slice('VESK_AGENTIC_API_KEY_'.length).toLowerCase().replace(/_/g, '-');
-        seen.add(prov);
+      if (k.startsWith('VK_') && k.endsWith('_KEY')) {
+        const prov = k.slice(3, -4).toLowerCase().replace(/_/g, '-');
+        if (prov) seen.add(prov);
       }
     }
   } catch {}

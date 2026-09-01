@@ -22,6 +22,7 @@ import { Agent } from '@vesk/agentic/src/loop';
 import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
 import { createWebTools } from '@vesk/agentic/src/tools/web';
 import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
+import { getApiKey, loadAgenticConfig, SUPPORTED_PROVIDERS } from '@vesk/agentic/src/config';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -262,18 +263,19 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
 
   // ── @vesk/agentic dev API (B6-plug) — chained BEFORE the core dev API ─────
   // Chain: createAgentRouter (CheckpointManager + AgentCapabilityTable + Provider
-  // via openAiProvider/anthropicProvider, VESK_AGENTIC_API_KEY server-side) →
+  // via openAiProvider/anthropicProvider, .env.local VK_{PROVIDER}_KEY) →
   // createDevApiRouter. Gate: only expose /__vesk/agent/* when @vesk/agentic
   // is installed AND active (otherwise lean core, no agent surface).
   const agenticCheckpointManager = new CheckpointManager();
   const agenticVeskDir = resolve(appDir, '..', '.vesk');
   const agenticProjectDir = resolve(appDir, '..');
   function isAgenticActive(): boolean {
-    if (process.env.VESK_AGENTIC_API_KEY) return true;
+    try {
+      if (SUPPORTED_PROVIDERS.some((p) => !!getApiKey(agenticProjectDir, p))) return true;
+    } catch {}
     try {
       const records = getPluginRecords(appDir, agenticVeskDir, configPluginNames);
       const rec = records.find((r) => r.name === '@vesk/agentic' || r.package === '@vesk/agentic');
-      // Gate only if installed; if not installed at all, no agent surface unless key is set (live testing).
       if (!rec) return false;
       return rec.active;
     } catch {
@@ -288,10 +290,10 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   }
   async function runAgenticAgent(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
     const cfg = (providerConfig || {}) as Record<string, unknown>;
-    const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
-    const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || (process.env[`VESK_AGENTIC_API_KEY_${String(providerName).toUpperCase()}`] as string) || '';
-    const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : 'gpt-4o-mini');
-    const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || (process.env[`VESK_AGENTIC_BASE_URL_${String(providerName).toUpperCase()}`] as string) || undefined;
+    const providerName = String(cfg.provider as string || loadAgenticConfig(agenticProjectDir).provider || 'openai');
+    const apiKey = (cfg.apiKey as string) || getApiKey(agenticProjectDir, providerName) || '';
+    const model = (cfg.model as string) || (loadAgenticConfig(agenticProjectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : 'gpt-4o-mini');
+    const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(agenticProjectDir).baseUrl as string) || undefined;
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
     let provider: import('@vesk/agentic/src/loop').Provider;
     if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
@@ -396,7 +398,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     // Dev panel endpoints (/__vesk/...): HMR state, plugin list, activate/
     // deactivate/install/uninstall. Routed through the pure injectable router.
     // Chain: agent router (CheckpointManager + AgentCapabilityTable + Provider
-    // via openAiProvider/anthropicProvider, VESK_AGENTIC_API_KEY server-side)
+    // via openAiProvider/anthropicProvider, .env.local VK_{PROVIDER}_KEY)
     // is tried BEFORE the core dev panel, gated by @vesk/agentic active.
     if (url.pathname.startsWith('/__vesk/')) {
       let body: unknown = undefined;

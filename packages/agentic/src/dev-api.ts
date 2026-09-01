@@ -32,7 +32,7 @@ import type { AgentResult } from './loop.js';
 import type { ProviderConfig } from './providers/types.js';
 import type { Checkpoint } from './checkpoints.js';
 import { CheckpointManager } from './checkpoints.js';
-import { loadAgenticConfig, saveAgenticConfig, getApiKey, saveApiKey } from './config.js';
+import { loadAgenticConfig, saveAgenticConfig, getApiKey, saveApiKey, providerDotenvVar as defaultVkVar, readDotenvValue } from './config.js';
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { openAiProvider } from './providers/openai.js';
@@ -120,7 +120,10 @@ function denied(cap: string): DevPanelResponse {
 
 // per-provider helpers — shared with config.ts but duplicated here to avoid circular
 // Strongly avoid leaking raw keys — only masked previews leave this module.
-const SUPPORTED_PROVIDERS: readonly string[] = ['openai', 'anthropic', 'google', 'ollama'] as const;
+const SUPPORTED_PROVIDERS: readonly string[] = [
+  'openai', 'anthropic', 'google', 'ollama',
+  'opencode', 'opencode-go', 'openrouter', 'loopers', 'custom',
+] as const;
 
 function maskPreview(key: string | null | undefined): string | null {
   if (!key) return null;
@@ -139,27 +142,29 @@ function normalizeProvider(provider: string): string {
   return provider.trim().toLowerCase();
 }
 
-function providerEnvName(provider: string): string {
-  return `VESK_AGENTIC_API_KEY_${provider.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
-}
-
 function sanitizeProviderName(provider: string): string {
   const p = provider.trim().toLowerCase();
   if (!p) return 'default';
   return p.replace(/[\/\\]+/g, '_').replace(/[^a-z0-9_.-]/g, '_') || 'default';
 }
 
-// Precise per-provider key lookup — does NOT fallback to generic legacy for non-openai.
-// For openai, legacy .key / generic env is considered fallback for backwards compat.
+// Precise per-provider key lookup from project .env.local VK_{PROVIDER}_KEY.
+// The CLI loads .env.local into process.env at startup, so process.env is the
+// primary read; a direct file read is a defensive fallback for edits made
+// after startup.
 function getPerProviderKeyRaw(projectDir: string, provider: string): string | null {
   const prov = normalizeProvider(provider);
-  // 1. per-provider env
+  const dotenvName = defaultVkVar(prov);
+  // 1. .env.local VK_*_KEY (mirrored in process.env)
   try {
-    const envName = providerEnvName(prov);
-    const v = process.env[envName];
+    const v = process.env[dotenvName];
     if (v && v.trim()) return v.trim();
   } catch {}
-  // 2. per-provider file .vesk/agentic/keys/{provider}.key
+  try {
+    const df = readDotenvValue(projectDir, dotenvName);
+    if (df && df.trim()) return df.trim();
+  } catch {}
+  // 2. legacy per-provider file .vesk/agentic/keys/{provider}.key (compat)
   try {
     const p = resolve(projectDir, '.vesk', 'agentic', 'keys', `${sanitizeProviderName(prov)}.key`);
     if (existsSync(p)) {
@@ -167,24 +172,6 @@ function getPerProviderKeyRaw(projectDir: string, provider: string): string | nu
       if (v) return v;
     }
   } catch {}
-  // 3. for openai family, fallback to legacy .key and generic env (backwards compat)
-  if (prov === 'openai' ) {
-    try {
-      const generic = getApiKey(projectDir);
-      if (generic && generic.trim()) return generic.trim();
-    } catch {}
-    try {
-      if (process.env.VESK_AGENTIC_API_KEY && process.env.VESK_AGENTIC_API_KEY.trim()) return process.env.VESK_AGENTIC_API_KEY.trim();
-      if (process.env.OPENCODE_API_KEY && process.env.OPENCODE_API_KEY.trim()) return process.env.OPENCODE_API_KEY.trim();
-    } catch {}
-    try {
-      const legacy = resolve(projectDir, '.vesk', 'agentic', '.key');
-      if (existsSync(legacy)) {
-        const v = readFileSync(legacy, 'utf-8').trim();
-        if (v) return v;
-      }
-    } catch {}
-  }
   return null;
 }
 

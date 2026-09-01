@@ -1303,8 +1303,10 @@ export function agenticProviderLabel(p: string): string {
 	}
 }
 
-export function buildAgenticModelsUrl(provider: string): string {
-	return AGENTIC_MODELS_URL + '?provider=' + encodeURIComponent(provider);
+export function buildAgenticModelsUrl(provider: string, baseUrl?: string): string {
+	let url = AGENTIC_MODELS_URL + '?provider=' + encodeURIComponent(provider);
+	if (baseUrl && baseUrl.trim()) url += '&baseUrl=' + encodeURIComponent(baseUrl.trim());
+	return url;
 }
 
 export function filterAgenticModels(models: string[], query: string): string[] {
@@ -1851,6 +1853,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	let agenticModelsCache: string[] = [];
 	let agenticModelsLoading = false;
 	let agenticModelsError: string | null = null;
+	let agenticBaseUrl = '';
 	let agenticRunning = false;
 	let agenticError: string | null = null;
 	let agenticInput = '';
@@ -1949,6 +1952,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			ui.agenticProvider = val;
 			agenticModelsCache = [];
 			ui.agenticModels = [];
+			if (agenticConfigState) agenticConfigState.models = [];
 			refreshAgenticModels();
 			// also refresh for settings sub-tab if open
 			if (activeTab === 'settings' && settingsSubtab === 'agentic') refreshAgenticModels();
@@ -2249,6 +2253,9 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				const v = agBaseEl.value || '';
 				saveAgenticConfigPatch({ baseUrl: v });
 				if (agenticConfigState) agenticConfigState.baseUrl = v;
+				agenticBaseUrl = v;
+				// A base URL change can turn a stub list (custom) into a real one — refresh.
+				refreshAgenticModels();
 				return;
 			}
 			const agBaseKeyEl = target.closest('[data-agentic-key="baseUrl"]') as HTMLInputElement | null;
@@ -2256,6 +2263,8 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				const v = agBaseKeyEl.value || '';
 				saveAgenticConfigPatch({ baseUrl: v });
 				if (agenticConfigState) agenticConfigState.baseUrl = v;
+				agenticBaseUrl = v;
+				refreshAgenticModels();
 				return;
 			}
 			const agMaxEl = target.closest('[data-agentic-maxsteps]') as HTMLInputElement | null;
@@ -2611,7 +2620,9 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 						saving: agenticConfigSaving,
 						saveError: agenticConfigSaveError,
 						saveOk: agenticConfigSaveOk,
-						models: agenticConfigState.models.length ? agenticConfigState.models : agenticModelsCache.slice(),
+						// Live cache always wins over the possibly-stale config snapshot — the
+						// subtab must show the models fetched for the CURRENT provider/baseUrl.
+						models: agenticModelsCache.length ? agenticModelsCache.slice() : agenticConfigState.models,
 						modelsLoading: agenticModelsLoading,
 						modelsError: agenticModelsError,
 					};
@@ -2856,6 +2867,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				const provider = typeof d.provider === 'string' && AGENTIC_PROVIDERS.indexOf(d.provider as string) !== -1 ? String(d.provider) : ui.agenticProvider;
 				const model = typeof d.model === 'string' ? String(d.model) : ui.agenticModel;
 				const baseUrl = typeof d.baseUrl === 'string' ? String(d.baseUrl) : (typeof (d as Record<string, unknown>).baseUrl === 'string' ? String((d as Record<string, unknown>).baseUrl) : '');
+				agenticBaseUrl = baseUrl;
 				const mode = typeof d.mode === 'string' && isAgenticMode(d.mode as string) ? (d.mode as AgenticMode) : ui.agenticMode;
 				const maxSteps = typeof d.maxSteps === 'number' ? d.maxSteps as number : 10;
 				const hasKey = !!d.hasKey;
@@ -2967,7 +2979,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		agenticModelsLoading = true;
 		agenticModelsError = null;
 		renderPanel();
-		const url = buildAgenticModelsUrl(ui.agenticProvider);
+		const url = buildAgenticModelsUrl(ui.agenticProvider, agenticBaseUrl);
 		fetch(url)
 			.then(function (r) {
 				if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -2981,8 +2993,17 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				} else if (Array.isArray(data)) {
 					list = (data as unknown[]).filter(function (v) { return typeof v === 'string'; }) as string[];
 				}
+				// Live models always win — keep the settings subtab in sync with the cache.
 				agenticModelsCache = list;
 				ui.agenticModels = list.slice();
+				if (agenticConfigState) {
+					agenticConfigState.models = list.slice();
+					agenticConfigState.modelsLoading = false;
+					agenticConfigState.modelsError = null;
+					// reflect the resolved provider/baseUrl so the subtab is self-consistent
+					agenticConfigState.provider = ui.agenticProvider;
+					agenticConfigState.baseUrl = agenticBaseUrl;
+				}
 				persistUi();
 				agenticModelsLoading = false;
 				renderPanel();
@@ -3130,7 +3151,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				agenticMessages.push({ role: 'system', content: 'fetching models for ' + ui.agenticProvider + '...', ts: Date.now() });
 				renderPanel();
 				if (typeof fetch !== 'undefined') {
-					fetch(buildAgenticModelsUrl(ui.agenticProvider)).then(function (r) { return r.json(); }).then(function (data: { models?: string[] }) {
+					fetch(buildAgenticModelsUrl(ui.agenticProvider, agenticBaseUrl)).then(function (r) { return r.json(); }).then(function (data: { models?: string[] }) {
 						const list = Array.isArray(data.models) ? data.models : [];
 						agenticModelsCache = list; ui.agenticModels = list.slice(); persistUi();
 						agenticMessages.push({ role: 'system', content: 'models (' + ui.agenticProvider + '): ' + (list.length ? list.join(', ') : 'none (fallback)'), ts: Date.now() });

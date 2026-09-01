@@ -24,6 +24,7 @@ import { AgentCapabilityTable } from '@vesk/agentic/src/permissions';
 import { openAiProvider } from '@vesk/agentic/src/providers/openai';
 import { anthropicProvider } from '@vesk/agentic/src/providers/anthropic';
 import { Agent } from '@vesk/agentic/src/loop';
+import { getApiKey, loadAgenticConfig, SUPPORTED_PROVIDERS } from '@vesk/agentic/src/config';
 import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
 import { createWebTools } from '@vesk/agentic/src/tools/web';
 import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
@@ -140,13 +141,16 @@ export async function routeDevPanel(
   const configPluginNames = deps.configNames();
   // ── @vesk/agentic — chain createAgentRouter BEFORE createDevApiRouter ─────
   // Uses CheckpointManager + AgentCapabilityTable + Provider via
-  // openAiProvider/anthropicProvider; API key server-side via VESK_AGENTIC_API_KEY.
-  // Gate: only expose /__vesk/agent/* when @vesk/agentic is installed AND active.
+  // openAiProvider/anthropicProvider; API keys per-provider from .env.local
+  // VK_{PROVIDER}_KEY.
+  // Gate: expose /__vesk/agent/* when @vesk/agentic is installed+active OR any
+  // provider key (VK_*_KEY) is configured in .env.local.
   try {
     const records = getPluginRecords(appDir, veskDir, configPluginNames);
     const rec = records.find((r) => r.name === '@vesk/agentic' || r.package === '@vesk/agentic');
-    // Gate: plugin active OR API key present (for live testing without full install)
-    const isAgenticActive = (!!rec && rec.active) || !!process.env.VESK_AGENTIC_API_KEY;
+    const hasProviderKey = SUPPORTED_PROVIDERS.some((p) => !!getApiKey(deps.projectDir, p));
+    // Gate: plugin active OR any provider key present
+    const isAgenticActive = (!!rec && rec.active) || hasProviderKey;
     if (isAgenticActive) {
       const getPermissions = (): AgentCapabilityTable => {
         const rawMode = (process.env.VESK_AGENTIC_MODE as string) || 'explore';
@@ -156,10 +160,10 @@ export async function routeDevPanel(
       };
       const runAgent = async (prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> => {
         const cfg = (providerConfig || {}) as Record<string, unknown>;
-        const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
-        const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || (process.env[`VESK_AGENTIC_API_KEY_${String(providerName).toUpperCase()}`] as string) || '';
-        const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'opencode' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
-        const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || (process.env[`VESK_AGENTIC_BASE_URL_${String(providerName).toUpperCase()}`] as string) || undefined;
+        const providerName = String(cfg.provider as string || loadAgenticConfig(deps.projectDir).provider || 'openai');
+        const apiKey = (cfg.apiKey as string) || getApiKey(deps.projectDir, providerName) || '';
+        const model = (cfg.model as string) || (loadAgenticConfig(deps.projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'opencode' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
+        const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(deps.projectDir).baseUrl as string) || undefined;
         const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
         let provider: import('@vesk/agentic/src/loop').Provider;
         if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
@@ -535,10 +539,12 @@ export async function startDevServer(port: number, projectDir: string, config: R
     },
   });
 
-  // ── @vesk/agentic — agent router for startDevServer (also gated by VESK_AGENTIC_API_KEY for live testing)
+  // ── @vesk/agentic — agent router for startDevServer (per-provider .env.local keys)
   const agenticCheckpointManagerMain = new CheckpointManager();
   function isAgenticActiveMain(): boolean {
-    if (process.env.VESK_AGENTIC_API_KEY) return true;
+    try {
+      if (SUPPORTED_PROVIDERS.some((p) => !!getApiKey(projectDir, p))) return true;
+    } catch {}
     try {
       const recs = getPluginRecords(appDirPath, veskStateDir, configPluginNames);
       const rec = recs.find((r) => r.name === '@vesk/agentic' || r.package === '@vesk/agentic');
@@ -553,10 +559,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
   }
   async function runAgenticAgentMain(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
     const cfg = (providerConfig || {}) as Record<string, unknown>;
-    const providerName = (cfg.provider as string) || (process.env.VESK_AGENTIC_PROVIDER as string) || 'openai';
-    const apiKey = process.env.VESK_AGENTIC_API_KEY || (cfg.apiKey as string) || '';
-    const model = (cfg.model as string) || (process.env.VESK_AGENTIC_MODEL as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
-    const baseUrl = (cfg.baseUrl as string) || (process.env.VESK_AGENTIC_BASE_URL as string) || undefined;
+    const providerName = String(cfg.provider as string || loadAgenticConfig(projectDir).provider || 'openai');
+    const apiKey = (cfg.apiKey as string) || getApiKey(projectDir, providerName) || '';
+    const model = (cfg.model as string) || (loadAgenticConfig(projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : 'gpt-4o-mini');
+    const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(projectDir).baseUrl as string) || undefined;
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
     const provider = providerName === 'anthropic' ? anthropicProvider({ apiKey, model, baseUrl, maxTokens }) : openAiProvider({ apiKey, model, baseUrl });
     const tools = createVeskTools({ projectDir, appDir: appDirPath, veskDir: veskStateDir });

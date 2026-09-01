@@ -11,10 +11,10 @@
 
 export interface AgenticOptions {
   /** LLM provider. Default 'openai'. */
-  provider?: 'openai' | 'anthropic' | 'google' | 'ollama';
+  provider?: 'openai' | 'anthropic' | 'google' | 'ollama' | 'opencode' | 'opencode-go' | 'openrouter' | 'loopers' | 'custom';
   /** Model name (e.g. gpt-4o-mini, claude-sonnet-4-6, gemini-2.0-flash, llama3.1). */
   model?: string;
-  /** API key. Prefer env var VESK_AGENTIC_API_KEY — never commit to git. */
+  /** API key. Stored per-provider in the project `.env.local` as VK_{PROVIDER}_KEY — never commit to git. */
   apiKey?: string;
   /** Custom base URL for OpenAI-compatible providers or self-hosted Ollama. */
   baseUrl?: string;
