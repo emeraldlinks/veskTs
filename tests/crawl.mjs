@@ -37,8 +37,6 @@ import { existsSync } from 'node:fs';
 
 const CHROMIUM_CANDIDATES = [
   '/data/data/com.termux/files/usr/bin/chromium-browser',
-  '/usr/sbin/chromium',
-  '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
   '/usr/bin/google-chrome',
 ];

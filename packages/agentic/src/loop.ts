@@ -47,8 +47,15 @@ export type CompletionResponse =
   | { kind: 'message'; content: string }
   | { kind: 'tool_calls'; toolCalls: ToolCall[] };
 
+/** Provider-level streaming event (one per `completeStream` invocation). */
+export type StreamEvent =
+  | { kind: 'delta'; content: string }
+  | { kind: 'message'; content: string }
+  | { kind: 'tool_calls'; toolCalls: ToolCall[] };
+
 export interface Provider {
   complete(request: CompletionRequest): Promise<CompletionResponse>;
+  completeStream?(request: CompletionRequest): AsyncIterable<StreamEvent>;
   listModels?(options: { apiKey?: string; baseUrl?: string }): Promise<string[]>;
 }
 
@@ -56,11 +63,34 @@ export interface AgentOptions {
   provider: Provider;
   tools?: Tool[];
   system?: string;
-  maxSteps?: number; // default 10
+  /** Soft step budget. The agent finishes as soon as the model returns a plain
+      message; once `step` passes this budget without a final message it either
+      throws `MaxStepsExceededError` (when `autoExtend` is false) or keeps going
+      (when `autoExtend` is true). Default 10. */
+  maxSteps?: number;
+  /** When true, tool-calling steps beyond `maxSteps` are allowed to continue up
+      to `hardMaxSteps` instead of stopping, so multi-step tasks aren't cut off
+      prematurely while progress is being made. Default false. */
+  autoExtend?: boolean;
+  /** Absolute step ceiling used when `autoExtend` is true. Defaults to
+      `max(maxSteps * 4, maxSteps + 20)`. */
+  hardMaxSteps?: number;
   onStep?: (step: number) => void | Promise<void>;
   onToolCall?: (call: ToolCall) => void | Promise<void>;
   onToolResult?: (call: ToolCall, output: string) => void | Promise<void>;
 }
+
+/** Agent-level streaming event (`runStream`). */
+export type AgentStreamEvent =
+  | { type: 'user'; content: string }
+  | { type: 'step'; step: number; budget: number }
+  | { type: 'assistant_start'; step: number }
+  | { type: 'text_delta'; content: string }
+  | { type: 'assistant_end'; step: number; content: string }
+  | { type: 'tool_call'; step: number; call: ToolCall }
+  | { type: 'tool_result'; step: number; call: ToolCall; output: string }
+  | { type: 'done'; result: AgentResult }
+  | { type: 'error'; message: string };
 
 export interface AgentResult {
   text: string;
@@ -93,6 +123,7 @@ export class Agent {
   private readonly toolSpecs: ToolSpec[];
   private readonly system?: string;
   private readonly maxSteps: number;
+  private readonly stepBudget: number;
   private readonly onStep?: (step: number) => void | Promise<void>;
   private readonly onToolCall?: (call: ToolCall) => void | Promise<void>;
   private readonly onToolResult?: (call: ToolCall, output: string) => void | Promise<void>;
@@ -103,7 +134,14 @@ export class Agent {
     this.tools = new Map(tools.map((t) => [t.name, t]));
     this.toolSpecs = tools.map(({ name, description, parameters }) => ({ name, description, parameters }));
     this.system = options.system;
-    this.maxSteps = options.maxSteps ?? 10;
+    const softMax = Math.max(1, Math.floor(options.maxSteps ?? 10));
+    this.maxSteps = softMax;
+    if (options.autoExtend) {
+      const hard = options.hardMaxSteps === undefined ? Math.max(softMax * 4, softMax + 20) : Math.max(softMax, Math.floor(options.hardMaxSteps));
+      this.stepBudget = Math.min(hard, 10000);
+    } else {
+      this.stepBudget = softMax;
+    }
     this.onStep = options.onStep;
     this.onToolCall = options.onToolCall;
     this.onToolResult = options.onToolResult;
@@ -114,7 +152,7 @@ export class Agent {
     if (this.system !== undefined) messages.push({ role: 'system', content: this.system });
     messages.push({ role: 'user', content: prompt });
 
-    for (let step = 1; step <= this.maxSteps; step++) {
+    for (let step = 1; step <= this.stepBudget; step++) {
       await this.onStep?.(step);
       const response = await this.provider.complete({ messages, tools: this.toolSpecs });
       if (response.kind === 'message') {
@@ -133,7 +171,98 @@ export class Agent {
         messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: output });
       }
     }
-    throw new MaxStepsExceededError(this.maxSteps, messages);
+    throw new MaxStepsExceededError(this.stepBudget, messages);
+  }
+
+  /** Stream the agent run. Mirrors `run()` but yields progress events, including
+      text deltas as the model generates them (via `provider.completeStream` when
+      available; otherwise the final message is emitted as a single delta). */
+  async *runStream(prompt: string): AsyncGenerator<AgentStreamEvent> {
+    const messages: Message[] = [];
+    if (this.system !== undefined) messages.push({ role: 'system', content: this.system });
+    messages.push({ role: 'user', content: prompt });
+    yield { type: 'user', content: prompt };
+
+    for (let step = 1; step <= this.stepBudget; step++) {
+      yield { type: 'step', step, budget: this.stepBudget };
+      await this.onStep?.(step);
+
+      if (this.provider.completeStream) {
+        yield { type: 'assistant_start', step };
+        let content = '';
+        let term: StreamEvent = { kind: 'message', content: '' };
+        try {
+          for await (const ev of this.provider.completeStream({ messages, tools: this.toolSpecs })) {
+            if (ev.kind === 'delta') {
+              content += ev.content;
+              yield { type: 'text_delta', content: ev.content };
+            } else {
+              term = ev;
+            }
+          }
+        } catch (e) {
+          yield { type: 'error', message: e instanceof Error ? e.message : String(e) };
+          return;
+        }
+        if (term.kind === 'message') {
+          messages.push({ role: 'assistant', content });
+          yield { type: 'assistant_end', step, content };
+          yield { type: 'done', result: { text: content, steps: step, messages } };
+          return;
+        }
+        const toolCalls = term.toolCalls ?? [];
+        if (toolCalls.length === 0) {
+          messages.push({ role: 'assistant', content });
+          yield { type: 'assistant_end', step, content };
+          yield { type: 'done', result: { text: content, steps: step, messages } };
+          return;
+        }
+        messages.push({ role: 'assistant', content: null, toolCalls });
+        const results = await Promise.all(
+          toolCalls.map(async (call) => {
+            await this.onToolCall?.(call);
+            return { call, output: await this.runTool(call) };
+          }),
+        );
+        for (const { call, output } of results) {
+          await this.onToolResult?.(call, output);
+          yield { type: 'tool_call', step, call };
+          yield { type: 'tool_result', step, call, output };
+          messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: output });
+        }
+        continue;
+      }
+
+      let response: CompletionResponse;
+      try {
+        response = await this.provider.complete({ messages, tools: this.toolSpecs });
+      } catch (e) {
+        yield { type: 'error', message: e instanceof Error ? e.message : String(e) };
+        return;
+      }
+      if (response.kind === 'message') {
+        yield { type: 'assistant_start', step };
+        yield { type: 'text_delta', content: response.content };
+        messages.push({ role: 'assistant', content: response.content });
+        yield { type: 'assistant_end', step, content: response.content };
+        yield { type: 'done', result: { text: response.content, steps: step, messages } };
+        return;
+      }
+      messages.push({ role: 'assistant', content: null, toolCalls: response.toolCalls });
+      const results = await Promise.all(
+        response.toolCalls.map(async (call) => {
+          await this.onToolCall?.(call);
+          return { call, output: await this.runTool(call) };
+        }),
+      );
+      for (const { call, output } of results) {
+        await this.onToolResult?.(call, output);
+        yield { type: 'tool_call', step, call };
+        yield { type: 'tool_result', step, call, output };
+        messages.push({ role: 'tool', toolCallId: call.id, name: call.name, content: output });
+      }
+    }
+    yield { type: 'error', message: `Agent did not finish within ${this.stepBudget} steps` };
   }
 
   private async runTool(call: ToolCall): Promise<string> {

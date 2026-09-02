@@ -158,35 +158,37 @@ export async function routeDevPanel(
         const mode = (valid.includes(rawMode) ? rawMode : 'explore') as 'explore' | 'debug' | 'agent';
         return new AgentCapabilityTable(mode);
       };
-      const runAgent = async (prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> => {
-        const cfg = (providerConfig || {}) as Record<string, unknown>;
-        const providerName = String(cfg.provider as string || loadAgenticConfig(deps.projectDir).provider || 'openai');
-        const apiKey = (cfg.apiKey as string) || getApiKey(deps.projectDir, providerName) || '';
-        const model = (cfg.model as string) || (loadAgenticConfig(deps.projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'claude-sonnet-4-6' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
-        const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(deps.projectDir).baseUrl as string) || undefined;
-        const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
-        let provider: import('@vesk/agentic/src/loop').Provider;
-        if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
-        else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
-        else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
-        else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
-        else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
-        else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
-        else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
-        else provider = openAiProvider({ apiKey, model, baseUrl });
+      const runAgent = async (prompt: string, mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> => {
+        const { provider, providerName } = await buildAgenticProvider(deps.projectDir, (providerConfig ?? {}) as Record<string, unknown>);
         const veskTools = createVeskTools({ projectDir: deps.projectDir, appDir, veskDir });
         const webTools = createWebTools();
         const browserTools = createBrowserTools();
         const allTools = [...veskTools, ...webTools, ...browserTools];
         // Filter by permissions table for the requested mode (server-enforced)
-        const modeTable = new (await import('@vesk/agentic/src/permissions')).AgentCapabilityTable(providerName === 'opencode' || providerName === 'opencode-go' ? 'agent' : (_mode as 'explore' | 'debug' | 'agent') || 'explore');
+        const modeTable = new (await import('@vesk/agentic/src/permissions')).AgentCapabilityTable(providerName === 'opencode' || providerName === 'opencode-go' ? 'agent' : (mode as 'explore' | 'debug' | 'agent') || 'explore');
         const filtered = allTools.filter(t => {
           // web and browser are read-only, allow for explore+
           if (t.name.startsWith('web.') || t.name.startsWith('browser.')) return modeTable.allows('readFiles');
           return true;
         });
-        const agent = new Agent({ provider, tools: filtered });
+        const budget = resolveAgenticStepBudget(deps.projectDir, (providerConfig ?? {}) as Record<string, unknown>);
+        const agent = new Agent({ provider, tools: filtered, maxSteps: budget.maxSteps, autoExtend: budget.autoExtend, hardMaxSteps: budget.hardMaxSteps });
         return agent.run(prompt);
+      };
+      const runAgentStream = async function* (prompt: string, mode: string, providerConfig: unknown): AsyncGenerator<import('@vesk/agentic/src/loop').AgentStreamEvent> {
+        const { provider, providerName } = await buildAgenticProvider(deps.projectDir, (providerConfig ?? {}) as Record<string, unknown>);
+        const veskTools = createVeskTools({ projectDir: deps.projectDir, appDir, veskDir });
+        const webTools = createWebTools();
+        const browserTools = createBrowserTools();
+        const allTools = [...veskTools, ...webTools, ...browserTools];
+        const modeTable = new (await import('@vesk/agentic/src/permissions')).AgentCapabilityTable(providerName === 'opencode' || providerName === 'opencode-go' ? 'agent' : (mode as 'explore' | 'debug' | 'agent') || 'explore');
+        const filtered = allTools.filter(t => {
+          if (t.name.startsWith('web.') || t.name.startsWith('browser.')) return modeTable.allows('readFiles');
+          return true;
+        });
+        const budget = resolveAgenticStepBudget(deps.projectDir, (providerConfig ?? {}) as Record<string, unknown>);
+        const agent = new Agent({ provider, tools: filtered, maxSteps: budget.maxSteps, autoExtend: budget.autoExtend, hardMaxSteps: budget.hardMaxSteps });
+        yield* agent.runStream(prompt);
       };
       const agentRouter = createAgentRouter({
         projectDir: deps.projectDir,
@@ -194,6 +196,7 @@ export async function routeDevPanel(
         veskDir,
         getPermissions: getPermissions as unknown as () => import('@vesk/agentic/src/permissions').AgentCapabilityTable,
         runAgent: runAgent as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => Promise<import('@vesk/agentic/src/loop').AgentResult>,
+        runAgentStream: runAgentStream as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => AsyncIterable<import('@vesk/agentic/src/loop').AgentStreamEvent>,
         listCheckpoints: () => agenticCheckpointManager.listNewestFirst(),
         rollback: (id: string) => agenticCheckpointManager.get(id) ?? null,
         createCheckpoint: (...args: unknown[]) => {
@@ -243,8 +246,69 @@ async function readBodyJson(req: IncomingMessage, maxBodyBytes: number): Promise
 
 class DevBodyTooLargeError extends Error {}
 
+function defaultAgenticModel(providerName: string): string {
+  return providerName === 'anthropic' ? 'claude-sonnet-4-6'
+    : providerName === 'google' ? 'gemini-2.0-flash'
+    : providerName === 'ollama' ? 'llama3.1'
+    : providerName === 'opencode' ? 'claude-sonnet-4-6'
+    : providerName === 'opencode-go' ? 'opencode-go/kimi-k3'
+    : providerName === 'openrouter' ? 'openrouter/auto'
+    : 'gpt-4o-mini';
+}
+
+/** Build the agentic provider from a request providerConfig (request wins),
+    falling back to the project's agentic config file. Shared by run + stream. */
+async function buildAgenticProvider(projectDir: string, providerConfig: Record<string, unknown> | null | undefined): Promise<{ provider: import('@vesk/agentic/src/loop').Provider; providerName: string }> {
+  const cfg = (providerConfig || {}) as Record<string, unknown>;
+  const providerName = String((cfg.provider as string) || loadAgenticConfig(projectDir).provider || 'openai');
+  const apiKey = (cfg.apiKey as string) || getApiKey(projectDir, providerName) || '';
+  const model = (cfg.model as string) || (loadAgenticConfig(projectDir).model as string) || defaultAgenticModel(providerName);
+  const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(projectDir).baseUrl as string) || undefined;
+  const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
+  let provider: import('@vesk/agentic/src/loop').Provider;
+  if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
+  else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
+  else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
+  else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
+  else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
+  else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
+  else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
+  else provider = openAiProvider({ apiKey, model, baseUrl });
+  return { provider, providerName };
+}
+
+/** Step budget for an agent run. Request `maxSteps` wins; then the project's
+    agentic config; else 25. Auto-extension is on so multi-step tasks aren't cut
+    off before the model reaches a final answer, with a 200-step hard ceiling. */
+function resolveAgenticStepBudget(projectDir: string, providerConfig: Record<string, unknown> | null | undefined): { maxSteps: number; autoExtend: boolean; hardMaxSteps: number } {
+  const cfg = (providerConfig || {}) as Record<string, unknown>;
+  const fileCfg = loadAgenticConfig(projectDir);
+  const requestVal = typeof cfg.maxSteps === 'number' && Number.isFinite(cfg.maxSteps as number) ? (cfg.maxSteps as number) : NaN;
+  const fileVal = typeof fileCfg.maxSteps === 'number' && fileCfg.maxSteps > 0 ? fileCfg.maxSteps : NaN;
+  const maxSteps = Number.isFinite(requestVal) ? Math.max(1, Math.floor(requestVal)) : Number.isFinite(fileVal) ? Math.floor(fileVal) : 25;
+  return { maxSteps, autoExtend: true, hardMaxSteps: 200 };
+}
+
 function writeDevPanelResponse(res: ServerResponse, response: DevPanelResponse): void {
   const headers: Record<string, string | number> = { ...response.headers };
+  if (response.stream) {
+    // Streaming response (e.g. SSE agent progress): no Content-Length, pipe the
+    // already-framed chunks through until the generator finishes.
+    res.writeHead(response.status, headers);
+    res.flushHeaders?.();
+    void (async () => {
+      try {
+        for await (const chunk of response.stream!) {
+          if (!res.writableEnded) res.write(chunk);
+        }
+      } catch {
+        /* stream aborted — nothing to relay */
+      } finally {
+        if (!res.writableEnded) res.end();
+      }
+    })();
+    return;
+  }
   if (response.encoding === 'base64') {
     res.writeHead(response.status, { ...headers, 'Content-Length': Buffer.byteLength(response.body, 'base64') });
     res.end(Buffer.from(response.body, 'base64'));
@@ -558,24 +622,18 @@ export async function startDevServer(port: number, projectDir: string, config: R
     return new AgentCapabilityTable(mode);
   }
   async function runAgenticAgentMain(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
-    const cfg = (providerConfig || {}) as Record<string, unknown>;
-    const providerName = String(cfg.provider as string || loadAgenticConfig(projectDir).provider || 'openai');
-    const apiKey = (cfg.apiKey as string) || getApiKey(projectDir, providerName) || '';
-    const model = (cfg.model as string) || (loadAgenticConfig(projectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'claude-sonnet-4-6' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
-    const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(projectDir).baseUrl as string) || undefined;
-    const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
-    let provider: import('@vesk/agentic/src/loop').Provider;
-    if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
-    else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
-    else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
-    else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
-    else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
-    else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
-    else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
-    else provider = openAiProvider({ apiKey, model, baseUrl });
+    const { provider } = await buildAgenticProvider(projectDir, (providerConfig || {}) as Record<string, unknown>);
     const tools = createVeskTools({ projectDir, appDir: appDirPath, veskDir: veskStateDir });
-    const agent = new Agent({ provider, tools });
+    const budget = resolveAgenticStepBudget(projectDir, (providerConfig || {}) as Record<string, unknown>);
+    const agent = new Agent({ provider, tools, maxSteps: budget.maxSteps, autoExtend: budget.autoExtend, hardMaxSteps: budget.hardMaxSteps });
     return agent.run(prompt);
+  }
+  const runAgentStreamMain = async function* (prompt: string, _mode: string, providerConfig: unknown): AsyncGenerator<import('@vesk/agentic/src/loop').AgentStreamEvent> {
+    const { provider } = await buildAgenticProvider(projectDir, (providerConfig || {}) as Record<string, unknown>);
+    const tools = createVeskTools({ projectDir, appDir: appDirPath, veskDir: veskStateDir });
+    const budget = resolveAgenticStepBudget(projectDir, (providerConfig || {}) as Record<string, unknown>);
+    const agent = new Agent({ provider, tools, maxSteps: budget.maxSteps, autoExtend: budget.autoExtend, hardMaxSteps: budget.hardMaxSteps });
+    yield* agent.runStream(prompt);
   }
   let agentRouterMain: ReturnType<typeof createAgentRouter> | null = null;
   if (isAgenticActiveMain()) {
@@ -586,6 +644,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         veskDir: veskStateDir,
         getPermissions: getAgenticPermissionsMain as unknown as () => import('@vesk/agentic/src/permissions').AgentCapabilityTable,
         runAgent: runAgenticAgentMain as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => Promise<import('@vesk/agentic/src/loop').AgentResult>,
+        runAgentStream: runAgentStreamMain as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => AsyncIterable<import('@vesk/agentic/src/loop').AgentStreamEvent>,
         listCheckpoints: () => agenticCheckpointManagerMain.listNewestFirst(),
         rollback: (id: string) => agenticCheckpointManagerMain.get(id) ?? null,
         createCheckpoint: (...args: unknown[]) => {

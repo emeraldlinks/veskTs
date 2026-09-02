@@ -28,7 +28,7 @@
  */
 
 import type { AgentCapabilityTable, AgentMode } from './permissions.js';
-import type { AgentResult } from './loop.js';
+import type { AgentResult, AgentStreamEvent } from './loop.js';
 import type { ProviderConfig } from './providers/types.js';
 import type { Checkpoint } from './checkpoints.js';
 import { CheckpointManager } from './checkpoints.js';
@@ -50,6 +50,10 @@ export interface DevPanelResponse {
   headers: Record<string, string>;
   body: string;
   encoding?: 'utf8' | 'base64';
+  /** When set, `body`/`encoding` are ignored and this async iterable of
+      (already-framed) strings is streamed to the client instead — used for
+      SSE agent progress. */
+  stream?: AsyncIterable<string>;
 }
 
 export interface AgentRouter {
@@ -80,6 +84,16 @@ export interface AgentRouterOptions {
     providerConfig?: ProviderConfig | unknown,
   ) => Promise<AgentResult>;
   /**
+   * Stream the agent for a single turn. Optional — when provided, the
+   * `/__vesk/agent/run` endpoint responds with an SSE stream of
+   * `AgentStreamEvent`s for `{ stream: true }` requests.
+   */
+  runAgentStream?: (
+    prompt: string,
+    mode: AgentMode,
+    providerConfig?: ProviderConfig | unknown,
+  ) => AsyncIterable<AgentStreamEvent> | Promise<AsyncIterable<AgentStreamEvent>>;
+  /**
    * List all checkpoints, newest first. Closure form is typically
    * `() => manager.list()` or `() => listCheckpoints(projectDir)`.
    */
@@ -108,6 +122,10 @@ function jsonStatus(status: number, data: unknown): DevPanelResponse {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(data),
   };
+}
+
+function sseEvent(type: string, data: unknown): string {
+  return 'event: ' + type + '\n' + 'data: ' + JSON.stringify(data) + '\n\n';
 }
 
 function badRequest(message: string): DevPanelResponse {
@@ -284,11 +302,46 @@ export function createAgentRouter(opts: AgentRouterOptions): AgentRouter {
         b.provider_config ??
         undefined) as ProviderConfig | unknown | undefined;
 
+      // Thread the requested step budget into the run path so a per-request
+      // setting (e.g. from the dev-panel UI max-steps control) actually applies.
+      const pc = (providerConfig && typeof providerConfig === 'object' ? providerConfig : {}) as Record<string, unknown>;
+      if (typeof b.maxSteps === 'number' && Number.isFinite(b.maxSteps)) pc.maxSteps = b.maxSteps;
+
       if (typeof opts.runAgent !== 'function') {
         return jsonStatus(503, { error: 'agent runner unavailable' });
       }
+      if (b.stream === true && typeof opts.runAgentStream === 'function') {
+        const headers = {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-cache',
+          Connection: 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        };
+        const generator = (async function* () {
+          let events: AsyncIterable<AgentStreamEvent>;
+          try {
+            events = await opts.runAgentStream!(prompt, mode, pc as unknown as ProviderConfig);
+          } catch (e) {
+            yield sseEvent('error', { message: e instanceof Error ? e.message : String(e) });
+            return;
+          }
+          try {
+            for await (const ev of events) {
+              yield sseEvent(ev.type, ev);
+            }
+          } catch (e) {
+            yield sseEvent('error', { message: e instanceof Error ? e.message : String(e) });
+          }
+        })();
+        return {
+          status: 200,
+          headers,
+          body: '',
+          stream: generator,
+        };
+      }
       try {
-        const result = await opts.runAgent(prompt, mode, providerConfig as ProviderConfig);
+        const result = await opts.runAgent(prompt, mode, pc as unknown as ProviderConfig);
         return jsonStatus(200, { ok: true, result });
       } catch (e) {
         return jsonStatus(500, { error: e instanceof Error ? e.message : String(e) });

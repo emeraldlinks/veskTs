@@ -28,7 +28,7 @@ if (!['edge', 'deno'].includes(platform)) {
 }
 const PORT = parseInt(process.argv[3] || '3987', 10);
 const BASE = `http://localhost:${PORT}`;
-const CHROME = process.env.CHROMIUM_PATH || '/usr/bin/chromium';
+const CHROME = process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser';
 
 let passed = 0;
 let failed = 0;

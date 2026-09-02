@@ -617,7 +617,136 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(src.includes('__kp_cfg_input'), 'source styles config inputs');
 	assert(src.includes('__kp_cfg_textarea'), 'source styles raw editor textarea');
 	assert(src.includes('__kp_cfg_select'), 'source styles config selects');
-}
+
+	// -- agentic send-time model fix: user-selected model wins, never a stale default
+	assert(src.includes('agenticSelectedModel'), 'source tracks the user\u2019s explicitly selected model');
+	assert(
+		src.includes("if (!agenticSelectedModel) ui.agenticModel = model"),
+		'source never clobbers the user-selected model with the persisted config default on load'
+	);
+	assert(
+		src.includes("agenticSelectedModel = val") ,
+		'source records the user\u2019s model pick in changePref(agenticModel)'
+	);
+	assert(
+		src.includes('resolveAgenticModel'),
+		'source resolves a send-time model rather than reading ui.agenticModel directly'
+	);
+	assert(
+		src.includes('providerConfig: { provider: ui.agenticProvider, model: sendModel }'),
+		'source sends the resolved model via providerConfig (user pick wins)'
+	);
+	assert(
+		src.includes('agenticSelectedModel = \'\'') &&
+			src.includes("key === 'agenticProvider'"),
+		'source clears the model pick when the provider changes (model is provider-scoped)'
+	);
+	// no dead hardcoded gpt-4o-mini default that opencode rejects — anywhere in the client
+	assert(!src.includes("'gpt-4o-mini'"), 'no gpt-4o-mini literal anywhere in the dev client (model names come from the per-provider fetch)');
+	assert(
+		src.includes("no model selected") || src.includes('no model to send'),
+		'source guards against sending with no resolved model'
+	);
+	assert(
+		src.includes('syncAgenticSlashPopup'),
+		'source patches only the slash popup on keystrokes (no full re-render that destroys the textbox)'
+	);
+	assert(
+		src.includes('Update only the slash popup, never re-render the whole panel'),
+		'source documents why keystrokes must not re-render the panel (mobile keyboard dismiss)'
+	);
+	assert(
+		src.includes('.__kp_ag_input_wrap{position:sticky;bottom:0'),
+		'source pins the message textbox to the bottom of the panel (static bottom, no jump)'
+	);
+	assert(
+		src.includes('wasAgenticInput') && src.includes('setSelectionRange(caret, caret)'),
+		'source carries focus + caret across panel redraws so the keyboard stays up while typing'
+	);
+assert(
+ 		src.includes("if (wasAgenticInput)") && src.includes('nue.focus()'),
+ 		'source re-focuses the redrawn textbox only when it was the focused element'
+ 	);
+
+ 	// -- follow-up: no jumping UI, no premature stop (maxSteps), streaming progress
+ 	assert(src.includes('agenticMaxSteps'), 'source tracks a client-side max-steps budget');
+ 	assert(src.includes('agenticRunStep') && src.includes('agenticRunBudget'), 'source tracks live step/budget for the progress label');
+ 	assert(
+ 		src.includes('maxSteps: maxSteps'),
+ 		'source sends maxSteps with every agent chat send'
+ 	);
+ 	assert(
+ 		src.includes('stream: true'),
+ 		'source requests a streaming response from the agent endpoint'
+ 	);
+ 	assert(
+ 		src.includes("indexOf('text/event-stream')"),
+ 		'source detects the SSE response so it can stream rather than buffer'
+ 	);
+ 	assert(src.includes('consumeAgenticStream'), 'source streams the agent reply from the response body reader');
+ 	assert(src.includes('getReader'), 'source consumes a ReadableStream body for agent replies');
+ 	assert(src.includes('patchAgenticChat'), 'source patches the chat host in place (no full panel re-render)');
+ 	assert(
+ 		src.includes('const host = pane') &&
+ 			src.includes("pane.querySelector('.__kp_ag_messages')"),
+ 		'source resolves the persistent message host inside the existing pane'
+ 	);
+ 	assert(
+ 		src.includes('host.dataset.agentic =') || src.includes("data-agentic=\"messages\""),
+ 		'source tags a persistent messages host node'
+ 	);
+ 	assert(
+ 		src.includes('host.appendChild(buildAgenticMessageEl') && src.includes('host.removeChild(host.lastChild)'),
+ 		'source grows/shrinks only the persistent messages host child list (no pane re-creation)'
+ 	);
+ 	assert(
+ 		src.includes('agenticPaneNearBottom'),
+ 		'source keeps the scroll position unless the user is already near the bottom'
+ 	);
+ 	assert(
+ 		src.includes('agenticRunning') && src.includes('agenticPaneNearBottom(pane)'),
+ 		'source always keeps the newest content in view while a run is in flight'
+ 	);
+ 	assert(
+ 		src.includes('running step ') || src.includes("'running'") || src.includes('running step'),
+ 		'source labels the send button with live step/budget progress'
+ 	);
+assert(
+ 		src.includes('steps per run (1-200)') || src.includes('(1-200)'),
+ 		'source documents the 200-step cap in the settings control'
+ 	);
+ 	assert(
+ 		src.includes('data-agentic-key="maxSteps"') && src.includes('max="200"'),
+ 		'source settings cap agent max-steps at 200'
+ 	);
+ 	assert(src.includes('let agenticMaxSteps = 25'), 'source defaults the step budget to 25');
+ 	assert(
+ 		src.includes('agenticMaxSteps = maxSteps'),
+ 		'source syncs the live budget from GET /__vesk/agent/config'
+ 	);
+ 	assert(
+ 		src.includes('agenticMaxSteps > 0 ? agenticMaxSteps : undefined'),
+ 		'source omits maxSteps when it has no valid budget rather than capping at the library default'
+ 	);
+ 	assert(
+ 		src.includes('patchAgenticHistorySection') && src.includes('data-agentic="history-block"'),
+ 		'source refreshes checkpoints into a stable history block instead of re-rendering the panel'
+ 	);
+ 	assert(
+ 		src.includes("host.appendChild(buildAgenticMessageEl") && src.includes('host.removeChild(host.lastChild)'),
+ 		'source grows/shrinks only the persistent messages host child list (no pane re-creation)'
+ 	);
+	assert(
+ 		src.includes("const wrap = doc.createElement('div');") && src.includes('replaceChild(wrap, placeholder)'),
+ 		'source materializes the messages host in place when the chat starts empty (no pane re-render)'
+ 	);
+ 	{
+ 		const start = src.indexOf('function refreshAgenticHistory');
+ 		const histFn = src.slice(start, start + 1200);
+ 		assert(!histFn.includes('renderPanel'), 'refreshAgenticHistory never re-renders the whole panel (would jump)');
+ 		assert(histFn.includes('patchAgenticHistorySection'), 'refreshAgenticHistory patches only the history block');
+ 	}
+ }
 
 console.log('\nResults: ' + passed + ' passed, ' + failed + ' failed, ' + (passed + failed) + ' total\n');
 process.exit(failed > 0 ? 1 : 0);

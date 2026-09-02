@@ -110,6 +110,10 @@ export interface DevPanelResponse {
   body: string;
   /** When 'base64', the dev server writes Buffer.from(body, 'base64') to the socket (binary payloads like icons). */
   encoding?: 'utf8' | 'base64';
+  /** When set, `body`/`encoding` are ignored and this async iterable of
+      (already-framed) strings is streamed to the client instead — used for
+      SSE agent progress. */
+  stream?: AsyncIterable<string>;
 }
 
 export interface PluginRouterChangeEvent {
@@ -290,23 +294,43 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   }
   async function runAgenticAgent(prompt: string, _mode: string, providerConfig: unknown): Promise<import('@vesk/agentic/src/loop').AgentResult> {
     const cfg = (providerConfig || {}) as Record<string, unknown>;
-    const providerName = String(cfg.provider as string || loadAgenticConfig(agenticProjectDir).provider || 'openai');
+    const provider = await buildAdapterAgenticProvider(cfg);
+    const tools = createVeskTools({ projectDir: agenticProjectDir, appDir, veskDir: agenticVeskDir });
+    const budget = resolveAdapterAgenticStepBudget(cfg);
+    const agent = new Agent({ provider, tools, maxSteps: budget.maxSteps, autoExtend: budget.autoExtend, hardMaxSteps: budget.hardMaxSteps });
+    return agent.run(prompt);
+  }
+  async function* runAgenticAgentStream(prompt: string, _mode: string, providerConfig: unknown): AsyncGenerator<import('@vesk/agentic/src/loop').AgentStreamEvent> {
+    const cfg = (providerConfig || {}) as Record<string, unknown>;
+    const provider = await buildAdapterAgenticProvider(cfg);
+    const tools = createVeskTools({ projectDir: agenticProjectDir, appDir, veskDir: agenticVeskDir });
+    const budget = resolveAdapterAgenticStepBudget(cfg);
+    const agent = new Agent({ provider, tools, maxSteps: budget.maxSteps, autoExtend: budget.autoExtend, hardMaxSteps: budget.hardMaxSteps });
+    yield* agent.runStream(prompt);
+  }
+
+  async function buildAdapterAgenticProvider(cfg: Record<string, unknown>): Promise<import('@vesk/agentic/src/loop').Provider> {
+    const providerName = String((cfg.provider as string) || loadAgenticConfig(agenticProjectDir).provider || 'openai');
     const apiKey = (cfg.apiKey as string) || getApiKey(agenticProjectDir, providerName) || '';
     const model = (cfg.model as string) || (loadAgenticConfig(agenticProjectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'claude-sonnet-4-6' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
     const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(agenticProjectDir).baseUrl as string) || undefined;
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
-    let provider: import('@vesk/agentic/src/loop').Provider;
-    if (providerName === 'anthropic') provider = anthropicProvider({ apiKey, model, baseUrl, maxTokens });
-    else if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); provider = googleProvider({ apiKey, model, baseUrl }); }
-    else if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); provider = ollamaProvider({ model, baseUrl }); }
-    else if (providerName === 'opencode') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
-    else if (providerName === 'opencode-go') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
-    else if (providerName === 'openrouter') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
-    else if (providerName === 'loopers') provider = openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
-    else provider = openAiProvider({ apiKey, model, baseUrl });
-    const tools = createVeskTools({ projectDir: agenticProjectDir, appDir, veskDir: agenticVeskDir });
-    const agent = new Agent({ provider, tools });
-    return agent.run(prompt);
+    if (providerName === 'anthropic') return anthropicProvider({ apiKey, model, baseUrl, maxTokens });
+    if (providerName === 'google') { const { googleProvider } = await import('@vesk/agentic/src/providers/google'); return googleProvider({ apiKey, model, baseUrl }); }
+    if (providerName === 'ollama') { const { ollamaProvider } = await import('@vesk/agentic/src/providers/ollama'); return ollamaProvider({ model, baseUrl }); }
+    if (providerName === 'opencode') return openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/v1' });
+    if (providerName === 'opencode-go') return openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://opencode.ai/zen/go/v1' });
+    if (providerName === 'openrouter') return openAiProvider({ apiKey, model, baseUrl: baseUrl || 'https://openrouter.ai/api/v1' });
+    if (providerName === 'loopers') return openAiProvider({ apiKey, model, baseUrl: baseUrl || 'http://localhost:8080' });
+    return openAiProvider({ apiKey, model, baseUrl });
+  }
+
+  function resolveAdapterAgenticStepBudget(cfg: Record<string, unknown>): { maxSteps: number; autoExtend: boolean; hardMaxSteps: number } {
+    const fileCfg = loadAgenticConfig(agenticProjectDir);
+    const requestVal = typeof cfg.maxSteps === 'number' && Number.isFinite(cfg.maxSteps as number) ? (cfg.maxSteps as number) : NaN;
+    const fileVal = typeof fileCfg.maxSteps === 'number' && fileCfg.maxSteps > 0 ? fileCfg.maxSteps : NaN;
+    const maxSteps = Number.isFinite(requestVal) ? Math.max(1, Math.floor(requestVal)) : Number.isFinite(fileVal) ? Math.floor(fileVal) : 25;
+    return { maxSteps, autoExtend: true, hardMaxSteps: 200 };
   }
   let agentRouter: ReturnType<typeof createAgentRouter> | null = null;
   try {
@@ -317,6 +341,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         veskDir: agenticVeskDir,
         getPermissions: getAgenticPermissions as unknown as () => import('@vesk/agentic/src/permissions').AgentCapabilityTable,
         runAgent: runAgenticAgent as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => Promise<import('@vesk/agentic/src/loop').AgentResult>,
+        runAgentStream: runAgenticAgentStream as unknown as (prompt: string, mode: import('@vesk/agentic/src/permissions').AgentMode, providerConfig?: unknown) => AsyncIterable<import('@vesk/agentic/src/loop').AgentStreamEvent>,
         listCheckpoints: () => agenticCheckpointManager.listNewestFirst(),
         rollback: (id: string) => agenticCheckpointManager.get(id) ?? null,
         createCheckpoint: (...args: unknown[]) => {
@@ -417,6 +442,22 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       if (agentRouter) {
         const agentResult = await agentRouter.route(req.method || 'GET', url.pathname, body, url.search);
         if (agentResult) {
+          if (agentResult.stream) {
+            res.writeHead(agentResult.status, agentResult.headers);
+            res.flushHeaders?.();
+            void (async () => {
+              try {
+                for await (const chunk of agentResult.stream!) {
+                  if (!res.writableEnded) res.write(chunk);
+                }
+              } catch {
+                /* stream aborted */
+              } finally {
+                if (!res.writableEnded) res.end();
+              }
+            })();
+            return;
+          }
           res.writeHead(agentResult.status, agentResult.headers);
           res.end(agentResult.encoding === 'base64' ? Buffer.from(agentResult.body, 'base64') : agentResult.body);
           return;
@@ -424,6 +465,22 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       }
       const result = await devPanel.route(req.method || 'GET', url.pathname, body, url.search);
       if (result) {
+        if (result.stream) {
+          res.writeHead(result.status, result.headers);
+          res.flushHeaders?.();
+          void (async () => {
+            try {
+              for await (const chunk of result.stream!) {
+                if (!res.writableEnded) res.write(chunk);
+              }
+            } catch {
+              /* stream aborted */
+            } finally {
+              if (!res.writableEnded) res.end();
+            }
+          })();
+          return;
+        }
         res.writeHead(result.status, result.headers);
         res.end(result.encoding === 'base64' ? Buffer.from(result.body, 'base64') : result.body);
         return;

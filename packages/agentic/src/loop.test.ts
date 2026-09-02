@@ -296,5 +296,170 @@ await test('assistant message with toolCalls preserved in history', async () => 
   assert(assistantWithTools?.toolCalls?.[0].id === 'c1', 'assistant toolCalls preserved');
 });
 
+// ── 14: autoExtend lets multi-step tasks finish past the soft budget ─────────
+await test('autoExtend continues past maxSteps while tool-calling then finishes', async () => {
+  const provider = mockProvider([
+    toolCalls([{ id: 'c1', name: 'a', arguments: {} }]),
+    toolCalls([{ id: 'c2', name: 'a', arguments: {} }]),
+    toolCalls([{ id: 'c3', name: 'a', arguments: {} }]),
+    msg('finally done'),
+  ]);
+  const a: Tool = { name: 'a', description: 'a', parameters: {}, execute: async () => 'A' };
+  const agent = new Agent({ provider, tools: [a], maxSteps: 2, autoExtend: true });
+  const result = await agent.run('loop');
+  assert(result.text === 'finally done', 'agent reaches the final message');
+  assert(result.steps === 4, 'ran past the soft budget to finish (steps 4)');
+});
+
+await test('autoExtend without a finishing message throws at the hard ceiling', async () => {
+  const provider: Provider = {
+    async complete() {
+      return toolCalls([{ id: 'c1', name: 'a', arguments: {} }]);
+    },
+  };
+  const a: Tool = { name: 'a', description: 'a', parameters: {}, execute: async () => 'A' };
+  const agent = new Agent({ provider, tools: [a], maxSteps: 2, autoExtend: true, hardMaxSteps: 4 });
+  let caught: unknown;
+  try {
+    await agent.run('loop forever');
+  } catch (e) {
+    caught = e;
+  }
+  assert(caught instanceof MaxStepsExceededError, 'throws at hard ceiling');
+  assert((caught as MaxStepsExceededError).steps === 4, 'error reports the hard ceiling steps');
+});
+
+await test('autoExtend default hard ceiling is derived from maxSteps', async () => {
+  const provider: Provider = {
+    async complete() {
+      return toolCalls([{ id: 'c1', name: 'a', arguments: {} }]);
+    },
+  };
+  const a: Tool = { name: 'a', description: 'a', parameters: {}, execute: async () => 'A' };
+  const agent = new Agent({ provider, tools: [a], maxSteps: 2, autoExtend: true });
+  let caught: unknown;
+  try {
+    await agent.run('loop');
+  } catch (e) {
+    caught = e;
+  }
+  // default hard = max(2*4, 2+20) = 22
+  assert((caught as MaxStepsExceededError).steps === 22, 'default hard ceiling = max(2*4, 2+20) = 22');
+});
+
+await test('no autoExtend keeps legacy maxSteps stopping behavior', async () => {
+  const provider: Provider = {
+    async complete() {
+      return toolCalls([{ id: 'c1', name: 'a', arguments: {} }]);
+    },
+  };
+  const a: Tool = { name: 'a', description: 'a', parameters: {}, execute: async () => 'A' };
+  const agent = new Agent({ provider, tools: [a], maxSteps: 3 });
+  let caught: unknown;
+  try {
+    await agent.run('loop');
+  } catch (e) {
+    caught = e;
+  }
+  assert(caught instanceof MaxStepsExceededError, 'still throws without autoExtend');
+  assert((caught as MaxStepsExceededError).steps === 3, 'stops at maxSteps when autoExtend off');
+});
+
+// ── 15: runStream streaming ─────────────────────────────────────────────────
+await test('runStream emits deltas from a streaming provider then done', async () => {
+  const streamProvider: Provider = {
+    complete: async () => msg('should not be used'),
+    async *completeStream() {
+      yield { kind: 'delta', content: 'Hel' };
+      yield { kind: 'delta', content: 'lo' };
+      yield { kind: 'message', content: 'Hello' };
+    },
+  };
+  const agent = new Agent({ provider: streamProvider });
+  const events: string[] = [];
+  let finalText = '';
+  for await (const ev of agent.runStream('hi')) {
+    events.push(ev.type);
+    if (ev.type === 'text_delta') finalText += ev.content;
+    if (ev.type === 'done') assert(ev.result.text === 'Hello', 'done carries full result text');
+  }
+  assert(events.includes('step'), 'step event emitted');
+  assert(events.includes('assistant_start'), 'assistant_start emitted');
+  const deltas = events.filter((t) => t === 'text_delta');
+  assert(deltas.length === 2, 'two text_delta events');
+  assert(finalText === 'Hello', 'deltas reassemble into the full message');
+  assert(events[events.length - 1] === 'done', 'stream ends with done');
+});
+
+await test('runStream falls back to one-shot delta when provider has no completeStream', async () => {
+  const provider = mockProvider([msg('all at once')]);
+  const agent = new Agent({ provider });
+  const events: string[] = [];
+  let seenDelta = '';
+  for await (const ev of agent.runStream('hi')) {
+    events.push(ev.type);
+    if (ev.type === 'text_delta' && typeof ev.content === 'string') seenDelta += ev.content;
+  }
+  assert(seenDelta === 'all at once', 'non-streaming provider emits whole reply as a single delta');
+  assert(events[events.length - 1] === 'done', 'still terminates with done');
+});
+
+await test('runStream streams a multi-step tool run with tool events', async () => {
+  const provider = mockProvider([
+    toolCalls([{ id: 'c1', name: 'a', arguments: {} }]),
+    msg('final'),
+  ]);
+  const a: Tool = { name: 'a', description: 'a', parameters: {}, execute: async () => 'A' };
+  const agent = new Agent({ provider, tools: [a] });
+  const events: string[] = [];
+  let toolEvents = 0;
+  for await (const ev of agent.runStream('x')) {
+    events.push(ev.type);
+    if (ev.type === 'tool_call' || ev.type === 'tool_result') toolEvents++;
+  }
+  assert(toolEvents === 2, 'tool_call + tool_result streamed');
+  assert(events.includes('text_delta'), 'final answer streamed after tools');
+  assert(events[events.length - 1] === 'done', 'tool run terminates with done');
+});
+
+await test('runStream surfaces provider errors as error events', async () => {
+  const provider: Provider = {
+    async complete() {
+      throw new Error('boom');
+    },
+  };
+  const agent = new Agent({ provider });
+  const events: string[] = [];
+  for await (const ev of agent.runStream('hi')) {
+    events.push(ev.type);
+  }
+  assert(events.includes('error'), 'error event emitted on provider failure');
+  assert(!events.includes('done'), 'no done after error');
+});
+
+await test('runStream yields error when step budget exhausted', async () => {
+  const provider: Provider = {
+    async complete() {
+      return toolCalls([{ id: 'c1', name: 'a', arguments: {} }]);
+    },
+  };
+  const a: Tool = { name: 'a', description: 'a', parameters: {}, execute: async () => 'A' };
+  const agent = new Agent({ provider, tools: [a], maxSteps: 2 });
+  const events: string[] = [];
+  for await (const ev of agent.runStream('x')) {
+    events.push(ev.type);
+  }
+  assert(events.includes('error'), 'step-budget exhaustion surfaces as error event');
+});
+
+// ── 16: stream keeps onStep hooks in sync ───────────────────────────────────
+await test('runStream calls onStep per step', async () => {
+  const steps: number[] = [];
+  const provider = mockProvider([msg('done')]);
+  const agent = new Agent({ provider, onStep: (s) => { steps.push(s); } });
+  for await (const _ev of agent.runStream('x')) { /* drain */ }
+  assert(steps.length === 1 && steps[0] === 1, 'onStep fired during stream');
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total\n`);
 if (failed > 0) throw new Error(`${failed} tests failed`);

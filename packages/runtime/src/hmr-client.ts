@@ -258,7 +258,7 @@ export function defaultDevtoolState(): DevtoolState {
 		pluginsView: 'cards',
 		sidebarMode: 'expanded',
 		agenticProvider: 'openai',
-		agenticModel: 'gpt-4o-mini',
+		agenticModel: '',
 		agenticMode: 'explore',
 		agenticModels: [],
 		settingsSubTab: 'devtools',
@@ -336,13 +336,13 @@ export interface AgenticConfigState {
 export function defaultAgenticConfigState(): AgenticConfigState {
 	return {
 		provider: 'openai',
-		model: 'gpt-4o-mini',
+		model: '',
 		models: [],
 		modelsLoading: false,
 		modelsError: null,
 		baseUrl: '',
 		mode: 'explore',
-		maxSteps: 10,
+		maxSteps: 25,
 		apiKeys: {},
 		hasKeys: {},
 		keyPreviews: {},
@@ -975,11 +975,11 @@ export function renderSettingsDevToolsSubtab(prefs: DevPrefs): string {
 export function renderSettingsAgenticSubtab(state: AgenticConfigState | null | undefined): string {
 	const s: AgenticConfigState = state || defaultAgenticConfigState();
 	const provider = typeof s.provider === 'string' && AGENTIC_PROVIDERS.indexOf(s.provider) !== -1 ? s.provider : 'openai';
-	const model = typeof s.model === 'string' ? s.model : 'gpt-4o-mini';
+	const model = typeof s.model === 'string' ? s.model : '';
 	const models = Array.isArray(s.models) ? s.models : [];
 	const baseUrl = typeof s.baseUrl === 'string' ? s.baseUrl : '';
 	const mode = isAgenticMode(s.mode) ? s.mode : 'explore';
-	const maxSteps = typeof s.maxSteps === 'number' && Number.isFinite(s.maxSteps) ? s.maxSteps : 10;
+	const maxSteps = typeof s.maxSteps === 'number' && Number.isFinite(s.maxSteps) ? s.maxSteps : 25;
 	const apiKeys = s.apiKeys && typeof s.apiKeys === 'object' ? s.apiKeys : {};
 	const hasKeys = s.hasKeys && typeof s.hasKeys === 'object' ? s.hasKeys : {};
 	const keyPreviews = s.keyPreviews && typeof s.keyPreviews === 'object' ? s.keyPreviews : {};
@@ -996,8 +996,8 @@ export function renderSettingsAgenticSubtab(state: AgenticConfigState | null | u
 	html += '<div class="__kp_cfg_hint">override provider baseUrl ()</div>';
 	html += renderAgenticModeToggle(mode);
 	html += '<div class="__kp_setlabel">MAX STEPS</div>';
-	html += '<input class="__kp_cfg_input" data-agentic-key="maxSteps" data-agentic-maxsteps type="number" min="1" max="100" step="1" value="' + escapeHtml(String(maxSteps)) + '">';
-	html += '<div class="__kp_cfg_hint">max agent loop steps (1-100)</div>';
+	html += '<input class="__kp_cfg_input" data-agentic-key="maxSteps" data-agentic-maxsteps type="number" min="1" max="200" step="1" value="' + escapeHtml(String(maxSteps)) + '">';
+	html += '<div class="__kp_cfg_hint">steps per run (1-200) — auto-extends past this while the agent still makes progress</div>';
 	html += '<div class="__kp_sec">&gt; API KEYS</div>';
 	html += '<div class="__kp_cfg_hint">per-provider keys — stored server-side, previews are masked</div>';
 	for (const p of AGENTIC_PROVIDERS) {
@@ -1422,10 +1422,15 @@ export function renderAgenticHistory(
 	history: AgenticCheckpoint[],
 	loading?: boolean
 ): string {
-	let html = '<div class="__kp_sec">&gt; HISTORY</div>';
+	// Single stable block node so the client can refresh checkpoints in place
+	// without re-rendering the whole panel (which would drop the chat messages
+	// host and make the panel "jump").
+	let html = '<div class="__kp_ag_hist_block" data-agentic="history-block">';
+	html += '<div class="__kp_sec">&gt; HISTORY</div>';
 	if (loading) html += '<div class="__kp_line">loading history...</div>';
 	if (!history || history.length === 0) {
 		if (!loading) html += '<div class="__kp_line">no checkpoints yet</div>';
+		html += '</div>';
 		return html;
 	}
 	html += '<div class="__kp_ag_history" data-agentic="history">';
@@ -1451,6 +1456,7 @@ export function renderAgenticHistory(
 			'">rollback</button>' +
 			'</div>';
 	}
+	html += '</div>';
 	html += '</div>';
 	return html;
 }
@@ -1532,7 +1538,7 @@ export function renderAgenticSlashPopup(
 export function renderAgenticChatInput(input?: string, running?: boolean, models: string[] = [], providers: string[] = AGENTIC_PROVIDERS, tools: string[] = []): string {
 	const popup = !running && input && input.startsWith('/') ? renderAgenticSlashPopup(input, models, providers, tools) : '';
 	return (
-		'<div class="__kp_ag_input_wrap" style="position:relative">' +
+		'<div class="__kp_ag_input_wrap">' +
 		popup +
 		'<div class="__kp_ag_input_row">' +
 		'<input class="__kp_ag_input" data-agentic-input="1" placeholder="ask agentic... (try /help)" value="' +
@@ -1552,7 +1558,7 @@ export function renderAgenticChatInput(input?: string, running?: boolean, models
 
 export function renderAgenticPanel(state: AgenticPanelState): string {
 	const provider = state.provider || 'openai';
-	const model = state.model || 'gpt-4o-mini';
+	const model = typeof state.model === 'string' ? state.model : '';
 	const models = Array.isArray(state.models) ? state.models : [];
 	const mode = isAgenticMode(state.mode) ? state.mode : 'explore';
 	const messages = Array.isArray(state.messages) ? state.messages : [];
@@ -1758,7 +1764,7 @@ const CSS =
 	'#__vesk_dev .__kp_ag_msg_body{font-size:12px;color:var(--vk-fg);white-space:pre-wrap;word-break:break-word;margin-top:2px;}' +
 	'#__vesk_dev .__kp_ag_msg[data-role="assistant"] .__kp_ag_msg_body{color:var(--vk-muted);}' +
 	'#__vesk_dev .__kp_ag_msg[data-role="system"] .__kp_ag_msg_body{color:var(--vk-dim);font-style:italic;}' +
-	'#__vesk_dev .__kp_ag_input_wrap{position:relative;display:flex;flex-direction:column;}' +
+	'#__vesk_dev .__kp_ag_input_wrap{position:sticky;bottom:0;z-index:11;display:flex;flex-direction:column;background:var(--vk-bg);border-top:1px solid var(--vk-line-soft);margin:8px -12px -12px;padding:6px 12px 12px;}' +
 	'#__vesk_dev .__kp_ag_popup{position:absolute;bottom:100%;left:0;right:0;max-height:180px;overflow-y:auto;background:var(--vk-bg);border:1px solid var(--vk-border);border-bottom:none;z-index:10;box-shadow:0 -4px 12px rgba(0,0,0,0.3);}' +
 	'#__vesk_dev .__kp_ag_popup_item{all:unset;display:flex;justify-content:space-between;align-items:center;width:100%;padding:6px 8px;font-family:inherit;font-size:11px;color:var(--vk-fg);cursor:pointer;border-bottom:1px solid var(--vk-line-soft);}' +
 	'#__vesk_dev .__kp_ag_popup_item:hover{background:var(--vk-soft);}' +
@@ -1838,9 +1844,15 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	let agenticModelsCache: string[] = [];
 	let agenticModelsLoading = false;
 	let agenticModelsError: string | null = null;
+	// The user's explicitly picked model — survives a later config-load that would
+	// otherwise clobber ui.agenticModel back to the (possibly stale) persisted default.
+	let agenticSelectedModel = '';
 	let agenticBaseUrl = '';
 	let agenticRunning = false;
 	let agenticError: string | null = null;
+	let agenticMaxSteps = 25;
+	let agenticRunStep = 0;
+	let agenticRunBudget = 0;
 	let agenticInput = '';
 	let agenticHistoryLoading = false;
 
@@ -1935,6 +1947,9 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			ui.sidebarMode = val;
 		} else if (key === 'agenticProvider' && AGENTIC_PROVIDERS.indexOf(val) !== -1) {
 			ui.agenticProvider = val;
+			// a model pick is provider-scoped — clear it so the new provider re-resolves
+			// to a valid model from its own freshly fetched list.
+			agenticSelectedModel = '';
 			agenticModelsCache = [];
 			ui.agenticModels = [];
 			if (agenticConfigState) agenticConfigState.models = [];
@@ -1943,6 +1958,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			if (activeTab === 'settings' && settingsSubtab === 'agentic') refreshAgenticModels();
 		} else if (key === 'agenticModel' && val.length > 0) {
 			ui.agenticModel = val;
+			agenticSelectedModel = val;
 		} else if (key === 'agenticMode' && isAgenticMode(val)) {
 			ui.agenticMode = val;
 		} else {
@@ -2386,8 +2402,10 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			const target = e.target as HTMLElement;
 			if (target && target.getAttribute('data-agentic-input') === '1') {
 				agenticInput = (target as HTMLInputElement).value;
-				// re-render to show/hide slash popup (position absolute above textbox)
-				renderPanel();
+				// Update only the slash popup, never re-render the whole panel:
+				// recreating the textbox on every keystroke dismisses the mobile
+				// keyboard and makes the UI jump.
+				syncAgenticSlashPopup();
 				return;
 			}
 			const cfgSrc = target.closest('[data-cfg-source]') as HTMLTextAreaElement | null;
@@ -2513,6 +2531,25 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		}
 	}
 
+	function syncAgenticSlashPopup(): void {
+		if (!doc) return;
+		const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
+		if (!inputEl) return;
+		const wrap = inputEl.closest('.__kp_ag_input_wrap') as HTMLElement | null;
+		if (!wrap) return;
+		const cur = wrap.querySelector('[data-agentic-popup]') as HTMLElement | null;
+		const nextHtml =
+			!agenticRunning && agenticInput.charAt(0) === '/'
+				? renderAgenticSlashPopup(agenticInput, [], AGENTIC_PROVIDERS, [])
+				: '';
+		if (nextHtml) {
+			if (cur) (cur as HTMLElement).outerHTML = nextHtml;
+			else wrap.insertAdjacentHTML('afterbegin', nextHtml);
+		} else if (cur) {
+			cur.remove();
+		}
+	}
+
 	function renderPanel(): void {
 		if (!doc.getElementById('__vesk_dev')) createDot();
 		if (!panelEl) return;
@@ -2520,6 +2557,12 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 		const content = doc.getElementById('__kp_content');
 		if (!content) return;
+
+		// If the agentic textbox is focused (actively typing on mobile), carry
+		// focus + caret across the redraw so the keyboard never dismisses.
+		const activeEl = doc.activeElement;
+		const wasAgenticInput = !!activeEl && activeEl.getAttribute('data-agentic-input') === '1';
+		const caret = wasAgenticInput ? (activeEl as HTMLInputElement).selectionStart : -1;
 
 		const renderers: Record<string, () => string> = {
 			overview: () =>
@@ -2630,7 +2673,21 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		content.innerHTML = '<div class="__kp_pane" data-tab="' + escapeHtml(activeTab) + '">' + html + '</div>';
 		const pane = content.firstElementChild as HTMLElement | null;
 		if (pane) {
-			pane.scrollTop = 0;
+			// Restore focus onto the redrawn textbox (skipping the scroll-to-top,
+			// which would yank the pane out from under the keyboard).
+			if (wasAgenticInput) {
+				const nue = doc.querySelector('[data-agentic-input="1"]') as HTMLInputElement | null;
+				if (nue) {
+					nue.focus();
+					try {
+						nue.setSelectionRange(caret, caret);
+					} catch (_e) {
+						/* ignore selection restore failures */
+					}
+				}
+			} else {
+				pane.scrollTop = 0;
+			}
 			void pane.offsetWidth;
 		}
 	}
@@ -2854,7 +2911,8 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				const baseUrl = typeof d.baseUrl === 'string' ? String(d.baseUrl) : (typeof (d as Record<string, unknown>).baseUrl === 'string' ? String((d as Record<string, unknown>).baseUrl) : '');
 				agenticBaseUrl = baseUrl;
 				const mode = typeof d.mode === 'string' && isAgenticMode(d.mode as string) ? (d.mode as AgenticMode) : ui.agenticMode;
-				const maxSteps = typeof d.maxSteps === 'number' ? d.maxSteps as number : 10;
+				const maxSteps = typeof d.maxSteps === 'number' ? d.maxSteps as number : 25;
+	agenticMaxSteps = maxSteps;
 				const hasKey = !!d.hasKey;
 				const keyPreview = typeof d.keyPreview === 'string' ? String(d.keyPreview) : null;
 				const previews: Record<string, string | null> = {};
@@ -2883,9 +2941,11 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				};
 				agenticConfigLoading = false;
 				agenticConfigError = null;
-				// sync ui
+				// sync ui — but never clobber the user's explicitly selected model with a
+				// (possibly stale persisted) config default. The fresh per-provider fetched
+				// list + user pick win; server config is only the persisted default.
 				ui.agenticProvider = provider;
-				ui.agenticModel = model;
+				if (!agenticSelectedModel) ui.agenticModel = model;
 				ui.agenticMode = mode;
 				persistUi();
 				renderPanel();
@@ -3008,11 +3068,20 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			});
 	}
 
+	function patchAgenticHistorySection(): void {
+		const pane = agenticPaneEl();
+		if (!pane) return;
+		const block = pane.querySelector('[data-agentic="history-block"]') as HTMLElement | null;
+		if (!block) return;
+		block.innerHTML = renderAgenticHistory(agenticHistory, agenticHistoryLoading) +
+			(agenticHistoryError ? '<div class="__kp_pl_err">' + String(agenticHistoryError) + '</div>' : '');
+	}
+
 	function refreshAgenticHistory(): void {
 		if (typeof fetch === 'undefined') return;
 		agenticHistoryLoading = true;
 		agenticHistoryError = null;
-		renderPanel();
+		patchAgenticHistorySection();
 		fetch('/__vesk/agent/history')
 			.then(function (r) {
 				if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -3033,13 +3102,247 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 					});
 				}
 				agenticHistoryLoading = false;
-				renderPanel();
+				patchAgenticHistorySection();
 			})
 			.catch(function (e: unknown) {
 				agenticHistoryLoading = false;
 				agenticHistoryError = e instanceof Error ? e.message : String(e);
-				renderPanel();
+				patchAgenticHistorySection();
 			});
+	}
+
+	// Resolve the model to send: the user's explicit pick wins when it's valid for
+	// the active provider; otherwise fall back to the first valid model in the
+	// fetched per-provider list (never a dead hardcoded default).
+	function resolveAgenticModel(): string {
+		// A user's explicit pick reliably wins at send time.
+		if (agenticSelectedModel) return agenticSelectedModel;
+		const list = agenticModelsCache.length ? agenticModelsCache : ui.agenticModels;
+		const pick = (ui.agenticModel || '').trim();
+		if (pick && (list.length === 0 || list.indexOf(pick) !== -1)) return pick;
+		if (list.length) return list[0];
+		return pick;
+	}
+
+	function agenticPaneEl(): HTMLElement | null {
+		const pane = doc.querySelector('#__vesk_dev .__kp_pane[data-tab="agentic"]') as HTMLElement | null;
+		return pane;
+	}
+
+	function agenticPaneNearBottom(pane: HTMLElement): boolean {
+		return pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 48;
+	}
+
+	function buildAgenticMessageEl(m: AgenticMessage, idx: number): HTMLElement {
+		const role = m.role || 'user';
+		const time = m.ts ? new Date(m.ts).toLocaleTimeString() : '';
+		const wrap = doc.createElement('div');
+		wrap.className = '__kp_ag_msg';
+		wrap.setAttribute('data-role', role);
+		wrap.setAttribute('data-idx', String(idx));
+		const head = doc.createElement('div');
+		head.className = '__kp_ag_msg_head';
+		const roleSpan = doc.createElement('span');
+		roleSpan.className = '__kp_ag_role';
+		roleSpan.textContent = role;
+		head.appendChild(roleSpan);
+		if (time) {
+			const t = doc.createElement('span');
+			t.className = '__kp_ag_time';
+			t.textContent = time;
+			head.appendChild(t);
+		}
+		const body = doc.createElement('div');
+		body.className = '__kp_ag_msg_body';
+		body.textContent = m.content;
+		wrap.appendChild(head);
+		wrap.appendChild(body);
+		return wrap;
+	}
+
+	function updateAgenticChatState(): void {
+		// Send button + running indicator only for the live chat pane. The input
+		// stays enabled while running (disabling a focused input blurs it and
+		// dismisses the mobile keyboard); sends are guarded by agenticRunning.
+		const pane = agenticPaneEl();
+		if (!pane) return;
+		const sendBtn = pane.querySelector('button[data-agentic-send]') as HTMLButtonElement | null;
+		if (sendBtn) {
+			sendBtn.disabled = !!agenticRunning;
+			const label = agenticRunning
+				? 'running' + (agenticRunStep > 0 ? ' step ' + agenticRunStep + (agenticRunBudget > 0 ? '/' + agenticRunBudget : '') : '') + '…'
+				: 'send';
+			if (sendBtn.textContent !== label) sendBtn.textContent = label;
+		}
+		const errHost = pane.querySelector('.__kp_pl_err') as HTMLElement | null;
+		if (agenticError) {
+			if (errHost) {
+				errHost.textContent = agenticError;
+			} else {
+				const errDiv = doc.createElement('div');
+				errDiv.className = '__kp_pl_err';
+				const host = pane.querySelector('.__kp_ag_messages') as HTMLElement | null;
+				if (host && host.parentNode) {
+					if (host.nextSibling) host.parentNode.insertBefore(errDiv, host.nextSibling);
+					else host.parentNode.appendChild(errDiv);
+				} else {
+					pane.appendChild(errDiv);
+				}
+			}
+		} else if (errHost) {
+			errHost.remove();
+		}
+	}
+
+	// Incremental chat DOM update: grows/shrinks the message list in place and
+	// patches the last message body as stream deltas arrive. The pane element is
+	// never recreated, so scroll position and the textbox stay put during
+	// send/receive — no UI jumping.
+	function patchAgenticChat(): void {
+		const pane = agenticPaneEl();
+		if (!pane) return;
+		let host = pane.querySelector('.__kp_ag_messages') as HTMLElement | null;
+		if (!host) {
+			// The empty chat renders only a placeholder line (no host node), so
+			// create the host in its place the first time a message exists. We
+			// NEVER re-render the whole pane here — that is what makes the UI jump.
+			const wrap = doc.createElement('div');
+			wrap.className = '__kp_ag_messages';
+			wrap.setAttribute('data-agentic', 'messages');
+			const placeholder = pane.querySelector('.__kp_line');
+			if (placeholder && placeholder.parentNode === pane) {
+				placeholder.parentNode.replaceChild(wrap, placeholder);
+			} else {
+				const inputWrap = pane.querySelector('.__kp_ag_input_wrap');
+				if (inputWrap) pane.insertBefore(wrap, inputWrap);
+				else pane.appendChild(wrap);
+			}
+			host = wrap;
+		}
+		if (pane && host) {
+			let count = host.children.length;
+			while (count < agenticMessages.length) {
+				host.appendChild(buildAgenticMessageEl(agenticMessages[count], count));
+				count++;
+			}
+			while (count > agenticMessages.length && host.lastChild) {
+				host.removeChild(host.lastChild);
+				count--;
+			}
+			for (let i = 0; i < agenticMessages.length; i++) {
+				const row = host.children[i] as HTMLElement | null;
+				if (!row) continue;
+				const m = agenticMessages[i];
+				const body = row.querySelector('.__kp_ag_msg_body') as HTMLElement | null;
+				if (body && body.textContent !== m.content) body.textContent = m.content;
+				if (m.ts) {
+					const t = new Date(m.ts).toLocaleTimeString();
+					const timeEl = row.querySelector('.__kp_ag_time') as HTMLElement | null;
+					if (timeEl && timeEl.textContent !== t) timeEl.textContent = t;
+				}
+			}
+			if (agenticRunning || agenticPaneNearBottom(pane)) {
+				pane.scrollTop = pane.scrollHeight;
+			}
+		}
+		updateAgenticChatState();
+	}
+
+	function consumeAgenticStream(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
+		const decoder = new TextDecoder();
+		let buffer = '';
+		let finished = false;
+		function dispatch(rawFrame: string): void {
+			if (finished) return;
+			let type = 'message';
+			let data = '';
+			const lines = rawFrame.split('\n');
+			for (const line of lines) {
+				if (line.indexOf('event:') === 0) type = line.slice(6).trim();
+				else if (line.indexOf('data:') === 0) data = line.slice(5).trim();
+			}
+			if (!data) return;
+			let ev: Record<string, unknown>;
+			try {
+				ev = JSON.parse(data) as Record<string, unknown>;
+			} catch {
+				return;
+			}
+			const evType = type;
+			if (evType === 'step') {
+				if (typeof ev.step === 'number') agenticRunStep = ev.step as number;
+				if (typeof ev.budget === 'number' && (ev.budget as number) > 0) agenticRunBudget = ev.budget as number;
+				updateAgenticChatState();
+				return;
+			}
+			if (evType === 'text_delta') {
+				const content = typeof ev.content === 'string' ? (ev.content as string) : '';
+				if (!content) return;
+				const cur = agenticMessages[agenticMessages.length - 1];
+				if (cur && cur.role === 'assistant' && typeof cur.content === 'string') {
+					cur.content += content;
+				} else {
+					agenticMessages.push({ role: 'assistant', content: content, ts: Date.now() });
+				}
+				patchAgenticChat();
+				return;
+			}
+			if (evType === 'tool_call') {
+				const call = ev.call as Record<string, unknown> | undefined;
+				const name = call && typeof call.name === 'string' ? String(call.name) : '';
+				if (name) {
+					agenticMessages.push({ role: 'system', content: '→ tool: ' + name + (typeof ev.step === 'number' ? ' (step ' + String(ev.step) + ')' : ''), ts: Date.now() });
+					patchAgenticChat();
+				}
+				return;
+			}
+			if (evType === 'error') {
+				finished = true;
+				agenticError = typeof ev.message === 'string' ? String(ev.message) : typeof ev.error === 'string' ? String(ev.error) : 'agent error';
+				agenticRunning = false;
+				agenticRunStep = 0;
+				patchAgenticChat();
+				return;
+			}
+			if (evType === 'done') {
+				finished = true;
+				const res = ev.result as Record<string, unknown> | undefined;
+				const text = res && typeof res.text === 'string' ? String(res.text) : '';
+				const cur = agenticMessages[agenticMessages.length - 1];
+				if (cur && cur.role === 'assistant' && cur.content) {
+					if (text && cur.content !== text) cur.content = text;
+				} else if (text) {
+					agenticMessages.push({ role: 'assistant', content: text, ts: Date.now() });
+				}
+				agenticRunning = false;
+				agenticRunStep = 0;
+				patchAgenticChat();
+				refreshAgenticHistory();
+			}
+		}
+		function pump(step: ReadableStreamReadResult<Uint8Array>): Promise<void> | void {
+			if (step.done) {
+				try {
+					reader.releaseLock();
+				} catch {
+					/* already released */
+				}
+				agenticRunning = false;
+				agenticRunStep = 0;
+				patchAgenticChat();
+				return;
+			}
+			buffer += decoder.decode(step.value as Uint8Array, { stream: true });
+			let idx = buffer.indexOf('\n\n');
+			while (idx !== -1) {
+				const rawFrame = buffer.slice(0, idx);
+				buffer = buffer.slice(idx + 2);
+				dispatch(rawFrame);
+				idx = buffer.indexOf('\n\n');
+			}
+			return reader.read().then(pump);
+		}
+		return reader.read().then(pump);
 	}
 
 	function sendAgenticMessage(): void {
@@ -3057,39 +3360,57 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		}
 		agenticRunning = true;
 		agenticError = null;
+		agenticRunStep = 0;
+		agenticRunBudget = agenticMaxSteps > 0 ? agenticMaxSteps : 0;
 		agenticMessages.push({ role: 'user', content: prompt, ts: Date.now() });
 		if (inputEl) inputEl.value = '';
 		agenticInput = '';
-		renderPanel();
+		patchAgenticChat();
 		if (typeof fetch === 'undefined') {
 			agenticRunning = false;
 			agenticError = 'fetch unavailable';
-			renderPanel();
+			patchAgenticChat();
 			return;
 		}
+		const sendModel = resolveAgenticModel();
+		if (!sendModel) {
+			agenticRunning = false;
+			agenticError = 'no model selected — refresh the model list for ' + ui.agenticProvider;
+			patchAgenticChat();
+			return;
+		}
+		const maxSteps = agenticMaxSteps > 0 ? agenticMaxSteps : undefined;
 		fetch('/__vesk/agent/run', {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
-			body: JSON.stringify({ prompt: prompt, provider: ui.agenticProvider, model: ui.agenticModel, mode: ui.agenticMode, providerConfig: { provider: ui.agenticProvider, model: ui.agenticModel } }),
+			body: JSON.stringify({ prompt: prompt, provider: ui.agenticProvider, model: sendModel, mode: ui.agenticMode, maxSteps: maxSteps, stream: true, providerConfig: { provider: ui.agenticProvider, model: sendModel } }),
 		})
 			.then(function (r) {
-				return r.json().then(function (body: { error?: string; result?: { text?: string; error?: string } }) {
-					if (!r.ok) throw new Error(body.error || 'HTTP ' + r.status);
-					return body;
+				const ctype = r.headers.get('content-type') || '';
+				if (!r.ok) {
+					return r.json().then(function (b) {
+						throw new Error((b as { error?: string }).error || 'HTTP ' + r.status);
+					});
+				}
+				if (ctype.indexOf('text/event-stream') !== -1 && r.body && typeof (r.body as ReadableStream<Uint8Array>).getReader === 'function') {
+					return consumeAgenticStream((r.body as ReadableStream<Uint8Array>).getReader());
+				}
+				// Older server / non-streaming fallback: whole reply at once.
+				return r.json().then(function (body) {
+					const result = (body as { result?: { text?: string } }).result;
+					const reply = result && typeof result.text === 'string' ? result.text : 'done';
+					agenticMessages.push({ role: 'assistant', content: reply, ts: Date.now() });
+					agenticRunning = false;
+					agenticRunStep = 0;
+					patchAgenticChat();
+					refreshAgenticHistory();
 				});
-			})
-			.then(function (body) {
-				const result = body.result as { text?: string } | undefined;
-				const reply = result && typeof result.text === 'string' ? result.text : 'done';
-				agenticMessages.push({ role: 'assistant', content: reply, ts: Date.now() });
-				agenticRunning = false;
-				renderPanel();
-				refreshAgenticHistory();
 			})
 			.catch(function (e: unknown) {
 				agenticRunning = false;
+				agenticRunStep = 0;
 				agenticError = e instanceof Error ? e.message : String(e);
-				renderPanel();
+				patchAgenticChat();
 			});
 	}
 

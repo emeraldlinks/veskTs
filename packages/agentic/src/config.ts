@@ -13,7 +13,7 @@ const DEFAULT_CONFIG: AgenticConfig = {
   provider: 'openai',
   model: 'gpt-4o-mini',
   mode: 'explore',
-  maxSteps: 10,
+  maxSteps: 25,
 };
 
 export const SUPPORTED_PROVIDERS: string[] = [

@@ -111,6 +111,10 @@ export interface DevPanelResponse {
   headers: Record<string, string>;
   body: string;
   encoding?: 'utf8' | 'base64';
+  /** When set, `body`/`encoding` are ignored and this async iterable of
+      (already-framed) strings is streamed to the client instead — used for
+      SSE agent progress. */
+  stream?: AsyncIterable<string>;
 }
 
 export interface RebuildResult {
