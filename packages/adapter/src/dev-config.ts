@@ -70,7 +70,10 @@ export async function parseConfigSource(source: string, isTs: boolean, projectDi
     writeFileSync(tmpFile, js, 'utf-8');
     (globalThis as Record<string, unknown>).__vesk_inject = {
       defineConfig,
-      definePlugin: () => ({}),
+      // Pass-through like the real definePlugin (which validates + returns
+      // its argument): a stub returning {} would strip the plugin's `name`
+      // and make validateConfig reject the file (GET /__vesk/config → 500).
+      definePlugin: (p: unknown) => p,
       preset,
     };
     const mod = await import(`${tmpFile}?t=${Date.now()}`);
