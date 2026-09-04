@@ -49,7 +49,11 @@ function deriveTargets(index) {
 	const targets = [];
 	for (const name of names) {
 		const dir = index.get(name);
-		if (dir && name.startsWith('@vesk/')) targets.push({ dir, name });
+		// @vesk/* are the framework packages. `lucide-vesk` is also a local
+		// workspace package (never published to the registry), so it must be
+		// repacked + pinned as a tarball too — otherwise npm tries the registry
+		// and 404s on it.
+		if (dir && (name.startsWith('@vesk/') || name === 'lucide-vesk')) targets.push({ dir, name });
 	}
 	return targets;
 }

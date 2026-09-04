@@ -165,19 +165,28 @@ export class ComponentCall {
   spreadProps: Expression[];
   children: IRNode[];
   start: number;
+  /**
+   * Raw JS expression for the component value when the JSX tag is a member
+   * expression (e.g. `<it.icon>` → `it.icon`). Dotted tags can never be HTML
+   * elements or registry names, so codegen must invoke this expression
+   * directly instead of resolving `componentName` through the registry.
+   */
+  calleeExpr: string | null;
 
   constructor(
     componentName: string,
     props: { name: string; value: Expression }[],
     children: IRNode[] = [],
     spreadProps: Expression[] = [],
-    start = -1
+    start = -1,
+    calleeExpr: string | null = null
   ) {
     this.componentName = componentName;
     this.props = props;
     this.children = children;
     this.spreadProps = spreadProps;
     this.start = start;
+    this.calleeExpr = calleeExpr;
   }
 }
 

@@ -26,7 +26,7 @@ import type { Expression } from '@vesk/compiler/src/ir';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
-import { extractRuntimeNames } from '@vesk/compiler/src/server-utils';
+import { extractRuntimeNames, extractTopLevelNames } from '@vesk/compiler/src/server-utils';
 import { importBindingPairs, localValueImportNames } from '@vesk/compiler/src/module-imports';
 import { stripTrackGeneric } from '@vesk/compiler/src/scan';
 import { inlineMdImportsFrom } from '@vesk/compiler/src/md-inline';
@@ -89,6 +89,35 @@ function containsJsx(node: any, depth = 0): boolean {
 
 function printAst(ast: any): string {
   return print(ast, containsJsx(ast) ? tsx() : ts()).code;
+}
+
+/**
+ * Converts a bare effect block (`{ <setup>; effect(fn); }`, the shape every
+ * `ctx.effects.push` template produces) into an expression that runs the
+ * block immediately and evaluates to the effect handle:
+ * `(() => { <setup>; return effect(fn); })()`.
+ *
+ * Required when an effect is collected into a per-item effects array
+ * (`__e.push(<block>)`): a raw block in expression position parses as an
+ * object literal, so `let` declarations inside it are a SyntaxError that
+ * kills the entire client chunk — and with it hydration for the whole page.
+ * Falls back to a value-less IIFE when the block shape is unexpected.
+ */
+function effectBlockToHandlerExpr(eff: string): string {
+  try {
+    const ast = parse(eff) as unknown as { body?: Array<{ type?: string; body?: Array<{ type?: string; expression?: unknown }> }> };
+    const block = ast.body?.[0];
+    const stmts = block?.type === 'BlockStatement' ? block.body ?? [] : [];
+    const last = stmts[stmts.length - 1];
+    if (last?.type === 'ExpressionStatement' && last.expression) {
+      const returning = { ...block, body: [...stmts.slice(0, -1), { type: 'ReturnStatement', argument: last.expression }] };
+      const code = printAst(returning);
+      if (code) return `(() => ${code})()`;
+    }
+  } catch {
+    // fall through to the value-less IIFE below
+  }
+  return `(() => ${eff})()`;
 }
 
 export function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
@@ -580,10 +609,14 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
   const propsObj = `{ ${propsEntries.join(', ')} }`;
   const v = ctx.n();
   const awaitKw = ctx.asyncComps.has(node.componentName) ? 'await ' : '';
+  // Member-expression tags (`<it.icon>`) carry the raw component-valued
+  // expression — invoke it directly; it is never a registry name.
+  const calleeExpr = node.calleeExpr ? `(${node.calleeExpr})` : null;
   if (ctx.hydrate) {
-    const access = ctx.importedNames.has(node.componentName)
-      ? node.componentName
-      : `__components[${JSON.stringify(node.componentName)}]`;
+    const access = calleeExpr
+      ?? (ctx.importedNames.has(node.componentName)
+        ? node.componentName
+        : `__components[${JSON.stringify(node.componentName)}]`);
     const subScope = () => ctx.inTryBody
       ? `${ctx.walker}.subWalker(${parentVar})`
       : `${ctx.walker}.subWalker(${ctx.walker}.nextElement())`;
@@ -600,7 +633,7 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
         const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
         if (childVar) ctx.push(`$f.appendChild(${childVar});`);
       }
-      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${eff});` : eff);
+      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
       ctx.effects = savedEffects;
       ctx.walker = savedWalker;
       ctx.push(`return $f; })();`);
@@ -620,12 +653,14 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
         const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
         if (childVar) ctx.push(`$f.appendChild(${childVar});`);
       }
-      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${eff});` : eff);
+      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
       ctx.effects = savedEffects;
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
     }
-    if (ctx.importedNames.has(node.componentName)) {
+    if (calleeExpr) {
+      ctx.push(`const ${v} = ${calleeExpr}({ ${propsEntries.join(', ')} });`);
+    } else if (ctx.importedNames.has(node.componentName)) {
       ctx.push(`const ${v} = ${awaitKw}${node.componentName}({ ${propsEntries.join(', ')} });`);
     } else {
       ctx.push(`const ${v} = ${awaitKw}${compPrefix}[${JSON.stringify(node.componentName)}]({ ${propsEntries.join(', ')} });`);
@@ -1259,13 +1294,21 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
   mapLines.push(`const __components = {};`);
   const asyncComps = computeAsyncComponents(irRoot.components);
 
+  // Top-level value bindings (`const MyIcon = Cpu`) live in module scope
+  // alongside the component map, so a same-named JSX tag must invoke that
+  // in-scope value directly — not a registry lookup. File-defined components
+  // keep registry precedence.
+  const componentNames = new Set(irRoot.components.map((c) => c.name));
+  const topValueNames = extractTopLevelNames(irRoot.topLevelCode).filter((n) => !componentNames.has(n));
+  const directNames = new Set([...extractRuntimeNames(irRoot.imports), ...localValueImportNames(irRoot.imports), ...topValueNames]);
+
   for (const comp of irRoot.components) {
     if (hydrate && isStaticComponent(comp)) {
       const stub = `(props, __registry, __hydrate) => { return __hydrate.root; }`;
       mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
-    const code = generateComponent(comp, new Set([...extractRuntimeNames(irRoot.imports), ...localValueImportNames(irRoot.imports)]), hydrate, asyncComps);
+    const code = generateComponent(comp, directNames, hydrate, asyncComps);
     mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
   }
 

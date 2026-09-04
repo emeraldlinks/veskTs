@@ -4,6 +4,9 @@
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
 import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate } from '@vesk/compiler/src/server-codegen';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
@@ -1523,6 +1526,216 @@ describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
 		setVskHydrate(false);
 		expect(out).toContain('<!--vsk-->');
 		expect(out).toContain('<div>Hello, W!</div>');
+	});
+	it('renderPageStream honors clientScriptUrl like renderFullPage', async () => {
+		const stream = renderPageStream(`component App { return <div>hi</div>; }`, 'App', {}, new Map(), { clientScriptUrl: '/_vesk/client.js' });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<script type="module" src="/_vesk/client.js"></script>');
+		expect(out).toContain('</body>');
+	});
+	it('renderPageStream omits client script when no clientScriptUrl', async () => {
+		const stream = renderPageStream(`component App { return <div>hi</div>; }`, 'App', {}, new Map(), {});
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).not.toContain('<script type="module"');
+	});
+});
+
+describe('Statement-mode guard-clause early return', () => {
+	it('guard taken renders only guard output', () => {
+		const html = render(`
+			component App(props: { ok: boolean }) {
+				if (!props.ok) {
+					return <div>missing</div>;
+				}
+				<div>found</div>
+			}
+		`, 'App', { ok: false });
+		expect(html).toBe('<div>missing</div>');
+	});
+	it('guard not taken renders rest', () => {
+		const html = render(`
+			component App(props: { ok: boolean }) {
+				if (!props.ok) {
+					return <div>missing</div>;
+				}
+				<div>found</div>
+			}
+		`, 'App', { ok: true });
+		expect(html).toBe('<div>found</div>');
+	});
+	it('literal-false guard renders rest', () => {
+		const html = render(`
+			component App {
+				if (false) {
+					return <div>never</div>;
+				}
+				<div>always</div>
+			}
+		`, 'App');
+		expect(html).toBe('<div>always</div>');
+	});
+	it('statements after guard use narrowed values (lookup pattern)', () => {
+		const src = `
+			const getDoc = (slug) => slug === 'a' ? { title: 'A' } : undefined;
+			component App(props: { slug: string }) {
+				const doc = getDoc(props.slug);
+				if (!doc) {
+					return <div>404</div>;
+				}
+				<div>{doc.title}</div>
+			}
+		`;
+		expect(render(src, 'App', { slug: 'nope' })).toBe('<div>404</div>');
+		expect(render(src, 'App', { slug: 'a' })).toBe('<div>A</div>');
+	});
+	it('multiple guards fold right', () => {
+		const src = `
+			component App(props: { n: number }) {
+				if (props.n === 1) {
+					return <div>one</div>;
+				}
+				if (props.n === 2) {
+					return <div>two</div>;
+				}
+				<div>other</div>
+			}
+		`;
+		expect(render(src, 'App', { n: 1 })).toBe('<div>one</div>');
+		expect(render(src, 'App', { n: 2 })).toBe('<div>two</div>');
+		expect(render(src, 'App', { n: 3 })).toBe('<div>other</div>');
+	});
+	it('if/else with returns in both branches still works', () => {
+		const src = `
+			component App(props: { ok: boolean }) {
+				if (props.ok) {
+					return <div>yes</div>;
+				} else {
+					return <div>no</div>;
+				}
+			}
+		`;
+		expect(render(src, 'App', { ok: true })).toBe('<div>yes</div>');
+		expect(render(src, 'App', { ok: false })).toBe('<div>no</div>');
+	});
+});
+
+describe('Dynamic component tags — SSR invokes the value', () => {
+	it('member-expression tag renders value output (expression)', () => {
+		const html = render(`
+			const Check = (props) => '<svg class="' + props.class + '"></svg>';
+			const items = [{ icon: Check }];
+			component App { return <div>{items.map((it) => <it.icon class="x" />)}</div>; }
+		`, 'App');
+		expect(html).toBe('<div><svg class="x"></svg></div>');
+	});
+	it('member-expression tag renders value output (statement)', () => {
+		const html = render(`
+			const Check = (props) => '<b>' + props.t + '</b>';
+			const items = [{ icon: Check }];
+			component App { <div>for (const it of items) { <it.icon t="y" /> }</div> }
+		`, 'App');
+		expect(html).toBe('<div><b>y</b></div>');
+	});
+	it('top-level bound component renders value output (expression)', () => {
+		const html = render(`
+			const MyIcon = (props) => '<i>' + props.label + '</i>';
+			component App { return <div><MyIcon label="hi" /></div>; }
+		`, 'App');
+		expect(html).toBe('<div><i>hi</i></div>');
+	});
+	it('top-level bound component renders value output (statement)', () => {
+		const html = render(`
+			const MyIcon = (props) => '<i>' + props.label + '</i>';
+			component App { <div><MyIcon label="hi" /></div> }
+		`, 'App');
+		expect(html).toBe('<div><i>hi</i></div>');
+	});
+	it('same-file component still renders via registry (expression + statement)', () => {
+		expect(render(`
+			component Inner { return <span>hi</span>; }
+			component App { return <div><Inner /></div>; }
+		`, 'App')).toBe('<div><span>hi</span></div>');
+		expect(render(`
+			component Inner { <span>hi</span> }
+			component App { <div><Inner /></div> }
+		`, 'App')).toBe('<div><span>hi</span></div>');
+	});
+	it('component declaration wins over same-named top-level binding', () => {
+		const html = render(`
+			const Foo = (props) => 'const-value';
+			component Foo { return <span>comp-value</span>; }
+			component App { return <div><Foo /></div>; }
+		`, 'App');
+		expect(html).toBe('<div><span>comp-value</span></div>');
+	});
+});
+
+// ============================================================
+// Cross-File Scope Isolation (callee __veskScope)
+// Two `.vsk` files declaring the same top-level name must each SSR
+// their OWN value — the hoist-first-wins merge must not leak one
+// file's binding into another component. Covered in both body modes.
+// ============================================================
+describe('Cross-File Scope Isolation', () => {
+	function writeFiles(files: Record<string, string>): { dir: string; paths: Record<string, string> } {
+		const dir = mkdtempSync(join(tmpdir(), 'vesk-scope-'));
+		const paths: Record<string, string> = {};
+		for (const [name, src] of Object.entries(files)) {
+			const p = join(dir, name);
+			writeFileSync(p, src);
+			paths[name] = p;
+		}
+		return { dir, paths };
+	}
+	it('sibling files with colliding top-level names render own values (expression + statement)', async () => {
+		const { dir, paths } = writeFiles({
+			// expression-mode body
+			'alpha.vsk': `const stages = ['alpha-one', 'alpha-two'];\ncomponent Alpha { return <span>{stages[1]}</span>; }\n`,
+			// statement-mode body (bare JSX)
+			'beta.vsk': `const stages = ['beta-one', 'beta-two'];\ncomponent Beta { <span>{stages[1]}</span> }\n`,
+			// beta imported FIRST so alpha is the merge loser pre-fix
+			'page.vsk': `import { Beta } from './beta.vsk'\nimport { Alpha } from './alpha.vsk'\ncomponent Home { return <div><Alpha /><Beta /></div>; }\n`,
+		});
+		try {
+			const src = readFileSync(paths['page.vsk'], 'utf-8');
+			const out = await renderPage(src, 'Home', {}, new Map(), { sourcePath: paths['page.vsk'] });
+			const body = typeof out === 'string' ? out : (out as { body: string }).body;
+			expect(body).toBe('<div><span>alpha-two</span><span>beta-two</span></div>');
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+	it('reversed import order still isolates scopes', async () => {
+		const { dir, paths } = writeFiles({
+			'alpha.vsk': `const stages = ['alpha-one', 'alpha-two'];\ncomponent Alpha { <span>{stages[0]}</span> }\n`,
+			'beta.vsk': `const stages = ['beta-one', 'beta-two'];\ncomponent Beta { return <span>{stages[0]}</span>; }\n`,
+			'page.vsk': `import { Alpha } from './alpha.vsk'\nimport { Beta } from './beta.vsk'\ncomponent Home { return <div><Alpha /><Beta /></div>; }\n`,
+		});
+		try {
+			const src = readFileSync(paths['page.vsk'], 'utf-8');
+			const out = await renderPage(src, 'Home', {}, new Map(), { sourcePath: paths['page.vsk'] });
+			const body = typeof out === 'string' ? out : (out as { body: string }).body;
+			expect(body).toBe('<div><span>alpha-one</span><span>beta-one</span></div>');
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+	it('depth-2 nesting isolates scopes at every level', async () => {
+		const { dir, paths } = writeFiles({
+			'leaf.vsk': `const tag = 'leaf';\ncomponent Leaf { return <i>{tag}</i>; }\n`,
+			'mid.vsk': `import { Leaf } from './leaf.vsk'\nconst tag = 'mid';\ncomponent Mid { <b>{tag}<Leaf /></b> }\n`,
+			'page.vsk': `import { Mid } from './mid.vsk'\nconst tag = 'page';\ncomponent Home { return <div>{tag}<Mid /></div>; }\n`,
+		});
+		try {
+			const src = readFileSync(paths['page.vsk'], 'utf-8');
+			const out = await renderPage(src, 'Home', {}, new Map(), { sourcePath: paths['page.vsk'] });
+			const body = typeof out === 'string' ? out : (out as { body: string }).body;
+			expect(body).toBe('<div>page<b>mid<i>leaf</i></b></div>');
+		} finally {
+			rmSync(dir, { recursive: true, force: true });
+		}
 	});
 });
 

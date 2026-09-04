@@ -21,6 +21,18 @@ import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-in
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { applyLocalModuleImports } from '@vesk/compiler/src/module-imports';
 
+type ScopedFn = Function & { __veskScope?: Record<string, unknown> };
+
+// Registry-hoisted sub components are invoked with the caller's `__vesk`,
+// but each component's scope declaration destructures its DEFINING file's
+// top-level bindings. When two `.vsk` files declare the same top-level name
+// (e.g. both define `const stages`), the hoist-first-wins merge below would
+// hand every component the wrong file's value. Attaching the defining scope
+// lets every call site prefer the callee's own bindings.
+function scopedVesk(fn: Function, fallback: Record<string, unknown>): Record<string, unknown> {
+  return (fn as ScopedFn).__veskScope || fallback;
+}
+
 
 export function compileFile(source: string, options?: { sourcePath?: string }): CompileFileResult {
   return compileFileInternal(source, options?.sourcePath, new Set());
@@ -34,6 +46,7 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
   const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
   const ir = generateIR(ast, source, sourcePath);
   const componentMap = buildComponentMap(ir, true);
+  const ownComponentNames = ir.components.map((c) => c.name);
   const __vesk = loadRuntimeImports(ir.imports);
   applyLocalModuleImports(__vesk, ir.imports, sourcePath);
   if (sourcePath) {
@@ -59,6 +72,12 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
     }
   }
   evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
+  // Sub-file components arrive pre-scoped from the recursive call below;
+  // scope the remaining (own) components to this file's bindings.
+  for (const name of ownComponentNames) {
+    const fn = componentMap.get(name) as ScopedFn | undefined;
+    if (fn && !fn.__veskScope) fn.__veskScope = __vesk;
+  }
   return { ir, componentMap, __vesk };
 }
 
@@ -86,7 +105,7 @@ export function render(
     return withSsrStore(() => (async () => {
       let bodyHtml: string;
       try {
-        bodyHtml = await renderFn(props, fullRegistry, __vesk);
+        bodyHtml = await renderFn(props, fullRegistry, scopedVesk(renderFn, __vesk));
       } finally {
         delete (globalThis as any).__vsk_ssr;
         clearSsrCells(renderToken);
@@ -96,7 +115,7 @@ export function render(
   }
   let bodyHtml: unknown;
   try {
-    bodyHtml = withSsrStore(() => renderFn(props, fullRegistry, __vesk));
+    bodyHtml = withSsrStore(() => renderFn(props, fullRegistry, scopedVesk(renderFn, __vesk)));
   } finally {
     delete (globalThis as any).__vsk_ssr;
     clearSsrCells(renderToken);
@@ -138,7 +157,7 @@ export function renderPage(
       return withSsrStore(() => (async () => {
         let bodyHtml: string;
         try {
-          bodyHtml = await renderFn(ssrProps, fullRegistry, __vesk);
+          bodyHtml = await renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk));
         } finally {
           delete (globalThis as any).__vsk_ssr;
           clearSsrCells(renderToken);
@@ -152,7 +171,7 @@ export function renderPage(
     }
     let bodyHtml: unknown;
     try {
-      bodyHtml = withSsrStore(() => renderFn(ssrProps, fullRegistry, __vesk));
+      bodyHtml = withSsrStore(() => renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk)));
     } finally {
       delete (globalThis as any).__vsk_ssr;
       clearSsrCells(renderToken);
@@ -431,7 +450,7 @@ export function renderPageStream(
   const renderToken = (globalThis as any).__vsk_ssr_token;
   let bodyHtml: string;
   try {
-    bodyHtml = await Promise.resolve(renderFn(ssrProps, fullRegistry, __vesk));
+    bodyHtml = await Promise.resolve(renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk)));
   } finally {
     delete (globalThis as any).__vsk_ssr;
     clearSsrCells(renderToken);
@@ -443,7 +462,12 @@ export function renderPageStream(
 
   const dataScripts = buildDataScripts(ssrProps, ssrData, options.externalDataScript);
   const dataScriptBlock = dataScripts.length > 0 ? '\n' + dataScripts.join('\n') : '';
-  yield `\n</div>${dataScriptBlock}</body>\n</html>\n`;
+  // Mirror renderFullPage: a full document must carry the client bundle or
+  // the page can never hydrate (dev-server streams hit this path).
+  const clientScript = options.clientScriptUrl
+    ? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
+    : '';
+  yield `\n</div>${dataScriptBlock}${clientScript}</body>\n</html>\n`;
   }
 
   const gen = raw();

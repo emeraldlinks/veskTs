@@ -10,6 +10,7 @@ const PACKAGES_DIR = join(ROOT, 'packages');
 
 const INTERNAL_NAMES = new Set([
   '@vesk/adapter',
+  '@vesk/agentic',
   '@vesk/compiler',
   '@vesk/lsp',
   '@vesk/plugin-tailwind',
@@ -24,6 +25,7 @@ const INTERNAL_NAMES = new Set([
 
 const PUBLISH_ORDER = [
   '@vesk/types',
+  '@vesk/agentic',
   '@vesk/compiler',
   '@vesk/runtime',
   '@vesk/plugin-tailwind',

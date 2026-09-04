@@ -4,6 +4,23 @@
 
 **Current phase:** pure-TS pipeline (haul parked)
 
+**FIXED — dynamic/member-expression JSX component tags** (found while porting `vesk-docs`):
+`<it.icon />` compiled to `document.createElement("it.icon")` (dotted member treated as
+static HTML) and `<MyIcon />` (top-level `const MyIcon = Cpu`) to `__components["MyIcon"]`
+(registry-lookup by name string) instead of invoking the in-scope component VALUE.
+Fix: `ComponentCall.calleeExpr` carries the raw member expression from `processJSXElement`
+(`ir-generator.ts`, AST `JSXMemberExpression` check — never HTML/registry); server
+(`server-jsgen.ts`) and client (`client-codegen.ts`, normal + hydrate) emit `(expr)(props…)`
+directly. Top-level value bindings now resolve directly too (server + client
+`buildComponentMap` merge `extractTopLevelNames` minus file-defined component names into the
+direct-call set; components keep registry precedence). Root-cause side-quest: `vesk` CLI
+runs a prebuilt esbuild bundle (`packages/cli/dist/cli.js`) with the compiler inlined, so
+`build-packages.ts` alone left `vesk build` stale — rebuilt via `npx tsx build.ts` in
+`packages/cli` (same name+version → npm never refreshes it automatically).
+Tests: 14 client-codegen (both body modes × normal/hydrate, incl. registry-precedence guards)
++ 6 server-codegen SSR render tests; client 195 / server 134 / integration 124 / ir-generator 9
+green, `npm run typecheck` clean, `tests/hydration-test.mjs` 284/284 against test-app dev server.
+
 **Completed (mobile agentic chat textbox):** Each keystroke in the message textbox used to call `renderPanel()`, recreating the whole panel DOM (and re-creating the `<input>`) → mobile OS keyboard dismissed and the UI jumped on every key. `hmr-client.ts` now (1) patches only the slash popup on `input` events via `syncAgenticSlashPopup()` — the textbox element is never touched, so focus/caret/keyboard persist; (2) carries focus + caret across any other panel redraw (`renderPanel` captures `wasAgenticInput` + caret, re-focuses + restores selection, skips scroll-to-top while typing); (3) pins the textbox as a static bottom bar (`.__kp_ag_input_wrap` now `position:sticky;bottom:0` full-width flush bar instead of inline `position:relative`). Verified via `vesk-web/agentic-probe.mjs` new "mobile typing stable" check: same DOM node + still focused + connected + value intact + slash popup shown + computed `position: sticky`, then send still returns assistant reply "Ok". Tests: hmr-client.test.ts 281 (added 5 source-substring regressions), typecheck clean, vesk-web deps refreshed (0.2.10-ci).
 
 **Completed (agentic send-time model fix):** Fixed "agentic chat failed, never received a message": client hardcoded `gpt-4o-mini` default (opencode rejects it) plus config-load could clobber the user's freshly-picked model before send. `hmr-client.ts` now tracks `agenticSelectedModel` (set on model pick, cleared on provider change), `refreshAgenticConfig` no longer clobbers a user pick, defaults are `model:''`, and `sendAgenticMessage` resolves the send model via `resolveAgenticModel()` (user pick > active ui model if valid > first listed model) sent in both `model` and `providerConfig.model`. Reproduced root cause live: POST `/__vesk/agent/run` with `gpt-4o-mini` → `{"error":"fetch failed"}`, with `nemotron-3.5-lightning-free` → `{"ok":true,"result":{"text":"Ok"}}`. End-to-end puppeteer probe (`vesk-web/agentic-probe.mjs`) PASSES: full Settings→Agentic drive (open panel, pick opencode + nemotron-3.5-lightning-free, send "say Ok", assert assistant reply "Ok", no failed line). Terminal chromium: removed `/usr/sbin/chromium`+`/usr/bin/chromium` (hard links; dead), only `/data/data/com.termux/files/usr/bin/chromium-browser` works — updated `vesk-web/agentic-probe.mjs`, `tests/crawl.mjs`, `scripts/platform-hydration.mjs`. Persisted config fixed to `nemotron-3.5-lightning-free`. vesk-web deps refreshed (0.2.10-ci). Tests: hmr-client.test.ts 277 (added 9 source-substring regressions), typecheck clean.

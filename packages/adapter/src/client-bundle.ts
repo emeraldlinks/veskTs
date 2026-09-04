@@ -161,6 +161,114 @@ function isComponentExport(node: CompiledNode): boolean {
 }
 
 /**
+ * Extracts matched top-level statements from a compiled client module using
+ * the parser's exact `start`/`end` offsets — the complement of
+ * `removeCompiledNodes`. AST-only, like everything else in this file.
+ */
+function extractCompiledNodes(code: string, isTarget: (node: CompiledNode) => boolean): string {
+  let ast: unknown;
+  try {
+    ast = parse(code);
+  } catch {
+    return '';
+  }
+  const parts: string[] = [];
+  for (const raw of (ast as { body?: Array<unknown> }).body ?? []) {
+    const node = raw as CompiledNode;
+    if (isTarget(node) && typeof node.start === 'number' && typeof node.end === 'number') {
+      let cut = node.end;
+      if (code[cut] === ';') cut++;
+      parts.push(code.slice(node.start, cut));
+    }
+  }
+  return parts.join('\n');
+}
+
+function isModuleLevel(node: CompiledNode): boolean {
+  // import/export statements must stay at module top level (hoisted imports
+  // of the same module are harmless duplicates); everything else is scoped.
+  return node.type === 'ImportDeclaration'
+    || node.type === 'ExportNamedDeclaration'
+    || node.type === 'ExportDefaultDeclaration';
+}
+
+/**
+ * Demotes surviving value exports to plain declarations (`export const x`
+ * becomes `const x`) and drops bare re-export lists (`export { x }`,
+ * `export default …`). Code-split chunks execute as classic scripts inside
+ * an IIFE, so any `export` statement is a SyntaxError — and the chunk-local
+ * binding is all cross-file references need (components resolve through the
+ * `__components` / `__hydrators` registries). Offset-based on the parser AST.
+ */
+function demoteExports(code: string): string {
+  let ast: unknown;
+  try {
+    ast = parse(code);
+  } catch {
+    return code;
+  }
+  const body = (ast as { body?: Array<unknown> }).body ?? [];
+  type Edit = { start: number; end: number; text: string };
+  const edits: Edit[] = [];
+  for (const raw of body) {
+    const node = raw as CompiledNode & { declaration?: CompiledNode & { start?: number; end?: number } };
+    if (typeof node.start !== 'number' || typeof node.end !== 'number') continue;
+    if (node.type === 'ExportNamedDeclaration' && node.declaration
+      && typeof node.declaration.start === 'number' && typeof node.declaration.end === 'number') {
+      edits.push({ start: node.start, end: node.end, text: code.slice(node.declaration.start, node.declaration.end) });
+    } else if (node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration') {
+      let cut = node.end;
+      if (code[cut] === ';') cut++;
+      edits.push({ start: node.start, end: cut, text: '' });
+    }
+  }
+  edits.sort((a, b) => b.start - a.start);
+  for (const e of edits) code = code.slice(0, e.start) + e.text + code.slice(e.end);
+  return code;
+}
+
+/**
+ * Code-split chunks execute as classic scripts, so NO import statement may
+ * survive in a contribution (runtime and `.vsk` imports are stripped
+ * earlier; npm packages and relative `.ts` values are unresolvable from a
+ * `/_vesk/static/` classic script). Strips every remaining import and
+ * demotes value exports — server-only components never execute
+ * client-side, and islands must receive data through props/serialization
+ * rather than module imports (a stripped binding referenced by an island
+ * fails loudly at that island instead of killing the whole chunk).
+ */
+function stripChunkImports(code: string): string {
+  return demoteExports(removeCompiledNodes(code, isAnyImport));
+}
+
+/**
+ * Scopes one file's contribution to the shared chunk: module-level
+ * import/export statements pass through untouched, all other top-level
+ * statements (component registrations, top-level `const` helpers, …) are
+ * wrapped in a block. Without this, same-named top-level bindings from
+ * different `.vsk` files (e.g. two files declaring `const stages`) collide
+ * in the concatenated chunk scope and the whole chunk fails to parse —
+ * killing hydration for the entire page. Cross-file references always go
+ * through the `__components` / `__hydrators` registries (never bare
+ * identifiers), so hiding file locals in a block is safe; assignments like
+ * `__components["X"] = …` still reach the outer binding.
+ */
+function scopeFileContribution(code: string): string {
+  const head = extractCompiledNodes(code, isModuleLevel);
+  const rest = removeCompiledNodes(code, isModuleLevel);
+  if (!rest.trim()) return head;
+  const scoped = (head ? head + '\n' : '') + '{\n' + rest + '\n}';
+  // Never trade a potential duplicate-binding error for a certain syntax
+  // error: if the scoped form does not parse, keep the original.
+  try {
+    parse(scoped);
+    return scoped;
+  } catch {
+    return code;
+  }
+}
+
+/**
  * Removes matched top-level statements from a compiled client module using the
  * parser's exact `start`/`end` offsets — never a text scan, so a doc sample
  * stored inside a template literal can never be mistaken for a real statement.
@@ -281,8 +389,11 @@ export async function generateClientBundle(
     if (cached && cacheUsable) {
       cachedFileHits++;
       for (const dep of cached.imports) compileFile(dep, cache?.files.get(dep)?.actualName ?? '', output);
-      if (cached.compCode) output.push(cached.compCode);
-      if (cached.hydCode) output.push(cached.hydCode);
+      // Comp and hyd contributions of one file share its top-level bindings
+      // (e.g. `const links` used by both the component and its hydrator),
+      // so they must be scoped together in a single block.
+      const cachedFileCode = [cached.compCode, cached.hydCode].filter(Boolean).join('\n');
+      if (cachedFileCode.trim()) output.push(scopeFileContribution(cachedFileCode));
       for (const n of cached.runtimeNames) runtimeImportNames.add(n);
       if (cached.actualName && resolvedName !== null && cached.actualName !== resolvedName) {
         output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(cached.actualName)}], configurable: true });`);
@@ -304,8 +415,8 @@ export async function generateClientBundle(
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
     const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null, filePath);
-    const compCode = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-    const hydCode = rawHyd ? stripExports(stripVskImports(stripRuntimeImport(rawHyd))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const compCode = rawComp ? stripChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawComp)))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const hydCode = rawHyd ? stripChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawHyd)))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
     if (rawComp) collectRuntimeImports(rawComp);
     if (rawHyd) collectRuntimeImports(rawHyd);
 
@@ -320,8 +431,10 @@ export async function generateClientBundle(
       editedNames!.set(filePath, actualName);
     }
 
-    if (compCode) output.push(compCode);
-    if (hydCode) output.push(hydCode);
+    // Comp and hyd contributions of one file share its top-level bindings,
+    // so they are scoped together in a single block (see replay path above).
+    const fileCode = [compCode, hydCode].filter(Boolean).join('\n');
+    if (fileCode.trim()) output.push(scopeFileContribution(fileCode));
     if (actualName && resolvedName !== null && actualName !== resolvedName) {
       output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
       output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
@@ -445,19 +558,14 @@ export async function generateClientBundle(
       resolveVskImports(filePath, (p, n) => compileFileMono(p, n || ''));
 
       const compCode = compileClient(src, null, { forceClient: true, sourcePath: filePath });
-      if (compCode) {
-        collectRuntimeImports(compCode);
-        const stripped = stripExports(stripVskImports(stripRuntimeImport(compCode)));
-        componentLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
-      }
-
       const hydCode = compileClient(src, null, { hydrate: true, forceClient: true, includeTopLevel: false, sourcePath: filePath });
-      if (hydCode) {
-        collectRuntimeImports(hydCode);
-        const stripped = stripExports(stripVskImports(stripRuntimeImport(hydCode)))
-          .replace(/__components/g, '__hydrators');
-        hydratorLines.push(stripped.replace(/^\n+/, '').replace(/\n+$/, ''));
-      }
+      if (compCode) collectRuntimeImports(compCode);
+      if (hydCode) collectRuntimeImports(hydCode);
+      // Comp and hyd share the file's top-level bindings — scope together.
+      const strippedComp = compCode ? stripExports(stripVskImports(stripRuntimeImport(compCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      const strippedHyd = hydCode ? stripExports(stripVskImports(stripRuntimeImport(hydCode))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      const fileCode = [strippedComp, strippedHyd].filter(Boolean).join('\n');
+      if (fileCode.trim()) componentLines.push(scopeFileContribution(fileCode));
 
       const actualName = resolveComponentName(src);
       if (actualName && actualName !== resolvedName) {

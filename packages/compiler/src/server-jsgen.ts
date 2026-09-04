@@ -351,13 +351,26 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   }
   const propsObj = `{ ${propsEntries.join(', ')} }`;
   const compName = node.componentName;
-  const isImported = importedNames && importedNames.has(compName);
-  const callee = isImported ? compName : `__registry.get(${JSON.stringify(compName)})`;
+  // Member-expression tags (`<it.icon>`) carry the raw component-valued
+  // expression — invoke it directly; it is never a registry name.
+  const callee = node.calleeExpr
+    ? `(${node.calleeExpr})`
+    : (() => {
+      const isImported = importedNames && importedNames.has(compName);
+      return isImported ? compName : `__registry.get(${JSON.stringify(compName)})`;
+    })();
   const awaitKw = isAsync ? 'await ' : '';
+  // Hoist the callee so its defining-file scope (`__veskScope`, attached in
+  // server-render.ts) is preferred over the merged caller scope. Same-named
+  // top-level bindings in different `.vsk` files must not leak across
+  // components during SSR.
+  const calleeVar = `__cc${nextVskId()}`;
+  lines.push(`const ${calleeVar} = ${callee};`);
+  const callExpr = `${awaitKw}${calleeVar}(${propsObj}, __registry, (${calleeVar}.__veskScope || __vesk))`;
   if (__vskHydrate) {
-    lines.push(`__out.push('<!--vsk--><div>' + (${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '') + '</div>');`);
+    lines.push(`__out.push('<!--vsk--><div>' + (${callExpr} || '') + '</div>');`);
   } else {
-    lines.push(`__out.push(${awaitKw}${callee}(${propsObj}, __registry, __vesk) || '');`);
+    lines.push(`__out.push(${callExpr} || '');`);
   }
   return lines.join('\n');
 }
@@ -419,8 +432,14 @@ export function buildComponentMap(irRoot: IRRoot, useSharedScope: boolean): Map<
   const map = new Map<string, Function>();
   const runtimeNames = extractRuntimeNames(irRoot.imports);
   const localValueNames = localValueImportNames(irRoot.imports);
-  const importedNames = new Set([...runtimeNames, ...localValueNames]);
   const topNames = extractTopLevelNames(irRoot.topLevelCode);
+  // Top-level value bindings (`const MyIcon = Cpu`) are destructured into
+  // every component scope from `__vesk` (see `scopeDecl` below), so a
+  // same-named JSX tag must invoke that in-scope value directly — not a
+  // registry lookup. File-defined components keep registry precedence.
+  const componentNames = new Set(irRoot.components.map((c) => c.name));
+  const topValueNames = topNames.filter((n) => !componentNames.has(n));
+  const importedNames = new Set([...runtimeNames, ...localValueNames, ...topValueNames]);
   const hasTracked = irRoot.components.some((c) => c.body.some((n) => n instanceof TrackDecl));
   const extraNames = hasTracked ? ['get', 'set', 'track'] : [];
   const allNames = [...new Set([...runtimeNames, ...topNames, ...extraNames, ...localValueNames])];

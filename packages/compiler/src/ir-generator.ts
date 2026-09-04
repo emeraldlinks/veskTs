@@ -617,12 +617,24 @@ function processJSXCallbackBody(source: string, body: any): IRNode[] {
 }
 
 function processJSXElement(source: string, element: any): IRNode[] {
-  const tagName = getJSXTagName(element.openingElement.name);
+  const nameNode = element.openingElement.name;
+  const tagName = getJSXTagName(nameNode);
   const selfClosing = element.openingElement.selfClosing;
 
   if (tagName === 'Head') {
     const children = selfClosing ? [] : processJSXChildren(source, element.children || []);
     return [new HeadBlock(children)];
+  }
+
+  // A dotted JSX tag (`<it.icon>`, `<Foo.Bar>`) is a component-valued member
+  // expression — never an HTML element (dots are not valid in tag names) and
+  // never a registry key. Carry the raw expression so codegen invokes the
+  // actual in-scope value instead of `document.createElement("it.icon")` or a
+  // registry lookup by dotted string.
+  if (nameNode && nameNode.type === 'JSXMemberExpression') {
+    const { props, spreadProps } = extractProps(source, element);
+    const children = selfClosing ? [] : processJSXChildren(source, element.children || []);
+    return [new ComponentCall(tagName, props, children, spreadProps, element.start, getSource(source, nameNode))];
   }
 
   if (!isHTMLTag(tagName) && selfClosing) {
@@ -902,6 +914,18 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
       const refName = getComponentRefName(stmt);
       if (refName) nodes.push(new ComponentRef(refName));
     } else if (stmt.type === 'IfStatement') {
+      // Guard-clause early return (`if (c) return X` with no else): everything
+      // after this statement becomes the alternate branch, mirroring
+      // expression-mode `buildGuardChain`. Without this the `return` is
+      // silently swallowed and execution falls through into code that
+      // assumes the guard held.
+      const guardArg = !stmt.alternate ? getReturnArgument(stmt.consequent) : null;
+      if (guardArg) {
+        const consequent = exprToIR(source, guardArg);
+        const alternate = processStatementModeBody(source, bodyStmts.slice(i + 1), filename);
+        nodes.push(new OpaqueDynamicRegion(toExpression(source, stmt.test), consequent, alternate));
+        break;
+      }
       nodes.push(...processIfStatement(source, stmt));
     } else if (stmt.type === 'ForOfStatement') {
       let alternate: IRNode[] = [];

@@ -823,7 +823,8 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	try {
 		rootDom = runInBlockWindow(() => renderLayoutChain(0));
 	} catch (error: unknown) {
-		if (error && (error as Error).name === 'NotFoundError') {
+		if (error instanceof NotFoundError) {
+			if (typeof console !== 'undefined') console.error('[vesk-debug] NotFoundError in renderLayoutChain:', error);
 			return renderNotFound(router, match, container);
 		}
 		let errDom: unknown;
@@ -843,7 +844,7 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		return (rootDom as Promise<unknown>).then(
 			(resolved) => { mountDom(resolved); },
 			(error: unknown) => {
-				if (error && (error as Error).name === 'NotFoundError') {
+				if (error instanceof NotFoundError) {
 					return renderNotFound(router, match, container);
 				}
 				return Promise.resolve(renderErrorInLayout(error)).then(
@@ -1091,7 +1092,8 @@ async function hydrateInitial(
 		// Hydration failed — most often the page component throwing on the
 		// client after a clean SSR. Re-render through renderMatch so the error
 		// component replaces just the page slot and the layout/nav survives.
-		if (error && (error as Error).name === 'NotFoundError') {
+		if (error instanceof NotFoundError) {
+			if (typeof console !== 'undefined') console.error('[vesk-debug] NotFoundError during hydration:', error);
 			await renderNotFound(router, match, container);
 			return;
 		}

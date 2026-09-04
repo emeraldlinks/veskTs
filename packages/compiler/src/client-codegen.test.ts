@@ -817,6 +817,46 @@ describe('Keyed .map() reconciliation', () => {
 	});
 });
 
+describe('Effect blocks collected into per-item arrays', () => {
+
+	// An effect block flushed into a keyed-map item's effects array must be
+	// emitted as a handle-returning IIFE. A raw `{ let …; effect(…) }` block
+	// in expression position parses as an object literal, so the whole
+	// client chunk fails with a SyntaxError and the page never hydrates.
+	// (Surfaced by nested loops inside component children, e.g. Roadmap.)
+	bothModes('effectful nested map in component children of keyed item compiles', `
+		const groups = [{ label: 'g', items: ['a', 'b'] }];
+		component Wrap(props) { return <div>{props.children}</div>; }
+		component App {
+			let &[active] = track(0);
+			return <div>{groups.map(g => <Wrap key={g.label}><ul>{g.items.map(i => <li class={active === 0 ? 'a' : 'b'}>{i}</li>)}</ul></Wrap>)}</div>;
+		}
+	`, (code) => {
+		try {
+			new Function('track, effect, reconcile', stripModuleWrapper(code));
+		} catch (e) {
+			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
+		}
+		expect(code).toContain('__e.push((() =>');
+	});
+
+	bothModes('statement-mode effectful nested map in component children of keyed item compiles', `
+		const groups = [{ label: 'g', items: ['a', 'b'] }];
+		component Wrap(props) { <div>{props.children}</div> }
+		component App {
+			let &[active] = track(0);
+			<div>{groups.map(g => <Wrap key={g.label}><ul>{g.items.map(i => <li class={active === 0 ? 'a' : 'b'}>{i}</li>)}</ul></Wrap>)}</div>;
+		}
+	`, (code) => {
+		try {
+			new Function('track, effect, reconcile', stripModuleWrapper(code));
+		} catch (e) {
+			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
+		}
+		expect(code).toContain('__e.push((() =>');
+	});
+});
+
 describe('Keyed for-of with ; key clause and #empty block', () => {
 	bothModes('statement-mode keyed for-of uses reconcile and empty fallback', `
 		component App(props: { todos: { id: number, text: string }[] }) {
@@ -1212,6 +1252,127 @@ describe('OpaqueDynamicRegion guard scoping inside list items', () => {
 		expect(code).toContain('__e.push((() => {');
 		expect(code.split('\n').filter((l) => l.trim() === guardLine).length).toBe(1);
 		expect(code.indexOf(guardLine) > code.indexOf('__e.push((() => {')).toBe(true);
+	});
+});
+
+
+describe('Statement-mode guard-clause early return', () => {
+	// `if (c) return X` with no else compiles the rest of the body as the
+	// alternate branch — the return must not be swallowed (fall-through).
+	bothModes('guard if/else-fold emits both branches', `
+		component App(props: { ok: boolean }) {
+			if (!props.ok) {
+				return <div>missing</div>;
+			}
+			<div>found</div>
+		}
+	`, (code, mode) => {
+		if (mode === 'normal') {
+			expect(code).toContain('missing');
+			expect(code).toContain('found');
+		} else {
+			// hydrate claims the SSR-rendered branch; assert the dispatch
+			expect(code).toContain('if (!props.ok)');
+		}
+	});
+	bothModes('lookup-pattern guard keeps post-guard statements', `
+		component App(props: { slug: string }) {
+			const doc = props.slug;
+			if (!doc) {
+				return <div>404</div>;
+			}
+			<div>{doc}</div>
+		}
+	`, (code, mode) => {
+		if (mode === 'normal') expect(code).toContain('404');
+		else expect(code).toContain('if (!doc)');
+	});
+});
+
+describe('Dynamic component tags — member expressions + bound values', () => {
+
+	// `<it.icon>` must invoke the component value, never
+	// `document.createElement("it.icon")` or a dotted registry lookup.
+	bothModes('member-expression tag invokes value (expression)', `
+		import { Cpu } from 'lucide-vesk';
+		const items = [{ icon: Cpu }];
+		component App {
+			return <div>{items.map((it) => <it.icon class="size-4" />)}</div>;
+		}
+	`, (code) => {
+		expect(code).toContain('(it.icon)({');
+		expect(code).not.toContain('createElement("it.icon")');
+		expect(code).not.toContain('__components["it.icon"]');
+		expect(code).not.toContain('__hydrators["it.icon"]');
+	});
+	bothModes('member-expression tag invokes value (statement)', `
+		import { Cpu } from 'lucide-vesk';
+		const items = [{ icon: Cpu }];
+		component App {
+			<div>
+				for (const it of items) { <it.icon class="size-4" /> }
+			</div>
+		}
+	`, (code) => {
+		expect(code).toContain('(it.icon)({');
+		expect(code).not.toContain('createElement("it.icon")');
+		expect(code).not.toContain('__components["it.icon"]');
+		expect(code).not.toContain('__hydrators["it.icon"]');
+	});
+	bothModes('namespaced member tag invokes value', `
+		const NS = { Foo: (props) => null };
+		component App {
+			return <div><NS.Foo bar="1" /></div>;
+		}
+	`, (code) => {
+		expect(code).toContain('(NS.Foo)({');
+		expect(code).not.toContain('__components["NS.Foo"]');
+		expect(code).not.toContain('__hydrators["NS.Foo"]');
+	});
+
+	// A top-level binding holding a component (`const MyIcon = Cpu`) is in
+	// module scope, so the tag must call it directly — not via registry.
+	bothModes('top-level bound component invokes value (expression)', `
+		import { Cpu } from 'lucide-vesk';
+		const MyIcon = Cpu;
+		component App { return <div><MyIcon class="size-4" /></div>; }
+	`, (code) => {
+		expect(code).toContain('MyIcon({');
+		expect(code).not.toContain('__components["MyIcon"]');
+		expect(code).not.toContain('__hydrators["MyIcon"]');
+	});
+	bothModes('top-level bound component invokes value (statement)', `
+		import { Cpu } from 'lucide-vesk';
+		const MyIcon = Cpu;
+		component App { <div><MyIcon class="size-4" /></div> }
+	`, (code) => {
+		expect(code).toContain('MyIcon({');
+		expect(code).not.toContain('__components["MyIcon"]');
+		expect(code).not.toContain('__hydrators["MyIcon"]');
+	});
+
+	// Guards against over-correction: file-defined components keep
+	// registry resolution, including over a same-named top-level binding.
+	// (Static children hydrate through a `__components` stub — the real
+	// `__hydrators` map entry only exists for non-static components.)
+	bothModes('same-file static component still resolves via registry', `
+		component Inner { return <span>hi</span>; }
+		component App { return <div><Inner /></div>; }
+	`, (code) => {
+		expect(code).toContain('__components["Inner"]');
+	});
+	bothModes('same-file interactive component still resolves via registry', `
+		component Inner { return <button onClick={() => {}}>hi</button>; }
+		component App { return <div><Inner /></div>; }
+	`, (code) => {
+		expect(code).toContain('__components["Inner"]');
+	});
+	bothModes('component declaration wins over same-named top-level binding', `
+		const Foo = (props) => null;
+		component Foo { return <span>comp</span>; }
+		component App { return <div><Foo /></div>; }
+	`, (code) => {
+		expect(code).toContain('__components["Foo"]');
 	});
 });
 

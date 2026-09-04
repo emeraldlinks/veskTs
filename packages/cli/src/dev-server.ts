@@ -1309,7 +1309,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const ssrData = ssrSink.snapshot();
       const dataScripts = buildDataScripts(props, ssrData || {}, storeDataScript);
       if (dataScripts.length > 0) yield dataScripts.join('\n') + '\n';
-      yield '</body>\n</html>';
+      // The streamed document must carry the client bundle (mirrors the
+      // buffered renderSSR path via injectDevScripts) or the page can never
+      // hydrate — the sender below only appends hmr.js.
+      yield '\t<script type="module" src="/_vesk/client.js"></script>\n</body>\n</html>';
       }
 
       const gen = raw();
