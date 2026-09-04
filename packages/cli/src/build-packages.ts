@@ -25,8 +25,10 @@ const PACKAGES: Record<string, PackageBuild> = {
     entry: 'index',
     copy: [{ from: 'src/acorn-ts-plugin', to: 'acorn-ts-plugin' }],
   },
-  adapter: { name: '@vesk/adapter', entry: 'index' },
+  // agentic before adapter — adapter's dev-server imports @vesk/agentic,
+  // so agentic's dist types must exist first on fresh checkouts (CI).
   agentic: { name: '@vesk/agentic', entry: 'index' },
+  adapter: { name: '@vesk/adapter', entry: 'index' },
   'lucide-vesk': { name: 'lucide-vesk', entry: 'index' },
 };
 
