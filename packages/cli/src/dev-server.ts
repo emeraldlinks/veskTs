@@ -11,7 +11,7 @@ import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
-import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
+import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, isAllowedWsUpgrade, installMdReadHook } from '@vesk/adapter/src/paths';
 import { createDevApiRouter } from '@vesk/adapter/src/dev-api';
 import type { DevPanelResponse, DiagnosticFinding } from '@vesk/adapter/src/dev-api';
@@ -766,12 +766,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
                   } else if (fileExists && !bundleError) {
                     try {
                       const src = readFileSync(fullPath, 'utf-8');
-                      let compCode = compileClient(src, null, { forceClient: true, sourcePath: fullPath, mdRoots: [projectDir] });
-                      compCode = compCode.replace(/^import\s*[\s\S]*?from\s*['"][^'"]+['"];?\s*\n?/gm, '');
-                      compCode = compCode.replace(/^const __components = \{\};\s*\n?/m, '');
-                      compCode = compCode.replace(/^function __cleanup\(start, end\) \{[\s\S]*?\n\}\s*\n?/m, '');
-                      compCode = compCode.replace(/^export\s+default\s+__components\[.*?\];?\s*\n?/gm, '');
-                      compCode = compCode.replace(/^export\s+(const|let|var)\s+\w+\s*=\s*__components\[.*?\];?\s*\n?/gm, '');
+                      // Eval-safe snippet (same builder as the adapter path):
+                      // full file scope without imports/exports or the
+                      // registry preamble, block-wrapped so repeated evals
+                      // cannot redeclare the file's top-level consts.
+                      let compCode = buildHmrEvalSnippet(
+                        compileClient(src, null, { forceClient: true, sourcePath: fullPath, mdRoots: [projectDir] }),
+                      );
                       const actualName = extractCompName(src);
                       for (const cname of changedComponents) {
                         if (actualName && actualName !== cname) {

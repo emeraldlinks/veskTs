@@ -269,6 +269,39 @@ function scopeFileContribution(code: string): string {
 }
 
 /**
+ * Builds the eval-safe HMR update snippet for one compiled file: drops
+ * imports, re-exports and the registry preamble (`const __components = …`,
+ * `const __hydrators = …`), demotes remaining value exports, and wraps the
+ * rest in a block. Component registrations (`__components["X"] = …`) still
+ * reach the live registries and stay visible to nothing else, file
+ * top-level bindings (`const navItems`, helpers, …) stay visible to the
+ * component closures that reference them, and repeated evals of the same
+ * file can no longer redeclare its top-level consts. Without the file
+ * scope, an updated component renders against missing bindings and the
+ * swap fails with a ReferenceError that surfaces nowhere the tests assert
+ * (no reload, stale DOM, zero page errors).
+ */
+export function buildHmrEvalSnippet(code: string): string {
+  const isSnippetDrop = (node: CompiledNode): boolean => {
+    if (isAnyImport(node) || isComponentExport(node) || isRuntimePreamble(node)) return true;
+    return node.type === 'VariableDeclaration'
+      && (node.declarations?.[0]?.id?.name === '__components'
+        || node.declarations?.[0]?.id?.name === '__hydrators');
+  };
+  const body = demoteExports(removeCompiledNodes(code, isSnippetDrop)).trim();
+  if (!body) return '';
+  const scoped = `{\n${body}\n}`;
+  // Never trade a potential duplicate-binding error for a certain syntax
+  // error: if the scoped form does not parse, keep the unscoped body.
+  try {
+    parse(scoped);
+    return scoped;
+  } catch {
+    return body;
+  }
+}
+
+/**
  * Removes matched top-level statements from a compiled client module using the
  * parser's exact `start`/`end` offsets — never a text scan, so a doc sample
  * stored inside a template literal can never be mistaken for a real statement.
@@ -421,13 +454,11 @@ export async function generateClientBundle(
     if (rawHyd) collectRuntimeImports(rawHyd);
 
     if (returnEdited && only!.has(filePath)) {
-      // Mirrors the HMR fnSources preparation in the dev servers: drop every
-      // remaining top-level import so the snippet can be eval'd in the page
-      // context where runtime globals already exist.
-      const bare = rawComp
-        ? removeCompiledNodes(stripExports(stripVskImports(stripRuntimeImport(rawComp))), isAnyImport)
-        : '';
-      editedSources!.set(filePath, bare);
+      // Eval-safe snippet for HMR fnSources (see buildHmrEvalSnippet):
+      // full file scope so component closures keep their top-level
+      // bindings, without imports/exports or the registry preamble, and
+      // block-wrapped so repeated evals cannot redeclare them.
+      editedSources!.set(filePath, rawComp ? buildHmrEvalSnippet(rawComp) : '');
       editedNames!.set(filePath, actualName);
     }
 

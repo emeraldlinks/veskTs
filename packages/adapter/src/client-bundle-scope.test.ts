@@ -9,7 +9,7 @@
  *   - every emitted JS asset still parses as a module (no SyntaxError)
  *   - both files' `stages` bindings survive, block-scoped per file
  */
-import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
+import { generateClientBundle, buildHmrEvalSnippet } from '@vesk/adapter/src/client-bundle';
 import { parse } from '@vesk/compiler/src/parser';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
@@ -122,6 +122,52 @@ component Home {
     compAt >= 0 && hydAt > compAt && !/^}$/m.test(between),
     'component and hydrator share one file block',
   );
+
+  // HMR eval snippets must carry the file's top-level scope without the
+  // registry preamble, and survive repeated evals. A sliced per-component
+  // assignment closes over file bindings (const navItems, …) missing from
+  // the eval context, so the swapped component throws ReferenceError at
+  // render and the swap fails silently (no reload, stale DOM, zero page
+  // errors). A preamble `const __components = {}` shadows the live map.
+  console.log('\n=== HMR eval snippet scope ===');
+  {
+    const fileCode = `import { Link } from '@vesk/runtime/router';
+const __components = {};
+const navItems = [{ label: 'Home', href: '/' }];
+function helper() { return navItems.length; }
+__components["Layout"] = (props) => {
+  return helper() + navItems[0].label;
+};
+export default __components["Layout"];`;
+    const snippet = buildHmrEvalSnippet(fileCode);
+
+    let parses = true;
+    try { parse(snippet); } catch { parses = false; }
+    await assert(parses, 'snippet parses');
+
+    await assert(!/^import\s/m.test(snippet), 'no imports survive in snippet');
+    await assert(!/^export\s/m.test(snippet), 'no exports survive in snippet');
+    await assert(!/const __components\s*=/.test(snippet), 'no registry preamble shadows the live map');
+    await assert(snippet.includes('const navItems'), 'file top-level bindings travel with the snippet');
+    await assert(snippet.includes('__components["Layout"]'), 'component registration travels with the snippet');
+
+    // Eval twice against a live registry map (simulating two HMR updates
+    // to the same file in one page lifetime): both evals must succeed and
+    // both registrations must land on the live map.
+    const live: Record<string, unknown> = {};
+    (globalThis as Record<string, unknown>).__components = live;
+    let firstThrow: unknown = null;
+    let secondThrow: unknown = null;
+    try { (0, eval)(snippet); } catch (e) { firstThrow = e; }
+    await assert(firstThrow === null, 'first eval applies cleanly');
+    await assert(typeof live['Layout'] === 'function', 'registration lands on the live map');
+    let rendered = '';
+    try { rendered = String((live['Layout'] as () => unknown)()); } catch (e) { rendered = 'THREW:' + String(e); }
+    await assert(rendered === '1Home', 'rendered closure sees file bindings (got ' + rendered + ')');
+    try { (0, eval)(snippet); } catch (e) { secondThrow = e; }
+    await assert(secondThrow === null, 'second eval of the same file does not redeclare');
+    delete (globalThis as Record<string, unknown>).__components;
+  }
 
   rmSync(dir, { recursive: true });
 

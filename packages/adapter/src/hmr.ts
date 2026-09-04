@@ -4,6 +4,7 @@ import { readFileSync, existsSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
+import { buildHmrEvalSnippet } from './client-bundle';
 import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
 import { resolveErrorFile } from '@vesk/adapter/src/ssr-function';
 import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
@@ -500,16 +501,22 @@ export function createHmrServer(
 
         if (assignments.length > 0) {
           const components: Record<string, boolean> = {};
-          const fnSources: Record<string, string> = {};
-          for (const { name, raw } of assignments) {
+          for (const { name } of assignments) {
             components[name] = true;
-            fnSources[name] = raw;
           }
-          broadcast('update', {
-            components,
-            fnSources,
-            time: Date.now() - start,
-          });
+          // Send the whole file scope (not per-component slices): a sliced
+          // assignment closes over file top-level bindings (const navItems,
+          // helpers, …) that the eval context does not have, so the
+          // re-rendered component throws ReferenceError and the swap fails
+          // silently (no reload, stale DOM, zero page errors).
+          const snippet = buildHmrEvalSnippet(code);
+          if (snippet.trim()) {
+            broadcast('update', {
+              components,
+              fnSources: { _raw: snippet },
+              time: Date.now() - start,
+            });
+          }
         }
 
         if (sourceDir !== null) {
