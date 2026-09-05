@@ -1,6 +1,6 @@
 {
   "name": "@vesk/agentic",
-  "version": "0.2.12",
+  "version": "0.2.13",
   "type": "module",
   "description": "Vesk agentic plugin — zero-deps agent loop, provider abstraction, permissions, tools, checkpoints",
   "main": "./dist/index.js",
@@ -32,7 +32,7 @@
     "node": ">=20.0.0"
   },
   "dependencies": {
-    "@vesk/types": "^0.2.12"
+    "@vesk/types": "^0.2.13"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
