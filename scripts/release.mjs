@@ -117,6 +117,9 @@ console.log(`\n\x1b[1mrelease: building all packages\x1b[0m`);
 // package's typecheck always sees its dependencies' freshly built dist/.
 const BUILD_ORDER = [
   '@vesk/types',
+  // agentic before adapter — adapter's dev-server imports @vesk/agentic,
+  // so agentic's dist types must exist first on fresh checkouts (CI).
+  '@vesk/agentic',
   '@vesk/runtime',
   '@vesk/compiler',
   '@vesk/plugin-tailwind',
