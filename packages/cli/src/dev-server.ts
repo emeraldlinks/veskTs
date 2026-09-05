@@ -592,6 +592,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       hasError: !!devLastError,
       componentCount: countPages(routeTree),
       nonce: (globalThis as Record<string, unknown>).__vesk_hmr_nonce as string | undefined,
+      agenticAvailable: isAgenticActiveMain(),
     }),
     getDiagnostics: () => produceDiagnostics({ bundleBytes: devBundleBytes, configPluginNames, findings: devDiagnostics }),
     rebuild: () => fullRebuild(),
@@ -1465,7 +1466,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         const errCode = errorStatusCode(err);
         logRequest(errCode);
         res.writeHead(errCode, { 'Content-Type': 'text/html' });
-        res.end(errorHtml || `<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${err.message}\n${err.stack}</pre></body></html>`);
+        res.end(injectSsrErrorMarker(errorHtml || `<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${err.message}\n${err.stack}</pre></body></html>`, err));
       }
     }
   });
@@ -1525,6 +1526,23 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
 const TAILWIND_BLOCK = /^\s*@(theme\s*\{|layer\s+(components|utilities)\s*\{|utility\s+\w+\s*\{)/;
 const LAYER_BASE = /^\s*@layer\s+base\s*\{/;
+
+/**
+ * Bake the `vesk-ssr-error` marker into a dev error page so hmr-client can
+ * pop the error overlay on load (the HMR channel only reports compile
+ * errors — an SSR failure served as a page would otherwise stay silent).
+ * Mirrors the marker convention in adapter hmr/ssr-function SSR paths.
+ */
+function injectSsrErrorMarker(html: string, err: unknown): string {
+  const msg = err instanceof Error ? err.message : String(err);
+  const marker = `<!--vesk-ssr-error:${encodeURIComponent(msg || 'Internal Server Error')}-->`;
+  const bodyIdx = html.indexOf('<body');
+  if (bodyIdx >= 0) {
+    const end = html.indexOf('>', bodyIdx);
+    if (end >= 0) return html.slice(0, end + 1) + marker + html.slice(end + 1);
+  }
+  return marker + html;
+}
 
 function stripTailwindDirectives(css: string): string {
   const lines = css.split('\n');

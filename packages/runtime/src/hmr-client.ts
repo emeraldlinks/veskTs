@@ -202,6 +202,26 @@ export function renderLogRow(entry: HmrLogEntry): string {
 
 export const DEV_TABS: string[] = ['overview', 'agentic', 'errors', 'diagnostics', 'plugins', 'log', 'settings'];
 
+/**
+ * Tabs visible for a given agentic-plugin availability. The Agentic tab
+ * renders only when the plugin is installed and active; while availability
+ * is still unknown (null) everything stays visible so the UI never hides
+ * before the first hmr/state load.
+ */
+export function visibleDevTabs(agenticAvailable: boolean | null): string[] {
+	if (agenticAvailable === false) return DEV_TABS.filter((t) => t !== 'agentic');
+	return DEV_TABS.slice();
+}
+
+/**
+ * Settings subtabs visible for a given agentic-plugin availability.
+ */
+export function visibleSettingsSubtabs(agenticAvailable: boolean | null): SettingsSubTab[] {
+	const all: SettingsSubTab[] = ['devtools', 'agentic', 'vesk'];
+	if (agenticAvailable === false) return all.filter((t) => t !== 'agentic');
+	return all;
+}
+
 export const DEV_STATE_KEY = 'veskDevPrefs';
 
 export const PANEL_MIN_W = 320;
@@ -371,10 +391,10 @@ export const TAB_GLYPHS: Record<string, string> = {
 	settings: 'St',
 };
 
-export function renderTabBar(active: string, mode: DevtoolState['sidebarMode'] = 'expanded'): string {
+export function renderTabBar(active: string, mode: DevtoolState['sidebarMode'] = 'expanded', visibleTabs: string[] = DEV_TABS): string {
 	if (mode === 'rail') {
 		let out = '<div class="__kp_tabs __kp_tabs_rail" data-sidebar="rail">';
-		for (const tab of DEV_TABS) {
+		for (const tab of visibleTabs) {
 			const glyph = TAB_GLYPHS[tab] || tab.slice(0, 2).toUpperCase();
 			out +=
 				'<button class="__kp_tab' +
@@ -393,7 +413,7 @@ export function renderTabBar(active: string, mode: DevtoolState['sidebarMode'] =
 		return out + '</div>';
 	}
 	let out = '<div class="__kp_tabs" data-sidebar="expanded">';
-	for (const tab of DEV_TABS) {
+	for (const tab of visibleTabs) {
 		out +=
 			'<button class="__kp_tab' +
 			(tab === active ? ' active' : '') +
@@ -1021,12 +1041,13 @@ export function renderSettingsVeskConfigSubtab(state: VeskConfigState | null | u
 	return renderVeskConfigPanel(state);
 }
 
-export function renderSettingsSubtabs(active: string): string {
-	const tabs: { id: SettingsSubTab; label: string }[] = [
-		{ id: 'devtools', label: 'DEVTOOLS' },
-		{ id: 'agentic', label: 'AGENTIC' },
-		{ id: 'vesk', label: 'VESK CONFIG' },
-	];
+export function renderSettingsSubtabs(active: string, visibleTabs: SettingsSubTab[] = ['devtools', 'agentic', 'vesk']): string {
+	const labels: Record<SettingsSubTab, string> = {
+		devtools: 'DEVTOOLS',
+		agentic: 'AGENTIC',
+		vesk: 'VESK CONFIG',
+	};
+	const tabs: { id: SettingsSubTab; label: string }[] = visibleTabs.map((id) => ({ id, label: labels[id] }));
 	let html = '<nav class="__kp_settings_tabs" data-settings-subtabs="1">';
 	for (const t of tabs) {
 		html +=
@@ -1048,15 +1069,18 @@ export function renderSettingsPanel(
 	prefs: DevPrefs,
 	agentic?: AgenticConfigState | null,
 	vesk?: VeskConfigState | null,
-	activeSubTab?: string
+	activeSubTab?: string,
+	agenticVisible = true
 ): string {
 	const sub = isSettingsSubTab(activeSubTab || '') ? (activeSubTab as SettingsSubTab) : 'devtools';
 	// Keep backward compat: if only prefs supplied, render full panel with nav defaulting to devtools
 	let html = '<div class="__kp_sec">&gt; SETTINGS</div>';
-	html += renderSettingsSubtabs(sub);
+	html += renderSettingsSubtabs(sub, agenticVisible ? ['devtools', 'agentic', 'vesk'] : ['devtools', 'vesk']);
 	html += '<div class="__kp_settings_pane" data-settings-pane="' + escapeHtml(sub) + '">';
 	if (sub === 'agentic') {
-		html += renderSettingsAgenticSubtab(agentic || null);
+		html += agenticVisible
+			? renderSettingsAgenticSubtab(agentic || null)
+			: '<div class="__kp_line">Agentic is not available — the @vesk/agentic plugin is not installed or not active.</div>';
 	} else if (sub === 'vesk') {
 		html += renderSettingsVeskConfigSubtab(vesk || null);
 	} else {
@@ -1827,6 +1851,11 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	let ws: WebSocket | null = null;
 	let status: string = 'idle';
 	let lastError: HmrErrorPayload | null = null;
+	// Where the currently shown error came from. A runtime-reported error
+	// (SSR marker / uncaught exception, shown before the socket connects)
+	// must survive the connect-time clearError — the failing DOM is still
+	// what the user sees until new code lands.
+	let lastErrorSource: 'ws' | 'runtime' | null = null;
 	let lastCompileMs = 0;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let disposed = false;
@@ -1836,6 +1865,15 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	let diagnostics: DevDiagnostic[] = [];
 	let diagnosticsError: string | null = null;
 	const log: HmrLogEntry[] = [];
+
+	// Whether the @vesk/agentic plugin is installed and active on the dev
+	// server (mirrors the server's agent-route gate). Unknown (null) until
+	// the first hmr/state load — agent endpoints must not be called until
+	// availability is confirmed.
+	let agenticAvailable: boolean | null = null;
+	function isAgenticAvailable(): boolean {
+		return agenticAvailable === true;
+	}
 
 	// Agentic state
 	let agenticMessages: AgenticMessage[] = [];
@@ -1983,11 +2021,13 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	function connect(): void {
 		try {
 			ws = new WebSocket(host);
-			ws.onopen = function () {
-				if (disposed) return;
+		ws.onopen = function () {
+			if (disposed) return;
+			if (lastErrorSource !== 'runtime') {
 				clearError();
 				setStatus('idle');
-			};
+			}
+		};
 			ws.onmessage = function (e: MessageEvent) {
 				if (disposed) return;
 				try {
@@ -2088,6 +2128,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	function handleError(payload: HmrErrorPayload): void {
 		status = 'error';
 		lastError = payload;
+		lastErrorSource = 'ws';
 		showOverlay(payload);
 		logEvent('error', undefined);
 		renderPanel();
@@ -2095,6 +2136,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	function clearError(): void {
 		lastError = null;
+		lastErrorSource = null;
 		dismissOverlay();
 	}
 
@@ -2219,6 +2261,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				if (tab === 'plugins') refreshPlugins();
 				if (tab === 'diagnostics') refreshDiagnostics();
 				if (tab === 'agentic') {
+					if (agenticAvailable === null) refreshAgenticAvailability();
 					refreshAgenticModels();
 					refreshAgenticHistory();
 				}
@@ -2492,6 +2535,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		persistUi();
 		if (sub === 'vesk' && !cfgState && !cfgLoading) refreshVeskConfig();
 		if (sub === 'agentic') {
+			if (agenticAvailable === null) refreshAgenticAvailability();
 			if (!agenticConfigState && !agenticConfigLoading) refreshAgenticConfig();
 			// Always refresh live models via {PROVIDER}/models (through dev server proxy) when Agentic settings opened
 			refreshAgenticModels();
@@ -2558,6 +2602,11 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		const content = doc.getElementById('__kp_content');
 		if (!content) return;
 
+		// The tab bar is created once — toggle the Agentic entry as
+		// availability resolves (rebuilding it would drop its listeners).
+		const agenticTabBtn = doc.querySelector('#__vesk_dev [data-tab="agentic"]') as HTMLElement | null;
+		if (agenticTabBtn) agenticTabBtn.style.display = agenticAvailable === false ? 'none' : '';
+
 		// If the agentic textbox is focused (actively typing on mobile), carry
 		// focus + caret across the redraw so the keyboard never dismisses.
 		const activeEl = doc.activeElement;
@@ -2572,20 +2621,22 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 					lastError,
 				}),
 			agentic: () =>
-				renderAgenticPanel({
-					provider: ui.agenticProvider,
-					model: ui.agenticModel,
-					models: agenticModelsCache.length ? agenticModelsCache : ui.agenticModels,
-					modelsLoading: agenticModelsLoading,
-					modelsError: agenticModelsError,
-					mode: ui.agenticMode,
-					messages: agenticMessages,
-					history: agenticHistory,
-					historyLoading: agenticHistoryLoading,
-					input: agenticInput,
-					running: agenticRunning,
-					error: agenticError || agenticHistoryError,
-				}),
+				agenticAvailable === false
+					? '<div class="__kp_sec">&gt; AGENTIC</div><div class="__kp_line">Agentic is not available — the @vesk/agentic plugin is not installed or not active.</div>'
+					: renderAgenticPanel({
+						provider: ui.agenticProvider,
+						model: ui.agenticModel,
+						models: agenticModelsCache.length ? agenticModelsCache : ui.agenticModels,
+						modelsLoading: agenticModelsLoading,
+						modelsError: agenticModelsError,
+						mode: ui.agenticMode,
+						messages: agenticMessages,
+						history: agenticHistory,
+						historyLoading: agenticHistoryLoading,
+						input: agenticInput,
+						running: agenticRunning,
+						error: agenticError || agenticHistoryError,
+					}),
 			errors: () => renderErrorsPanel(lastError),
 			diagnostics: () =>
 				diagnosticsError
@@ -2665,7 +2716,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 						modelsError: agenticModelsError,
 					};
 				}
-				return renderSettingsPanel(ui as DevPrefs, agenticRender, cfgRender, settingsSubtab);
+				return renderSettingsPanel(ui as DevPrefs, agenticRender, cfgRender, settingsSubtab, agenticAvailable !== false);
 			},
 		};
 		const renderTab: (() => string) | undefined = renderers[activeTab];
@@ -2894,8 +2945,31 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			});
 	}
 
+	// Re-check whether the @vesk/agentic plugin is installed and active
+	// (e.g. after plugin install/uninstall/activate/deactivate). The panel
+	// only calls agent endpoints while availability is confirmed.
+	function refreshAgenticAvailability(): void {
+		if (typeof fetch === 'undefined') return;
+		fetch(urls.stateUrl)
+			.then(function (r) {
+				if (!r.ok) throw new Error('HTTP ' + r.status);
+				return r.json();
+			})
+			.then(function (data: unknown) {
+				const v = (data as { agenticAvailable?: unknown } | null)?.agenticAvailable;
+				if (typeof v === 'boolean' && v !== agenticAvailable) {
+					agenticAvailable = v;
+					renderPanel();
+				}
+			})
+			.catch(function () {
+				/* state endpoint optional */
+			});
+	}
+
 	function refreshAgenticConfig(): void {
 		if (typeof fetch === 'undefined') return;
+		if (!isAgenticAvailable()) return;
 		agenticConfigLoading = true;
 		agenticConfigError = null;
 		renderPanel();
@@ -3005,6 +3079,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	}
 
 	function saveAgenticApiKey(provider: string, key: string): void {
+		if (!isAgenticAvailable()) return;
 		if (!key.trim()) {
 			agenticConfigSaveError = 'api key empty';
 			renderPanel();
@@ -3021,6 +3096,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	function refreshAgenticModels(): void {
 		if (typeof fetch === 'undefined') return;
+		if (!isAgenticAvailable()) return;
 		agenticModelsLoading = true;
 		agenticModelsError = null;
 		renderPanel();
@@ -3079,6 +3155,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	function refreshAgenticHistory(): void {
 		if (typeof fetch === 'undefined') return;
+		if (!isAgenticAvailable()) return;
 		agenticHistoryLoading = true;
 		agenticHistoryError = null;
 		patchAgenticHistorySection();
@@ -3347,6 +3424,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	function sendAgenticMessage(): void {
 		if (agenticRunning) return;
+		if (!isAgenticAvailable()) return;
 		const inputEl = doc.querySelector('[data-agentic-input]') as HTMLInputElement | null;
 		const text = inputEl ? inputEl.value : agenticInput;
 		const prompt = (text || '').trim();
@@ -3441,6 +3519,10 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			renderPanel();
 			return;
 		}
+		// Every remaining slash command touches the agent backend — only
+		// run when the plugin is installed and active (/help and /clear
+		// above stay local).
+		if (!isAgenticAvailable()) return;
 		if (normalizedCmd === '/provider') {
 			const arg = full.slice(cmd.length).trim().split(/\s+/)[0] || '';
 			if (!arg || AGENTIC_PROVIDERS.indexOf(arg) === -1) {
@@ -3607,6 +3689,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	}
 
 	function rollbackAgenticCheckpoint(id: string): void {
+		if (!isAgenticAvailable()) return;
 		if (typeof fetch === 'undefined') {
 			agenticHistoryError = 'fetch unavailable';
 			renderPanel();
@@ -3740,6 +3823,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			.catch(function (e: unknown) {
 				pluginDetailMsg = (e instanceof Error ? e.message : String(e));
 				refreshPlugins();
+				refreshAgenticAvailability();
 				renderPanel();
 			});
 	}
@@ -3747,6 +3831,8 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	function runPluginAction(path: string, body: Record<string, string>): void {
 		pluginDetailMsg = 'done \u2014 reloading';
 		renderPanel();
+		// Plugin set changed — re-check agent availability.
+		refreshAgenticAvailability();
 	}
 
 	function loadPluginExports(name: string): void {
@@ -4043,7 +4129,11 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				return r.json();
 			})
 			.then(function (data: unknown) {
-				const payload = data as { error?: HmrErrorPayload };
+				const payload = data as { error?: HmrErrorPayload; agenticAvailable?: unknown };
+				if (payload && typeof payload.agenticAvailable === 'boolean' && payload.agenticAvailable !== agenticAvailable) {
+					agenticAvailable = payload.agenticAvailable;
+					renderPanel();
+				}
 				if (payload && payload.error) {
 					lastError = payload.error;
 					status = 'error';
@@ -4062,7 +4152,68 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	});
 
 	connect();
+	reportRuntimeErrors();
 	loadPersistedState();
+
+	// Surface runtime failures in the error overlay. The HMR channel only
+	// reports compile errors, so an SSR 500 (served as a page carrying the
+	// `vesk-ssr-error` marker) or an uncaught client exception would
+	// otherwise stay invisible in dev. Best-effort: never break the app.
+	function reportRuntimeErrors(): void {
+		const show = (message: string, extra?: Partial<HmrErrorPayload>): void => {
+			if (disposed || !message) return;
+			try {
+				handleError({
+					file: '',
+					line: null,
+					column: null,
+					message,
+					...(extra || {}),
+				});
+				lastErrorSource = 'runtime';
+			} catch { /* overlay is best-effort */ }
+		};
+		// SSR failure marker baked into error pages:
+		// <!--vesk-ssr-error:<uri-encoded message>-->.
+		try {
+			const walker = doc.createTreeWalker(doc, 128, null);
+			while (walker.nextNode()) {
+				const raw = walker.currentNode.textContent || '';
+				if (raw.indexOf('vesk-ssr-error') !== 0) continue;
+				let message = raw.slice('vesk-ssr-error'.length);
+				if (message.charAt(0) === ':') message = message.slice(1);
+				try {
+					message = decodeURIComponent(message);
+				} catch { /* keep raw */ }
+				if (message) show('SSR: ' + message);
+				break;
+			}
+		} catch { /* ignore */ }
+		// Uncaught client exceptions + unhandled rejections.
+		try {
+			win.addEventListener('error', function (e: Event) {
+				const err = e as ErrorEvent;
+				const cause = err && (err.error as Error | null | undefined);
+				show(
+					(err && err.message) || 'Uncaught error',
+					{
+						file: (err && (err.filename as string)) || '',
+						line: err && typeof err.lineno === 'number' ? err.lineno : null,
+						column: err && typeof err.colno === 'number' ? err.colno : null,
+						stack: cause && cause.stack ? String(cause.stack) : undefined,
+					},
+				);
+			});
+			win.addEventListener('unhandledrejection', function (e: Event) {
+				const reason = (e as PromiseRejectionEvent).reason as unknown;
+				const asErr = reason as Error | null | undefined;
+				show(
+					(asErr && asErr.message) || 'Unhandled rejection: ' + String(reason),
+					{ stack: asErr && asErr.stack ? String(asErr.stack) : undefined },
+				);
+			});
+		} catch { /* ignore */ }
+	}
 
 	function boot(): void {
 		if (disposed) return;

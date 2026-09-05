@@ -38,6 +38,9 @@ export interface DevHmrState {
   error: Record<string, unknown> | null;
   hasError: boolean;
   componentCount: number;
+  /** Whether the @vesk/agentic plugin is installed and active (mirrors the
+      server's agent-route gate). Absent on servers that predate the flag. */
+  agenticAvailable?: boolean;
 }
 
 /** Default state when no HMR provider is available (no server). */
@@ -366,7 +369,10 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     appDir,
     veskDir: resolve(appDir, '..', '.vesk'),
     configPluginNames,
-    getHmrState: devHmrState,
+    // Surface agent availability for the devtool UI (single source of
+    // truth, mirroring the agent-route gate below): the panel only calls
+    // plugin endpoints when the plugin is installed and active.
+    getHmrState: () => ({ ...devHmrState(), agenticAvailable: isAgenticActive() }),
     onPluginChange: async (event) => {
       try {
         await doBuild();

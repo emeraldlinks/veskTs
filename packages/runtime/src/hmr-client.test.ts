@@ -45,6 +45,8 @@ import {
 	PANEL_EDGE,
 	DEV_TABS,
 	PLUGIN_SEARCH_SUGGESTIONS,
+	visibleDevTabs,
+	visibleSettingsSubtabs,
 } from './hmr-client';
 import type { PluginRecord, PluginExportsData, PluginSearchResult, DevDiagnostic, VeskConfigState } from './hmr-client';
 
@@ -740,12 +742,60 @@ assert(
  		src.includes("const wrap = doc.createElement('div');") && src.includes('replaceChild(wrap, placeholder)'),
  		'source materializes the messages host in place when the chat starts empty (no pane re-render)'
  	);
- 	{
+ 	// -- agentic UI renders/calls only when the plugin is installed+active
+	assert(src.includes('visibleDevTabs'), 'source computes visible tabs from agentic availability');
+	assert(src.includes('visibleSettingsSubtabs'), 'source computes visible settings subtabs');
+	assert(
+		src.includes('isAgenticAvailable'),
+		'source gates agent calls behind an availability check'
+	);
+	assert(
+		src.includes('Agentic is not available'),
+		'source explains the hidden Agentic UI instead of failing silently'
+	);
+	assert(visibleDevTabs(true).includes('agentic'), 'agentic tab visible when plugin active');
+	assert(visibleDevTabs(null).includes('agentic'), 'agentic tab visible while availability unknown');
+	assert(!visibleDevTabs(false).includes('agentic'), 'agentic tab hidden when plugin inactive');
+	assert(visibleDevTabs(false).length === DEV_TABS.length - 1, 'only the agentic tab is hidden');
+	assert(visibleSettingsSubtabs(true).includes('agentic'), 'agentic settings visible when active');
+	assert(!visibleSettingsSubtabs(false).includes('agentic'), 'agentic settings hidden when inactive');
+	assert(
+		!renderTabBar('overview', 'expanded', visibleDevTabs(false)).includes('data-tab="agentic"'),
+		'rendered tab bar omits the agentic button when inactive'
+	);
+	assert(
+		renderTabBar('overview', 'expanded', visibleDevTabs(null)).includes('data-tab="agentic"'),
+		'rendered tab bar keeps the agentic button while unknown'
+	);
+	assert(
+		renderSettingsPanel(defaultDevtoolState(), null, null, 'agentic', false).includes('not installed or not active'),
+		'settings agentic pane explains instead of rendering controls when inactive'
+	);
+	assert(
+		!renderSettingsSubtabs('devtools', visibleSettingsSubtabs(false)).includes('data-settings-subtab="agentic"'),
+		'settings subtab bar omits agentic when inactive'
+	);
+	{
  		const start = src.indexOf('function refreshAgenticHistory');
  		const histFn = src.slice(start, start + 1200);
  		assert(!histFn.includes('renderPanel'), 'refreshAgenticHistory never re-renders the whole panel (would jump)');
  		assert(histFn.includes('patchAgenticHistorySection'), 'refreshAgenticHistory patches only the history block');
  	}
+
+	// -- runtime error overlay: SSR failures and uncaught client errors must
+	// pop the overlay (the HMR channel only reports compile errors)
+	assert(src.includes('reportRuntimeErrors'), 'source scans for runtime failures at boot');
+	assert(src.includes('vesk-ssr-error'), 'source reads the SSR error marker baked into error pages');
+	assert(src.includes('decodeURIComponent(message)'), 'source decodes the SSR error message');
+	assert(
+		src.includes("addEventListener('error'") && src.includes("addEventListener('unhandledrejection'"),
+		'source hooks uncaught exceptions and unhandled rejections'
+	);
+	assert(src.includes('lastErrorSource'), 'source tracks where the shown error came from');
+	assert(
+		src.includes("if (lastErrorSource !== 'runtime')"),
+		'socket connect does not dismiss a runtime-reported overlay for DOM that still carries the failure'
+	);
  }
 
 console.log('\nResults: ' + passed + ' passed, ' + failed + ' failed, ' + (passed + failed) + ' total\n');
