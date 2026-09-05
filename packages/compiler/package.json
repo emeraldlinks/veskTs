@@ -1,6 +1,6 @@
 {
   "name": "@vesk/compiler",
-  "version": "0.2.10",
+  "version": "0.2.12",
   "type": "module",
   "description": "Vesk compiler — lexer, parser, semantic analysis, IR, codegen",
   "main": "./dist/index.js",
@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@sveltejs/acorn-typescript": "^1.0.0",
-    "@vesk/types": "^0.2.10",
+    "@vesk/types": "^0.2.12",
     "acorn": "^8.15.0",
     "esrap": "^2.3.0",
     "is-reference": "^3.0.0",

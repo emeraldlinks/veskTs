@@ -1,6 +1,6 @@
 {
   "name": "@vesk/types",
-  "version": "0.2.10",
+  "version": "0.2.12",
   "type": "module",
   "description": "Vesk shared type definitions — the single source for all public framework types",
   "main": "./dist/index.js",

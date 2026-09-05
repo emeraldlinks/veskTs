@@ -1,6 +1,6 @@
 {
   "name": "lucide-vesk",
-  "version": "0.2.10",
+  "version": "0.2.12",
   "type": "module",
   "description": "Lucide icons for Vesk — same props as lucide-react, fully typed, covers all icons, never scoped",
   "main": "./dist/index.js",
