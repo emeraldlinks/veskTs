@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES, applyHeadPlugins, applyHtmlPlugins } from '@vesk/compiler/src/server-codegen';
+import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES, applyHeadInjects, applyHtmlPlugins } from '@vesk/compiler/src/server-codegen';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
@@ -31,6 +31,7 @@ import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
+import { resolveCssUrls, isTailwindPlugin, hasUserCss, stripTailwindDirectives } from '@vesk/adapter/src/css';
 import { buildErrorPayload } from '@vesk/adapter/src/hmr';
 import { buildCodeframe } from '@vesk/adapter/src/error-codeframe';
 import type { HmrErrorPayload } from '@vesk/adapter/src/hmr';
@@ -465,13 +466,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   }
   function isTailwindActive(): boolean {
-    return getActiveDevPlugins().some((p) => String(p.name).toLowerCase().includes('tailwind'));
+    return isTailwindPlugin(getActiveDevPlugins());
   }
   function activeCssUrls(): string[] {
-    const urls: string[] = [];
-    if (isTailwindActive()) urls.push('/_vesk/static/_tailwind.css');
-    urls.push('/_vesk/static/global.css');
-    return urls;
+    return resolveCssUrls({
+      tailwind: isTailwindActive(),
+      userCss: hasUserCss(appDirPath),
+    });
   }
   function cssLinkTags(): string {
     return activeCssUrls().map((u) => `\t<link rel="stylesheet" href="${u}" />`).join('\n') + '\n';
@@ -1275,7 +1276,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           if (security.autoEscape !== false) secMeta += '\t<!-- vesk: auto-escape enabled -->\n';
         }
         let headBlock = '\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n' + cssLinkTags() + secMeta + (head ? '\t' + head.split('\n').join('\n\t') + '\n' : '');
-        headBlock = await applyHeadPlugins(headBlock, getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname });
+        headBlock = await applyHeadInjects(headBlock, { plugins: getActiveDevPlugins() as VeskPlugin[] }, { sourcePath: url.pathname });
         html = `<!DOCTYPE html>\n<html>\n<head>\n${headBlock}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>${dataScriptBlock}\n</body>\n</html>`;
         html = injectDevScripts(html);
         html = await applyHtmlPlugins(html, getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname });
@@ -1349,7 +1350,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
       if (head) headParts.push('\t' + head.split('\n').join('\n\t'));
       yield '<!DOCTYPE html>\n<html>\n<head>\n';
-      yield (await applyHeadPlugins(headParts.join('\n'), getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname })) + '\n';
+      yield (await applyHeadInjects(headParts.join('\n'), { plugins: getActiveDevPlugins() as VeskPlugin[] }, { sourcePath: url.pathname })) + '\n';
       yield '</head>\n<body>\n<div id="root">\n';
       yield prettifyHtml(body);
       yield '\n</div>\n';
@@ -1582,9 +1583,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
   await new Promise(() => {});
 }
 
-const TAILWIND_BLOCK = /^\s*@(theme\s*\{|layer\s+(components|utilities)\s*\{|utility\s+\w+\s*\{)/;
-const LAYER_BASE = /^\s*@layer\s+base\s*\{/;
-
 /**
  * Bake the `vesk-ssr-error` marker into a dev error page so hmr-client can
  * pop the error overlay on load (the HMR channel only reports compile
@@ -1600,36 +1598,6 @@ export function injectSsrErrorMarker(html: string, err: unknown): string {
     if (end >= 0) return html.slice(0, end + 1) + marker + html.slice(end + 1);
   }
   return marker + html;
-}
-
-function stripTailwindDirectives(css: string): string {
-  const lines = css.split('\n');
-  const result: string[] = [];
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i].trim();
-    if (line.startsWith("@import 'tailwindcss'") || line.startsWith('@import "tailwindcss"')) {
-      i++;
-      continue;
-    }
-    if (line.startsWith('@source ')) {
-      i++;
-      continue;
-    }
-    if (TAILWIND_BLOCK.test(line)) {
-      let braceCount = (lines[i].match(/\{/g) || []).length - (lines[i].match(/\}/g) || []).length;
-      i++;
-      while (i < lines.length && braceCount > 0) {
-        braceCount += (lines[i].match(/\{/g) || []).length;
-        braceCount -= (lines[i].match(/\}/g) || []).length;
-        i++;
-      }
-      continue;
-    }
-    result.push(lines[i]);
-    i++;
-  }
-  return result.join('\n').trim();
 }
 
 function buildRequestContext(req: IncomingMessage): {

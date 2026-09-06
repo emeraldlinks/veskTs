@@ -7,6 +7,7 @@ import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { buildHmrEvalSnippet } from './client-bundle';
 import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
 import { resolveErrorFile } from '@vesk/adapter/src/ssr-function';
+import { resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
 import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
 import { parseCompilerError, buildCodeframe, type Codeframe } from '@vesk/adapter/src/error-codeframe';
 import { suggestFor } from '@vesk/adapter/src/error-tips';
@@ -270,14 +271,10 @@ function regenerateSsrFunction(
   const headExtra = options?.headExtra || null;
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
-  const tailwindPath = resolve(outDir, 'static', '_tailwind.css');
-  const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
-  const altCssPath = resolve(appDir, '..', 'src', 'app.css');
-  const hasGlobalCss = existsSync(globalCssPath) || existsSync(altCssPath);
-  const hasTailwind = existsSync(tailwindPath) && readFileSync(tailwindPath, 'utf-8').trim().length > 0;
-  const cssUrls: string[] = [];
-  if (hasTailwind) cssUrls.push('/_vesk/static/_tailwind.css');
-  if (hasGlobalCss) cssUrls.push('/_vesk/static/global.css');
+  const cssUrls = resolveCssUrls({
+    tailwind: hasBuiltTailwindCss(outDir),
+    userCss: hasUserCss(appDir),
+  });
   const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
   const headExtraOption = headExtra ? `, headExtra: ${JSON.stringify(headExtra)}` : '';
   const bakedOptions = cssOption + headExtraOption;

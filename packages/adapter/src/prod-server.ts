@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
+import { resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const _require = createRequire(import.meta.url);
@@ -445,6 +446,10 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     }
 
     const appDir = resolve(projectDir, 'app');
+    const pageCssUrls = resolveCssUrls({
+      tailwind: hasBuiltTailwindCss(outDir),
+      userCss: hasUserCss(appDir),
+    });
     const nfPath = resolve(appDir, 'not-found.vsk');
     let notFoundHtml: string | null = null;
     if (existsSync(nfPath)) {
@@ -453,12 +458,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
         const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
         const src = readFileSync(nfPath, 'utf-8');
         const compName = resolveComponentName(src) || 'NotFound';
-        const tailwindPathNF = resolve(outDir, 'static', '_tailwind.css');
-        const hasTailwindNF = existsSync(tailwindPathNF) && readFileSync(tailwindPathNF, 'utf-8').trim().length > 0;
-        const cssUrlsNF: string[] = [];
-        if (hasTailwindNF) cssUrlsNF.push('/_vesk/static/_tailwind.css');
-        cssUrlsNF.push('/_vesk/static/global.css');
-        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: cssUrlsNF, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: nfPath, headExtra: bakedHeadExtra });
+        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: pageCssUrls, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: nfPath, headExtra: bakedHeadExtra });
       } catch {}
     }
 
@@ -524,12 +524,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                   const compName = resolveComponentName(src) || 'Error';
                   // never leak stack traces / internal messages to prod error pages
                   const expose = process.env.NODE_ENV !== 'production';
-                  const tailwindPathErr = resolve(outDir, 'static', '_tailwind.css');
-                  const hasTailwindErr = existsSync(tailwindPathErr) && readFileSync(tailwindPathErr, 'utf-8').trim().length > 0;
-                  const cssUrlsErr: string[] = [];
-                  if (hasTailwindErr) cssUrlsErr.push('/_vesk/static/_tailwind.css');
-                  cssUrlsErr.push('/_vesk/static/global.css');
-                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: cssUrlsErr, clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath, headExtra: bakedHeadExtra });
+                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: pageCssUrls, clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath, headExtra: bakedHeadExtra });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });

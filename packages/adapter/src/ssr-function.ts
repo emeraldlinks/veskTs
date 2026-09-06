@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
+import { resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
 function escapeSource(src: string): string {
@@ -87,14 +88,10 @@ export function generateSsrFunction(
   const funcDir = resolve(outDir, 'server', 'functions');
   const funcPath = resolve(funcDir, `${name}.js`);
 
-  const tailwindPath = resolve(outDir, 'static', '_tailwind.css');
-  const globalCssPath = resolve(appDir, '..', 'src', 'global.css');
-  const altCssPath = resolve(appDir, '..', 'src', 'app.css');
-  const hasGlobalCss = existsSync(globalCssPath) || existsSync(altCssPath);
-  const hasTailwind = existsSync(tailwindPath) && readFileSync(tailwindPath, 'utf-8').trim().length > 0;
-  const cssUrls: string[] = [];
-  if (hasTailwind) cssUrls.push('/_vesk/static/_tailwind.css');
-  if (hasGlobalCss) cssUrls.push('/_vesk/static/global.css');
+  const cssUrls = resolveCssUrls({
+    tailwind: hasBuiltTailwindCss(outDir),
+    userCss: hasUserCss(appDir),
+  });
   const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
   // Static head snippet baked from the active onHead plugins — merged into
   // every rendered head at request time (page tags win via mergeHeadHtml).

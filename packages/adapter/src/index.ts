@@ -1,9 +1,9 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
 import { resolve, dirname, relative, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cssBlockEnd } from '@vesk/compiler/src/scan';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
+import { resolveUserCssPath, stripTailwindDirectives, isTailwindPlugin, resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
 import { collectActionIds } from '@vesk/compiler/src/actions';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/middleware';
@@ -185,6 +185,47 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   ];
   for (const d of dirs) mkdirSync(d, { recursive: true });
 
+  const cssSourcePath = resolveUserCssPath(appDir);
+  if (cssSourcePath !== null) {
+    const cssContent = readFileSync(cssSourcePath, 'utf-8');
+    const userCss = stripTailwindDirectives(cssContent);
+    const userCssTarget = resolve(outDir, 'static', 'global.css');
+    writeFileSync(userCssTarget, userCss, 'utf-8');
+    console.error(`vesk build: css  → static/global.css  (${userCss.length} bytes)`);
+
+    const twCssTarget = resolve(outDir, 'static', '_tailwind.css');
+    const tailwindActive = isTailwindPlugin(pluginsPipelines);
+    if (!tailwindActive) {
+      writeFileSync(twCssTarget, '', 'utf-8');
+      console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind plugin inactive)');
+    } else {
+      let twCss = cssContent;
+      for (const plugin of pluginsPipelines) {
+        if (typeof plugin.onCSS === 'function') {
+          const result = await plugin.onCSS(twCss, cssSourcePath);
+          if (result !== null && typeof result === 'string') {
+            twCss = result;
+          }
+        }
+      }
+      const hasUnresolvedTailwindImport = /@import\s+['"]tailwindcss['"]/.test(twCss);
+      if (hasUnresolvedTailwindImport) {
+        const lines = twCss.split('\n').filter(l => !/^\s*@import\s+['"]tailwindcss['"]/.test(l));
+        twCss = lines.join('\n').trim();
+        if (twCss.length === 0) {
+          writeFileSync(twCssTarget, '', 'utf-8');
+          console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind unresolved)');
+        } else {
+          writeFileSync(twCssTarget, twCss, 'utf-8');
+          console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes, tailwind partially unresolved)`);
+        }
+      } else {
+        writeFileSync(twCssTarget, twCss, 'utf-8');
+        console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
+      }
+    }
+  }
+
   const { scanRoutes, scanComponents } = await resolveCompilerApi<{
     scanRoutes: (appDir: string, options?: Record<string, unknown>) => RouteNode[];
     scanComponents: (componentsDir: string) => Map<string, string>;
@@ -310,83 +351,14 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   copyStaticAssets(publicDir, outDir);
   console.error('vesk build: static → static/public/');
 
-  const srcDir = resolve(appDir, '..', 'src');
-  const cssSrc = resolve(srcDir, 'global.css');
-  const altCssSrc = resolve(srcDir, 'app.css');
-
-  let cssContent: string | null = null;
-  let cssSourcePath: string | null = null;
-  if (existsSync(cssSrc)) {
-    cssContent = readFileSync(cssSrc, 'utf-8');
-    cssSourcePath = cssSrc;
-  } else if (existsSync(altCssSrc)) {
-    cssContent = readFileSync(altCssSrc, 'utf-8');
-    cssSourcePath = altCssSrc;
-  }
-
-  function stripTailwindDirectives(css: string): string {
-    const blockStart = /^\s*@(theme\s*\{|layer\s+(components|utilities)\s*\{|utility\s+\w+\s*\{)/;
-    let result = css.replace(/^\s*@import\s+['"]tailwindcss['"]\s*;?\s*$/gm, '');
-    result = result.replace(/^\s*@source\s+['"][^'"]+['"]\s*;?\s*$/gm, '');
-    const output: string[] = [];
-    let pos = 0;
-    while (pos < result.length) {
-      const lineEnd = result.indexOf('\n', pos) === -1 ? result.length : result.indexOf('\n', pos) + 1;
-      const line = result.slice(pos, lineEnd);
-      if (blockStart.test(line.trim())) {
-        const end = cssBlockEnd(result, pos);
-        pos = end;
-        continue;
-      }
-      output.push(line);
-      pos = lineEnd;
-    }
-    return output.join('').trim();
-  }
-
-  if (cssContent !== null) {
-    const userCss = stripTailwindDirectives(cssContent);
-    const userCssTarget = resolve(outDir, 'static', 'global.css');
-    writeFileSync(userCssTarget, userCss, 'utf-8');
-    console.error(`vesk build: css  → static/global.css  (${userCss.length} bytes)`);
-
-    const twCssTarget = resolve(outDir, 'static', '_tailwind.css');
-    const isTailwindActive = pluginsPipelines.some((p) => String(p.name).toLowerCase().includes('tailwind'));
-    if (!isTailwindActive) {
-      writeFileSync(twCssTarget, '', 'utf-8');
-      console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind plugin inactive)');
-    } else {
-      let twCss = cssContent;
-      for (const plugin of pluginsPipelines) {
-        if (typeof plugin.onCSS === 'function') {
-          const result = await plugin.onCSS(twCss, cssSourcePath!);
-          if (result !== null && typeof result === 'string') {
-            twCss = result;
-          }
-        }
-      }
-      const hasUnresolvedTailwindImport = /@import\s+['"]tailwindcss['"]/.test(twCss);
-      if (hasUnresolvedTailwindImport) {
-        const lines = twCss.split('\n').filter(l => !/^\s*@import\s+['"]tailwindcss['"]/.test(l));
-        twCss = lines.join('\n').trim();
-        if (twCss.length === 0) {
-          writeFileSync(twCssTarget, '', 'utf-8');
-          console.error('vesk build: css  → static/_tailwind.css  (empty, tailwind unresolved)');
-        } else {
-          writeFileSync(twCssTarget, twCss, 'utf-8');
-          console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes, tailwind partially unresolved)`);
-        }
-      } else {
-        writeFileSync(twCssTarget, twCss, 'utf-8');
-        console.error(`vesk build: css  → static/_tailwind.css  (${twCss.length} bytes)`);
-      }
-    }
-  }
-
   let prerenderedRoutes: Array<{ path: string; html: string; static: boolean; params?: Record<string, string> }> = [];
   if (options?.ssg) {
     const { generateSsgRoutes } = await import('./static.js') as { generateSsgRoutes: typeof import('./static.js').generateSsgRoutes };
-    prerenderedRoutes = await generateSsgRoutes(routeTree, appDir, outDir, pluginsPipelines, pluginHeadExtra);
+    const cssUrls = resolveCssUrls({
+      tailwind: hasBuiltTailwindCss(outDir),
+      userCss: hasUserCss(appDir),
+    });
+    prerenderedRoutes = await generateSsgRoutes(routeTree, appDir, outDir, pluginsPipelines, pluginHeadExtra, cssUrls);
     console.error(`vesk build: ssg   → prerendered/  (${prerenderedRoutes.length} pages)`);
   }
 

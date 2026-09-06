@@ -32,13 +32,14 @@ export async function generateSsgRoutes(
   appDir: string,
   outDir: string,
   plugins?: import('@vesk/types').VeskPlugin[],
-  headExtra?: string
+  headExtra?: string,
+  cssUrls?: string[]
 ): Promise<SsgRouteResult[]> {
   const { ssg } = await import('@vesk/compiler/src/server-render') as { ssg: (source: string, componentName: string | null, customProps: Record<string, unknown> | undefined, options: Record<string, unknown>) => Promise<{ html: string; body: string; head: string; props: string; clientCode: string; static: boolean; staticLists: boolean }> };
   const prerenderDir = resolve(outDir, 'prerendered');
   mkdirSync(prerenderDir, { recursive: true });
 
-  const ssgOptions: Record<string, unknown> = { plugins, headExtra };
+  const ssgOptions: Record<string, unknown> = { plugins, headExtra, cssUrls };
 
   const results: SsgRouteResult[] = [];
 

@@ -7,7 +7,7 @@ import {
   renderFullPage,
   prettifyHtml,
   resolveComponentName,
-  applyHeadPlugins,
+  applyHeadInjects,
   applyHtmlPlugins,
 } from '@vesk/compiler/src/server-codegen';
 import { matchUrl, type MatchResult } from '@vesk/compiler/src/router';
@@ -15,9 +15,11 @@ import { buildWebRequest } from '@vesk/compiler/src/api-routes';
 import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { getAction, validateActionInput, issuesToFieldMap } from '@vesk/runtime/src/action';
+import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 
 function actionCssUrls(appDirPath: string): string[] {
+  let tailwind = true;
   try {
     const veskDir = join(resolve(appDirPath, '..'), '.vesk');
     const statePath = join(veskDir, 'plugins.json');
@@ -25,13 +27,12 @@ function actionCssUrls(appDirPath: string): string[] {
       const raw = readFileSync(statePath, 'utf-8');
       const state = JSON.parse(raw) as { plugins?: Array<{ name: string; active: boolean }> };
       const entries = state?.plugins || [];
-      const inactiveTailwind = entries.some(
+      tailwind = !entries.some(
         (p) => String(p.name).toLowerCase().includes('tailwind') && p.active === false,
       );
-      if (inactiveTailwind) return ['/_vesk/static/global.css'];
     }
   } catch {}
-  return ['/_vesk/static/_tailwind.css', '/_vesk/static/global.css'];
+  return resolveCssUrls({ tailwind, userCss: hasUserCss(appDirPath) });
 }
 function actionCssLinkTags(appDirPath: string): string {
   return actionCssUrls(appDirPath).map((u) => `\t<link rel="stylesheet" href="${u}" />`).join('\n') + '\n';
@@ -182,9 +183,9 @@ async function renderPageHtml(pagePathname: string, params: Record<string, strin
   const hasLayout = chain.some(n => n.layout && existsSync(resolve(ctx.appDirPath, n.sourceDir as string, 'layout.vsk')));
   if (hasLayout) {
     const secMeta = securityMeta(ctx.security);
-    const headBlock = await applyHeadPlugins(
+    const headBlock = await applyHeadInjects(
       '\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n' + actionCssLinkTags(ctx.appDirPath) + secMeta + (head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''),
-      ctx.plugins,
+      { plugins: ctx.plugins },
       { sourcePath: ctx.url.pathname }
     );
     const fullHtml = `<!DOCTYPE html>\n<html>\n<head>\n${headBlock}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
