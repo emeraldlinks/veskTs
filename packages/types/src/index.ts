@@ -87,6 +87,20 @@ export interface MiddlewareExtractResult {
 // Plugins
 // ────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Context passed to document-integrating plugin hooks (`onHead` / `onHtml`).
+ * Carries enough route info for a plugin to vary its output per request/page.
+ */
+export interface RenderPluginContext {
+  /** Request pathname when rendering for a live request (unset at build/SSG time). */
+  url?: string;
+  /** Absolute path of the page/layout `.vsk` driving this render (when known). */
+  sourcePath?: string;
+  /** Route path pattern, e.g. `/blog/[slug]` (when known). */
+  routePath?: string;
+  [key: string]: unknown;
+}
+
 export interface VeskPlugin {
   name: string;
   provides?: Record<string, (() => unknown | Promise<unknown>) | unknown>;
@@ -96,6 +110,21 @@ export interface VeskPlugin {
   onTransformJS?: (code: string, filePath: string) => string | null | Promise<string | null>;
   onBuildStart?: () => void | Promise<void>;
   onBuildEnd?: () => void | Promise<void>;
+  /**
+   * Inject or rewrite the assembled `<head>` content. Receives the full head
+   * string (charset, viewport, CSS links, security metas, page `<Head>` tags)
+   * and must return the new head, or `null` to leave it unchanged. Run in
+   * config order on every rendered document — dev (live), build/SSG (live) and
+   * prod (baked at build via `headExtra`).
+   */
+  onHead?: (headHtml: string, ctx?: RenderPluginContext) => string | null | Promise<string | null>;
+  /**
+   * Inject or rewrite the finalized full HTML document (`<!DOCTYPE html>…`).
+   * Runs on non-streamed documents only (SSG prerender + buffered renderFullPage
+   * pages incl. not-found/error). Streaming paths and the bake-for-prod path
+   * apply `onHead` only — see plugin-api docs.
+   */
+  onHtml?: (html: string, ctx?: RenderPluginContext) => string | null | Promise<string | null>;
   [key: string]: unknown;
 }
 
@@ -222,6 +251,12 @@ export interface ProdServerOptions {
 export interface SsrFunctionOptions {
   ancestorLayouts?: AncestorLayout[];
   middlewareCode?: string | null;
+  /**
+   * Build-time-baked head snippet produced by active `onHead` plugins. Merged
+   * into every rendered head (page wins over baked extras) by the generated
+   * SSR function at request time.
+   */
+  headExtra?: string;
 }
 
 export interface ApiFunctionOptions {
@@ -270,6 +305,11 @@ export interface ClientBundleOptions {
    * pass.
    */
   returnEditedSources?: boolean;
+  /**
+   * Active plugins whose `onTransformJS` hook runs over the emitted client
+   * bundle (`main`) and any code-split `chunk` sources.
+   */
+  plugins?: VeskPlugin[];
 }
 
 export interface ChunkEntry {
@@ -327,6 +367,12 @@ export interface Manifest {
     dir: string;
   };
   actions?: ManifestActionEntry[];
+  /**
+   * Build-time-baked head snippet produced by active `onHead` plugins. Merged
+   * into not-found/error pages rendered directly by the prod server (which has
+   * no in-process plugin objects).
+   */
+  headExtra?: string;
 }
 
 export interface SsgRouteResult {

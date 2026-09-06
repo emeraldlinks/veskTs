@@ -267,7 +267,6 @@ export function parse(source: string, options: ParseOptions = {}): Program {
         'If you wrote literal { or } inside JSX text, escape them as {\'{\'} and {\'}\'} or use &lbrace; &rbrace;.',
         'Ensure all JSX tags are properly closed and component names start with an uppercase letter.',
       ],
-      tip: 'Vesk parses with Acorn + TypeScript + JSX — use the code frame above to locate the error.',
     });
   }
 }

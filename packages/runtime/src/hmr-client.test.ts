@@ -39,6 +39,7 @@ import {
 	loadDevtoolState,
 	saveDevtoolState,
 	defaultDevtoolState,
+	isAcornParseMessage,
 	DEV_STATE_KEY,
 	PANEL_MIN_W,
 	PANEL_MIN_H,
@@ -89,7 +90,15 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(html.includes('^'), 'caret glyph rendered');
 
 	const caretIdx = html.indexOf('kf-caret');
-	assert(caretIdx > html.indexOf('broken'), 'caret appears on the error line after the text');
+	assert(caretIdx > html.indexOf('broken'), 'caret appears after the error line text');
+
+	const errClose = html.indexOf('</div>', html.indexOf('kf-err'));
+	const caretRowIdx = html.indexOf('<div class="kf-caret">');
+	assert(caretRowIdx > errClose, 'caret renders as its own row after the error line, not inline in it');
+	assert(
+		html.includes('<div class="kf-caret">' + ' '.repeat(4 + 3 + 16) + '^'),
+		'caret row is indented to the gutter edge + column (23 spaces for column 17)',
+	);
 
 	assert(html.indexOf('995') < html.indexOf('1000'), 'lines render in ascending gutter order');
 }
@@ -126,7 +135,7 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	const nodes = buildErrorNodes(payload);
 
 	assert(nodes.file.includes('app/page.vsk:1000:17'), 'file header shows file, line and column');
-	assert(nodes.message === 'Unexpected token', 'message is escaped/copied verbatim');
+	assert(nodes.message === '', 'raw acorn parse message ("Unexpected token") is hidden from the overlay');
 	assert(nodes.codeframe.includes('kf-err'), 'codeframe piece includes the highlighted error line');
 	assert(nodes.lists.includes('&gt; TIPS'), 'TIPS section label rendered (uppercase, > prefix)');
 	assert(nodes.lists.includes('&gt; SUGGESTIONS'), 'SUGGESTIONS section label rendered');
@@ -134,6 +143,16 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(nodes.lists.includes('Check your syntax'), 'tip content rendered');
 	assert(nodes.lists.indexOf('SUGGESTIONS') < nodes.lists.indexOf('NEXT STEPS'), 'sections keep declared order');
 	assert(nodes.stack === 'at renderPage (app/page.vsk:1000:17)', 'stack text preserved');
+}
+
+// buildErrorNodes with non-acorn (actionable) messages keeps them verbatim
+{
+	const nodes = buildErrorNodes({ file: 'app/page.vsk', line: 4, column: 2, message: 'someVar is not defined', codeframe: undefined, stack: undefined });
+	assert(nodes.message === 'someVar is not defined', 'non-acorn message is preserved verbatim');
+	assert(!isAcornParseMessage('someVar is not defined'), 'isAcornParseMessage flags only acorn-style parse messages');
+	assert(isAcornParseMessage('Unexpected token'), 'isAcornParseMessage flags "Unexpected *" parse messages');
+	assert(isAcornParseMessage('Parse error'), 'isAcornParseMessage flags "Parse error"');
+	assert(isAcornParseMessage('Unexpected identifier'), 'isAcornParseMessage flags "Unexpected identifier"');
 }
 
 // buildErrorNodes with missing optional fields
@@ -594,6 +613,10 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(src.includes('#__kp_content'), 'source bounds the content wrapper for vertical scrolling');
 	assert(src.includes('min-height:0'), 'source lets the scrollable pane shrink below its content (restores scrolling)');
 	assert(src.includes('overflow-y:auto'), 'source keeps the content pane vertically scrollable');
+	assert(src.includes('--vk-err-bg') && src.includes('--vk-err-fg'), 'source defines a red error palette');
+	assert(src.includes('.kf-err{background:var(--vk-err-bg)'), 'error line highlight uses the red palette, not inverse-video white');
+	assert(src.includes('.kf-caret{color:var(--vk-err-fg)'), 'caret row uses the red-palette foreground');
+	assert(src.includes('isAcornParseMessage') && src.includes("'Unexpected '"), 'source hides raw acorn parse messages from the overlay');
 	assert(src.includes('renderSearchPluginDetail'), 'source renders a pre-install detail view for npm search results');
 	assert(src.includes('data-search-pkg-open'), 'source wires a details action on npm search results');
 	assert(src.includes('pluginInstalling'), 'source tracks an in-flight plugin install (loading state)');
@@ -791,12 +814,17 @@ assert(
 		src.includes("addEventListener('error'") && src.includes("addEventListener('unhandledrejection'"),
 		'source hooks uncaught exceptions and unhandled rejections'
 	);
-	assert(src.includes('lastErrorSource'), 'source tracks where the shown error came from');
+assert(src.includes('lastErrorSource'), 'source tracks where the shown error came from');
 	assert(
 		src.includes("if (lastErrorSource !== 'runtime')"),
 		'socket connect does not dismiss a runtime-reported overlay for DOM that still carries the failure'
 	);
- }
+	assert(src.includes('pendingStateSync'), 'source defers the connect-time clear until persisted state sync settles');
+	assert(
+		src.includes('if (!pendingStateSync) clearError()'),
+		'connect skips clearError while the /__vesk/hmr/state replay is in flight (error survives refresh)'
+	);
+  }
 
 console.log('\nResults: ' + passed + ' passed, ' + failed + ' failed, ' + (passed + failed) + ' total\n');
 process.exit(failed > 0 ? 1 : 0);

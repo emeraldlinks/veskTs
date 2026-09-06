@@ -93,6 +93,26 @@ function veskDirFromOutDir(outDir: string): string {
   return outDir;
 }
 
+/**
+ * Invoke every active plugin's `onHead` once with an empty head to capture its
+ * static head contribution. The result is baked into generated SSR functions
+ * and `config.json` (`headExtra`) for the prod path, where plugin objects are
+ * not available at request time.
+ */
+async function collectPluginHeadExtra(pluginsPipelines: VeskPlugin[]): Promise<string> {
+  const parts: string[] = [];
+  for (const plugin of pluginsPipelines) {
+    if (typeof plugin.onHead !== 'function') continue;
+    try {
+      const result = await plugin.onHead('', { sourcePath: 'build' });
+      if (typeof result === 'string' && result.trim()) parts.push(result);
+    } catch {
+      // a failing onHead at bake time must not break the build
+    }
+  }
+  return parts.join('\n');
+}
+
 export async function build(appDir: string, options?: BuildOptions): Promise<BuildResult | undefined> {
   appDir = resolve(appDir);
   const outDir = resolve(options?.outDir || resolve(appDir, '..', '.vesk'));
@@ -147,6 +167,13 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
       await plugin.onBuildStart();
     }
   }
+
+  // Bake the active `onHead` plugins' static head contribution for the prod
+  // SSR path (generated SSR functions + prod-server not-found/error pages have
+  // no in-process plugin objects, so their head snippets ship build-time).
+  // Live hooks still run in dev / build / SSG where plugin objects exist.
+  const pluginHeadExtra = await collectPluginHeadExtra(pluginsPipelines);
+  if (pluginHeadExtra) console.error('vesk build: baked plugin head → config.json + SSR functions');
 
   console.error(`vesk build: output → ${outDir}`);
 
@@ -205,7 +232,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
           const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));
           mwCode = compileMiddlewareCode(mwSources);
         }
-        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts, middlewareCode: mwCode });
+        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra });
         writeFileSync(funcPath, funcCode, 'utf-8');
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (existsSync(pagePath)) {
@@ -263,10 +290,11 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
 
   console.error('vesk build: bundling client runtime...');
-  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number } = {};
+  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[] } = {};
   if (options?.codeSplit) bundleOpts.codeSplit = true;
   if (options?.hmr) bundleOpts.hmr = true;
   if (options?.routeDataCache !== undefined) bundleOpts.routeDataCache = options.routeDataCache;
+  if (pluginsPipelines.length > 0) bundleOpts.plugins = pluginsPipelines;
   const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);
   writeFileSync(resolve(outDir, 'static', 'client.js'), main, 'utf-8');
   const mode = chunks.length > 0 ? 'code-split' : 'monolithic';
@@ -358,7 +386,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   let prerenderedRoutes: Array<{ path: string; html: string; static: boolean; params?: Record<string, string> }> = [];
   if (options?.ssg) {
     const { generateSsgRoutes } = await import('./static.js') as { generateSsgRoutes: typeof import('./static.js').generateSsgRoutes };
-    prerenderedRoutes = await generateSsgRoutes(routeTree, appDir, outDir);
+    prerenderedRoutes = await generateSsgRoutes(routeTree, appDir, outDir, pluginsPipelines, pluginHeadExtra);
     console.error(`vesk build: ssg   → prerendered/  (${prerenderedRoutes.length} pages)`);
   }
 
@@ -403,7 +431,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
-  const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap);
+  const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra);
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
 

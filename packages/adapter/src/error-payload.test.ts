@@ -81,6 +81,35 @@ try {
     assert(Array.isArray(p.tips) && Array.isArray(p.suggestions) && Array.isArray(p.nextSteps), 'loc case: tips/suggestions/nextSteps arrays present');
   }
 
+  // --- " in <file>" redundant suffix is stripped from the message ---
+  {
+    const abs = join(tmp, 'page.vsk');
+    const p = buildErrorPayload(
+      { message: `Unexpected token in ${abs}`, loc: { line: 3, column: 7 } },
+      'page.vsk',
+      { appDir: tmp },
+    );
+    assert(p.message === 'Unexpected token', 'suffix case: redundant " in <absolute file>" stripped from message');
+    assert(p.line === 3 && p.column === 8, 'suffix case: stripped message keeps location');
+    assert(p.codeframe !== undefined, 'suffix case: codeframe still present after stripping');
+  }
+  {
+    const p = buildErrorPayload(
+      { message: 'Unexpected token in page.vsk', loc: { line: 3, column: 7 } },
+      'page.vsk',
+      { appDir: tmp },
+    );
+    assert(p.message === 'Unexpected token', 'suffix case: redundant " in <relative file>" stripped from message');
+  }
+  {
+    const p = buildErrorPayload(
+      { message: 'Unexpected token in other.vsk', loc: { line: 3, column: 7 } },
+      'page.vsk',
+      { appDir: tmp },
+    );
+    assert(p.message === 'Unexpected token in other.vsk', 'suffix case: message naming a different file untouched');
+  }
+
   // --- Missing-file case: line info present but no source file on disk ---
   {
     const p = buildErrorPayload(

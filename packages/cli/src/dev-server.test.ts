@@ -13,7 +13,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { routeDevPanel, injectDevScripts, DEV_SCRIPTS } from './dev-server.js';
+import { routeDevPanel, injectDevScripts, injectSsrErrorMarker, DEV_SCRIPTS, buildDevErrorPayload } from './dev-server.js';
 
 let passed = 0;
 let failed = 0;
@@ -204,6 +204,109 @@ async function main() {
       const leaks = (shapes[i].split('/_vesk/').length - 1);
       assert(leaks === 2, `single dev-script pair in shape ${i} (leaks=${leaks})`);
     }
+  }
+
+  // ---- buildDevErrorPayload (canonical HMR error payload for the CLI path) ----
+  {
+    const appDir = join(tmpProject, 'app');
+    mkdirSync(appDir, { recursive: true });
+    const srcLines: string[] = [];
+    for (let i = 1; i <= 21; i++) {
+      srcLines.push(i === 11 ? 'const {{{ broken' : `const line${i} = ${i};`);
+    }
+    const src = srcLines.join('\n');
+    const file = join(appDir, 'page.vsk');
+    writeFileSync(file, src, 'utf-8');
+
+    const veskErr = Object.assign(new Error(`Unexpected token in ${file}`), {
+      name: 'VeskError',
+      line: 11,
+      column: 3,
+      file,
+      tip: 'Check for missing or extra brackets.',
+      suggestions: ['Remove the extra braces', 'Close the block'],
+      nextSteps: ['Fix the syntax error and save'],
+      code: '11 | const {{{ broken\n   |   ^',
+    });
+
+    const p = buildDevErrorPayload({
+      err: veskErr,
+      errorMessage: veskErr.message,
+      filename: 'page.vsk',
+      fullPath: file,
+      appDir,
+      fileExists: true,
+    });
+
+    assert(p.message === 'Unexpected token', 'payload strips the redundant " in <abs file>" suffix from the message');
+    assert(p.file === 'page.vsk', 'payload keeps the watcher-relative file name');
+    assert(p.line === 11 && p.column === 3, 'payload keeps the VeskError line/column');
+    assert(p.codeframe !== undefined && Array.isArray(p.codeframe.code), 'payload carries a structured codeframe (not a plain string)');
+    assert(p.codeframe!.code.length === 11, 'payload codeframe spans 5 above + error line + 5 below');
+    const errLines = p.codeframe!.code.filter((l) => l.isError);
+    assert(errLines.length === 1 && errLines[0].no === 11, 'payload codeframe highlights exactly the error line');
+    assert(p.codeframe!.file === 'page.vsk', 'payload codeframe names the watcher-relative file');
+    assert(!!p.tips && p.tips[0] === 'Check for missing or extra brackets.', 'payload promotes the VeskError tip first');
+    assert(!!p.suggestions && p.suggestions.length === 2, 'payload keeps the VeskError suggestions');
+    assert(!!p.nextSteps && p.nextSteps.length === 1, 'payload keeps the VeskError nextSteps');
+  }
+
+  // ---- buildDevErrorPayload: foreign shape fallback (regex line/col scan) ----
+  {
+    const appDir = join(tmpProject, 'app');
+    const src = Array.from({ length: 10 }, (_, i) => `const n${i + 1} = ${i + 1};`).join('\n');
+    writeFileSync(join(appDir, 'page.vsk'), src, 'utf-8');
+    const p = buildDevErrorPayload({
+      err: new Error('Parse failed at line 6 column 2'),
+      errorMessage: 'Parse failed at line 6 column 2',
+      filename: 'page.vsk',
+      fullPath: join(appDir, 'page.vsk'),
+      appDir,
+      fileExists: true,
+    });
+    assert(p.line === 6 && p.column === 2, 'foreign shape: line/column recovered from a message keyword scan');
+    assert(
+      p.codeframe !== undefined && p.codeframe!.code.filter((l) => l.isError)[0].no === 6,
+      'foreign shape: codeframe is rebuilt from the on-disk source',
+    );
+    assert(!!p.tips && Array.isArray(p.tips) && p.tips.length >= 1, 'foreign shape: tips populated from the message');
+  }
+
+  // ---- SSR-error fallback page carries BOTH the dev script pair and the
+  // SSR-error marker (refresh of a broken page without error.vsk must still
+  // get the overlay + an HMR socket, so the fix reaches the tab) ----
+  {
+    const fallback = injectDevScripts('<!DOCTYPE html><html><body><h1>500</h1><pre>Unexpected token</pre></body></html>');
+    const page = injectSsrErrorMarker(fallback, new Error('Unexpected token'));
+    assert(page.includes('vesk-ssr-error:'), 'fallback error page bakes the SSR error marker for hmr-client');
+    assert((page.split('/_vesk/').length - 1) === 2, 'fallback error page carries client.js + hmr.js so HMR reconnects after refresh');
+    assert(page.indexOf('vesk-ssr-error:') > page.indexOf('<body'), 'marker sits inside the body so the comment walker finds it');
+    assert(
+      injectSsrErrorMarker('<html><body><h1>500</h1></body></html>', new Error('boom')).includes('vesk-ssr-error:boom'),
+      'marker encodes the raw server error message for the overlay on load',
+    );
+  }
+
+  // ---- getHmrState: full HmrErrorPayload (with codeframe) passes through the
+  // /__vesk/hmr/state replay surface ----
+  {
+    const fullPayload = buildDevErrorPayload({
+      err: new Error('Parse failed at line 6 column 2'),
+      errorMessage: 'Parse failed at line 6 column 2',
+      filename: 'page.vsk',
+      fullPath: join(join(tmpProject, 'app'), 'page.vsk'),
+      appDir: join(tmpProject, 'app'),
+      fileExists: true,
+    });
+    const { res, rec } = makeRes();
+    await routeDevPanel(makeReq('GET'), res, new URL('http://x/__vesk/hmr/state'), {
+      ...deps(),
+      getHmrState: () => ({ status: 'error', lastCompileMs: null, error: fullPayload, hasError: true, componentCount: 0 }),
+    });
+    assert(rec.status === 200, 'GET /__vesk/hmr/state with a full error payload -> 200');
+    const state = JSON.parse(rec.body) as { error: { message: string; file?: string; codeframe?: unknown; line?: number | null } };
+    assert(state.error.message === 'Parse failed at line 6 column 2', 'state passes the raw compile error through');
+    assert(state.error.codeframe !== undefined && state.error.line === 6, 'state replays the structured codeframe so a refreshed page restores the red error line');
   }
 
   rmSync(tmpProject, { recursive: true, force: true });

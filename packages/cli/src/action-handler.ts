@@ -7,13 +7,15 @@ import {
   renderFullPage,
   prettifyHtml,
   resolveComponentName,
+  applyHeadPlugins,
+  applyHtmlPlugins,
 } from '@vesk/compiler/src/server-codegen';
 import { matchUrl, type MatchResult } from '@vesk/compiler/src/router';
 import { buildWebRequest } from '@vesk/compiler/src/api-routes';
 import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { getAction, validateActionInput, issuesToFieldMap } from '@vesk/runtime/src/action';
-import type { RouteNode } from '@vesk/compiler/src/types';
+import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 
 function actionCssUrls(appDirPath: string): string[] {
   try {
@@ -41,6 +43,7 @@ export interface ActionHandlerContext {
   routeTree: RouteNode[];
   security?: Record<string, unknown>;
   maxBodyBytes?: number;
+  plugins?: VeskPlugin[];
 }
 
 function chainForPath(routeTree: RouteNode[], pathname: string): RouteNode[] {
@@ -179,15 +182,21 @@ async function renderPageHtml(pagePathname: string, params: Record<string, strin
   const hasLayout = chain.some(n => n.layout && existsSync(resolve(ctx.appDirPath, n.sourceDir as string, 'layout.vsk')));
   if (hasLayout) {
     const secMeta = securityMeta(ctx.security);
-    return `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${actionCssLinkTags(ctx.appDirPath)}${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+    const headBlock = await applyHeadPlugins(
+      '\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n' + actionCssLinkTags(ctx.appDirPath) + secMeta + (head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''),
+      ctx.plugins,
+      { sourcePath: ctx.url.pathname }
+    );
+    const fullHtml = `<!DOCTYPE html>\n<html>\n<head>\n${headBlock}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>\n</html>`;
+    return applyHtmlPlugins(fullHtml, ctx.plugins, { sourcePath: ctx.url.pathname });
   }
 
   const leaf = chain.find(n => n.page);
   if (!leaf) return null;
   const src = readFileSync(resolve(ctx.appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
   const compName = resolveComponentName(src) || (leaf.page as string);
-  const html = await renderFullPage(src, compName, { params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: actionCssUrls(ctx.appDirPath), security: ctx.security, sourcePath: resolve(ctx.appDirPath, leaf.sourceDir as string, 'page.vsk') });
-  return html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
+  const html = await renderFullPage(src, compName, { params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: actionCssUrls(ctx.appDirPath), security: ctx.security, sourcePath: resolve(ctx.appDirPath, leaf.sourceDir as string, 'page.vsk'), plugins: ctx.plugins });
+  return applyHtmlPlugins(html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>'), ctx.plugins, { sourcePath: ctx.url.pathname });
 }
 
 /**

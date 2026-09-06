@@ -1,0 +1,84 @@
+{
+  "name": "@vesk/plugin-pwa",
+  "description": "Progressive Web App plugin for Vesk — generates manifest.webmanifest and sw.js, exposes head tags and SW registration helpers via provides",
+  "vesk": ">=0.2.10",
+  "capabilities": ["pwa", "service-worker"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "name": {
+        "type": "string",
+        "description": "App name (used for <title> and manifest name)"
+      },
+      "shortName": {
+        "type": "string",
+        "description": "Short name for the home-screen prompt"
+      },
+      "description": {
+        "type": "string",
+        "description": "App description (manifest description)"
+      },
+      "scope": {
+        "type": "string",
+        "description": "Service worker scope (default '/')"
+      },
+      "lang": {
+        "type": "string",
+        "default": "en-US",
+        "description": "Default locale for the manifest"
+      },
+      "display": {
+        "type": "string",
+        "enum": ["standalone", "fullscreen", "minimal-ui", "browser"],
+        "default": "standalone",
+        "description": "display mode for the installed PWA"
+      },
+      "orientation": {
+        "type": "string",
+        "enum": ["any", "natural", "landscape", "landscape-primary", "landscape-secondary", "portrait", "portrait-primary", "portrait-secondary"],
+        "default": "any",
+        "description": "Preferred orientation"
+      },
+      "themeColor": {
+        "type": "string",
+        "default": "#000000",
+        "description": "Theme color for the address bar and OS chrome"
+      },
+      "backgroundColor": {
+        "type": "string",
+        "default": "#ffffff",
+        "description": "Background color for the splash screen"
+      },
+      "icons": {
+        "type": "array",
+        "description": "Manifest icons (defaults to /icon-192.png and /icon-512.png if unset)",
+        "items": {
+          "type": "object",
+          "properties": {
+            "src": { "type": "string" },
+            "sizes": { "type": "string" },
+            "type": { "type": "string" },
+            "purpose": { "type": "string" }
+          },
+          "required": ["src", "sizes", "type"]
+        }
+      },
+      "publicDir": {
+        "type": "string",
+        "description": "Where the plugin writes manifest.webmanifest and sw.js (defaults to ./public)"
+      },
+      "noServiceWorker": {
+        "type": "boolean",
+        "default": false,
+        "description": "Disable auto service-worker generation"
+      },
+      "swStrategy": {
+        "type": "string",
+        "enum": ["stale-while-revalidate", "cache-first", "network-first"],
+        "default": "stale-while-revalidate",
+        "description": "Service worker caching strategy"
+      }
+    },
+    "additionalProperties": false
+  }
+}

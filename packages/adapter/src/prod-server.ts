@@ -115,6 +115,7 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.ico': 'image/x-icon', '.html': 'text/html', '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.wasm': 'application/wasm',
 };
 
@@ -136,6 +137,8 @@ interface BuildConfig {
     dir: string;
   };
   actions?: Array<{ id: string; function: string }>;
+  /** Build-time-baked onHead-plugin head snippet for not-found/error pages. */
+  headExtra?: string;
 }
 
 interface MatchPathResult {
@@ -159,6 +162,10 @@ export async function startProdServer(outDir: string, options?: { port?: number;
   }
 
   const buildConfig: BuildConfig = JSON.parse(readFileSync(configPath, 'utf-8'));
+  // Baked onHead-plugin head snippet (config.json `headExtra`) — applied to
+  // pages that render directly here (not-found / error) where no SSR function
+  // and no in-process plugin objects exist.
+  const bakedHeadExtra: string = buildConfig.headExtra || '';
   console.error(`vesk start: serving from ${outDir}`);
 
   const projectDir = resolve(outDir, '..');
@@ -451,7 +458,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
         const cssUrlsNF: string[] = [];
         if (hasTailwindNF) cssUrlsNF.push('/_vesk/static/_tailwind.css');
         cssUrlsNF.push('/_vesk/static/global.css');
-        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: cssUrlsNF, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: nfPath });
+        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: cssUrlsNF, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: nfPath, headExtra: bakedHeadExtra });
       } catch {}
     }
 
@@ -522,7 +529,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                   const cssUrlsErr: string[] = [];
                   if (hasTailwindErr) cssUrlsErr.push('/_vesk/static/_tailwind.css');
                   cssUrlsErr.push('/_vesk/static/global.css');
-                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: cssUrlsErr, clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath });
+                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: cssUrlsErr, clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath, headExtra: bakedHeadExtra });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });

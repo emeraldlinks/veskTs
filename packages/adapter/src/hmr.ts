@@ -119,11 +119,21 @@ export function buildErrorPayload(
     ? resolve(opts.appDir, file)
     : undefined;
 
+  // The file header already shows the location; strip the redundant
+  // " in <file>" suffix compilers append to messages (e.g. acorn's
+  // "Unexpected token in /abs/app/page.vsk").
+  const cleanMessage =
+    filePath && message.endsWith(` in ${filePath}`)
+      ? message.slice(0, -` in ${filePath}`.length).trim()
+      : message.endsWith(` in ${file}`)
+        ? message.slice(0, -` in ${file}`.length).trim()
+        : message;
+
   const payload: HmrErrorPayload = {
     file,
     line,
     column,
-    message,
+    message: cleanMessage,
   };
   if (filePath) payload.filePath = filePath;
   if (codeframe) payload.codeframe = codeframe;
@@ -254,9 +264,10 @@ function regenerateSsrFunction(
   appDir: string,
   outDir: string,
   componentMap?: Map<string, string>,
-  options?: { ancestorLayouts?: AncestorLayout[] },
+  options?: { ancestorLayouts?: AncestorLayout[]; headExtra?: string },
 ): void {
   const ancestorLayouts = options?.ancestorLayouts || [];
+  const headExtra = options?.headExtra || null;
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
   const tailwindPath = resolve(outDir, 'static', '_tailwind.css');
@@ -268,6 +279,8 @@ function regenerateSsrFunction(
   if (hasTailwind) cssUrls.push('/_vesk/static/_tailwind.css');
   if (hasGlobalCss) cssUrls.push('/_vesk/static/global.css');
   const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
+  const headExtraOption = headExtra ? `, headExtra: ${JSON.stringify(headExtra)}` : '';
+  const bakedOptions = cssOption + headExtraOption;
   const parts = routeNode.fullPath.split('/').filter(Boolean);
   const name = routeName(parts);
   const funcDir = resolve(outDir, 'server', 'functions');
@@ -349,7 +362,7 @@ function regenerateSsrFunction(
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: url.href }), head: '' };",
       '  }',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
     ].join('\n');
   } else if (hasAncestorLayout) {
@@ -365,20 +378,20 @@ function regenerateSsrFunction(
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: url.href }), head: '' };",
       '  }',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
     ].join('\n');
   } else {
     renderCode = [
       '  let stream;',
       '  try {',
-      '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + cssOption + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });",
+      '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });",
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    if (!_errorSrc) throw err;',
       "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
-      "    const html = await renderFullPage(_errorSrc, _errorComp, { params, statusCode: 500, error: message, stack, url: url.href }, __componentRegistry, { hydrate: true, cached: _errorCompiled" + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
+      "    const html = await renderFullPage(_errorSrc, _errorComp, { params, statusCode: 500, error: message, stack, url: url.href }, __componentRegistry, { hydrate: true, cached: _errorCompiled" + bakedOptions + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
       "    return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: 500 });",
       '  }',
       '  return new Response(new ReadableStream({',

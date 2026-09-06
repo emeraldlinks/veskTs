@@ -121,7 +121,7 @@ async function main(){
   assert(cssUrlsDyn >= 6, `all renderFullPage/renderPageStream/cssUrls use activeCssUrls (got ${cssUrlsDyn})`);
   assert(devSrc.includes('cssLinkTags()'), 'hardcoded HTML templates use cssLinkTags (tailwind conditional)');
   const mwGated = (devSrc.match(/plugins: getActiveDevPlugins\(\)/g)||[]).length;
-  assert(mwGated === 2, `middleware executeMiddlewareChain uses getActiveDevPlugins twice (api + page) (got ${mwGated})`);
+  assert(mwGated >= 2, `middleware + render calls use getActiveDevPlugins (api + page) (got ${mwGated})`);
   assert(!/for \(const plugin of devPlugins\)/.test(devSrc), 'no remaining raw devPlugins loops (all gated)');
 
   // --- static wiring: adapter/src/index.ts ---

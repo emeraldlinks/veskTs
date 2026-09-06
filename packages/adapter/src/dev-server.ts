@@ -7,6 +7,7 @@ import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
 import { createHmrServer } from './hmr';
 import * as hmrApi from './hmr';
+import type { HmrErrorPayload } from './hmr';
 import { createDevApiRouter } from './dev-api';
 import { buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
@@ -35,7 +36,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export interface DevHmrState {
   status: 'up' | 'compiling' | 'error' | 'down';
   lastCompileMs: number | null;
-  error: Record<string, unknown> | null;
+  error: HmrErrorPayload | Record<string, unknown> | null;
   hasError: boolean;
   componentCount: number;
   /** Whether the @vesk/agentic plugin is installed and active (mirrors the
@@ -250,6 +251,7 @@ const MIME: Record<string, string> = {
   '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
   '.ico': 'image/x-icon', '.html': 'text/html', '.json': 'application/json',
+  '.webmanifest': 'application/manifest+json',
   '.woff': 'font/woff', '.woff2': 'font/woff2', '.wasm': 'application/wasm',
 };
 

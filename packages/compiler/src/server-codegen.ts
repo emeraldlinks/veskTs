@@ -65,4 +65,6 @@ export {
   renderFullPage,
   renderPageStream,
   buildDataScripts,
+  applyHeadPlugins,
+  applyHtmlPlugins,
 } from '@vesk/compiler/src/server-render';

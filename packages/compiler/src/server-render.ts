@@ -208,6 +208,72 @@ function clearSsrCells(token: string | undefined): void {
   }
 }
 
+type RenderPluginLike = import('@vesk/types').VeskPlugin;
+
+interface HeadInjectOptions {
+  plugins?: RenderPluginLike[];
+  headExtra?: string;
+}
+
+/**
+ * Run the active plugins' `onHead` hooks (config order) against an assembled
+ * `<head>` string. A hook returns the new head, or `null` to keep the input.
+ */
+export async function applyHeadPlugins(
+  headHtml: string,
+  plugins: RenderPluginLike[] | undefined | null,
+  ctx?: import('@vesk/types').RenderPluginContext
+): Promise<string> {
+  if (!plugins || plugins.length === 0) return headHtml;
+  let out = headHtml;
+  for (const plugin of plugins) {
+    if (typeof plugin.onHead === 'function') {
+      const result = await plugin.onHead(out, ctx);
+      if (typeof result === 'string') out = result;
+    }
+  }
+  return out;
+}
+
+/**
+ * Run the active plugins' `onHtml` hooks (config order) against a finalized
+ * full HTML document. Only valid for non-streamed documents.
+ */
+export async function applyHtmlPlugins(
+  html: string,
+  plugins: RenderPluginLike[] | undefined | null,
+  ctx?: import('@vesk/types').RenderPluginContext
+): Promise<string> {
+  if (!plugins || plugins.length === 0) return html;
+  let out = html;
+  for (const plugin of plugins) {
+    if (typeof plugin.onHtml === 'function') {
+      const result = await plugin.onHtml(out, ctx);
+      if (typeof result === 'string') out = result;
+    }
+  }
+  return out;
+}
+
+/**
+ * Resolve head integration for a render call: live `onHead` hooks when plugin
+ * objects are available (dev / build / SSG), otherwise merge the baked
+ * `headExtra` (prod path — page head wins over baked extras via mergeHeadHtml).
+ */
+async function applyHeadInjects(
+  headHtml: string,
+  options: HeadInjectOptions,
+  ctx?: import('@vesk/types').RenderPluginContext
+): Promise<string> {
+  if (options.plugins && options.plugins.length > 0) {
+    return applyHeadPlugins(headHtml, options.plugins, ctx);
+  }
+  if (options.headExtra) {
+    return mergeHeadHtml(headHtml, options.headExtra).html;
+  }
+  return headHtml;
+}
+
 export async function ssg(
   source: string,
   componentName?: string,
@@ -256,16 +322,27 @@ export async function ssg(
 
   const cssUrls: string[] = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
   const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
+
+  const renderCtx: import('@vesk/types').RenderPluginContext = { sourcePath: options.sourcePath as string | undefined };
+  let finalHead = ['\t<meta charset="utf-8" />', '\t<meta name="viewport" content="width=device-width, initial-scale=1" />'].join('\n');
+  if (cssLink) finalHead += '\n' + cssLink.trimEnd();
+  if (headHtml) finalHead += '\n' + headHtml.split('\n').map((l) => '\t' + l).join('\n');
+  finalHead = await applyHeadInjects(
+    finalHead,
+    { plugins: options.plugins as RenderPluginLike[] | undefined, headExtra: options.headExtra as string | undefined },
+    renderCtx
+  );
+
   const html = `<!DOCTYPE html>
 <html>
 <head>
-\t<meta charset="utf-8" />
-\t<meta name="viewport" content="width=device-width, initial-scale=1" />
-${cssLink}${headHtml ? '\t' + headHtml.split('\n').join('\n\t') + '\n' : ''}</head>
+${finalHead}
+</head>
 <body>
 ${bodyHtml}${scriptBlock}</body>
 </html>
 `;
+  const finalHtml = await applyHtmlPlugins(html, options.plugins as RenderPluginLike[] | undefined, renderCtx);
 
   const staticLists = ir.components.some((c) => {
     return c.body.some((node) => {
@@ -274,7 +351,7 @@ ${bodyHtml}${scriptBlock}</body>
     });
   });
 
-  return { html, body: bodyHtml, head: headHtml, props: serializedProps, clientCode, static: !hasClient, staticLists };
+  return { html: finalHtml, body: bodyHtml, head: headHtml, props: serializedProps, clientCode, static: !hasClient, staticLists };
 }
 
 export function buildDataScripts(
@@ -366,16 +443,23 @@ export async function renderFullPage(
       if (sec.autoEscape !== false) headLines.push(`\t<!-- vesk: auto-escape enabled -->`);
     }
 
-    return `<!DOCTYPE html>
+    const finalHead = await applyHeadInjects(
+      headLines.join('\n'),
+      { plugins: options.plugins, headExtra: options.headExtra },
+      { sourcePath: options.sourcePath, url: (options.__vesk?.url as string) || undefined }
+    );
+
+    const docHtml = `<!DOCTYPE html>
 <html>
 <head>
-${headLines.join('\n')}</head>
+${finalHead}</head>
 <body>
 <div id="root">
 ${bodyHtml}
 </div>
 ${dataScriptBlock}${clientScript}</body>
 </html>`;
+    return applyHtmlPlugins(docHtml, options.plugins, { sourcePath: options.sourcePath, url: (options.__vesk?.url as string) || undefined });
   } finally {
     delete (globalThis as any).__vsk_ssr;
   }
@@ -422,13 +506,13 @@ export function renderPageStream(
   const cssUrls: string[] = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
   const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
 
-  yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n';
-  if (cssLink) yield cssLink;
+  const headParts: string[] = ['\t<meta charset="utf-8" />', '\t<meta name="viewport" content="width=device-width, initial-scale=1" />'];
+  if (cssLink) headParts.push(cssLink.trimEnd());
   if (options.security) {
     const sec = options.security;
-    if (sec.referrerPolicy !== false) yield `\t<meta name="referrer" content="${quoteAttr(sec.referrerPolicy || 'strict-origin-when-cross-origin')}" />\n`;
-    if (sec.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${quoteAttr(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'")}" />\n`;
-    if (sec.autoEscape !== false) yield `\t<!-- vesk: auto-escape enabled -->\n`;
+    if (sec.referrerPolicy !== false) headParts.push(`\t<meta name="referrer" content="${quoteAttr(sec.referrerPolicy || 'strict-origin-when-cross-origin')}" />`);
+    if (sec.contentSecurityPolicy !== false) headParts.push(`\t<meta http-equiv="Content-Security-Policy" content="${quoteAttr(sec.contentSecurityPolicy as string || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'")}" />`);
+    if (sec.autoEscape !== false) headParts.push('\t<!-- vesk: auto-escape enabled -->');
   }
   if (targetComp) {
     let headHtml = renderHeadHtml(targetComp, ssrProps);
@@ -441,8 +525,16 @@ export function renderPageStream(
         }
       }
     }
-    if (headHtml) yield '\t' + headHtml.split('\n').join('\n\t') + '\n';
+    if (headHtml) headParts.push('\t' + headHtml.split('\n').join('\n\t'));
   }
+
+  yield '<!DOCTYPE html>\n<html>\n<head>\n';
+  const finalHead = await applyHeadInjects(
+    headParts.join('\n'),
+    { plugins: options.plugins, headExtra: options.headExtra },
+    { sourcePath: options.sourcePath, url: (options.__vesk?.url as string) || undefined }
+  );
+  yield finalHead + '\n';
   yield '</head>\n<body>\n<div id="root">\n';
 
   (globalThis as any).__vsk_ssr = true;

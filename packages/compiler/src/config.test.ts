@@ -153,6 +153,32 @@ describe('definePlugin()', () => {
 		expect(typeof p.onRequest).toBe('function');
 	});
 
+	it('accepts onHead hook', () => {
+		const p = definePlugin({
+			name: 'head',
+			onHead: async (headHtml, ctx) => headHtml,
+		});
+		expect(typeof p.onHead).toBe('function');
+	});
+
+	it('accepts onHtml hook', () => {
+		const p = definePlugin({
+			name: 'doc',
+			onHtml: async (html, ctx) => html,
+		});
+		expect(typeof p.onHtml).toBe('function');
+	});
+
+	it('accepts onHead + onHtml together', () => {
+		const p = definePlugin({
+			name: 'both',
+			async onHead(head, ctx) { return head + '<meta name="x" content="y" />'; },
+			async onHtml(html, ctx) { return html; },
+		});
+		expect(typeof p.onHead).toBe('function');
+		expect(typeof p.onHtml).toBe('function');
+	});
+
 });
 
 describe('md config (raw-HTML policy)', () => {

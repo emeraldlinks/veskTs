@@ -15,6 +15,7 @@
     "packages/cli",
     "packages/compiler",
     "packages/create-vesk",
+    "packages/plugin-pwa",
     "packages/plugin-tailwind",
     "packages/runtime",
     "packages/types",
@@ -24,7 +25,7 @@
   ],
   "scripts": {
     "build": "npx tsx packages/cli/build.ts",
-    "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/adapter/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/adapter/tsconfig.json && tsc --noEmit -p packages/plugin-pwa/tsconfig.json",
     "test:dev": "npx tsx tests/dev-test.mjs",
     "test:prod": "npx tsx tests/prod-test.mjs",
     "test:unit": "node scripts/test.js",

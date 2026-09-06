@@ -7,6 +7,7 @@ export function generateManifest(
   staticRoutes: SsgRouteResult[],
   middlewareEnabled: boolean,
   actionMap?: Record<string, string>,
+  headExtra?: string,
 ): Manifest {
   const routeEntries: ManifestRouteEntry[] = [];
 
@@ -55,5 +56,6 @@ export function generateManifest(
       dir: 'static',
     },
     ...(actionEntries.length > 0 ? { actions: actionEntries } : {}),
+    ...(headExtra ? { headExtra } : {}),
   };
 }

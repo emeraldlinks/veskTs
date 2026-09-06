@@ -106,8 +106,9 @@ export function padNum(n: string | number, len: number): string {
 /**
  * Render a codeframe's `code` lines directly (gutter numbers + text). The
  * server supplies the ±context window (5 above / 5 below). The exact error
- * line is highlighted with inverse-video styling (via `kf-err`) plus a `>`
- * gutter marker, and a caret is drawn at `frame.column` when present.
+ * line is highlighted on a red background (via `kf-err`) plus a `>` gutter
+ * marker, and a caret row is drawn underneath the error line aligned to
+ * `frame.column` when present.
  */
 export function renderCodeframe(frame: HmrCodeframe | undefined | null): string {
 	if (!frame || !Array.isArray(frame.code) || frame.code.length === 0) return '';
@@ -116,14 +117,11 @@ export function renderCodeframe(frame: HmrCodeframe | undefined | null): string 
 		if (l.no > maxNo) maxNo = l.no;
 	}
 	const gutterW = String(maxNo).length;
+	const indent = gutterW + 3;
 	let out = '';
 	for (const l of frame.code) {
 		const no = padNum(l.no, gutterW);
 		const marker = l.isError ? '>' : ' ';
-		let caret = '';
-		if (l.isError && frame.column != null && frame.column > 0) {
-			caret = '<span class="kf-caret">' + '^'.padStart(frame.column, ' ') + '</span>';
-		}
 		out +=
 			'<div' +
 			(l.isError ? ' class="kf-err"' : '') +
@@ -133,10 +131,17 @@ export function renderCodeframe(frame: HmrCodeframe | undefined | null): string 
 			no +
 			'</span> ' +
 			escapeHtml(l.text) +
-			caret +
 			'</div>';
+		if (l.isError && frame.column != null && frame.column > 0) {
+			out += caretRow(indent, frame.column);
+		}
 	}
 	return out;
+}
+
+function caretRow(indent: number, column: number): string {
+	const col = Math.max(0, column - 1);
+	return '<div class="kf-caret">' + ' '.repeat(indent + col) + '^</div>';
 }
 
 function section(title: string, items: string[]): string {
@@ -145,6 +150,15 @@ function section(title: string, items: string[]): string {
 		html += '<div class="kf-item">' + escapeHtml(item) + '</div>';
 	}
 	return html + '</div>';
+}
+
+/**
+ * Acorn's raw parse messages ("Unexpected token", "Parse error", …) carry no
+ * actionable detail on their own — the codeframe points at the exact spot and
+ * the tips/next-steps explain the fix. Hide the jargon from the overlay.
+ */
+export function isAcornParseMessage(message: string): boolean {
+	return message === 'Parse error' || message === 'SyntaxError' || message.startsWith('Unexpected ');
 }
 
 /**
@@ -158,7 +172,8 @@ export function buildErrorNodes(payload: HmrErrorPayload): ErrorNodes {
 		file += ':' + payload.line;
 		if (payload.column != null) file += ':' + payload.column;
 	}
-	const message = payload.message || 'Unknown error';
+	const rawMessage = payload.message || 'Unknown error';
+	const message = isAcornParseMessage(rawMessage) ? '' : rawMessage;
 
 	let lists = '';
 	if (payload.tips && payload.tips.length) lists += section('TIPS', payload.tips);
@@ -458,9 +473,7 @@ export function renderErrorsPanel(err: HmrErrorPayload | null): string {
 		'<div class="__kp_line"><b>' +
 		nodes.file +
 		'</b></div>' +
-		'<div class="__kp_line">' +
-		nodes.message +
-		'</div>' +
+		(nodes.message ? '<div class="__kp_line">' + nodes.message + '</div>' : '') +
 		(nodes.codeframe ? '<div class="__kp_code">' + nodes.codeframe + '</div>' : '') +
 		nodes.lists +
 		'<details class="__kp_stack"><summary>Stack trace</summary><pre>' +
@@ -1625,8 +1638,8 @@ const CSS =
 	'@keyframes __v_in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}' +
 	'@keyframes __v_tab{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}' +
 	'@keyframes __v_vo{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}' +
-	'#__vesk_dev,#__vesk_overlay{--vk-bg:#000;--vk-fg:#fff;--vk-border:#fff;--vk-line:#444;--vk-line-soft:#333;--vk-soft:#111;--vk-soft-hi:#222;--vk-muted:#bbb;--vk-dim:#666;--vk-codebg:#0a0a0a;--vk-inv-bg:#fff;--vk-inv-fg:#000;--vk-dot:#555;}' +
-	'#__vesk_dev[data-theme="light"],#__vesk_overlay[data-theme="light"]{--vk-bg:#fff;--vk-fg:#111;--vk-border:#111;--vk-line:#ccc;--vk-line-soft:#ddd;--vk-soft:#f5f5f5;--vk-soft-hi:#ececec;--vk-muted:#444;--vk-dim:#888;--vk-codebg:#fafafa;--vk-inv-bg:#111;--vk-inv-fg:#fff;--vk-dot:#999;}' +
+	'#__vesk_dev,#__vesk_overlay{--vk-bg:#000;--vk-fg:#fff;--vk-border:#fff;--vk-line:#444;--vk-line-soft:#333;--vk-soft:#111;--vk-soft-hi:#222;--vk-muted:#bbb;--vk-dim:#666;--vk-codebg:#0a0a0a;--vk-inv-bg:#fff;--vk-inv-fg:#000;--vk-err-bg:#b91c1c;--vk-err-fg:#fff;--vk-dot:#555;}' +
+	'#__vesk_dev[data-theme="light"],#__vesk_overlay[data-theme="light"]{--vk-bg:#fff;--vk-fg:#111;--vk-border:#111;--vk-line:#ccc;--vk-line-soft:#ddd;--vk-soft:#f5f5f5;--vk-soft-hi:#ececec;--vk-muted:#444;--vk-dim:#888;--vk-codebg:#fafafa;--vk-inv-bg:#111;--vk-inv-fg:#fff;--vk-err-bg:#dc2626;--vk-err-fg:#fff;--vk-dot:#999;}' +
 	'#__vesk_dev *,#__vesk_overlay *{transition:background .18s ease,color .18s ease,border-color .18s ease;}' +
 	'#__vesk_dev,#__vesk_dev *,#__vesk_overlay,#__vesk_overlay *{scrollbar-width:none;}' +
 	'#__vesk_dev *::-webkit-scrollbar,#__vesk_overlay *::-webkit-scrollbar{display:none;}' +
@@ -1649,11 +1662,11 @@ const CSS =
 	'#__vesk_overlay .__vo_file{font-size:12px;color:var(--vk-muted);margin-bottom:8px;white-space:pre-wrap;word-break:break-all;}' +
 	'#__vesk_overlay .__vo_file strong{color:var(--vk-fg);}' +
 	'#__vesk_overlay .__vo_message{font-size:13px;color:var(--vk-inv-fg);background:var(--vk-inv-bg);padding:8px 12px;margin-bottom:12px;white-space:pre-wrap;word-break:break-all;font-weight:700;}' +
-	'#__vesk_overlay .__vo_code{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);border-radius:0;padding:12px;margin-bottom:12px;overflow-x:auto;font-size:12px;line-height:1.6;}' +
+	'#__vesk_overlay .__vo_code{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);border-radius:0;padding:12px;margin-bottom:12px;overflow-x:auto;font-size:12px;line-height:1.6;white-space:pre;}' +
 	'#__vesk_overlay .__vo_code .kf-ln{color:var(--vk-dim);user-select:none;margin-right:8px;}' +
-	'#__vesk_overlay .__vo_code .kf-err{background:var(--vk-inv-bg);color:var(--vk-inv-fg);width:100%;}' +
-	'#__vesk_overlay .__vo_code .kf-err .kf-ln{color:var(--vk-inv-fg);}' +
-	'#__vesk_overlay .__vo_code .kf-caret{color:var(--vk-inv-fg);font-weight:700;}' +
+	'#__vesk_overlay .__vo_code .kf-err{background:var(--vk-err-bg);color:var(--vk-err-fg);width:100%;}' +
+	'#__vesk_overlay .__vo_code .kf-err .kf-ln{color:var(--vk-err-fg);}' +
+	'#__vesk_overlay .__vo_code .kf-caret{color:var(--vk-err-fg);font-weight:700;display:block;}' +
 	'#__vesk_overlay .__vo_tips{margin-top:8px;}' +
 	'#__vesk_overlay .kf-sec{margin-top:10px;}' +
 	'#__vesk_overlay .kf-sec-t{font-size:11px;font-weight:700;color:var(--vk-fg);margin-bottom:4px;text-transform:uppercase;letter-spacing:.08em;}' +
@@ -1697,11 +1710,11 @@ const CSS =
 	'#__vesk_dev .__kp_opt.active{color:var(--vk-inv-fg);background:var(--vk-inv-bg);border-color:var(--vk-border);}' +
 	'#__vesk_dev .__kp_line{font-size:12px;color:var(--vk-muted);}' +
 	'#__vesk_dev .__kp_line b{color:var(--vk-fg);}' +
-	'#__vesk_dev .__kp_code{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);padding:10px;font-size:12px;line-height:1.6;}' +
+	'#__vesk_dev .__kp_code{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);padding:10px;font-size:12px;line-height:1.6;white-space:pre;}' +
 	'#__vesk_dev .__kp_code .kf-ln{color:var(--vk-dim);user-select:none;margin-right:8px;}' +
-	'#__vesk_dev .__kp_code .kf-err{background:var(--vk-inv-bg);color:var(--vk-inv-fg);width:100%;}' +
-	'#__vesk_dev .__kp_code .kf-err .kf-ln{color:var(--vk-inv-fg);}' +
-	'#__vesk_dev .__kp_code .kf-caret{color:var(--vk-inv-fg);font-weight:700;}' +
+	'#__vesk_dev .__kp_code .kf-err{background:var(--vk-err-bg);color:var(--vk-err-fg);width:100%;}' +
+	'#__vesk_dev .__kp_code .kf-err .kf-ln{color:var(--vk-err-fg);}' +
+	'#__vesk_dev .__kp_code .kf-caret{color:var(--vk-err-fg);font-weight:700;display:block;}' +
 	'#__vesk_dev .__kp_diag{border:1px solid var(--vk-line-soft);padding:8px 10px;margin:6px 0;}' +
 	'#__vesk_dev .__kp_diag[data-severity="error"]{border-left:3px solid var(--vk-inv-bg);}' +
 	'#__vesk_dev .__kp_diag[data-severity="warning"]{border-left:3px solid var(--vk-dim);}' +
@@ -1856,6 +1869,10 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	// must survive the connect-time clearError — the failing DOM is still
 	// what the user sees until new code lands.
 	let lastErrorSource: 'ws' | 'runtime' | null = null;
+	// True until loadPersistedState() has resolved (success or failure). A
+	// socket connect during that window must not call clearError(), or it would
+	// wipe the error the page just replayed over HTTP on refresh.
+	let pendingStateSync = true;
 	let lastCompileMs = 0;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let disposed = false;
@@ -2024,7 +2041,10 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		ws.onopen = function () {
 			if (disposed) return;
 			if (lastErrorSource !== 'runtime') {
-				clearError();
+				// Only clear a stale overlay once the persisted-state sync has
+				// settled — a connect racing the /__vesk/hmr/state fetch would
+				// otherwise drop the error again right after a refresh.
+				if (!pendingStateSync) clearError();
 				setStatus('idle');
 			}
 		};
@@ -2181,7 +2201,9 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		if (!overlayEl) return;
 		const nodes = buildErrorNodes(payload);
 		(doc.getElementById('__vo_file') as HTMLElement).innerHTML = nodes.file;
-		(doc.getElementById('__vo_message') as HTMLElement).textContent = payload.message || 'Unknown error';
+		const msgEl = doc.getElementById('__vo_message') as HTMLElement;
+		msgEl.textContent = nodes.message;
+		msgEl.style.display = nodes.message ? '' : 'none';
 		(doc.getElementById('__vo_code') as HTMLElement).innerHTML = nodes.codeframe;
 		(doc.getElementById('__vo_tips') as HTMLElement).innerHTML = nodes.lists;
 		(doc.getElementById('__vo_stack') as HTMLElement).textContent = nodes.stack;
@@ -4122,13 +4144,17 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 	}
 
 	function loadPersistedState(): void {
-		if (typeof fetch === 'undefined') return;
+		if (typeof fetch === 'undefined') {
+			pendingStateSync = false;
+			return;
+		}
 		fetch(urls.stateUrl)
 			.then(function (r) {
 				if (!r.ok) throw new Error('HTTP ' + r.status);
 				return r.json();
 			})
 			.then(function (data: unknown) {
+				pendingStateSync = false;
 				const payload = data as { error?: HmrErrorPayload; agenticAvailable?: unknown };
 				if (payload && typeof payload.agenticAvailable === 'boolean' && payload.agenticAvailable !== agenticAvailable) {
 					agenticAvailable = payload.agenticAvailable;
@@ -4142,6 +4168,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				}
 			})
 			.catch(function () {
+				pendingStateSync = false;
 				/* state endpoint optional */
 			});
 	}

@@ -27,10 +27,18 @@ export function copyStaticAssets(publicDir: string, outDir: string): void {
   copyDir(publicDir, targetDir);
 }
 
-export async function generateSsgRoutes(routeTree: RouteNode[], appDir: string, outDir: string): Promise<SsgRouteResult[]> {
+export async function generateSsgRoutes(
+  routeTree: RouteNode[],
+  appDir: string,
+  outDir: string,
+  plugins?: import('@vesk/types').VeskPlugin[],
+  headExtra?: string
+): Promise<SsgRouteResult[]> {
   const { ssg } = await import('@vesk/compiler/src/server-render') as { ssg: (source: string, componentName: string | null, customProps: Record<string, unknown> | undefined, options: Record<string, unknown>) => Promise<{ html: string; body: string; head: string; props: string; clientCode: string; static: boolean; staticLists: boolean }> };
   const prerenderDir = resolve(outDir, 'prerendered');
   mkdirSync(prerenderDir, { recursive: true });
+
+  const ssgOptions: Record<string, unknown> = { plugins, headExtra };
 
   const results: SsgRouteResult[] = [];
 
@@ -61,7 +69,7 @@ export async function generateSsgRoutes(routeTree: RouteNode[], appDir: string, 
             for (const entry of paths) {
               try {
                 const params: Record<string, string> = (entry as Record<string, unknown>).params as Record<string, string> || {};
-                const result = await ssg(src, null, params, {});
+                const result = await ssg(src, null, params, ssgOptions);
                 const urlPath = (entry as Record<string, unknown>).path as string || node.fullPath;
                 // getStaticPaths output is app-controlled but must never write
                 // outside the prerender output dir
@@ -82,7 +90,7 @@ export async function generateSsgRoutes(routeTree: RouteNode[], appDir: string, 
           }
         } else if (hasStaticProps) {
           try {
-            const result = await ssg(src, null, undefined, {});
+            const result = await ssg(src, null, undefined, ssgOptions);
             const htmlPath = resolve(prerenderDir, node.fullPath === '/' ? 'index.html' : `${node.fullPath.slice(1)}.html`);
             mkdirSync(resolve(htmlPath, '..'), { recursive: true });
             writeFileSync(htmlPath, result.html);

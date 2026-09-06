@@ -69,6 +69,7 @@ function buildDefaultTargets() {
 			{ dir: 'compiler', name: '@vesk/compiler' },
 			{ dir: 'runtime', name: '@vesk/runtime' },
 			{ dir: 'adapter', name: '@vesk/adapter' },
+			{ dir: 'plugin-pwa', name: '@vesk/plugin-pwa' },
 			{ dir: 'plugin-tailwind', name: '@vesk/plugin-tailwind' },
 			{ dir: 'cli', name: 'vesk' },
 		];

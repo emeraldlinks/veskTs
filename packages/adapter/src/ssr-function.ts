@@ -78,6 +78,7 @@ export function generateSsrFunction(
 ): { funcPath: string; funcCode: string; name: string } {
   const ancestorLayouts = options?.ancestorLayouts || [];
   const middlewareCode = options?.middlewareCode || null;
+  const headExtra = options?.headExtra || null;
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
 
@@ -95,6 +96,10 @@ export function generateSsrFunction(
   if (hasTailwind) cssUrls.push('/_vesk/static/_tailwind.css');
   if (hasGlobalCss) cssUrls.push('/_vesk/static/global.css');
   const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
+  // Static head snippet baked from the active onHead plugins — merged into
+  // every rendered head at request time (page tags win via mergeHeadHtml).
+  const headExtraOption = headExtra ? `, headExtra: ${JSON.stringify(headExtra)}` : '';
+  const bakedOptions = cssOption + headExtraOption;
 
   const hasLayout = !!routeNode.layout;
   const hasAncestorLayout = ancestorLayouts.length > 0;
@@ -186,7 +191,7 @@ export function generateSsrFunction(
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' }), head: '' };",
       '  }',
-      "  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : 'Internal Server Error') : '') + '-->' : '') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled" + cssOption + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      "  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : 'Internal Server Error') : '') + '-->' : '') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled" + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',
@@ -200,14 +205,14 @@ export function generateSsrFunction(
       "  const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
       "  const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "  const props = { params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' };",
-      '  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
+      '  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
       '}',
       '',
       'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
       '  let stream;',
       '  try {',
-      '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + cssOption + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
+      '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    const html = await __renderErrorFullPage(params, requestUrl, err);',

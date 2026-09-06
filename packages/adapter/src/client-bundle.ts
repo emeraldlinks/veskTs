@@ -493,6 +493,20 @@ export async function generateClientBundle(
   }
 
   const codeSplit = !!(options?.codeSplit);
+  const transformPlugins = options?.plugins || [];
+
+  /** Run every active plugin's `onTransformJS` over an emitted bundle/chunk source. */
+  async function applyTransformPlugins(code: string, filePath: string): Promise<string> {
+    if (transformPlugins.length === 0) return code;
+    let out = code;
+    for (const plugin of transformPlugins) {
+      if (typeof plugin.onTransformJS === 'function') {
+        const result = await plugin.onTransformJS(out, filePath);
+        if (typeof result === 'string') out = result;
+      }
+    }
+    return out;
+  }
 
   if (codeSplit) {
     const chunkEntries: Array<{ name: string; code: string; node: RouteNode }> = [];
@@ -574,7 +588,11 @@ export async function generateClientBundle(
       main = await buildMainBundle(routeTree, runtimeDir, true, {}, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
       if (cache) cache.mainBundle = { key: mainKey, code: main };
     }
-    return { main, chunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
+    const transformedChunks: ChunkEntry[] = [];
+    for (const chunk of chunks) {
+      transformedChunks.push({ ...chunk, code: await applyTransformPlugins(chunk.code, chunk.name) });
+    }
+    return { main: await applyTransformPlugins(main, 'client.js'), chunks: transformedChunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
   } else {
     let componentLines: string[] = [];
     let hydratorLines: string[] = [];
@@ -635,7 +653,7 @@ export async function generateClientBundle(
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
     }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
     // Mono (non-codeSplit) builds are the production path — no incremental cache.
-    return { main, chunks: [] };
+    return { main: await applyTransformPlugins(main, 'client.js'), chunks: [] };
   }
 }
 

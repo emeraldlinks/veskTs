@@ -5,7 +5,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
+import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES, applyHeadPlugins, applyHtmlPlugins } from '@vesk/compiler/src/server-codegen';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
@@ -31,11 +31,74 @@ import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
+import { buildErrorPayload } from '@vesk/adapter/src/hmr';
+import { buildCodeframe } from '@vesk/adapter/src/error-codeframe';
+import type { HmrErrorPayload } from '@vesk/adapter/src/hmr';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
 
 // Shared @vesk/agentic checkpoint manager — module singleton so history persists across requests
 const agenticCheckpointManager = new CheckpointManager();
+
+export interface BuildDevErrorInput {
+  err: unknown;
+  errorMessage: string;
+  filename: string;
+  fullPath: string;
+  appDir: string;
+  fileExists: boolean;
+}
+
+// Canonical HMR error payload for the CLI dev server — same wire contract the
+// adapter's HMR server broadcasts: a structured codeframe (5 lines above /
+// error line / 5 lines below, isError highlight + caret column),
+// tips/suggestions/nextSteps, and the file + line/column header. Compiler
+// VeskErrors contribute their richer suggestions/next-steps/tip; foreign
+// shapes (esbuild, etc.) fall back to a keyword-scan of the message for a
+// location and rebuild the codeframe from disk.
+export function buildDevErrorPayload(input: BuildDevErrorInput): HmrErrorPayload {
+  const { err, errorMessage, filename, fullPath, appDir, fileExists } = input;
+  const payload = buildErrorPayload(err ?? new Error(errorMessage), filename, { appDir });
+
+  const errDetails = err && typeof err === 'object' ? (err as Record<string, unknown>) : undefined;
+  if (errDetails?.name === 'VeskError') {
+    if (Array.isArray(errDetails.suggestions) && (errDetails.suggestions as string[]).length) {
+      payload.suggestions = errDetails.suggestions as string[];
+    }
+    if (Array.isArray(errDetails.nextSteps) && (errDetails.nextSteps as string[]).length) {
+      payload.nextSteps = errDetails.nextSteps as string[];
+    }
+    if (typeof errDetails.tip === 'string' && errDetails.tip) {
+      payload.tips = [errDetails.tip, ...(payload.tips || [])];
+    }
+  }
+
+  // Fallback for error shapes without a recoverable location: scan the message
+  // for line/column and rebuild the codeframe from the on-disk source.
+  if (payload.line === null && payload.column === null) {
+    const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
+    const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
+    if (lineMatch) {
+      payload.line = parseInt(lineMatch[1], 10);
+      payload.column = colMatch ? parseInt(colMatch[1], 10) : 1;
+      if (fileExists && payload.line > 0) {
+        try {
+          const src = readFileSync(fullPath, 'utf-8');
+          const cf = buildCodeframe(src, payload.line, payload.column);
+          if (cf) {
+            cf.file = payload.file || filename;
+            payload.codeframe = cf;
+          }
+        } catch {
+          // no codeframe available
+        }
+      }
+    }
+  }
+
+  if (!payload.message) payload.message = errorMessage || 'Unknown error';
+  return payload;
+}
 
 function resolveRuntimeDir(projectDir: string): string | null {
   const candidates = [
@@ -528,7 +591,24 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   }
 
-  await buildClientBundle();
+  let devLastBuildMs: number | null = null;
+  let devLastError: HmrErrorPayload | null = null;
+  const devDiagnostics: DiagnosticFinding[] = [];
+
+  function recordDiagnostic(finding: DiagnosticFinding): void {
+    devDiagnostics.unshift(finding);
+    if (devDiagnostics.length > 50) devDiagnostics.length = 50;
+  }
+
+  try {
+    await buildClientBundle();
+  } catch (e) {
+    // A broken app must not kill the dev server: surface the error via the
+    // overlay (replayed on ws connect + /__vesk/hmr/state) and keep serving
+    // the error page until the first successful hot edit.
+    devLastError = { file: '', line: null, column: null, message: (e as Error).message };
+    LOG.warn(`dev server started with an app compile error: ${(e as Error).message}`);
+  }
   await bundleRuntime();
 
   const sourceToComponents = new Map<string, string[]>();
@@ -549,15 +629,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
   // veskStateDir, configPluginsRaw and configPluginNames are defined at the top
   // of startDevServer for the active-plugin helpers (getActiveDevPlugins).
 
-  let devLastBuildMs: number | null = null;
-  let devLastError: { message: string; file?: string; line?: number; column?: number } | null = null;
-  const devDiagnostics: DiagnosticFinding[] = [];
-
-  function recordDiagnostic(finding: DiagnosticFinding): void {
-    devDiagnostics.unshift(finding);
-    if (devDiagnostics.length > 50) devDiagnostics.length = 50;
-  }
-
   async function fullRebuild(): Promise<{ ok: boolean; error?: string; ms?: number }> {
     const t0 = Date.now();
     try {
@@ -574,7 +645,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       return { ok: true, ms: devLastBuildMs ?? 0 };
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
-      devLastError = { message: err.message };
+      devLastError = { file: '', line: null, column: null, message: err.message };
       recordDiagnostic({ severity: 'error', code: 'BUILD', file: null, message: err.message, hint: 'Fix the failing file; HMR will reload on save.' });
       return { ok: false, error: err.message, ms: Date.now() - t0 };
     }
@@ -750,6 +821,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
               }
 
               if (typeof (globalThis as Record<string, unknown>).__vesk_broadcastHmr === 'function') {
+                const hadErrorState = devLastError !== null;
                 if (changedComponents.length > 0) {
                   let fnSources: Record<string, string> | undefined;
                   let errorMessage = bundleError ? bundleError.message : '';
@@ -783,88 +855,52 @@ export async function startDevServer(port: number, projectDir: string, config: R
                       if (compCode.trim()) fnSources = { _raw: compCode };
                     } catch (e) {
                       errorMessage = (e as Error).message;
-                      LOG.err(`HMR compile error for ${filename}:`, (e as Error).message);
+                      bundleError = e as Error;
                     }
                   } else if (!fileExists) {
                     LOG.warn(`HMR source not found: ${fullPath}`);
                   }
                   if (fnSources) {
                     devLastError = null;
-                    ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({
-                      type: 'update',
-                      time: Date.now() - t0,
-                      components: Object.fromEntries(changedComponents.map(name => [name, true])),
-                      fnSources
-                    });
-                  } else if (errorMessage) {
-                    const err = bundleError;
-                    let line = 0, col = 0, file = '';
-                    const suggestions: string[] = [];
-                    const nextSteps: string[] = [];
-                    let tip = '';
-                    const errDetails = err ? (err as unknown as Record<string, unknown>) : undefined;
-                    if (errDetails?.name === 'VeskError') {
-                      line = (errDetails.line as number) || 0;
-                      col = (errDetails.column as number) || 0;
-                      file = (errDetails.file as string) || fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
-                      if (errDetails.suggestions) suggestions.push(...(errDetails.suggestions as string[]));
-                      if (errDetails.nextSteps) nextSteps.push(...(errDetails.nextSteps as string[]));
-                      tip = (errDetails.tip as string) || '';
+                    const bcast = (globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void;
+                    if (hadErrorState) {
+                      // Recovering from a compile error: the open page may be
+                      // an SSR error page, carry failed chunks, or hold a
+                      // stale client bundle — reload so the fixed app renders
+                      // consistently instead of trusting in-place HMR.
+                      bcast({ type: 'reload' });
                     } else {
-                      const lineMatch = errorMessage.match(/(?:line|at\s+line)\s*(\d+)/i);
-                      const colMatch = errorMessage.match(/(?:column|col)\s*(\d+)/i);
-                      const fileMatch = errorMessage.match(/(?:in|at)\s+['"]?([^'":\s]+(?:\.[a-z]+))['"]?/i);
-                      line = lineMatch ? parseInt(lineMatch[1]) : 0;
-                      col = colMatch ? parseInt(colMatch[1]) : 0;
-                      file = fullPath.replace(projectDir, '').replace(/^\//, '') || filename || '';
-                      if (fileMatch) file = fileMatch[1];
+                      bcast({
+                        type: 'update',
+                        time: Date.now() - t0,
+                        components: Object.fromEntries(changedComponents.map(name => [name, true])),
+                        fnSources
+                      });
                     }
-                    let code = '';
-                    // Prefer the compiler's rich code frame (5 lines before/after + ^ pointer) if available
-                    if (errDetails?.code && typeof errDetails.code === 'string' && (errDetails.code as string).trim()) {
-                      code = errDetails.code as string;
-                    } else if (line > 0 && fileExists) {
-                      try {
-                        const src = readFileSync(fullPath, 'utf-8');
-                        const lines = src.split('\n');
-                        const start = Math.max(0, line - 6);
-                        const end = Math.min(lines.length, line + 5);
-                        const width = String(end).length;
-                        const out: string[] = [];
-                        for (let i = start; i < end; i++) {
-                          const ln = String(i + 1).padStart(width, ' ');
-                          out.push(`${ln} | ${lines[i] ?? ''}`);
-                          if (i + 1 === line) {
-                            const pointerCol = Math.max(0, col - 1);
-                            out.push(`${' '.repeat(width)} | ${' '.repeat(pointerCol)}^`);
-                          }
-                        }
-                        code = out.join('\n');
-                      } catch {}
-                    }
-                    const tips: string[] = [];
-                    if (tip) tips.push(tip);
-                    if (errorMessage.toLowerCase().includes('unexpected token')) tips.push('Check for missing or extra brackets, parentheses, or quotes.');
-                    if (errorMessage.toLowerCase().includes('unexpected identifier')) tips.push('A keyword or identifier is in an unexpected position.');
-                    if (errorMessage.toLowerCase().includes('expected')) tips.push('Check the syntax around the reported line.');
-                    if (errorMessage.toLowerCase().includes('not defined') || errorMessage.toLowerCase().includes('is not defined')) tips.push('The variable or component may not be imported or declared.');
-                    if (errorMessage.toLowerCase().includes('invalid')) tips.push('Check the expression syntax.');
-                    if (errorMessage.toLowerCase().includes('component') && errorMessage.toLowerCase().includes('not')) tips.push('Ensure the component is properly defined.');
-                    if (nextSteps.length) tips.push(...nextSteps);
-                    if (tips.length === 0) tips.push('Review the code around the reported line.');
-                    devLastError = { message: errorMessage, file, line, column: col };
-                    recordDiagnostic({ severity: 'error', code: 'HMR_COMPILE', file: file || null, line: line || null, column: col || null, message: errorMessage, hint: tips[0] || null });
+                  } else if (errorMessage) {
+                    const payload = buildDevErrorPayload({
+                      err: bundleError,
+                      errorMessage,
+                      filename,
+                      fullPath,
+                      appDir: appDirPath,
+                      fileExists,
+                    });
+                    const displayFile = payload.file || filename || '';
+                    LOG.err(`[vsk:error] ${displayFile}${payload.line ? `:${payload.line}:${payload.column || 1}` : ''} — ${payload.message}`);
+                    devLastError = payload;
+                    recordDiagnostic({
+                      severity: 'error',
+                      code: 'HMR_COMPILE',
+                      file: displayFile || null,
+                      line: payload.line,
+                      column: payload.column,
+                      message: payload.message,
+                      hint: (payload.tips && payload.tips[0]) || null,
+                    });
                     ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void)({
                       type: 'error',
-                      message: errorMessage,
-                      file,
-                      line,
-                      column: col,
-                      code,
-                      stack: err?.stack || '',
-                      tips,
-                      suggestions,
-                      nextSteps,
+                      ...payload,
                     });
                   } else {
                     devLastError = null;
@@ -916,6 +952,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     '.svg': 'image/svg+xml', '.css': 'text/css', '': 'application/javascript',
     '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
     '.html': 'text/html', '.json': 'application/json',
+    '.webmanifest': 'application/manifest+json',
   };
 
   const hmrJsPath = join(runtimeDir, 'hmr-client.js');
@@ -1063,7 +1100,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
 
-    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security, maxBodyBytes: maxBodyBytes })) {
+    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security, maxBodyBytes: maxBodyBytes, plugins: getActiveDevPlugins() as VeskPlugin[] })) {
       return;
     }
 
@@ -1163,7 +1200,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           try {
             const nfSrc = readFileSync(nfPath, 'utf-8');
             const nfCompName = extractCompName(nfSrc) || (rootNode.notFound as string);
-            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: nfPath });
+            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: nfPath, plugins: getActiveDevPlugins() as VeskPlugin[] });
           } catch {}
         }
       }
@@ -1237,15 +1274,19 @@ export async function startDevServer(port: number, projectDir: string, config: R
           if (security.contentSecurityPolicy !== false) secMeta += `\t<meta http-equiv="Content-Security-Policy" content="${((security.contentSecurityPolicy as string) || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
           if (security.autoEscape !== false) secMeta += '\t<!-- vesk: auto-escape enabled -->\n';
         }
-        html = `<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n${cssLinkTags()}${secMeta}${head ? '\t' + head.split('\n').join('\n\t') + '\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>${dataScriptBlock}\n</body>\n</html>`;
+        let headBlock = '\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n' + cssLinkTags() + secMeta + (head ? '\t' + head.split('\n').join('\n\t') + '\n' : '');
+        headBlock = await applyHeadPlugins(headBlock, getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname });
+        html = `<!DOCTYPE html>\n<html>\n<head>\n${headBlock}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>${dataScriptBlock}\n</body>\n</html>`;
         html = injectDevScripts(html);
+        html = await applyHtmlPlugins(html, getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname });
       } else {
         const leaf = chain.find(n => n.page);
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
+          html = await renderFullPage(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), plugins: getActiveDevPlugins() as VeskPlugin[] });
           html = html.replace('</body>', '\t<script type="module" src="/_vesk/hmr.js"></script>\n</body>');
+          html = await applyHtmlPlugins(html, getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname });
         } else {
           throw new Error('No page or layout matched');
         }
@@ -1264,7 +1305,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk') });
+          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), plugins: getActiveDevPlugins() as VeskPlugin[] });
         } else {
           throw new Error('No page or layout matched');
         }
@@ -1298,13 +1339,17 @@ export async function startDevServer(port: number, projectDir: string, config: R
         }
       }
 
-      yield '<!DOCTYPE html>\n<html>\n<head>\n\t<meta charset="utf-8" />\n\t<meta name="viewport" content="width=device-width, initial-scale=1" />\n' + cssLinkTags();
+      const headParts: string[] = ['\t<meta charset="utf-8" />', '\t<meta name="viewport" content="width=device-width, initial-scale=1" />'];
+      const cssTags = cssLinkTags();
+      if (cssTags) headParts.push(cssTags.trimEnd());
       if (security) {
-        if (security.referrerPolicy !== false) yield `\t<meta name="referrer" content="${(security.referrerPolicy as string) || 'strict-origin-when-cross-origin'}" />\n`;
-        if (security.contentSecurityPolicy !== false) yield `\t<meta http-equiv="Content-Security-Policy" content="${((security.contentSecurityPolicy as string) || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />\n`;
-        if (security.autoEscape !== false) yield '\t<!-- vesk: auto-escape enabled -->\n';
+        if (security.referrerPolicy !== false) headParts.push(`\t<meta name="referrer" content="${(security.referrerPolicy as string) || 'strict-origin-when-cross-origin'}" />`);
+        if (security.contentSecurityPolicy !== false) headParts.push(`\t<meta http-equiv="Content-Security-Policy" content="${((security.contentSecurityPolicy as string) || "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; frame-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'").replace(/"/g, '&quot;')}" />`);
+        if (security.autoEscape !== false) headParts.push('\t<!-- vesk: auto-escape enabled -->');
       }
-      if (head) yield '\t' + head.split('\n').join('\n\t') + '\n';
+      if (head) headParts.push('\t' + head.split('\n').join('\n\t'));
+      yield '<!DOCTYPE html>\n<html>\n<head>\n';
+      yield (await applyHeadPlugins(headParts.join('\n'), getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname })) + '\n';
       yield '</head>\n<body>\n<div id="root">\n';
       yield prettifyHtml(body);
       yield '\n</div>\n';
@@ -1430,7 +1475,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                 try {
                   const nfSrc = readFileSync(nfPath, 'utf-8');
                   const nfCompName = extractCompName(nfSrc) || (node.notFound as string);
-                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: nfPath });
+                  const html = await renderFullPage(nfSrc, nfCompName, { params: match.params, url: url.pathname }, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: nfPath, plugins: getActiveDevPlugins() as VeskPlugin[] });
                   notFoundHtml = injectDevScripts(html);
                 } catch {}
               }
@@ -1453,7 +1498,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
                   const errSrc = readFileSync(errPath, 'utf-8');
                   const errCompName = extractCompName(errSrc) || (node.error as string);
                   const errProps = { error: err.message, stack: err.stack, statusCode: errorStatusCode(err), url: url.pathname };
-                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: errPath });
+                  const html = await renderFullPage(errSrc, errCompName, errProps, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: errPath, plugins: getActiveDevPlugins() as VeskPlugin[] });
                   errorHtml = injectDevScripts(html);
                 } catch (e2) {
                   LOG.err(`error page render failed:`, (e2 as Error).message);
@@ -1464,9 +1509,15 @@ export async function startDevServer(port: number, projectDir: string, config: R
           }
         }
         const errCode = errorStatusCode(err);
+        // The fallback error page must carry the dev script pair too — without
+        // it a refresh of a broken page gets no overlay and no HMR socket, so
+        // the fix never reaches the tab (full refresh required). Bake the SSR
+        // marker in so hmr-client pops the overlay on load.
+        const fallbackHtml = errorHtml || injectDevScripts(`<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${err.message}\n${err.stack}</pre></body></html>`);
         logRequest(errCode);
+        LOG.err(`[vsk:error] ${url.pathname} — ${err.message}`);
         res.writeHead(errCode, { 'Content-Type': 'text/html' });
-        res.end(injectSsrErrorMarker(errorHtml || `<!DOCTYPE html><html><body><h1>${errCode}</h1><pre>${err.message}\n${err.stack}</pre></body></html>`, err));
+        res.end(injectSsrErrorMarker(fallbackHtml, err));
       }
     }
   });
@@ -1497,6 +1548,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
   wss.on('connection', (ws) => {
     hmrClients.add(ws);
     ws.on('close', () => hmrClients.delete(ws));
+    // Replay the last compile error to every connected page. A refresh drops
+    // the in-memory overlay state, so without this the error (and its red
+    // codeframe) would silently vanish until the next rebuild.
+    if (devLastError) {
+      const msg = JSON.stringify({ type: 'error', ...devLastError, nonce: hmrNonce });
+      if (ws.readyState === 1) ws.send(msg);
+    }
   });
   server.on('upgrade', (req, socket, head) => {
     // Origin-checked: cross-site pages always attach Origin to WS handshakes
@@ -1533,7 +1591,7 @@ const LAYER_BASE = /^\s*@layer\s+base\s*\{/;
  * errors — an SSR failure served as a page would otherwise stay silent).
  * Mirrors the marker convention in adapter hmr/ssr-function SSR paths.
  */
-function injectSsrErrorMarker(html: string, err: unknown): string {
+export function injectSsrErrorMarker(html: string, err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   const marker = `<!--vesk-ssr-error:${encodeURIComponent(msg || 'Internal Server Error')}-->`;
   const bodyIdx = html.indexOf('<body');
