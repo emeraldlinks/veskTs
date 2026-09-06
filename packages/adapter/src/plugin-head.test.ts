@@ -9,6 +9,8 @@
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
 import { generateManifest } from '@vesk/adapter/src/manifest';
 import type { RouteNode } from '@vesk/adapter/src/types';
+import { resolve, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 let passed = 0;
 let failed = 0;
@@ -29,7 +31,10 @@ process.on('exit', () => {
   if (failed > 0) process.exit(1);
 });
 
-const TEST_APP = '/root/vesk/test-app/app';
+// test-app lives under the repo root; derive it so the test is not coupled to
+// any specific checkout path (works on CI runners as well as local machines).
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const TEST_APP = resolve(__dirname, '..', '..', '..', 'test-app', 'app');
 
 const baseRoute: RouteNode = {
   path: '/',

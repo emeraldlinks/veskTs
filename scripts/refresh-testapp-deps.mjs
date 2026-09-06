@@ -87,6 +87,7 @@ function run(cmd, args, opts = {}) {
 
 console.log('[refresh] building workspace packages...');
 run('npx', ['tsx', 'packages/cli/src/build-packages.ts'], { cwd: root });
+run('npm', ['run', 'build'], { cwd: join(root, 'packages', 'plugin-pwa') });
 run('npm', ['run', 'build'], { cwd: join(root, 'packages', 'plugin-tailwind') });
 // The `vesk` CLI bin (test-app's `dev`/`build`/`start` scripts and
 // leakage-test.mjs invoke `node_modules/.bin/vesk`) must be compiled before

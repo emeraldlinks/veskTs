@@ -103,12 +103,12 @@ async function main() {
   const src = readFileSync(resolve(__dirname, 'index.ts'), 'utf-8');
 
   const pipelineLoops = (src.match(/for \(const plugin of pluginsPipelines\)/g) || []).length;
-  assert(pipelineLoops === 3, `all three plugin hook loops iterate pluginsPipelines (got ${pipelineLoops})`);
+  assert(pipelineLoops === 4, `every plugin hook loop iterates pluginsPipelines (got ${pipelineLoops})`);
 
-  const hookLoops = ['onBuildStart', 'onCSS', 'onBuildEnd'].filter(hook =>
+  const hookLoops = ['onHead', 'onBuildStart', 'onCSS', 'onBuildEnd'].filter(hook =>
     new RegExp(`for \\(const plugin of pluginsPipelines\\)[\\s\\S]{0,120}${hook}`).test(src),
   );
-  assert(hookLoops.length === 3, `each hook has its own pluginsPipelines loop (got: ${hookLoops.join(', ') || 'none'})`);
+  assert(hookLoops.length === 4, `each hook has its own pluginsPipelines loop (got: ${hookLoops.join(', ') || 'none'})`);
 
   const rawLoops = (src.match(/for \(const plugin of plugins\)/g) || []).length;
   assert(rawLoops === 1, `the only raw-plugins loop is the skip log (got ${rawLoops})`);
