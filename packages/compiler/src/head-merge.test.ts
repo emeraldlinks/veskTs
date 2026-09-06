@@ -163,6 +163,40 @@ describe('mergeHeadHtml', () => {
     );
     expect.that(result.html).toContain('<title>Hello <b>World</b></title>');
   });
+
+  it('keeps script tag with src and its closing tag', () => {
+    const result = mergeHeadHtml(
+      '',
+      '<script src="/pwa-init.js" defer></script>'
+    );
+    expect.that(result.html).toContain('<script src="/pwa-init.js" defer></script>');
+    expect.that(result.html).toContain('</script>');
+  });
+
+  it('keeps inline script content inside headExtra', () => {
+    const result = mergeHeadHtml(
+      '<title>Page</title>',
+      '<script>window.__theme = "dark";</script>'
+    );
+    expect.that(result.html).toContain('<script>window.__theme = "dark";</script>');
+  });
+
+  it('keeps style block inside headExtra', () => {
+    const result = mergeHeadHtml(
+      '<title>Page</title>',
+      '<style>.nav { color: red; }</style>'
+    );
+    expect.that(result.html).toContain('.nav { color: red; }');
+  });
+
+  it('dedupes script by src across page and layout', () => {
+    const result = mergeHeadHtml(
+      '<script src="/shared.js" defer></script>',
+      '<script src="/shared.js" defer></script><script src="/other.js" defer></script>'
+    );
+    expect.that(result.html).toContain('<script src="/shared.js" defer></script>');
+    expect.that(result.html).toContain('<script src="/other.js" defer></script>');
+  });
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

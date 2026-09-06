@@ -66,5 +66,6 @@ export {
   renderPageStream,
   buildDataScripts,
   applyHeadPlugins,
+  applyHeadInjects,
   applyHtmlPlugins,
 } from '@vesk/compiler/src/server-render';

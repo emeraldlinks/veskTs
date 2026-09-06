@@ -260,7 +260,7 @@ export async function applyHtmlPlugins(
  * objects are available (dev / build / SSG), otherwise merge the baked
  * `headExtra` (prod path — page head wins over baked extras via mergeHeadHtml).
  */
-async function applyHeadInjects(
+export async function applyHeadInjects(
   headHtml: string,
   options: HeadInjectOptions,
   ctx?: import('@vesk/types').RenderPluginContext

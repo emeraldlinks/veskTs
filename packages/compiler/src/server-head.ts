@@ -177,8 +177,9 @@ function scanHeadTag(html: string, lt: number): HeadTagEntry | null {
   }
 
   let raw = html.slice(lt, i);
-  if (!selfClosing && tag === 'title') {
-    const closeTag = html.indexOf('</title', i);
+  const nonVoidTags = new Set(['title', 'script', 'style', 'noscript']);
+  if (!selfClosing && nonVoidTags.has(tag)) {
+    const closeTag = html.indexOf('</' + tag, i);
     if (closeTag !== -1) {
       const end = html.indexOf('>', closeTag);
       if (end !== -1) {
@@ -266,8 +267,13 @@ export function mergeHeadHtml(pageHead: string, layoutHead: string): { html: str
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
   });
 
+  const unkeyed: string[] = [];
+  for (const e of [...layoutEntries, ...pageEntries]) {
+    if (extractKey(e) === null && !unkeyed.includes(e.raw)) unkeyed.push(e.raw);
+  }
+
   return {
-    html: sorted.map(e => e.html).join('\n'),
+    html: [...sorted.map(e => e.html), ...unkeyed].join('\n'),
     conflicts,
   };
 }
