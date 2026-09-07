@@ -1,0 +1,57 @@
+import { track } from '@vesk/runtime'
+
+component PostCard(props) {
+	<article class="panel-strong p-6 mb-4">
+		<div class="flex items-center justify-between mb-2">
+			<h2 class="font-display text-lg font-semibold tracking-tight text-foreground">{props.post.title}</h2>
+			<span class="font-mono text-[11px] text-muted-foreground">{props.post.date}</span>
+		</div>
+		<p class="font-mono text-[12px] leading-relaxed text-muted-foreground mb-3">{props.post.excerpt}</p>
+		<div class="flex gap-2 mb-3">
+			for (const tag of props.post.tags) {
+				<span class="chip">{tag}</span>
+			}
+		</div>
+		<p class="font-mono text-[11px] text-muted-foreground">By {props.post.author}</p>
+	</article>
+}
+
+export default component Posts {
+	<Head>
+		<title>Posts — useFetch demo</title>
+	</Head>
+	let &[posts] = track<{ id: number; title: string; slug: string; excerpt: string; author: string; tags: string[]; date: string }[]>([])
+	const postsResource = useFetch('/api/posts', {
+		key: 'posts',
+		into: posts,
+		staleTime: 30000,
+		keepPreviousData: true,
+		retry: 2,
+		retryDelay: 400,
+		timeout: 8000,
+	})
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between mb-8">
+			<div>
+				<p class="eyebrow mb-3">posts · useFetch</p>
+				<h1 class="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Posts</h1>
+				<p class="mt-3 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">
+					Fetched with useFetch — deduped, cached with staleTime, retried with backoff, timed out, and written into a tracked cell.
+				</p>
+			</div>
+			<div class="flex items-center gap-3 shrink-0">
+				<span class="font-mono text-[11px] text-muted-foreground">{postsResource.loading ? (posts.length > 0 ? 'Refreshing…' : 'Loading…') : 'Fresh'}</span>
+				<button onClick={() => postsResource.refresh()} class="btn-solid px-4 py-2 text-sm">Refresh</button>
+			</div>
+		</div>
+		if (postsResource.error) {
+			<div class="border border-destructive bg-surface/50 p-4 mb-4">
+				<p class="font-mono text-[12px] text-destructive mb-2">Failed to load posts: {postsResource.error.message}</p>
+				<button onClick={() => postsResource.refresh()} class="btn-outline px-4 py-2 text-sm">Retry</button>
+			</div>
+		}
+		for (const post of posts) {
+			<PostCard post={post} />
+		}
+	</div>
+}

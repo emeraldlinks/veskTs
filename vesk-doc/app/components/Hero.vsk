@@ -1,0 +1,58 @@
+export component Hero {
+	<section id="top" class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 pt-12 pb-14 sm:px-8 sm:pt-20 sm:pb-20 lg:grid lg:grid-cols-[1.15fr_1fr] lg:gap-14 lg:pt-24">
+			<div>
+				<div class="rise mb-6 inline-flex items-center gap-2 border border-border px-2.5 py-1">
+					<span class="size-1.5 bg-accent"></span>
+					<span class="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">compiler-first framework · v0.4</span>
+				</div>
+				<h1 class="rise rise-1 font-display text-[40px] font-semibold leading-[0.95] tracking-tight text-balance sm:text-6xl lg:text-7xl">
+					Build once.<br />
+					Compile <span class="font-hand text-[0.95em] font-medium italic">everywhere.</span>
+				</h1>
+				<p class="rise rise-2 mt-6 max-w-[46ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty sm:text-sm">
+					Vesk is a compiler-first framework. Write one modern component model, and its compiler transforms your code into optimized web and native Kotlin applications — never a wrapped WebView.
+				</p>
+				<div class="rise rise-3 mt-8 flex flex-col gap-2.5 sm:flex-row">
+					<a id="get-started" href="#dx" class="btn-solid px-6 py-3 text-sm sm:min-w-[10rem] no-underline">Get Started</a>
+					<a href="#docs" class="btn-outline px-6 py-3 text-sm sm:min-w-[10rem] no-underline">Explore the Docs</a>
+				</div>
+			</div>
+			<div class="rise rise-4 mt-12 lg:mt-0">
+				<div class="panel">
+					<div class="border-b border-border px-3 py-1.5">
+						<span class="eyebrow">compiler pipeline</span>
+					</div>
+					<div class="px-4 py-5 font-mono text-[13px] leading-tight">
+						<div class="flex items-center justify-between gap-3 pl-3">
+							<span class="flex items-center gap-2">
+								<span class="size-1.5 bg-foreground/60"></span>
+								<span class="text-foreground">app.vsk</span>
+							</span>
+							<span class="text-[11px] text-muted-foreground">source</span>
+						</div>
+						<div class="py-1.5 pl-3 text-muted-foreground/70">↓</div>
+						<div class="flex items-center justify-between gap-3 pl-3">
+							<span class="flex items-center gap-2">
+								<span class="size-1.5 bg-accent"></span>
+								<span class="text-foreground">vesk compiler</span>
+							</span>
+							<span class="text-[11px] text-muted-foreground">analyze · lower · emit</span>
+						</div>
+						<div class="py-1.5 pl-3 text-muted-foreground/70">↓</div>
+						<div class="grid grid-cols-2 gap-2 pl-3">
+							<div class="border border-border px-3 py-2.5 text-center text-[12px]">web</div>
+							<div class="border border-border px-3 py-2.5 text-center text-[12px]">kotlin native</div>
+						</div>
+					</div>
+					<div class="flex items-center justify-between border-t border-border px-3 py-2 font-mono text-[10px] text-muted-foreground">
+						<span>build 412 ms</span>
+						<span class="flex items-center gap-1.5">
+							<span class="size-1.5 bg-accent caret"></span> stable
+						</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

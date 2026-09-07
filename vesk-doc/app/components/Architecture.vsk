@@ -1,0 +1,67 @@
+const stages = [
+	{ id: "source", name: "Vesk Source", detail: ".vsk components — markup, styling utilities and logic in one declarative unit." },
+	{ id: "parser", name: "Parser", detail: "Source becomes a typed syntax tree. Structure, attributes and expressions are exact." },
+	{ id: "semantic", name: "Semantic Analysis", detail: "Types, styling utilities and platform capabilities are resolved. Unsupported semantics are rejected here." },
+	{ id: "compiler", name: "Vesk Compiler", detail: "Lowering and optimization: layout, state and effects become target-native constructs." },
+	{ id: "platform", name: "Platform Code", detail: "Optimized web output or native Kotlin — emitted, not interpreted at runtime." },
+]
+
+export component Architecture {
+	const &[active] = track(2)
+
+	<section id="architecture" class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<p class="eyebrow mb-5 flex items-center gap-2">
+				<span class="text-accent">04</span>
+				<span>compiler architecture</span>
+			</p>
+			<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[24ch]">The compiler is the product.</h2>
+			<p class="mt-5 max-w-[48ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty sm:text-sm">
+				Five stages, no hidden runtime. Select a stage to see what happens to your code inside it.
+			</p>
+
+			<div class="mt-10 grid gap-6 lg:grid-cols-[0.9fr_1.1fr] lg:gap-12">
+				<ol class="border-t border-border">
+					for (let i = 0; i < stages.length; i++) {
+						const s = stages[i]
+						const isActive = i === active
+						<li class="border-b border-border">
+							<button
+								type="button"
+								onClick={() => active = i}
+								onMouseEnter={() => active = i}
+								class={isActive ? "flex w-full items-center gap-4 px-3 py-4 text-left transition-colors bg-surface" : "flex w-full items-center gap-4 px-3 py-4 text-left transition-colors hover:bg-surface/60"}
+							>
+								<span class={isActive ? "font-mono text-[11px] text-accent" : "font-mono text-[11px] text-muted-foreground"}>{String(i + 1).padStart(2, "0")}</span>
+								<span class="font-display text-sm font-medium tracking-tight">{s.name}</span>
+								<span class={isActive ? "ml-auto h-px flex-1 bg-accent" : "ml-auto h-px flex-1 bg-border"}></span>
+							</button>
+						</li>
+					}
+				</ol>
+
+				<div class="panel-strong flex h-full flex-col justify-between min-h-[220px]">
+					<div class="border-b border-border px-4 py-2">
+						<span class="eyebrow">stage detail</span>
+					</div>
+					<div class="px-4 py-6 sm:px-6 sm:py-8">
+						<h3 class="font-display text-xl font-semibold tracking-tight sm:text-2xl">{stages[active].name}</h3>
+						<p class="mt-3 max-w-[44ch] font-mono text-[12.5px] leading-relaxed text-muted-foreground">{stages[active].detail}</p>
+					</div>
+					<div class="border-t border-border px-4 py-3 font-mono text-[11px] text-muted-foreground">
+						<div class="flex flex-wrap items-center gap-1.5">
+							for (let j = 0; j < stages.length; j++) {
+								<span class="flex items-center gap-1.5">
+									<span class={j === active ? "text-accent" : ""}>{stages[j].id}</span>
+									if (j < stages.length - 1) {
+										<span class="text-border-strong">→</span>
+									}
+								</span>
+							}
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

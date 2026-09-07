@@ -1,0 +1,44 @@
+export component Targets {
+	<section id="targets" class="border-b border-border bg-paper text-paper-foreground">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<p class="eyebrow mb-5 flex items-center gap-2 text-paper-muted">
+				<span class="text-accent">05</span>
+				<span>web + native</span>
+			</p>
+			<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[26ch] text-paper-foreground">One development experience. Different targets.</h2>
+			<p class="mt-5 max-w-[50ch] font-mono text-[13px] leading-relaxed text-paper-muted text-pretty sm:text-sm">
+				Not "write once, run anywhere". Vesk preserves the semantics of your source application and emits output that is appropriate for each platform it targets.
+			</p>
+
+			<div class="mt-10 border border-paper-foreground/25 bg-paper">
+				<div class="border-b border-paper-foreground/20 px-3 py-1.5">
+					<span class="eyebrow text-paper-muted">target graph</span>
+				</div>
+				<div class="px-4 py-8 sm:px-8 sm:py-12">
+					<div class="mx-auto max-w-md font-mono text-[12px] text-paper-foreground">
+						<div class="mx-auto w-fit border border-paper-foreground px-5 py-2 font-medium">vesk</div>
+						<div class="mx-auto h-6 w-px bg-paper-foreground/40"></div>
+						<div class="mx-auto grid w-full grid-cols-2">
+							<div class="border-t border-r border-paper-foreground/40 h-6"></div>
+							<div class="border-t border-paper-foreground/40 h-6"></div>
+						</div>
+						<div class="grid grid-cols-2 gap-4 sm:gap-8">
+							<div class="text-center">
+								<div class="border border-paper-foreground/40 px-3 py-2.5 font-medium">web</div>
+								<div class="mx-auto h-5 w-px bg-paper-foreground/30"></div>
+								<div class="border border-paper-foreground/20 px-3 py-2.5">web platform</div>
+								<p class="mt-2 text-[11px] text-paper-muted">DOM · CSS · ESM</p>
+							</div>
+							<div class="text-center">
+								<div class="border border-paper-foreground/40 px-3 py-2.5 font-medium">native</div>
+								<div class="mx-auto h-5 w-px bg-paper-foreground/30"></div>
+								<div class="border border-paper-foreground/20 px-3 py-2.5">kotlin</div>
+								<p class="mt-2 text-[11px] text-paper-muted">Compose · Material 3</p>
+							</div>
+						</div>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

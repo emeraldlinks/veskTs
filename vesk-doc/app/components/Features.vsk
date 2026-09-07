@@ -1,0 +1,76 @@
+import { Boxes, Cpu, FileCode2, Gauge, Package, Paintbrush, RefreshCw, ShieldCheck, Smartphone, Sparkles, Terminal, Wrench } from 'lucide-vesk'
+
+export component Features {
+	<section id="features" class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<p class="eyebrow mb-5 flex items-center gap-2">
+				<span class="text-accent">06</span>
+				<span>features</span>
+			</p>
+			<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[24ch]">What ships in the box.</h2>
+
+			<div class="mt-10 grid border-t border-l border-border sm:grid-cols-2 lg:grid-cols-3">
+				<article class="h-full border-r border-b border-border p-5">
+					<Cpu size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Compiler-first architecture</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Build-time guarantees over runtime cost.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<FileCode2 size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">.vsk components</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Markup, styling and logic in one unit.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Boxes size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">TypeScript</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Typed logic and typed component contracts.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Paintbrush size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Tailwind CSS</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">The same utility model on web and native.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Smartphone size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Vesk Native</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Compile toward native Kotlin targets.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Sparkles size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Animation primitives</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Motion-style transitions, compiled.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<RefreshCw size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Hot Module Replacement</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Sub-second feedback while you build.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Package size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">npm compatibility</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Use the ecosystem you already depend on.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<ShieldCheck size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Compile-time validation</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Unsupported semantics fail the build.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Gauge size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Production builds</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Optimized output per platform target.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Terminal size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Developer tooling</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">CLI, diagnostics and build inspection.</p>
+				</article>
+				<article class="h-full border-r border-b border-border p-5">
+					<Wrench size={16} class="text-accent" strokeWidth={1.5} />
+					<h3 class="mt-4 font-display text-sm font-semibold tracking-tight">Native APIs</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Platform capabilities without escape hatches.</p>
+				</article>
+			</div>
+		</div>
+	</section>
+}

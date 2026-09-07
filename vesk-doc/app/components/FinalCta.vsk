@@ -1,0 +1,16 @@
+export component FinalCta {
+	<section class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 py-20 sm:px-8 sm:py-28">
+			<h2 class="max-w-[22ch] font-display text-[32px] font-semibold leading-[1.02] tracking-tight text-balance sm:text-6xl">
+				The next generation of application development starts with the <span class="font-hand text-[0.95em] font-medium italic">compiler.</span>
+			</h2>
+			<p class="mt-6 max-w-[44ch] font-mono text-[13px] leading-relaxed text-muted-foreground sm:text-sm">
+				Build for the web. Build for native. Let Vesk handle the translation.
+			</p>
+			<div class="mt-9 flex flex-col gap-2.5 sm:flex-row">
+				<a href="#get-started" class="btn-solid px-6 py-3 text-sm sm:min-w-[10rem] no-underline">Get Started</a>
+				<a href="#docs" class="btn-outline px-6 py-3 text-sm sm:min-w-[10rem] no-underline">Read the Docs</a>
+			</div>
+		</div>
+	</section>
+}

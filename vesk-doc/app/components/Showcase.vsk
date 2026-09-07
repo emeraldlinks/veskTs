@@ -1,0 +1,61 @@
+const projects = [
+	{ name: "Aurora Console", description: "Operations dashboard for a deployment platform, compiled to the web target.", platform: "Web", tech: "TypeScript · Tailwind", metric: "48 kB shipped" },
+	{ name: "Fieldbook", description: "Offline-first field notes app compiled toward native Kotlin with Material 3.", platform: "Android", tech: "Vesk Native · Kotlin", metric: "cold start 240 ms" },
+	{ name: "Signal Docs", description: "Documentation site sharing the same component library as its native companion.", platform: "Web + Native", tech: "One codebase", metric: "2 targets, 1 model" },
+]
+
+const community = [
+	["GitHub", "source, issues, RFCs"],
+	["Discord", "build in the open"],
+	["Examples", "starter projects"],
+	["Contributors", "compiler & tooling"],
+]
+
+export component Showcase {
+	<section id="showcase" class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<p class="eyebrow mb-5 flex items-center gap-2">
+				<span class="text-accent">09</span>
+				<span>showcase</span>
+			</p>
+			<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[24ch]">Built with Vesk.</h2>
+
+			<div class="mt-10 grid gap-3 lg:grid-cols-3 lg:gap-4">
+				for (let i = 0; i < projects.length; i++) {
+					const p = projects[i]
+					<article class="panel-strong group flex h-full flex-col justify-between p-5 transition-colors hover:border-border-strong">
+						<div>
+							<div class="flex items-center justify-between font-mono text-[10px] text-muted-foreground">
+								<span class="uppercase tracking-[0.18em]">{p.platform}</span>
+								<span>{String(i + 1).padStart(2, "0")}</span>
+							</div>
+							<h3 class="mt-6 font-display text-xl font-semibold tracking-tight">{p.name}</h3>
+							<p class="mt-2 max-w-[34ch] font-mono text-[12px] leading-relaxed text-muted-foreground">{p.description}</p>
+						</div>
+						<div class="mt-8 border-t border-border pt-3 font-mono text-[11px]">
+							<div class="flex items-center justify-between text-muted-foreground">
+								<span>{p.tech}</span>
+								<span class="text-accent">{p.metric}</span>
+							</div>
+							<a href="#showcase" class="mt-3 inline-flex items-center gap-1.5 text-foreground underline decoration-border underline-offset-4 transition-colors group-hover:decoration-accent no-underline">View project <span aria-hidden>→</span></a>
+						</div>
+					</article>
+				}
+			</div>
+
+			<a href="#get-started" class="btn-outline mt-8 w-full px-6 py-3 text-sm sm:w-auto sm:min-w-[16rem] inline-grid place-items-center no-underline">Build something with Vesk</a>
+
+			<div class="mt-16 border-t border-border pt-8">
+				<p class="eyebrow mb-5">community</p>
+				<div class="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
+					for (const c of community) {
+						<a href="#showcase" class="group bg-background px-4 py-5 no-underline block">
+							<div class="font-display text-sm font-semibold tracking-tight text-foreground"> {c[0]} <span class="text-muted-foreground transition-colors group-hover:text-accent">→</span></div>
+							<div class="mt-1 font-mono text-[11px] text-muted-foreground">{c[1]}</div>
+						</a>
+					}
+				</div>
+			</div>
+		</div>
+	</section>
+}

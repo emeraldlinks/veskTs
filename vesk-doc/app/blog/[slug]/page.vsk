@@ -1,0 +1,15 @@
+import { Link } from '@vesk/runtime/router';
+
+component BlogPost(props: { params: { slug: string } }) {
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<Link href="/blog" class="inline-flex items-center gap-1.5 font-mono text-[12px] text-muted-foreground hover:text-foreground no-underline mb-6">
+			← Back to blog
+		</Link>
+		<p class="eyebrow mb-4">post · {props.params.slug}</p>
+		<h1 class="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Post: {props.params.slug}</h1>
+		<div class="mt-6 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">
+			<p>This is a dynamic blog post rendered at <code class="bg-surface border border-border px-1.5 py-0.5 text-[12px] font-mono text-foreground">{"/" + props.params.slug}</code>.</p>
+			<p class="mt-3">Vesk's file-based router maps <code class="bg-surface border border-border px-1 py-0.5 text-[12px]">app/blog/[slug]/page.vsk</code> to <code class="bg-surface border border-border px-1 py-0.5 text-[12px]">/blog/:slug</code> — params are typed and available as <code class="bg-surface border border-border px-1 py-0.5 text-[12px]">props.params.slug</code>.</p>
+		</div>
+	</div>
+}

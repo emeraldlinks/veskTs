@@ -1,0 +1,21 @@
+import { Link } from '@vesk/runtime/router';
+
+component Blog {
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5">blog</p>
+		<h1 class="font-display text-3xl font-semibold tracking-tight sm:text-4xl">Blog</h1>
+		<p class="mt-3 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Notes on the compiler, runtime, and native pipeline.</p>
+		<div class="mt-10 grid gap-3 sm:grid-cols-2 max-w-3xl">
+			<Link href="/blog/hello-world" class="panel-strong p-5 no-underline block group hover:border-border-strong transition-colors">
+				<h2 class="font-display text-lg font-semibold tracking-tight text-foreground group-hover:text-accent transition-colors">Hello World</h2>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">First post powered by Vesk</p>
+				<span class="mt-3 inline-flex font-mono text-[11px] text-muted-foreground group-hover:text-foreground">→ read</span>
+			</Link>
+			<Link href="/blog/ssr-in-vesk" class="panel-strong p-5 no-underline block group hover:border-border-strong transition-colors">
+				<h2 class="font-display text-lg font-semibold tracking-tight text-foreground group-hover:text-accent transition-colors">SSR in Vesk</h2>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">How server-side rendering works</p>
+				<span class="mt-3 inline-flex font-mono text-[11px] text-muted-foreground group-hover:text-foreground">→ read</span>
+			</Link>
+		</div>
+	</div>
+}

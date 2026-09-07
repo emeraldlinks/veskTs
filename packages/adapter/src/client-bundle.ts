@@ -1,6 +1,7 @@
-import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync, rmSync, mkdtempSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { tmpdir } from 'node:os';
 import { build } from './esbuild-fallback.js';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { parse } from '@vesk/compiler/src/parser';
@@ -228,17 +229,56 @@ function demoteExports(code: string): string {
 }
 
 /**
- * Code-split chunks execute as classic scripts, so NO import statement may
- * survive in a contribution (runtime and `.vsk` imports are stripped
- * earlier; npm packages and relative `.ts` values are unresolvable from a
- * `/_vesk/static/` classic script). Strips every remaining import and
- * demotes value exports — server-only components never execute
- * client-side, and islands must receive data through props/serialization
- * rather than module imports (a stripped binding referenced by an island
- * fails loudly at that island instead of killing the whole chunk).
+ * Code-split chunks execute as classic scripts, so a chunk contribution may
+ * not carry a live `import` statement. Runtime (`@vesk/runtime*`) and `.vsk`
+ * imports are stripped earlier; the remaining imports (npm packages like
+ * `lucide-vesk`, and relative `.ts` value modules like `../../src/content/docs`)
+ * are preserved here and rewritten so esbuild can inline them when the chunk is
+ * bundled below.
+ *
+ * Relative specifiers are rewritten to absolute filesystem paths so they
+ * resolve regardless of where the temp bundle entry is written; bare package
+ * specifiers stay as-is and esbuild resolves them from the nearest
+ * `node_modules`. The chunk builder then esbuild-bundles any chunk that still
+ * has an import, inlining the referenced values into the IIFE so the final
+ * classic script has no bare import and hydrates correctly. If bundling fails,
+ * the caller falls back to stripping every import (the historical behavior).
  */
-function stripChunkImports(code: string): string {
-  return demoteExports(removeCompiledNodes(code, isAnyImport));
+function rewriteChunkImports(code: string, filePath: string): string {
+  let ast: unknown;
+  try {
+    ast = parse(code);
+  } catch {
+    return code;
+  }
+  type Edit = { start: number; end: number; text: string };
+  const edits: Edit[] = [];
+  for (const raw of (ast as { body?: Array<unknown> }).body ?? []) {
+    const node = raw as CompiledNode;
+    if (node.type !== 'ImportDeclaration' && node.type !== 'ExportNamedDeclaration') continue;
+    const src = node.source?.value;
+    if (typeof src !== 'string') continue;
+    if (src.startsWith('./') || src.startsWith('../')) {
+      const abs = resolve(dirname(filePath), src);
+      const start = (node.source as unknown as { start?: number }).start;
+      const end = (node.source as unknown as { end?: number }).end;
+      if (typeof start === 'number' && typeof end === 'number') {
+        edits.push({ start, end, text: JSON.stringify(abs) });
+      }
+    }
+  }
+  edits.sort((a, b) => b.start - a.start);
+  for (const e of edits) code = code.slice(0, e.start) + e.text + code.slice(e.end);
+  return code;
+}
+
+function hasChunkImports(code: string): boolean {
+  try {
+    const ast = parse(code) as { body?: Array<unknown> };
+    return (ast.body ?? []).some((n) => (n as { type?: string }).type === 'ImportDeclaration');
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -448,8 +488,8 @@ export async function generateClientBundle(
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
     const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null, filePath);
-    const compCode = rawComp ? stripChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawComp)))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-    const hydCode = rawHyd ? stripChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawHyd)))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const compCode = rawComp ? rewriteChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawComp))), filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const hydCode = rawHyd ? rewriteChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawHyd))), filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
     if (rawComp) collectRuntimeImports(rawComp);
     if (rawHyd) collectRuntimeImports(rawHyd);
 
@@ -560,13 +600,48 @@ export async function generateClientBundle(
       chunkEntries.push({ name: 'shared.js', code: sharedCode.join('\n\n'), node: null as unknown as RouteNode });
     }
 
+    const chunkIIFE = (body: string): string =>
+      `(()=>{\nconst __components = globalThis.__components || (globalThis.__components = {});\nconst __hydrators = globalThis.__hydrators || (globalThis.__hydrators = {});\n${body}\n})();\n`;
+
     for (const entry of chunkEntries) {
-      if (entry.code.trim()) {
-        chunks.push({
-          name: entry.name,
-          code: `(()=>{\nconst __components = globalThis.__components || (globalThis.__components = {});\nconst __hydrators = globalThis.__hydrators || (globalThis.__hydrators = {});\n${entry.code}\n})();\n`,
-        });
+      if (!entry.code.trim()) continue;
+      let finalCode: string;
+      if (hasChunkImports(entry.code)) {
+        // Bundle the chunk through esbuild so every remaining import (npm
+        // packages like lucide-vesk and rewritten relative `.ts` value
+        // modules) is inlined into the IIFE — a classic script cannot carry
+        // a live `import`, and a stripped binding referenced by a component
+        // would otherwise throw `X is not defined` at hydration.
+        const tmpBase = mkdtempSync(join(resolve(appDir, '..'), 'tmp-vesk-chunk-'));
+        const tmpFile = join(tmpBase, 'entry.js');
+        const toBundle = `const __components = globalThis.__components || (globalThis.__components = {});\nconst __hydrators = globalThis.__hydrators || (globalThis.__hydrators = {});\n${entry.code}\n`;
+        writeFileSync(tmpFile, toBundle);
+        try {
+          const result = await build({
+            entryPoints: [tmpFile],
+            bundle: true,
+            format: 'iife',
+            platform: 'browser',
+            write: false,
+            logLevel: 'silent',
+            loader: { '.js': 'tsx' },
+          });
+          finalCode = result.outputFiles[0].text;
+        } catch (e) {
+          const err = e as { errors?: Array<{ text: string }>; message?: string };
+          console.error('[vesk] chunk bundle failed', entry.name, err?.errors?.map((x) => x.text).join(' | ') || err?.message || String(e));
+          // Fall back to the historical behavior: strip every import so the
+          // classic script at least parses (referenced values will surface as
+          // ReferenceErrors at runtime — the pre-existing failure mode).
+          const stripped = demoteExports(removeCompiledNodes(entry.code, isAnyImport));
+          finalCode = chunkIIFE(stripped);
+        } finally {
+          try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+        }
+      } else {
+        finalCode = chunkIIFE(entry.code);
       }
+      chunks.push({ name: entry.name, code: finalCode });
     }
 
     function annotate(nodes: RouteNode[]): void {

@@ -1,0 +1,30 @@
+const items = [
+	{ n: "01", title: "Compiler first", body: "Guarantees move from runtime to build time. Less shipped abstraction, more known-good output." },
+	{ n: "02", title: "One development model", body: "A single component and styling model across targets — no per-platform rewrites of the same screen." },
+	{ n: "03", title: "Native applications", body: "Vesk Native compiles toward native Kotlin rather than wrapping a web app inside a WebView." },
+	{ n: "04", title: "Developer experience", body: "Modern tooling, fast feedback, HMR, Tailwind utilities, icons and motion primitives you already know." },
+	{ n: "05", title: "Performance", body: "The compiler produces optimized platform output instead of carrying a runtime abstraction along." },
+	{ n: "06", title: "Safety", body: "When semantics can't be preserved on a target, the compiler fails the build. Silence is the bug." },
+]
+
+export component Philosophy {
+	<section id="why" class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<p class="eyebrow mb-5 flex items-center gap-2">
+				<span class="text-accent">02</span>
+				<span>the philosophy</span>
+			</p>
+			<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[26ch]">Why Vesk exists.</h2>
+
+			<div class="mt-10 grid border-t border-border sm:grid-cols-2 lg:grid-cols-3">
+				for (const item of items) {
+					<article class="h-full border-b border-border px-0 py-6 sm:px-6 sm:[&:nth-child(odd)]:pl-0 lg:border-l lg:first:border-l-0">
+						<span class="font-mono text-[11px] text-accent">{item.n}</span>
+						<h3 class="mt-3 font-display text-base font-semibold tracking-tight">{item.title}</h3>
+						<p class="mt-2 max-w-[38ch] font-mono text-[12px] leading-relaxed text-muted-foreground">{item.body}</p>
+					</article>
+				}
+			</div>
+		</div>
+	</section>
+}

@@ -1,0 +1,39 @@
+import { Nav } from './components/Nav.vsk'
+import { Hero } from './components/Hero.vsk'
+import { CodeShowcase } from './components/CodeShowcase.vsk'
+import { Philosophy } from './components/Philosophy.vsk'
+import { Native } from './components/Native.vsk'
+import { Architecture } from './components/Architecture.vsk'
+import { Targets } from './components/Targets.vsk'
+import { Features } from './components/Features.vsk'
+import { DevExperience } from './components/DevExperience.vsk'
+import { Docs } from './components/Docs.vsk'
+import { Showcase } from './components/Showcase.vsk'
+import { Roadmap } from './components/Roadmap.vsk'
+import { FinalCta } from './components/FinalCta.vsk'
+import { Footer } from './components/Footer.vsk'
+
+component Home {
+	<Head>
+		<title>Vesk — The compiler-first framework for web and native apps</title>
+		<meta name="description" content="Vesk is a compiler-first application framework. Write one component model and compile it into optimized web and native Kotlin applications." />
+	</Head>
+	<div class="min-h-screen bg-background text-foreground">
+		<Nav />
+		<main>
+			<Hero />
+			<CodeShowcase />
+			<Philosophy />
+			<Native />
+			<Architecture />
+			<Targets />
+			<Features />
+			<DevExperience />
+			<Docs />
+			<Showcase />
+			<Roadmap />
+			<FinalCta />
+		</main>
+		<Footer />
+	</div>
+}

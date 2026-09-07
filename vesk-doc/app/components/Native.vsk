@@ -1,0 +1,84 @@
+const capabilities = [
+	"Android",
+	"Native Kotlin",
+	"Material 3",
+	"Tailwind utilities",
+	"Motion-style animation",
+	"Native APIs",
+	"Fast dev workflow",
+]
+
+const rows = [
+	{ name: "project-aurora", meta: "note · 2.1 kB" },
+	{ name: "todo-backlog", meta: "task · 1.3 kB" },
+	{ name: "meeting-notes", meta: "note · 1.8 kB" },
+	{ name: "field-log", meta: "note · 954 B" },
+]
+
+export component Native {
+	<section id="native" class="border-b border-border bg-surface/40">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<div class="grid gap-10 lg:grid-cols-[1fr_0.8fr] lg:items-center lg:gap-16">
+				<div>
+					<p class="eyebrow mb-5 flex items-center gap-2">
+						<span class="text-accent">03</span>
+						<span>vesk native</span>
+					</p>
+					<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[24ch]">Build native apps with the tools you already love.</h2>
+					<p class="mt-5 max-w-[46ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty sm:text-sm">
+						Write the same Vesk components you write for the web. Vesk Native compiles them toward Kotlin application targets — real native views, real platform APIs, Material 3 defaults.
+					</p>
+
+					<div class="mt-7 flex flex-wrap gap-2">
+						for (const c of capabilities) {
+							<span class="chip">{c}</span>
+						}
+					</div>
+					<a href="#docs" class="mt-7 inline-flex items-center gap-1.5 font-display text-sm font-medium underline decoration-border-strong underline-offset-4 transition-colors hover:decoration-accent no-underline text-foreground">
+						Explore Vesk Native <span aria-hidden>→</span>
+					</a>
+				</div>
+
+				<div class="panel-strong p-4 sm:p-6">
+					<div class="mb-4 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
+						<span class="uppercase tracking-[0.2em]">vesk native · preview</span>
+						<span>360 × 740</span>
+					</div>
+
+					<div class="mx-auto w-[220px] border border-border-strong bg-background p-2 sm:w-[248px]">
+						<div class="flex items-center justify-between border-b border-border pb-2 font-mono text-[9px] text-muted-foreground">
+							<span>9:41</span>
+							<span>▮▮▮</span>
+						</div>
+						<div class="pt-3">
+							<p class="font-display text-sm font-semibold tracking-tight">Entries</p>
+							<div class="mt-2 flex gap-3 border-b border-border pb-2 font-mono text-[9px]">
+								<span class="text-accent">All</span>
+								<span class="text-muted-foreground">Notes</span>
+								<span class="text-muted-foreground">Tasks</span>
+							</div>
+							<ul class="mt-1">
+								for (const r of rows) {
+									<li class="flex items-center justify-between border-b border-border/60 py-2 font-mono text-[10px]">
+										<span class="text-foreground/85">{r.name}</span>
+										<span class="text-muted-foreground">{r.meta}</span>
+									</li>
+								}
+							</ul>
+							<div class="mt-4 grid grid-cols-3 border-t border-border pt-2 font-mono text-[9px]">
+								<span class="text-center text-accent">entries</span>
+								<span class="text-center text-muted-foreground">tags</span>
+								<span class="text-center text-muted-foreground">settings</span>
+							</div>
+						</div>
+					</div>
+
+					<div class="mt-5 flex items-center justify-between border-t border-border pt-3 font-mono text-[10px] text-muted-foreground">
+						<span>Entries.vsk → Entries.kt</span>
+						<span class="text-accent">compiled · 2.1 kB</span>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}

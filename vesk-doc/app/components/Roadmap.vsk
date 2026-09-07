@@ -1,0 +1,55 @@
+export component Roadmap {
+	<section id="roadmap" class="border-b border-border bg-surface/40">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<p class="eyebrow mb-5 flex items-center gap-2">
+				<span class="text-accent">10</span>
+				<span>roadmap</span>
+			</p>
+			<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[24ch]">Ambitious, and honest about it.</h2>
+
+			<div class="mt-10 grid gap-px bg-border lg:grid-cols-3">
+				<div class="h-full bg-background p-5 sm:p-6">
+					<div class="flex items-baseline justify-between">
+						<h3 class="font-display text-lg font-semibold tracking-tight">Now</h3>
+						<span class="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">in progress</span>
+					</div>
+					<div class="mt-4 h-px bg-accent"></div>
+					<ul class="mt-4 font-mono text-[12px] list-none m-0 p-0">
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-accent">●</span><span class="text-foreground/85">Core compiler</span></li>
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-accent">●</span><span class="text-foreground/85">Vesk Native</span></li>
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-accent">●</span><span class="text-foreground/85">Developer tooling</span></li>
+						<li class="flex items-start gap-2.5 py-2.5"><span class="text-accent">●</span><span class="text-foreground/85">Documentation</span></li>
+					</ul>
+				</div>
+
+				<div class="h-full bg-background p-5 sm:p-6">
+					<div class="flex items-baseline justify-between">
+						<h3 class="font-display text-lg font-semibold tracking-tight">Next</h3>
+						<span class="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">planned</span>
+					</div>
+					<div class="mt-4 h-px bg-border"></div>
+					<ul class="mt-4 font-mono text-[12px] list-none m-0 p-0">
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Improved HMR</span></li>
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">More native APIs</span></li>
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Package ecosystem</span></li>
+						<li class="flex items-start gap-2.5 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Build diagnostics</span></li>
+					</ul>
+				</div>
+
+				<div class="h-full bg-background p-5 sm:p-6">
+					<div class="flex items-baseline justify-between">
+						<h3 class="font-display text-lg font-semibold tracking-tight">Future</h3>
+						<span class="font-mono text-[10px] uppercase tracking-[0.18em] text-muted-foreground">exploring</span>
+					</div>
+					<div class="mt-4 h-px bg-border"></div>
+					<ul class="mt-4 font-mono text-[12px] list-none m-0 p-0">
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Additional platforms</span></li>
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Advanced compiler optimizations</span></li>
+						<li class="flex items-start gap-2.5 border-b border-border/60 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Larger ecosystem</span></li>
+						<li class="flex items-start gap-2.5 py-2.5"><span class="text-muted-foreground">○</span><span class="text-foreground/85">Production-scale tooling</span></li>
+					</ul>
+				</div>
+			</div>
+		</div>
+	</section>
+}

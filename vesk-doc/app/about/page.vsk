@@ -1,0 +1,25 @@
+component About {
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2">
+			<span class="text-accent">·</span>
+			<span>about</span>
+		</p>
+		<h1 class="font-display text-3xl font-semibold tracking-tight sm:text-4xl">About Vesk</h1>
+		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">
+			Vesk is a compiler-first reactive UI framework. It compiles .vsk components to standard ESM with SSR, hydration, and fine-grained reactivity.
+		</p>
+		<p class="mt-4 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">
+			Key features include zero-JS pages, islands architecture, AOT event delegation, and streaming SSR. The compiler emits per-cell DOM updates and static subtrees need no hydration runtime.
+		</p>
+		<div class="mt-8 grid gap-px bg-border sm:grid-cols-2 max-w-3xl">
+			<div class="bg-surface p-5">
+				<h3 class="font-display text-sm font-semibold tracking-tight">Compiler-first</h3>
+				<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Build-time guarantees over runtime cost.</p>
+			</div>
+			<div class="bg-surface p-5">
+				<h3 class="font-display text-sm font-semibold tracking-tight">Islands</h3>
+				<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">Zero-JS pages with client islands.</p>
+			</div>
+		</div>
+	</div>
+}

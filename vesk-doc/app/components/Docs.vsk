@@ -1,0 +1,65 @@
+import { docPages } from '../../src/content/docs'
+import { Link } from '@vesk/runtime/router'
+
+const ecosystem = [
+	["TypeScript", "typed logic"],
+	["Tailwind", "styling model"],
+	["npm", "packages"],
+	["Material 3", "native design"],
+	["Kotlin", "native target"],
+	["Motion", "animation model"],
+]
+
+export component Docs {
+	<section id="docs" class="border-b border-border bg-paper text-paper-foreground">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<div class="grid gap-12 lg:grid-cols-[1fr_1fr] lg:gap-16">
+				<div>
+					<p class="eyebrow mb-5 flex items-center gap-2 text-paper-muted">
+						<span class="text-accent">08</span>
+						<span>documentation</span>
+					</p>
+					<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[22ch] text-paper-foreground">Documentation is part of the product.</h2>
+					<p class="mt-5 max-w-[44ch] font-mono text-[13px] leading-relaxed text-paper-muted text-pretty sm:text-sm">
+						Concepts first, then reference. Every compiler behaviour, diagnostic and native capability is written down — not inferred from example projects.
+					</p>
+					<Link href="/docs" class="mt-7 inline-flex items-center gap-1.5 border border-paper-foreground bg-paper-foreground px-5 py-3 font-display text-sm font-medium text-paper transition-opacity hover:opacity-90 no-underline">
+						Read the Documentation <span aria-hidden>→</span>
+					</Link>
+				</div>
+
+				<div class="border border-paper-foreground/25">
+					<div class="border-b border-paper-foreground/20 px-3 py-1.5">
+						<span class="eyebrow text-paper-muted">docs / contents</span>
+					</div>
+					<ul class="font-mono text-[12.5px] m-0 p-0 list-none">
+						for (let i = 0; i < docPages.length; i++) {
+							const item = docPages[i]
+							<li class="border-b border-paper-foreground/12 last:border-b-0">
+								<Link href={"/docs/" + item.slug} class="flex items-center justify-between px-3 py-2.5 text-paper-foreground/80 transition-colors hover:bg-paper-foreground/5 hover:text-paper-foreground no-underline">
+									<span>{item.title}</span>
+									<span class="text-[10px] text-paper-muted">{String(i + 1).padStart(2, "0")}</span>
+								</Link>
+							</li>
+						}
+					</ul>
+				</div>
+			</div>
+
+			<div class="mt-14 border-t border-paper-foreground/20 pt-8">
+				<p class="eyebrow mb-5 text-paper-muted">ecosystem · built on what you know</p>
+				<div class="grid gap-px bg-paper-foreground/15 sm:grid-cols-3 lg:grid-cols-6">
+					for (const e of ecosystem) {
+						<div class="bg-paper px-3 py-4">
+							<div class="font-display text-sm font-semibold tracking-tight text-paper-foreground">{e[0]}</div>
+							<div class="mt-1 font-mono text-[11px] text-paper-muted">{e[1]}</div>
+						</div>
+					}
+				</div>
+				<p class="mt-5 max-w-[62ch] font-mono text-[12px] leading-relaxed text-paper-muted">
+					Vesk is designed to work with technologies developers already understand rather than forcing an entirely foreign ecosystem.
+				</p>
+			</div>
+		</div>
+	</section>
+}

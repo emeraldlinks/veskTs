@@ -1,0 +1,101 @@
+const sourceCode = `component About {
+  <div class="max-w-3xl mx-auto px-4 py-14">
+    <h1 class="text-3xl font-semibold text-ink">About Vesk</h1>
+    <p class="text-muted">Some text here.</p>
+  </div>
+}`
+
+const webOutput = `export function About() {
+  const el = document.createElement("div")
+  el.className = "max-w-3xl mx-auto px-4 py-14"
+  el.append(
+    h("h1", "text-3xl font-semibold text-ink", "About Vesk"),
+    h("p", "text-muted", "Some text here."),
+  )
+  return el
+}`
+
+const nativeOutput = `@Composable
+fun About() {
+  Column(modifier = Modifier.widthIn(max = 768.dp)
+    .padding(horizontal = 16.dp, vertical = 56.dp)) {
+    Text("About Vesk", style = Type.headlineSmall, color = Ink)
+    Text("Some text here.", color = Muted)
+  }
+}`
+
+const stages = ["parse", "analyze", "emit"]
+
+export component CodeShowcase {
+	const &[target] = track("native")
+	const &[stage] = track(0)
+
+	effect(() => {
+		const id = setInterval(() => {
+			stage = (stage + 1) % 4
+		}, 1100)
+		on_destroy(() => clearInterval(id))
+	})
+
+	<section id="compiler" class="border-b border-border bg-surface/40">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<div>
+				<p class="eyebrow mb-5 flex items-center gap-2">
+					<span class="text-accent">01</span>
+					<span>write → understand → compile → ship</span>
+				</p>
+				<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl">The compiler reads your intent.</h2>
+				<p class="mt-4 max-w-[52ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty sm:text-sm">
+					A <span class="text-foreground">.vsk</span> component is parsed, checked for semantics the target can honour, then lowered into platform code. Same source, two honest outputs.
+				</p>
+			</div>
+
+			<div class="mt-10 grid grid-cols-1 gap-3 lg:grid-cols-2 lg:gap-6">
+				<div class="min-w-0">
+					<div class="panel-strong min-w-0 overflow-hidden">
+						<div class="flex items-center justify-between border-b border-border px-3 py-2">
+							<span class="font-mono text-[11px] text-foreground/70">About.vsk</span>
+							<span class="eyebrow text-[10px]">source</span>
+						</div>
+						<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] sm:text-[12.5px] text-foreground/85"><code>{sourceCode}</code></pre>
+					</div>
+				</div>
+
+				<div class="min-w-0">
+					<div class="panel-strong min-w-0 overflow-hidden">
+						<div class="flex min-w-0 items-center justify-between border-b border-border px-3 py-1.5">
+							<div class="flex min-w-0">
+								<button
+									type="button"
+									onClick={() => target = "web"}
+									class={target === "web" ? "shrink-0 px-3 py-1 font-mono text-[11px] bg-foreground text-background" : "shrink-0 px-3 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"}
+								>about.js</button>
+								<button
+									type="button"
+									onClick={() => target = "native"}
+									class={target === "native" ? "shrink-0 px-3 py-1 font-mono text-[11px] bg-foreground text-background" : "shrink-0 px-3 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"}
+								>About.kt</button>
+							</div>
+							<span class="eyebrow shrink-0 text-[10px] text-accent">compiled</span>
+						</div>
+						if (target === "web") {
+							<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-foreground/70 sm:text-[12.5px]"><code>{webOutput}</code></pre>
+						} else {
+							<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-foreground/70 sm:text-[12.5px]"><code>{nativeOutput}</code></pre>
+						}
+						<div class="flex min-w-0 items-center gap-3 border-t border-border px-3 py-2 font-mono text-[10px] text-muted-foreground">
+							for (let i = 0; i < stages.length; i++) {
+								<span class={i < stage ? "text-accent" : ""}>{i < stage ? "✓" : "·"} {stages[i]}</span>
+							}
+							<span class="ml-auto">{stage > 2 ? "done · 3.1 ms" : "…"}</span>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<p class="mt-6 max-w-[60ch] font-mono text-[12px] leading-relaxed text-muted-foreground">
+				If Vesk cannot preserve the semantics of your component on a target, the build fails — it never silently ships different behaviour.
+			</p>
+		</div>
+	</section>
+}

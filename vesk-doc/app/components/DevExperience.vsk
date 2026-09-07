@@ -1,0 +1,72 @@
+export component DevExperience {
+	const lines = [
+		{ text: "$ npm create vesk@latest", kind: "cmd" },
+		{ text: "$ cd my-app", kind: "cmd" },
+		{ text: "$ npm run dev", kind: "cmd" },
+		{ text: "✓ Vesk compiler ready", kind: "ok" },
+		{ text: "✓ Development server started · :3000", kind: "ok" },
+		{ text: "✓ HMR enabled", kind: "ok" },
+		{ text: "✓ Application running", kind: "ok" },
+		{ text: "→ web target · kotlin target", kind: "note" },
+	]
+
+	const &[shown] = track(0)
+
+	effect(() => {
+		const id = setInterval(() => {
+			if (shown >= lines.length) {
+				shown = 0
+			} else {
+				shown = shown + 1
+			}
+		}, 600)
+		on_destroy(() => clearInterval(id))
+	})
+
+	<section id="dx" class="border-b border-border">
+		<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20 lg:py-24">
+			<div class="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-16">
+				<div>
+					<p class="eyebrow mb-5 flex items-center gap-2">
+						<span class="text-accent">07</span>
+						<span>developer experience</span>
+					</p>
+					<h2 class="font-display font-semibold tracking-tight text-balance text-2xl leading-[1.05] sm:text-4xl max-w-[20ch]">The loop is the point.</h2>
+					<p class="mt-5 max-w-[42ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty sm:text-sm">
+						One command to start. Compiler diagnostics in the terminal, hot module replacement in the browser, and the same project compiling toward native without a second toolchain.
+					</p>
+					<div class="mt-7 grid gap-px border border-border bg-border font-mono text-[11px] sm:grid-cols-3">
+						<div class="bg-background px-3 py-3">
+							<div class="text-muted-foreground">cold start</div>
+							<div class="mt-1 font-display text-base font-semibold tracking-tight">412 ms</div>
+						</div>
+						<div class="bg-background px-3 py-3">
+							<div class="text-muted-foreground">hmr patch</div>
+							<div class="mt-1 font-display text-base font-semibold tracking-tight">18 ms</div>
+						</div>
+						<div class="bg-background px-3 py-3">
+							<div class="text-muted-foreground">native build</div>
+							<div class="mt-1 font-display text-base font-semibold tracking-tight">6.4 s</div>
+						</div>
+					</div>
+				</div>
+
+				<div class="panel-strong">
+					<div class="flex items-center gap-1.5 border-b border-border px-3 py-2">
+						<span class="size-2 bg-border-strong"></span>
+						<span class="size-2 bg-border-strong"></span>
+						<span class="size-2 bg-accent"></span>
+						<span class="ml-2 font-mono text-[10px] text-muted-foreground">vesk — zsh</span>
+					</div>
+					<div class="min-h-[248px] px-4 py-4 font-mono text-[11.5px] leading-[1.9] sm:text-[12.5px]">
+						for (let i = 0; i < shown; i++) {
+							const l = lines[i]
+							<div class={l.kind === "ok" ? "text-accent" : l.kind === "note" ? "text-muted-foreground" : "text-foreground/85"}>{l.text}</div>
+						}
+						<span class="caret inline-block h-3 w-1.5 bg-foreground/70 align-middle"></span>
+					</div>
+				</div>
+			</div>
+		</div>
+	</section>
+}
