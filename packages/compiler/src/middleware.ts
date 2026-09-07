@@ -109,7 +109,8 @@ export async function executeMiddlewareChain(
 ): Promise<{ response: Response | null; redirected: boolean; locals: Record<string, unknown>; rewriteUrl: string | null }> {
   const { onLast, plugins } = options;
   const url = new URL(request.url, 'http://localhost');
-  const locals: Record<string, unknown> = {};
+  const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
+  const locals: Record<string, unknown> = Object.assign({}, serverStore || {});
   const cookies = parseCookies(request.headers?.get('cookie') || '');
 
   const ctx = new Proxy({

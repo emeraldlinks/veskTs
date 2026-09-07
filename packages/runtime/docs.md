@@ -451,6 +451,17 @@ no `Content-Length`; delivered via `deliverResponse`'s `getReader()` loop on dev
 ISR: `isr`, `revalidatePath`, `revalidateTag`, `clearIsrCache`, `pageIsr`,
 `componentIsr`, `revalidateComponent`, `isrConfigToRevalidate`.
 
+Server events (`@vesk/runtime/server`): `serverLocals`, `getServerContext`,
+`setServerContext`, `clearServerContext` (plus `server_locals`,
+`get_server_context`, `set_server_context`, `clear_server_context` aliases).
+They read/write one process/isolate-wide store
+(`globalThis.__vesk_server_ctx`) shared with the `app/_events.ts` handlers
+and plugin `onStart`/`onStop` hooks — `setServerContext(k, v)` in an
+`onStart` boot is visible to every subsequent request,
+`getServerContext(k)` reads it anywhere server-side, and the store is
+pre-seeded into each request's middleware `locals`. `clearServerContext`
+wipes the store (edge isolates start with an empty store per isolate).
+
 ### Client-only bindings / reconcile
 `bindValue`, `bindChecked`, `bindGroup` (bindings), `reconcile` (reconcile).
 

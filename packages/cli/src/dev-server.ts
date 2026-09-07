@@ -11,6 +11,7 @@ import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
+import { collectEventsFile, loadEvents, runEventHandlers } from '@vesk/compiler/src/events';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, isAllowedWsUpgrade, installMdReadHook } from '@vesk/adapter/src/paths';
 import { createDevApiRouter } from '@vesk/adapter/src/dev-api';
@@ -29,7 +30,7 @@ import { createVeskTools } from '@vesk/agentic/src/tools/vesk';
 import { createWebTools } from '@vesk/agentic/src/tools/web';
 import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
-import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
+import type { RouteNode, VeskPlugin, VeskEventHandlers, ServerEventContext } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
 import { resolveCssUrls, isTailwindPlugin, hasUserCss, stripTailwindDirectives } from '@vesk/adapter/src/css';
 import { buildErrorPayload } from '@vesk/adapter/src/hmr';
@@ -465,6 +466,78 @@ export async function startDevServer(port: number, projectDir: string, config: R
       return rawDevPlugins;
     }
   }
+
+  // ── Server events (`app/_events.ts`) — live dev path ─────────────────────
+  // Modules can't be re-imported in-place, so dev keeps the handlers as values
+  // and re-runs them on HMR instead of reloading a module. Shipped via the
+  // synthetic event lifecycle below: onStart at boot, onRequest per request,
+  // onStop on shutdown/HMR.
+  let eventsFile: string | null = collectEventsFile(appDirPath);
+  let appEventsHandlers: VeskEventHandlers = {};
+  async function reloadAppEvents(): Promise<void> {
+    eventsFile = collectEventsFile(appDirPath);
+    if (eventsFile) {
+      try {
+        appEventsHandlers = await loadEvents(eventsFile);
+      } catch (e) {
+        LOG.err(`events load error: ${(e as Error).message}`);
+        appEventsHandlers = {};
+      }
+    } else {
+      appEventsHandlers = {};
+    }
+  }
+  function eventsStore(): Record<string, unknown> {
+    const g = globalThis as Record<string, unknown>;
+    if (!g.__vesk_server_ctx) g.__vesk_server_ctx = {};
+    return g.__vesk_server_ctx as Record<string, unknown>;
+  }
+  function makeEventCtx(overrides: Record<string, unknown>): ServerEventContext {
+    const store = eventsStore();
+    return {
+      server: null,
+      port,
+      host: bindHost,
+      locals: { ...store },
+      serverLocals: store,
+      set(key: string, value: unknown) { store[key] = value; return value; },
+      get(key: string) { return store[key]; },
+      ...overrides,
+    } as ServerEventContext;
+  }
+  let devServerRef: Server | null = null;
+  async function runAppStart(includePlugins: boolean): Promise<void> {
+    const bootCtx = makeEventCtx({ server: devServerRef });
+    try {
+      await runEventHandlers(appEventsHandlers, 'onStart', bootCtx);
+    } catch (e) {
+      LOG.err(`onStart error: ${(e as Error).message}`);
+    }
+    if (includePlugins) {
+      for (const plugin of getActiveDevPlugins()) {
+        if (typeof plugin.onStart === 'function') {
+          try { await (plugin.onStart as (ctx: ServerEventContext) => Promise<void>)(bootCtx); }
+          catch (e) { LOG.err(`plugin onStart error: ${(e as Error).message}`); }
+        }
+      }
+    }
+  }
+  async function runAppStop(includePlugins: boolean): Promise<void> {
+    const stopCtx = makeEventCtx({ server: devServerRef });
+    try {
+      await runEventHandlers(appEventsHandlers, 'onStop', stopCtx);
+    } catch (e) {
+      LOG.err(`onStop error: ${(e as Error).message}`);
+    }
+    if (includePlugins) {
+      for (const plugin of getActiveDevPlugins()) {
+        if (typeof plugin.onStop === 'function') {
+          try { await (plugin.onStop as (ctx: ServerEventContext) => Promise<void>)(stopCtx); }
+          catch (e) { LOG.err(`plugin onStop error: ${(e as Error).message}`); }
+        }
+      }
+    }
+  }
   function isTailwindActive(): boolean {
     return isTailwindPlugin(getActiveDevPlugins());
   }
@@ -776,12 +849,27 @@ export async function startDevServer(port: number, projectDir: string, config: R
         const isVsk = filename.endsWith('.vsk') || filename.endsWith('.md') || filename.endsWith('.markdown');
         const isCss = filename.endsWith('.css');
         const isApiRoute = filename.endsWith('.ts') || filename.endsWith('.js') || filename.endsWith('.tsx');
-        if (!isVsk && !isCss && !isApiRoute) return;
+        const isEvents = filename === '_events.ts' || filename === '_events.js';
+        if (!isVsk && !isCss && !isApiRoute && !isEvents) return;
 
         const fullPath = filename.startsWith('/') ? filename : join(watchDir, filename);
         const fileExists = existsSync(fullPath);
 
-        if (isVsk) {
+        if (isEvents) {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(async () => {
+            try {
+              await runAppStop(false);
+              await reloadAppEvents();
+              await runAppStart(false);
+              const bcast = (globalThis as Record<string, unknown>).__vesk_broadcastHmr as (msg: Record<string, unknown>) => void;
+              if (typeof bcast === 'function') bcast({ type: 'reload' });
+              LOG.info(`events reloaded (${filename})`);
+            } catch (e) {
+              LOG.err(`events reload error: ${(e as Error).message}`);
+            }
+          }, HMR_DEBOUNCE_MS);
+        } else if (isVsk) {
           if (debounceTimer) clearTimeout(debounceTimer);
           debounceTimer = setTimeout(async () => {
             const t0 = Date.now();
@@ -1101,10 +1189,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
 
-    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security, maxBodyBytes: maxBodyBytes, plugins: getActiveDevPlugins() as VeskPlugin[] })) {
-      return;
-    }
-
     if (url.pathname !== '/') {
       const staticPath = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
       if (staticPath && existsSync(staticPath) && statSync(staticPath).isFile()) {
@@ -1113,6 +1197,29 @@ export async function startDevServer(port: number, projectDir: string, config: R
         res.end(readFileSync(staticPath));
         return;
       }
+    }
+
+    const eventsCtx = makeEventCtx({
+      request: new Request(`http://localhost:${port}${req.url || '/'}`, {
+        headers: req.headers as Record<string, string>,
+        method: req.method || 'GET',
+      }),
+      params: {},
+      url,
+      cookies: rawCtx.cookies,
+    });
+    // Seed the shared per-request context so pages rendered without a
+    // middleware chain still see server-event locals.
+    rawCtx.locals = eventsCtx.locals;
+    (globalThis as Record<string, unknown>).__vesk_request = eventsCtx;
+    try {
+      await runEventHandlers(appEventsHandlers, 'onRequest', eventsCtx);
+    } catch (e) {
+      LOG.err(`onRequest error: ${(e as Error).message}`);
+    }
+
+    if (await handleActionRequest(req, res, { url, appDirPath, routeTree, security, maxBodyBytes: maxBodyBytes, plugins: getActiveDevPlugins() as VeskPlugin[] })) {
+      return;
     }
 
     const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
@@ -1143,7 +1250,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
           rawHeaders[k] = Array.isArray(v) ? v.join(', ') : (v || '');
         }
 
-        let apiLocals: Record<string, unknown> = {};
+        let apiLocals: Record<string, unknown> = Object.assign({}, eventsCtx?.locals || (globalThis as Record<string, unknown>).__vesk_server_ctx || {});
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
           try {
@@ -1523,6 +1630,20 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   });
 
+  devServerRef = server;
+
+  try {
+    await reloadAppEvents();
+  } catch (e) {
+    LOG.err(`events load error: ${(e as Error).message}`);
+  }
+
+  try {
+    await runAppStart(true);
+  } catch (e) {
+    LOG.err(`boot onStart error: ${(e as Error).message}`);
+  }
+
   server.on('error', (e: NodeJS.ErrnoException) => {
     if (e.code === 'EADDRINUSE') {
       LOG.err(`port ${port} is already in use — is another vesk dev server running?`);
@@ -1579,6 +1700,24 @@ export async function startDevServer(port: number, projectDir: string, config: R
       if (ws.readyState === 1) ws.send(msg);
     }
   };
+
+  let stopping = false;
+  const shutdown = (signal: string) => {
+    if (stopping) return;
+    stopping = true;
+    LOG.info(`dev server: ${signal} — stopping`);
+    void (async () => {
+      try {
+        await runAppStop(true);
+      } catch (e) {
+        LOG.err(`shutdown onStop error: ${(e as Error).message}`);
+      }
+      server.close(() => process.exit(0));
+    })();
+    setTimeout(() => process.exit(0), 3000).unref();
+  };
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   await new Promise(() => {});
 }

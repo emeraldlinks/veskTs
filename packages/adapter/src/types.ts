@@ -5,6 +5,8 @@ export type {
   RouteNode,
   ApiRouteNode,
   VeskPlugin,
+  ServerEventContext,
+  VeskEventHandlers,
   VeskSecurity,
   VeskCors,
   VeskRateLimit,

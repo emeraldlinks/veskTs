@@ -10,6 +10,7 @@ export interface PlatformHandlerInput {
   apiRoutes: ApiRouteNode[];
   prerenderedPaths: string[];
   hasMiddleware: boolean;
+  hasEvents?: boolean;
 }
 
 export function routeName(segments: string[]): string {
@@ -43,6 +44,7 @@ function findCompilerSrc(): string {
  */
 export function generatePlatformHandlerSource(input: PlatformHandlerInput): string {
   const { ssrRoutes, apiRoutes, prerenderedPaths, hasMiddleware } = input;
+  const hasEvents = !!input.hasEvents;
 
   let imports = '';
   const routeEntries: string[] = [];
@@ -67,12 +69,18 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
 
   const mwImport = hasMiddleware ? "import { execute as __executeMw } from './server/middleware.js';" : '';
   const hasMwLiteral = hasMiddleware ? 'true' : 'false';
+  const eventsImport = hasEvents ? "import { executeStart as __eventsStart, executeRequest as __eventsRequest } from './server/events.js';" : '';
 
   const prerenderedList = prerenderedPaths.length > 0
     ? `const __prerendered = new Set(${JSON.stringify(prerenderedPaths)});\n`
     : 'const __prerendered = new Set();\n';
 
   const isrCache = 'const __isrCache = new Map();';
+
+  const serverStoreLine = hasEvents ? 'const __serverStore = globalThis.__vesk_server_ctx || {};' : '';
+  const eventsStartLine = hasEvents ? '  await __eventsStart({ server: null });' : '';
+  const eventsRequestLine = hasEvents ? '  await __eventsRequest(mwCtx);' : '';
+  const localsSeed = hasEvents ? 'Object.assign({}, __serverStore)' : '{}';
 
   const compilerSrc = findCompilerSrc();
   const parseCookiesImport = hasMiddleware
@@ -111,23 +119,28 @@ export async function handleRequest(request) {
   const url = new URL(request.url);
   const pathname = url.pathname;
   const isDataRequest = request.headers.get('x-vesk-data') === '1';
+${serverStoreLine}
 
   if (__prerendered.has(pathname) && !isDataRequest) {
     return new Response(null, { status: 308, headers: { Location: '/_vesk/static/public' + (pathname.endsWith('/') ? pathname + 'index.html' : pathname + '.html') } });
   }
 
-  let mwCtx = { params: {}, url, locals: {}, cookies: {}, request, resolveUrl(u) { return new URL(u, request.url).href; }, set() {}, get() { return undefined; } };
+${eventsStartLine}
+  let mwCtx = { params: {}, url, locals: ${localsSeed}, cookies: {}, request, resolveUrl(u) { return new URL(u, request.url).href; }, set() {}, get() { return undefined; } };
   if (${hasMwLiteral}) {
     mwCtx = {
       request,
       params: {},
       url,
-      locals: {},
+      locals: ${localsSeed},
       cookies: typeof parseCookies !== 'undefined' ? parseCookies(request.headers.get('cookie') || '') : {},
       resolveUrl(u) { return new URL(u, request.url).href; },
       set(key, value) { this.locals[key] = value; },
       get(key) { return this.locals[key]; },
     };
+  }
+${eventsRequestLine}
+  if (${hasMwLiteral}) {
     const mwResult = await __executeMw(mwCtx);
     if (mwResult.response) return mwResult.response;
     if (mwResult.rewriteUrl) url.pathname = mwResult.rewriteUrl;
@@ -273,4 +286,5 @@ export interface PlatformBuildContext {
   apiRoutes: ApiRouteNode[];
   prerenderedPaths: string[];
   hasMiddleware: boolean;
+  hasEvents?: boolean;
 }

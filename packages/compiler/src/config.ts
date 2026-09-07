@@ -123,13 +123,15 @@ export function validateConfig(config: VeskConfig): VeskConfig {
       typeof plugin.onBuildStart === 'function' ||
       typeof plugin.onBuildEnd === 'function' ||
       typeof plugin.onRequest === 'function' ||
+      typeof plugin.onStart === 'function' ||
+      typeof plugin.onStop === 'function' ||
       typeof plugin.onHead === 'function' ||
       typeof plugin.onHtml === 'function' ||
       (plugin.provides && typeof plugin.provides === 'object' && Object.keys(plugin.provides).length > 0);
     if (!hasKnownHook) {
       throw new Error(
         `[vesk] Plugin "${plugin.name}" implements none of the recognized ` +
-        'hooks (onCSS, onFileWatch, onTransformJS, onBuildStart, onBuildEnd, onRequest, onHead, onHtml) ' +
+        'hooks (onCSS, onFileWatch, onTransformJS, onBuildStart, onBuildEnd, onRequest, onStart, onStop, onHead, onHtml) ' +
         'or provides — it will never be called. Check the plugin package version, or see ' +
         '/docu/cli/plugin-api.md for the current hook contract.'
       );

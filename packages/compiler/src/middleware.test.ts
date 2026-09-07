@@ -231,6 +231,33 @@ test('empty chain with no onLast returns null response', async () => {
 	cleanup('/tmp/nonexistent');
 });
 
+test('chain locals are preseeded from the server-wide events context', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx, next) {',
+			"  ctx.set('seen', ctx.get('boot'));",
+			'  return next();',
+			'}',
+		].join('\n'),
+	});
+	const g = globalThis as Record<string, unknown>;
+	g.__vesk_server_ctx = { boot: 'seed-value' };
+	try {
+		const tree = scanRoutes(join(tmp, 'app'));
+		const chain = collectMiddlewareChain(tree, '/', tmp);
+		const result = await executeMiddlewareChain(chain, new Request('http://localhost/'), {}, {
+			onLast: async (_rewrite, ctx) => new Response((ctx ? ctx.get('seen') : '') as string),
+		});
+		expect(result.locals.boot).toBe('seed-value');
+		expect(result.locals.seen).toBe('seed-value');
+		expect(await result.response.text()).toBe('seed-value');
+	} finally {
+		if (g.__vesk_server_ctx) { for (const k of Object.keys(g.__vesk_server_ctx as object)) delete (g.__vesk_server_ctx as Record<string, unknown>)[k]; }
+		cleanup(tmp);
+	}
+});
+
 await Promise.all(pending);
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

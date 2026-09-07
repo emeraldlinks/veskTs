@@ -405,6 +405,25 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   let routeTree: RouteNode[] = [];
   let runtimeBundle = '';
 
+  interface DevEventsModule {
+    executeStart?: (base?: Record<string, unknown>) => Promise<void>;
+    executeRequest?: (base?: Record<string, unknown>) => Promise<void>;
+    executeStop?: (base?: Record<string, unknown>) => Promise<void>;
+  }
+  let eventsMod: DevEventsModule | null = null;
+  async function reloadEventsMod(): Promise<void> {
+    const eventsPath = resolve(devDir, 'server', 'events.js');
+    if (existsSync(eventsPath)) {
+      try {
+        eventsMod = await import(`${eventsPath}?t=${Date.now()}`) as DevEventsModule;
+        return;
+      } catch {
+        // ignore — events file present but failed to load
+      }
+    }
+    eventsMod = null;
+  }
+
   async function doBuild(): Promise<void> {
     const start = Date.now();
     try {
@@ -417,6 +436,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       const monorepoRoot = resolve(__dirname, '..', '..', '..');
       const runtimeDir = resolve(monorepoRoot, 'packages', 'runtime', 'dist');
       runtimeBundle = buildRuntimeCode(runtimeDir);
+      await reloadEventsMod();
       lastBuild = Date.now();
       console.error(`vesk dev: rebuilt in ${Date.now() - start}ms`);
     } catch (e) {
@@ -425,9 +445,9 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     }
   }
 
-  await doBuild();
+await doBuild();
 
-  const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
+    const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
 
     // Dev panel endpoints (/__vesk/...): HMR state, plugin list, activate/
@@ -549,6 +569,24 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
         res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
         res.end(readFileSync(buildPath));
         return;
+      }
+    }
+
+    if (eventsMod) {
+      const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined || {};
+      const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
+      const evtCtx = {
+        request: webRequest,
+        params: {},
+        url,
+        locals: Object.assign({}, serverStore),
+        cookies: {} as Record<string, string>,
+      };
+      (globalThis as Record<string, unknown>).__vesk_request = evtCtx;
+      try {
+        await eventsMod.executeRequest?.(evtCtx);
+      } catch (e) {
+        console.error('vesk request: onRequest error:', e instanceof Error ? e.message : e);
       }
     }
 
@@ -730,6 +768,23 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   } catch (e) {
     console.error('vesk dev: file watching unavailable');
   }
+
+  const bootEventsMod = eventsMod as unknown as DevEventsModule | null;
+  try {
+    await bootEventsMod?.executeStart?.({ server, port, host });
+  } catch (e) {
+    console.error('vesk dev: onStart error:', e instanceof Error ? e.message : e);
+  }
+  server.on('close', () => {
+    void (async () => {
+      const stopEventsMod = eventsMod as unknown as DevEventsModule | null;
+      try {
+        await stopEventsMod?.executeStop?.({ server, port, host });
+      } catch (e) {
+        console.error('vesk dev: onStop error:', e instanceof Error ? e.message : e);
+      }
+    })();
+  });
 
   await new Promise<void>(resolve => {
     server.listen(port, host, () => {

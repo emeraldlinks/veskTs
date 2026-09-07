@@ -78,6 +78,54 @@ export interface MiddlewareChainItem {
   node: RouteNode;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Lifecycle events (`app/_events.ts`) + plugin lifecycle hooks
+// ────────────────────────────────────────────────────────────────────────────
+//
+// `app/_events.ts` is the app-level convention: export `onStart` / `onRequest`
+// / `onStop` handlers and Vesk runs them per event. `onStart` runs once at
+// server boot (or lazily once per isolate on serverless/edge targets),
+// `onRequest` runs for every request, and `onStop` runs on graceful shutdown
+// (Node servers only). Values `set()` during `onStart` land in the server-wide
+// context and are pre-seeded into every request's `locals`.
+
+/**
+ * Context passed to lifecycle event handlers and plugin `onStart`/`onStop`
+ * hooks. A superset of {@link MiddlewareContext}: everything on the per-request
+ * ctx is available to `onRequest`, and `onStart`/`onStop` additionally see the
+ * server object on long-running Node servers.
+ */
+export interface ServerEventContext {
+  /**
+   * The running Node `http.Server`. `null` on serverless/edge targets and at
+   * build time — those platforms have no persistent server process.
+   */
+  server?: unknown;
+  /** The port the server listens on (0 when no persistent server exists). */
+  port?: number;
+  /** The host address the server binds (undefined when no persistent server). */
+  host?: string;
+  request?: Request;
+  params?: Record<string, string>;
+  url?: URL;
+  locals: Record<string, unknown>;
+  cookies: Record<string, string>;
+  /**
+   * Process/isolate-wide context shared across every request. Sets performed
+   * here are visible via `locals()` on every subsequent request.
+   */
+  serverLocals: Record<string, unknown>;
+  set(key: string, value: unknown): void;
+  get(key: string): unknown;
+  [key: string]: unknown;
+}
+
+export interface VeskEventHandlers {
+  onStart?: (ctx: ServerEventContext) => void | Promise<void>;
+  onRequest?: (ctx: ServerEventContext) => void | Promise<void>;
+  onStop?: (ctx: ServerEventContext) => void | Promise<void>;
+}
+
 export interface MiddlewareExtractResult {
   params: string;
   body: string;
@@ -110,6 +158,21 @@ export interface VeskPlugin {
   onTransformJS?: (code: string, filePath: string) => string | null | Promise<string | null>;
   onBuildStart?: () => void | Promise<void>;
   onBuildEnd?: () => void | Promise<void>;
+  /**
+   * Runs once when a dev/start server boots, before it begins listening (and,
+   * on serverless/edge targets, once per isolate before the first request).
+   * Receives the server object on Node servers (`null` elsewhere) plus the
+   * per-process `serverLocals` store — values `set()` here are pre-seeded into
+   * every request's `locals()`. Dev servers run the live hook; production
+   * servers run the baked `app/_events.ts` handlers instead (plugin objects
+   * don't exist in the prod process — see the `onHead`/`headExtra` precedent).
+   */
+  onStart?: (ctx: ServerEventContext) => void | Promise<void>;
+  /**
+   * Runs on graceful shutdown (SIGINT/SIGTERM) on Node dev/start servers.
+   * No-op on serverless/edge targets, which have no shutdown lifecycle.
+   */
+  onStop?: (ctx: ServerEventContext) => void | Promise<void>;
   /**
    * Inject or rewrite the assembled `<head>` content. Receives the full head
    * string (charset, viewport, CSS links, security metas, page `<Head>` tags)
@@ -373,6 +436,8 @@ export interface Manifest {
    * no in-process plugin objects).
    */
   headExtra?: string;
+  /** True when the app declares a server-events file (`_events.ts`). */
+  events?: boolean;
 }
 
 export interface SsgRouteResult {

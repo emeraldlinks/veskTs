@@ -173,16 +173,27 @@ async function runHydrationTests() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
+    // Poll for a stable DOM state instead of relying on fixed sleeps — live
+    // SPA navigation can replace the document while puppeteer is mid-click,
+    // which surfaces as "Node is detached from document".
+    const waitH1 = async (text) => {
+      try {
+        await page.waitForFunction(
+          (want) => document.querySelector('h1')?.textContent?.trim() === want,
+          { timeout: 10000 }, text,
+        );
+      } catch { /* assertion below reports the actual state */ }
+    };
     await page.goto(BASE + '/blog', { waitUntil: 'networkidle0' });
     await page.click('a[href="/blog/hello-world"]');
-    await new Promise(r => setTimeout(r, 800));
+    await waitH1('Post: hello-world');
     hydrateAssert(page.url().includes('/blog/hello-world'), 'link → /blog/hello-world');
     let h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     hydrateAssert(h1 === 'Post: hello-world', 'h1: Post: hello-world');
     await page.click('a[href="/blog"]');
-    await new Promise(r => setTimeout(r, 800));
+    await waitH1('Blog');
     await page.click('a[href="/blog/ssr-in-vesk"]');
-    await new Promise(r => setTimeout(r, 800));
+    await waitH1('Post: ssr-in-vesk');
     hydrateAssert(page.url().includes('/blog/ssr-in-vesk'), 'link → /blog/ssr-in-vesk');
     h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     hydrateAssert(h1 === 'Post: ssr-in-vesk', 'h1: Post: ssr-in-vesk');
@@ -358,6 +369,20 @@ async function runHmrTests() {
   if (hmrServer) hmrServer.close();
 }
 
+async function runEventsTests() {
+  process.stdout.write('\n\x1b[1m=== Server Events Tests ===\x1b[0m\n');
+  const BASE = `http://localhost:${PORT}`;
+
+  const first = await (await fetch(`${BASE}/api/events`)).json();
+  assert(first.booted === 'events-online', `events onStart booted: ${first.booted}`);
+
+  const second = await (await fetch(`${BASE}/api/events`)).json();
+  assert((second.hits ?? 0) >= 2, `events onRequest ran per request (hits=${second.hits})`);
+
+  const page = await (await fetch(`${BASE}/`)).text();
+  assert(page.includes('Welcome to Vesk'), 'home still renders with events file present');
+}
+
 async function main() {
   process.stdout.write('\x1b[1m\x1b[36m=== Vesk Dev Test Runner ===\x1b[0m\n');
   process.stdout.write('Starting dev server...\n');
@@ -372,6 +397,7 @@ async function main() {
   try {
     await runUnitTests();
     await runHydrationTests();
+    await runEventsTests();
     await new Promise(r => setTimeout(r, 1000));
     await runHmrTests();
   } finally {

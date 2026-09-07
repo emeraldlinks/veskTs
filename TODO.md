@@ -4,6 +4,31 @@
 
 **Current phase:** pure-TS pipeline (haul parked)
 
+**Completed (server events):** `app/_events.ts` lifecycle hooks shipped end to end.
+`onStart` (Node: once before listen; edge: lazily per isolate with `server: null`),
+`onRequest` (every app request, bodyless, before middleware/actions) and `onStop`
+(graceful shutdown/dev HMR) run against a `ServerEventContext` whose `set`/`get`
+write one process-wide store `globalThis.__vesk_server_ctx`; `ctx.locals` is a
+per-request snapshot pre-seeded into middleware `locals`/`apiLocals`/SSR.
+Runtime adds `serverLocals`/`getServerContext`/`setServerContext`/
+`clearServerContext` (+ snake_case aliases) re-exported by `@vesk/runtime/server`
+and the adapter `server/runtime.js` bundle; `VeskPlugin` gains `onStart`/`onStop`
+(same ctx, included in the live CLI dev path). Compiler: `events.ts`
+collect/load/run + `isEventsFile`, `config.ts` gate, middleware seed. Adapter:
+`events.ts compileEvents` (esbuild-bundled `server/events.js`, idempotent
+`__vesk_events_started` guard cleared on stop, dynamic handler lift so missing
+exports don't warn), prod-server executeStart/executeRequest/executeStop, dev-server
+events boot + per-request hook, `_events.ts` HMR in del config; CLI dev-server runs
+events centrally (static→events→actions order), reloads + re-runs on events HMR.
+Fixes along the way: CLI boot didn't `reloadAppEvents()` before `runAppStart`
+(`_events.ts` was inert in dev); index-server now re-exports the snake_case aliases.
+Tests: compiler events 11 + middleware 12, adapter events 17, runtime server-events 7,
+plus E2E — `test-app/app/_events.ts` + `app/api/events/route.ts` asserted in
+`tests/dev-test.mjs` (38 total) and `tests/prod-test.mjs` (31 total; prod harness
+fixed to boot `startProdServer` in-process since `prod-server.ts` has no CLI
+bootstrap, plus the SPA back/forward test now back-navigates a pushState entry),
+`tests/hydration-test.mjs` 284/284, typecheck clean, no `_events` build warnings.
+
 **FIXED — dynamic/member-expression JSX component tags** (found while porting `vesk-docs`):
 `<it.icon />` compiled to `document.createElement("it.icon")` (dotted member treated as
 static HTML) and `<MyIcon />` (top-level `const MyIcon = Cpu`) to `__components["MyIcon"]`

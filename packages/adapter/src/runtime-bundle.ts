@@ -117,6 +117,16 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     'export const clearActions = __veskRuntime.clearActions;',
     'export const validateActionInput = __veskRuntime.validateActionInput;',
     'export const issuesToFieldMap = __veskRuntime.issuesToFieldMap;',
+    '',
+    '// Server-wide context store (server events)',
+    'export const serverLocals = __veskRuntime.serverLocals;',
+    'export const getServerContext = __veskRuntime.getServerContext;',
+    'export const setServerContext = __veskRuntime.setServerContext;',
+    'export const clearServerContext = __veskRuntime.clearServerContext;',
+    'export const server_locals = __veskRuntime.server_locals;',
+    'export const get_server_context = __veskRuntime.get_server_context;',
+    'export const set_server_context = __veskRuntime.set_server_context;',
+    'export const clear_server_context = __veskRuntime.clear_server_context;',
   ].join('\n');
   writeFileSync(entryFile, entryContent, 'utf-8');
 

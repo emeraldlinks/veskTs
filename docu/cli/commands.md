@@ -44,9 +44,47 @@ values fall back to 3000.
   500 so the SPA router can show the route error component.
 - HMR over WebSocket (`ws`): pushes `{ type: 'reload' | 'hmr', path }`.
 
+## Server events (`app/_events.ts`)
+
+The app can export lifecycle hooks from a private `app/_events.ts` (or
+`.js`) file. The `_` prefix keeps it out of routing and bundling as a page.
+
+```ts
+import type { ServerEventContext } from '@vesk/types';
+
+export async function onStart(ctx: ServerEventContext) {
+  await ctx.set('db', await createDb());
+}
+export async function onRequest(ctx: ServerEventContext) {
+  ctx.set('lastVisit', Date.now());
+}
+export async function onStop(ctx: ServerEventContext) {
+  await ctx.get<Db>('db')?.close();
+}
+```
+
+- `onStart` — Node: runs once before the server listens; edge: runs lazily
+  on the first request in the isolate (`ctx.server` is `null` on edge).
+- `onRequest` — runs for every app request, before middleware/actions. The
+  context is request-scoped: `ctx.set`/`ctx.get` write the process-wide store,
+  `ctx.locals` is a per-request snapshot seeded from it.
+- `onStop` — runs on graceful shutdown (SIGINT/SIGTERM) and on dev events HMR.
+- `ctx.set(key, value)` / `ctx.get(key)` / `ctx.serverLocals` mirror the
+  `@vesk/runtime/server` helpers `setServerContext` / `getServerContext` /
+  `serverLocals`, which read the same store via `globalThis.__vesk_server_ctx`.
+  Middleware `locals` and SSR pages see the boot values.
+- Dev: the handlers are reloaded and re-run when the events file changes
+  (onStart/onStop re-fire with the reload). Prod/edge: `_events.ts` is bundled
+  to `server/events.js` at build time and driven by `executeStart` /
+  `executeRequest` / `executeStop`.
+- Example: `test-app/app/_events.ts` (verified in `tests/dev-test.mjs` and
+  `tests/prod-test.mjs` via `test-app/app/api/events/route.ts`).
+
 ## Verified against
 
 - `packages/cli/src/index.ts` — command dispatch, flags, config loading
 - `packages/cli/docs.md` — dev server behaviors
+- `packages/cli/src/dev-server.ts` — server events wiring, events HMR
+- `packages/adapter/src/events.ts` — prod/edge `_events.ts` bundling
 - `docs/haul.md`, `packages/haul/internal/cli/` — haul commands
 - Commit `2a5b19d`

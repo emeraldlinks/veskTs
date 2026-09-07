@@ -12,10 +12,12 @@ into those pipelines directly.
 interface VeskPlugin {
   name: string;
   provides?: Record<string, (() => unknown | Promise<unknown>) | unknown>;
+  onStart?: (ctx: ServerEventContext) => void | Promise<void>;
   onRequest?: (ctx: MiddlewareContext) => void | Promise<void>;
   onCSS?: (content: string, filePath: string) => string | null | Promise<string | null>;
   onFileWatch?: (filePath: string) => { handled: boolean } | Promise<{ handled: boolean }>;
   onTransformJS?: (code: string, filePath: string) => string | null | Promise<string | null>;
+  onStop?: (ctx: ServerEventContext) => void | Promise<void>;
   onBuildStart?: () => void | Promise<void>;
   onBuildEnd?: () => void | Promise<void>;
 }
@@ -25,6 +27,12 @@ interface VeskPlugin {
 - At least one hook or a non-empty `provides` is required — a plugin that
   implements none of the recognized hooks "will never be called" and is
   rejected by `validateConfig`.
+- `onStart(ctx)` / `onStop(ctx)` receive a `ServerEventContext`
+  (`@vesk/types`) — the same context as `app/_events.ts`. `ctx.set`/`ctx.get`
+  write the process-wide server store; `onStart` runs at boot (once, before
+  the server listens — lazily per isolate on edge, where `ctx.server` is
+  `null`), `onStop` on graceful shutdown/dev reload. See
+  `/docu/cli/commands.md` → "Server events".
 - Hook contract details: `/docu/cli/plugin-api.md` (this page) is the
   canonical reference named by the compiler's error message.
 
@@ -66,5 +74,6 @@ export default defineConfig({
 - `packages/compiler/src/types.ts` — `VeskPlugin` interface
 - `packages/compiler/src/config.ts` — `definePlugin`, `validateConfig`
   plugin checks
+- `packages/types/src/index.ts` — `ServerEventContext`
 - `packages/plugin-tailwind/src/index.ts` — plugin behavior
 - Commit `2a5b19d`

@@ -223,6 +223,21 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     }
   }
 
+  interface EventsModule {
+    executeStart?: (base?: Record<string, unknown>) => Promise<void>;
+    executeRequest?: (base?: Record<string, unknown>) => Promise<void>;
+    executeStop?: (base?: Record<string, unknown>) => Promise<void>;
+  }
+  let eventsMod: EventsModule | null = null;
+  const eventsPath = resolve(outDir, 'server', 'events.js');
+  if (existsSync(eventsPath)) {
+    try {
+      eventsMod = await import(`${eventsPath}?t=${Date.now()}`) as EventsModule;
+    } catch {
+      // ignore
+    }
+  }
+
   interface SsrFunctionModule {
     handle: (req: Request) => Promise<Response>;
     handleAction?: (req: Request, id: string) => Promise<Response>;
@@ -358,16 +373,36 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     }
 
     let mwCtx: Record<string, unknown>;
+    const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
     if (middlewareMod) {
       mwCtx = {
         request: new Request(url.href, { headers: req.headers as Record<string, string>, method: req.method || 'GET' }),
         params: {},
         url,
-        locals: {},
+        locals: Object.assign({}, serverStore || {}),
         cookies: {},
         set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
         get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
       };
+    } else {
+      mwCtx = {
+        params: {},
+        url,
+        locals: Object.assign({}, serverStore || {}),
+        cookies: {},
+        request: null,
+        set() {},
+        get() { return undefined; },
+      };
+    }
+    if (eventsMod) {
+      try {
+        await eventsMod.executeRequest?.(mwCtx);
+      } catch (e) {
+        console.error('vesk request: onRequest error:', e instanceof Error ? e.message : e);
+      }
+    }
+    if (middlewareMod) {
       const mwResult = await middlewareMod.execute(mwCtx);
       if (mwResult.response) {
         const body = await mwResult.response.text();
@@ -378,16 +413,6 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       if (mwResult.rewriteUrl) {
         url.pathname = mwResult.rewriteUrl;
       }
-    } else {
-      mwCtx = {
-        params: {},
-        url,
-        locals: {},
-        cookies: {},
-        request: null,
-        set() {},
-        get() { return undefined; },
-      };
     }
     // Expose root middleware locals to API/SSR handlers (which seed their own
     // ctx.locals from this before running route-level middleware).
@@ -539,6 +564,33 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     res.writeHead(404, { 'Content-Type': 'text/html' });
     res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
   });
+
+  try {
+    await eventsMod?.executeStart?.({ server, port, host });
+  } catch (e) {
+    console.error('vesk start: onStart error:', e instanceof Error ? e.message : e);
+  }
+
+  server.on('close', () => {
+    void (async () => {
+      try {
+        await eventsMod?.executeStop?.({ server, port, host });
+      } catch (e) {
+        console.error('vesk stop: onStop error:', e instanceof Error ? e.message : e);
+      }
+    })();
+  });
+
+  let shuttingDown = false;
+  function shutdown(signal: string): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.error(`vesk stop: received ${signal}, closing…`);
+    server.close(() => process.exit(0));
+    setTimeout(() => process.exit(0), 3000).unref();
+  }
+  process.on('SIGINT', () => shutdown('SIGINT'));
+  process.on('SIGTERM', () => shutdown('SIGTERM'));
 
   server.listen(port, host, () => {
     console.error(`vesk production server at http://localhost:${port} (listening on ${host})`);

@@ -7,6 +7,7 @@ import { resolveUserCssPath, stripTailwindDirectives, isTailwindPlugin, resolveC
 import { collectActionIds } from '@vesk/compiler/src/actions';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/middleware';
+import { compileEvents } from '@vesk/adapter/src/events';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
 import { generateManifest } from '@vesk/adapter/src/manifest';
 import { copyStaticAssets } from '@vesk/adapter/src/static';
@@ -330,6 +331,9 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
+  const hasEvents = await compileEvents(appDir, outDir);
+  if (hasEvents) console.error('vesk build: evt  → server/events.js (onStart/onRequest/onStop)');
+
   console.error('vesk build: bundling client runtime...');
   const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[] } = {};
   if (options?.codeSplit) bundleOpts.codeSplit = true;
@@ -403,7 +407,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
-  const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra);
+  const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra, hasEvents);
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
 
@@ -420,6 +424,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         prerenderedPaths: prerenderedRoutes.map(r => r.path),
         prerenderedRoutes,
         hasMiddleware: middlewareEnabled,
+        hasEvents,
       });
       if (outRoot) {
         console.error(`vesk build: ${platform} → ${relative(projectRoot, outRoot)}`);

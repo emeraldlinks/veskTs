@@ -8,6 +8,7 @@ export function generateManifest(
   middlewareEnabled: boolean,
   actionMap?: Record<string, string>,
   headExtra?: string,
+  eventsEnabled = false,
 ): Manifest {
   const routeEntries: ManifestRouteEntry[] = [];
 
@@ -57,5 +58,6 @@ export function generateManifest(
     },
     ...(actionEntries.length > 0 ? { actions: actionEntries } : {}),
     ...(headExtra ? { headExtra } : {}),
+    ...(eventsEnabled ? { events: true } : {}),
   };
 }

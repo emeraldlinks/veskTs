@@ -1,9 +1,9 @@
 /**
  * Vesk Production Server Test Runner.
- * Builds the app, starts the production server, runs all production tests.
- * Usage: node tests/prod-test.mjs
+ * Builds the app, starts the production server in-process, runs all production
+ * tests. Usage: npx tsx tests/prod-test.mjs
  */
-import { execSync, spawn } from 'child_process';
+import { execSync } from 'child_process';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { existsSync } from 'fs';
@@ -16,7 +16,7 @@ execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inhe
 const PORT = 3099;
 const BASE = `http://localhost:${PORT}`;
 const outDir = resolve(root, 'test-app', '.vesk', 'prod-test');
-let serverProcess = null;
+let prodServer = null;
 let passed = 0;
 let failed = 0;
 
@@ -38,31 +38,31 @@ async function buildApp() {
 function startProdServer() {
   return new Promise((resolve_, reject) => {
     const prodServerPath = resolve(root, 'packages/adapter/src/prod-server.ts');
-    const prodServerPathJs = resolve(root, 'packages/adapter/src/prod-server.js');
-    serverProcess = spawn('npx', ['tsx', existsSync(prodServerPath) ? prodServerPath : prodServerPathJs], {
-      cwd: resolve(root, 'test-app'),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, PORT: String(PORT), NODE_ENV: 'production' },
-    });
-    let started = false;
-    const onData = (data) => {
-      const text = data.toString();
-      if (!started && text.includes('production server at')) {
-        started = true;
-        setTimeout(resolve_, 1000);
+    (async () => {
+      try {
+        const { startProdServer } = await import(prodServerPath);
+        const server = await startProdServer(outDir, { port: PORT });
+        prodServer = server;
+        const deadline = Date.now() + 30000;
+        for (;;) {
+          try {
+            const res = await fetch(`${BASE}/api/posts`);
+            if (res.ok) { setTimeout(resolve_, 500); return; }
+          } catch {}
+          if (Date.now() > deadline) throw new Error('prod server not ready within 30s');
+          await new Promise(r => setTimeout(r, 500));
+        }
+      } catch (e) {
+        reject(e instanceof Error ? e : new Error(String(e)));
       }
-    };
-    serverProcess.stdout.on('data', onData);
-    serverProcess.stderr.on('data', onData);
-    serverProcess.on('error', reject);
-    setTimeout(() => { if (!started) resolve_(); }, 10000);
+    })();
   });
 }
 
 function stopProdServer() {
-  if (serverProcess) {
-    serverProcess.kill('SIGTERM');
-    serverProcess = null;
+  if (prodServer) {
+    prodServer.close();
+    prodServer = null;
   }
 }
 
@@ -139,15 +139,24 @@ async function runProdHydrationTests() {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
+    // Land on /blog/hello-world via a real document load, then SPA-navigate to
+    // /blog via the router (pushState). back/forward then exercise popstate
+    // handling (a cross-document back would be a plain reload, not SPA).
     await page.goto(BASE + '/blog/hello-world', { waitUntil: 'networkidle0' });
-    await page.goto(BASE + '/blog', { waitUntil: 'networkidle0' });
+    await page.waitForFunction(() => !document.body.innerHTML.includes('<!--vsk-->'), { timeout: 15000 }).catch(() => {});
+    await new Promise(r => setTimeout(r, 300));
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await page.click('a[href="/blog"]');
+    await new Promise(r => setTimeout(r, 800));
+    let flagAlive = await page.evaluate(() => window.__spaFlag === true);
+    assert(flagAlive, '/blog/hello-world → /blog (SPA)');
     let h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
-    assert(h1 === 'Blog', 'Direct /blog');
+    assert(h1 === 'Blog', 'h1: Blog');
 
     await page.evaluate(() => { window.__spaFlag = true; });
     await page.evaluate(() => window.history.back());
     await new Promise(r => setTimeout(r, 800));
-    let flagAlive = await page.evaluate(() => window.__spaFlag === true);
+    flagAlive = await page.evaluate(() => window.__spaFlag === true);
     assert(flagAlive, 'back → /blog/hello-world (SPA)');
     h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     assert(h1 === 'Post: hello-world', 'h1: Post: hello-world');
@@ -181,6 +190,16 @@ async function runProdHydrationTests() {
   await browser.close();
 }
 
+async function runEventsTests() {
+  process.stdout.write('\n\x1b[1m=== Production Server Events Tests ===\x1b[0m\n');
+  const first = await (await fetch(`${BASE}/api/events`)).json();
+  assert(first.booted === 'events-online', `events onStart booted: ${first.booted}`);
+  const second = await (await fetch(`${BASE}/api/events`)).json();
+  assert((second.hits ?? 0) >= 2, `events onRequest ran per request (hits=${second.hits})`);
+  const page = await (await fetch(`${BASE}/`)).text();
+  assert(page.includes('Welcome to Vesk'), 'home still renders with events file present');
+}
+
 async function main() {
   process.stdout.write('\x1b[1m\x1b[36m=== Vesk Production Test Runner ===\x1b[0m\n');
 
@@ -195,12 +214,12 @@ async function main() {
     await startProdServer();
   } catch (e) {
     process.stderr.write(`Failed to start server: ${e.message}\n`);
-    stopProdServer();
     process.exit(1);
   }
 
   try {
     await runProdHydrationTests();
+    await runEventsTests();
   } finally {
     stopProdServer();
   }
@@ -212,6 +231,5 @@ async function main() {
 
 main().catch(e => {
   process.stderr.write(`Fatal: ${e.stack}\n`);
-  stopProdServer();
   process.exit(1);
 });

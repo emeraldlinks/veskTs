@@ -275,6 +275,18 @@ pageIsr(path: string, renderFn: () => Promise<{ html: string; headers?: Record<s
 componentIsr(key: string, renderFn: () => string | Promise<string>, opts?): Promise<string>
 isrConfigToRevalidate(config: unknown): number   // number or { revalidate } -> TTL, else 0
 ```
+- **Adds the server events module**:
+```ts
+serverLocals(): Record<string, unknown>        // same store as app/_events.ts + plugin onStart/onStop
+getServerContext(key: string): unknown          // read one server-wide value
+setServerContext(key: string, value: unknown): void  // write one server-wide value (visible to every request)
+clearServerContext(): void                      // wipe the store (edge isolates start empty per isolate)
+server_locals / get_server_context / set_server_context / clear_server_context  // snake_case aliases
+```
+All four address `globalThis.__vesk_server_ctx`, the same store the app
+`_events.ts` context and plugin `onStart`/`onStop` hooks write through; the
+store is pre-seeded into each request's middleware `locals`.
+
 - `VeskResponseInstance` (interface, in request.ts) exposes:
 `setStatus(code)`, `build()`, `text()`, `json()`, `setCookie(name, value, opts?)`,
 `clearCookie(name, opts?)`, `setCsp(policy)`, `setSecurityHeader(name, value)`,
