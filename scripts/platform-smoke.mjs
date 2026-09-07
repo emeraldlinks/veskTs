@@ -74,6 +74,12 @@ const handlerRel = shellPrefix + '/' + (platform === 'vercel' ? 'functions/__ind
 	: 'index.js');
 assert(statSync(join(deployRoot, handlerRel)).size > 10000, `handler bundle has substance (${statSync(join(deployRoot, handlerRel)).size} bytes)`);
 
+// The app ships `app/_events.ts`, so every handler bundle must contain the
+// compiled events lifecycle runner (`globalThis.__vesk_events_started` guard
+// marks the lifted executeStart/executeRequest/executeStop entry points).
+const handlerText = readFileSync(join(deployRoot, handlerRel), 'utf-8');
+assert(handlerText.includes('__vesk_events_started'), `events lifecycle runner bundled (${handlerText.includes('__vesk_events_started') ? 'yes' : 'MISSING'})`);
+
 // Static assets present. Layout differs per shell: 'platform' static mode
 // nests under the platform dir, 'embedded' keeps it at the outDir root.
 const staticCandidates = [join(deployRoot, '.vesk', 'static'), join(deployRoot, shellPrefix, 'static')];

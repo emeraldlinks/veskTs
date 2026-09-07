@@ -91,6 +91,7 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
 ${imports}
 ${parseCookiesImport}
 ${mwImport}
+${eventsImport}
 ${prerenderedList}
 ${isrCache}
 const __routes = [${routeEntries.join(',\n')}];
