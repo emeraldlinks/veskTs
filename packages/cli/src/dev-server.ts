@@ -1039,6 +1039,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
   const MIME: Record<string, string> = {
     '.svg': 'image/svg+xml', '.css': 'text/css', '': 'application/javascript',
+    '.js': 'application/javascript', '.mjs': 'application/javascript',
     '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
     '.html': 'text/html', '.json': 'application/json',
     '.webmanifest': 'application/manifest+json',
