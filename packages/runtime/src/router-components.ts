@@ -80,37 +80,54 @@ export function getCurrentRouter(): Router | null {
 	return _currentRouter;
 }
 
+/**
+ * Node fields like `error`, `loading`, `notFound` can hold an unresolved name
+ * string when a chunk fails to load (see the adapter's string-name fallback).
+ * Calling a string as a function throws `X is not a function`, and it also
+ * masks the real hydration failure. These finders therefore only return a node
+ * value when it is actually a callable function; offline/network nodes keep
+ * their `string` fallback semantics and are matched by name separately.
+ */
+function isFn(v: unknown): v is Function {
+	return typeof v === 'function';
+}
+
 export function findLoadingComponent(chain: Record<string, unknown>[]): Function | null {
 	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].loading) return chain[i].loading as Function;
+		const v = chain[i].loading;
+		if (isFn(v)) return v;
 	}
 	return null;
 }
 
 export function findErrorComponent(chain: Record<string, unknown>[]): Function | null {
 	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].error) return chain[i].error as Function;
+		const v = chain[i].error;
+		if (isFn(v)) return v;
 	}
 	return null;
 }
 
 export function findNotFoundComponent(chain: Record<string, unknown>[]): Function | null {
 	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].notFound) return chain[i].notFound as Function;
+		const v = chain[i].notFound;
+		if (isFn(v)) return v;
 	}
 	return null;
 }
 
 export function findOfflineComponent(chain: Record<string, unknown>[]): Function | string | null {
 	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].offline) return chain[i].offline as Function | string;
+		const v = chain[i].offline;
+		if (v !== undefined && v !== null) return v as Function | string;
 	}
 	return null;
 }
 
 export function findNetworkComponent(chain: Record<string, unknown>[]): Function | string | null {
 	for (let i = chain.length - 1; i >= 0; i--) {
-		if (chain[i].network) return chain[i].network as Function | string;
+		const v = chain[i].network;
+		if (v !== undefined && v !== null) return v as Function | string;
 	}
 	return null;
 }

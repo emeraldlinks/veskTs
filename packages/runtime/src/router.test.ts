@@ -1,4 +1,5 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from '@vesk/runtime/src/router';
+import { findErrorComponent, findNotFoundComponent, findLoadingComponent } from '@vesk/runtime/src/router-components';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
 let passed = 0;
@@ -1460,6 +1461,41 @@ testAsync('failed route data finishes the indicator with the error flag', async 
 });
 
 await asyncQueue;
+
+// ── Finder hardening: string-named nodes must not be returned as functions ──
+// When a code-split chunk fails to resolve, the adapter can leave a node field
+// holding a NAME STRING instead of the component function. Calling that string
+// as a function throws `X is not a function`; the finders must skip it (return
+// null) so the router falls through instead of crashing.
+test('string-named error/loading/notFound nodes are skipped (return null)', () => {
+	const chain = [
+		{ path: '/', page: () => null, error: 'Error_Index', loading: 'Loading_Index', notFound: 'NotFound_Index' },
+	] as unknown as Record<string, unknown>[];
+	expect(findErrorComponent(chain)).toBe(null);
+	expect(findNotFoundComponent(chain)).toBe(null);
+	expect(findLoadingComponent(chain)).toBe(null);
+});
+
+test('function error/loading/notFound nodes are returned', () => {
+	const err = () => document.createTextNode('e');
+	const load = () => document.createTextNode('l');
+	const nf = () => document.createTextNode('nf');
+	const chain = [
+		{ path: '/', page: () => document.createTextNode('p'), error: err, loading: load, notFound: nf },
+	] as unknown as Record<string, unknown>[];
+	expect(findErrorComponent(chain)).toBe(err);
+	expect(findNotFoundComponent(chain)).toBe(nf);
+	expect(findLoadingComponent(chain)).toBe(load);
+});
+
+test('nearest function error node wins over a closer string node', () => {
+	const err = () => document.createTextNode('e');
+	const chain = [
+		{ path: '/', page: () => document.createTextNode('p'), error: 'Legacy_Name' },
+		{ path: '/x', page: () => document.createTextNode('x'), error: err },
+	] as unknown as Record<string, unknown>[];
+	expect(findErrorComponent(chain)).toBe(err);
+});
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
