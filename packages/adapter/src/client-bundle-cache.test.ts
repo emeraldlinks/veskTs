@@ -207,6 +207,52 @@ component Home {
     assert(staleOk.compiledFiles === 1, `only the edited file compiles even when others went stale (${staleOk.compiledFiles})`);
     const staleAbout = staleOk.chunks.find(c => c.name === aboutChunkCold!.name)!;
     assert(staleAbout.code.includes('About') && !staleAbout.code.includes('silently changed'), 'non-edited file served from cache without stat');
+
+    // Warm rebuild must not lose chunk imports. Cached file codes keep their
+    // imports so a warm build re-folds them into its own fresh accumulator;
+    // if the cache stored import-stripped codes, the warm chunk would ship
+    // without its value-module bindings (ReferenceError at hydration).
+    console.log('\n=== Warm rebuild keeps chunk imports ===');
+    const dir2 = mkdtempSync(join(tmpdir(), 'vesk-cb-cache-imports-'));
+    const appDir2 = join(dir2, 'app');
+    mkdirSync(join(appDir2, 'components'), { recursive: true });
+    mkdirSync(join(appDir2, 'lib'), { recursive: true });
+    writeFileSync(join(appDir2, 'lib', 'icons.ts'), `export const Menu = 'MENU_WARM';
+export const Box = 'BOX_WARM';
+`);
+    writeFileSync(join(appDir2, 'components', 'MenuA.vsk'), `import { Menu } from '../lib/icons'
+component MenuA client {
+	return <span>{Menu}</span>
+}
+`);
+    writeFileSync(join(appDir2, 'components', 'MenuB.vsk'), `import { Menu, Box } from '../lib/icons'
+component MenuB {
+	return <span>{Menu}{Box}</span>
+}
+`);
+    writeFileSync(join(appDir2, 'page.vsk'), `import { MenuA } from './components/MenuA.vsk'
+import { MenuB } from './components/MenuB.vsk'
+component Home {
+	return <div><MenuA /><MenuB /></div>
+}
+`);
+    const tree2 = [routeNode(appDir2, '/', '/', 0)];
+    const cache2: ClientBundleCache = { files: new Map() };
+    const opts2 = { importRuntime: true, hmr: true, codeSplit: true, cache: cache2 };
+    const cold2 = await generateClientBundle(tree2, appDir2, new Map(), opts2);
+    const coldChunk = cold2.chunks.find((c) => c.name.includes('index'))!;
+    assert(coldChunk.code.includes('MENU_WARM') && coldChunk.code.includes('BOX_WARM'), 'cold chunk inlines both bindings');
+    const warm2 = await generateClientBundle(tree2, appDir2, new Map(), opts2);
+    assert(warm2.compiledFiles === 0, `warm rebuild recompiles nothing (${warm2.compiledFiles})`);
+    const warmChunk = warm2.chunks.find((c) => c.name.includes('index'))!;
+    assert(warmChunk.code.includes('MENU_WARM'), 'warm chunk keeps the Menu binding');
+    assert(warmChunk.code.includes('BOX_WARM'), 'warm chunk keeps the Box binding');
+    assert(!/^\s*import\s/m.test(warmChunk.code), 'warm chunk has no raw imports');
+    // esbuild stamps the random tmp entry path into a banner comment, so
+    // normalize it before comparing cold vs warm output.
+    const norm = (s: string) => s.replace(/tmp-vesk-chunk-[A-Za-z0-9_-]+/g, 'tmp-vesk-chunk-N');
+    assert(norm(warmChunk.code) === norm(coldChunk.code), 'warm chunk is byte-identical to the cold chunk');
+    rmSync(dir2, { recursive: true, force: true });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

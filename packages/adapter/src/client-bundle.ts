@@ -228,52 +228,6 @@ function demoteExports(code: string): string {
   return code;
 }
 
-/**
- * Code-split chunks execute as classic scripts, so a chunk contribution may
- * not carry a live `import` statement. Runtime (`@vesk/runtime*`) and `.vsk`
- * imports are stripped earlier; the remaining imports (npm packages like
- * `lucide-vesk`, and relative `.ts` value modules like `../../src/content/docs`)
- * are preserved here and rewritten so esbuild can inline them when the chunk is
- * bundled below.
- *
- * Relative specifiers are rewritten to absolute filesystem paths so they
- * resolve regardless of where the temp bundle entry is written; bare package
- * specifiers stay as-is and esbuild resolves them from the nearest
- * `node_modules`. The chunk builder then esbuild-bundles any chunk that still
- * has an import, inlining the referenced values into the IIFE so the final
- * classic script has no bare import and hydrates correctly. If bundling fails,
- * the caller falls back to stripping every import (the historical behavior).
- */
-function rewriteChunkImports(code: string, filePath: string): string {
-  let ast: unknown;
-  try {
-    ast = parse(code);
-  } catch {
-    return code;
-  }
-  type Edit = { start: number; end: number; text: string };
-  const edits: Edit[] = [];
-  for (const raw of (ast as { body?: Array<unknown> }).body ?? []) {
-    const node = raw as CompiledNode;
-    if (node.type !== 'ImportDeclaration' && node.type !== 'ExportNamedDeclaration') continue;
-    const src = node.source?.value;
-    if (typeof src !== 'string') continue;
-    if (src.startsWith('./') || src.startsWith('../')) {
-      const abs = resolve(dirname(filePath), src);
-      const start = (node.source as unknown as { start?: number }).start;
-      const end = (node.source as unknown as { end?: number }).end;
-      if (typeof start === 'number' && typeof end === 'number') {
-        // Append .ts extension so esbuild loads the module as TypeScript and inlines
-        // the exported values (e.g. const docPages = [...]).
-        edits.push({ start, end, text: JSON.stringify(abs + '.ts') });
-      }
-    }
-  }
-  edits.sort((a, b) => b.start - a.start);
-  for (const e of edits) code = code.slice(0, e.start) + e.text + code.slice(e.end);
-  return code;
-}
-
 function hasChunkImports(code: string): boolean {
   try {
     const ast = parse(code) as { body?: Array<unknown> };
@@ -281,6 +235,154 @@ function hasChunkImports(code: string): boolean {
   } catch {
     return false;
   }
+}
+
+interface ChunkSpecifier {
+  kind: 'default' | 'namespace' | 'named';
+  local?: string;
+  imported?: string;
+}
+
+/**
+ * Rewrites a compiled file's source specifier so esbuild can resolve it from
+ * the temp bundle entry. Bare package specifiers (e.g. `lucide-vesk`) stay
+ * as-is; relative specifiers are resolved to absolute filesystem paths with a
+ * `.ts` extension appended so esbuild loads the module as TypeScript and
+ * inlines its exported values. Offset-based on the parser AST — never a text
+ * scan.
+ */
+function resolveImportSource(src: string, filePath: string): string {
+  if (src.startsWith('./') || src.startsWith('../')) {
+    return resolve(dirname(filePath), src) + '.ts';
+  }
+  return src;
+}
+
+/**
+ * Accumulates every import a code-split chunk needs and rebuilds it as a
+ * single deduped import block.
+ *
+ * A chunk is the concatenation of several independently compiled files, and
+ * each file's component AND hydrator both keep their imports verbatim. So the
+ * same named binding frequently appears multiple times in one chunk — once per
+ * (file, comp|hyd) pair, plus once per extra file. acorn's `parse()` rejects
+ * that with `Identifier has already been declared`, so `hasChunkImports` used
+ * to silently return false and esbuild — which rejects the same duplicates —
+ * never ran; the chunk shipped with raw `import` statements inside its
+ * classic-script IIFE and hydration died with `SyntaxError: Cannot use import
+ * statement outside a module`.
+ *
+ * Processing each file's contribution in isolation avoids the duplicate
+ * bindings entirely (a single compiled file parses cleanly), folds the imports
+ * into a per-source map keyed by local binding, strips them from the file
+ * body, and later emits one merged import block at the top of the chunk.
+ */
+class ChunkImports {
+  private bySource = new Map<string, {
+    default?: ChunkSpecifier;
+    namespace?: ChunkSpecifier;
+    named: Map<string, ChunkSpecifier>;
+  }>();
+  private aborted = false;
+  private abortReason: string | null = null;
+
+  private fail(reason: string, code: string): string {
+    if (!this.aborted) {
+      this.aborted = true;
+      this.abortReason = reason;
+    }
+    return code;
+  }
+
+  /** Folds one file's imports into the merged set and returns the code with its imports stripped. */
+  add(code: string, filePath: string): string {
+    if (!code || this.aborted) return code;
+    let ast: unknown;
+    try {
+      ast = parse(code);
+    } catch {
+      // A single compiled file is always valid ESM; if it somehow is not,
+      // stop merging so the assembler falls back to the historical path.
+      return this.fail(`unparseable contribution from ${filePath}`, code);
+    }
+    const body = (ast as { body?: Array<unknown> }).body ?? [];
+    const ranges: Array<[number, number]> = [];
+    for (const raw of body) {
+      const node = raw as CompiledNode & { specifiers?: Array<unknown>; source?: { value?: unknown } };
+      if (node.type !== 'ImportDeclaration' || typeof node.start !== 'number' || typeof node.end !== 'number') continue;
+      const src = node.source?.value;
+      if (typeof src !== 'string') continue;
+      const resolved = resolveImportSource(src, filePath);
+      let group = this.bySource.get(resolved);
+      if (!group) {
+        group = { named: new Map() };
+        this.bySource.set(resolved, group);
+      }
+      for (const spec of node.specifiers ?? []) {
+        const s = spec as { type?: string; local?: { name?: string }; imported?: { name?: string } };
+        const local = s.local?.name;
+        if (typeof local !== 'string') return this.fail(`nameless specifier from '${resolved}' in ${filePath}`, code);
+        if (s.type === 'ImportDefaultSpecifier') {
+          if (group.default && group.default.local !== local) return this.fail(`conflicting default imports from '${resolved}' in ${filePath}`, code);
+          group.default = { kind: 'default', local };
+        } else if (s.type === 'ImportNamespaceSpecifier') {
+          if (group.namespace && group.namespace.local !== local) return this.fail(`conflicting namespace imports from '${resolved}' in ${filePath}`, code);
+          group.namespace = { kind: 'namespace', local };
+        } else if (s.type === 'ImportSpecifier') {
+          const imported = s.imported?.name;
+          if (typeof imported !== 'string') return this.fail(`nameless named-import from '${resolved}' in ${filePath}`, code);
+          const existing = group.named.get(imported);
+          if (existing && existing.local !== local) return this.fail(`'${imported}' from '${resolved}' bound to both '${existing.local}' and '${local}' in ${filePath}`, code);
+          group.named.set(imported, { kind: 'named', local, imported });
+        }
+      }
+      let cut = node.end;
+      if (code[cut] === ';') cut++;
+      ranges.push([node.start, cut]);
+    }
+    if (ranges.length === 0) return code;
+    return removeRanges(code, ranges);
+  }
+
+  /** True when every file parsed and merged cleanly (no conflict, no parse abort). */
+  get ok(): boolean {
+    return !this.aborted;
+  }
+
+  /** Why the merge aborted (null when `ok`). Surfaced by the assembler. */
+  get reason(): string | null {
+    return this.abortReason;
+  }
+
+  /** Renders the deduped import block (empty string when there are no imports). */
+  render(): string {
+    if (this.aborted || this.bySource.size === 0) return '';
+    const lines: string[] = [];
+    const sources = [...this.bySource.keys()].sort();
+    for (const src of sources) {
+      const g = this.bySource.get(src)!;
+      const parts: string[] = [];
+      if (g.default) parts.push(`import ${g.default.local} from ${JSON.stringify(src)}`);
+      if (g.namespace) parts.push(`import * as ${g.namespace.local} from ${JSON.stringify(src)}`);
+      const named = [...g.named.values()].sort((a, b) => (a.imported! < b.imported! ? -1 : 1));
+      if (named.length > 0) {
+        const specs = named.map((sp) => (sp.imported === sp.local ? sp.local! : `${sp.imported} as ${sp.local}`)).join(', ');
+        parts.push(`import { ${specs} } from ${JSON.stringify(src)}`);
+      }
+      lines.push(parts.join('\n'));
+    }
+    return lines.join('\n');
+  }
+}
+
+/** Removes a set of offset ranges from a source string, high-to-low. */
+function removeRanges(code: string, ranges: Array<[number, number]>): string {
+  const sorted = [...ranges].sort((a, b) => b[0] - a[0]);
+  let out = code;
+  for (const [start, end] of sorted) {
+    out = out.slice(0, start) + out.slice(end);
+  }
+  return out.trim();
 }
 
 /**
@@ -442,7 +544,7 @@ export async function generateClientBundle(
     return removeCompiledNodes(code, isComponentExport);
   }
 
-  function compileFile(filePath: string, resolvedName: string | null, output: string[]): void {
+  function compileFile(filePath: string, resolvedName: string | null, output: string[], imports: ChunkImports): void {
     if (seen.has(filePath)) return;
     seen.add(filePath);
 
@@ -463,11 +565,17 @@ export async function generateClientBundle(
     const cached = cacheUsable ? cachedEntry : undefined;
     if (cached && cacheUsable) {
       cachedFileHits++;
-      for (const dep of cached.imports) compileFile(dep, cache?.files.get(dep)?.actualName ?? '', output);
+      for (const dep of cached.imports) compileFile(dep, cache?.files.get(dep)?.actualName ?? '', output, imports);
       // Comp and hyd contributions of one file share its top-level bindings
       // (e.g. `const links` used by both the component and its hydrator),
-      // so they must be scoped together in a single block.
-      const cachedFileCode = [cached.compCode, cached.hydCode].filter(Boolean).join('\n');
+      // so they must be scoped together in a single block. Cached codes keep
+      // their imports; each side is folded separately because comp+hyd of one
+      // file carry the same import twice (joint parse would abort the merge).
+      // Mirror the fresh path exactly: strip, rename the hydrator registry,
+      // trim — otherwise warm output drifts from cold output.
+      const cachedComp = cached.compCode ? imports.add(cached.compCode, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      const cachedHyd = cached.hydCode ? imports.add(cached.hydCode, filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      const cachedFileCode = [cachedComp, cachedHyd].filter(Boolean).join('\n');
       if (cachedFileCode.trim()) output.push(scopeFileContribution(cachedFileCode));
       for (const n of cached.runtimeNames) runtimeImportNames.add(n);
       if (cached.actualName && resolvedName !== null && cached.actualName !== resolvedName) {
@@ -484,14 +592,18 @@ export async function generateClientBundle(
     }
     const namesBefore = cache ? new Set(runtimeImportNames) : null;
 
-    const importedPaths = resolveVskImports(filePath, (p, n) => compileFile(p, n || '', output));
+    const importedPaths = resolveVskImports(filePath, (p, n) => compileFile(p, n, output, imports));
 
     // One parse/IR pass feeds both client modes AND the component-name
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
     const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null, filePath);
-    const compCode = rawComp ? rewriteChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawComp))), filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-    const hydCode = rawHyd ? rewriteChunkImports(stripExports(stripVskImports(stripRuntimeImport(rawHyd))), filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    // Cache keeps the import-carrying codes so a warm build can re-fold them
+    // into its own fresh accumulator; the emitted codes are import-stripped.
+    const compWithImports = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))) : '';
+    const hydWithImports = rawHyd ? stripExports(stripVskImports(stripRuntimeImport(rawHyd))) : '';
+    const compCode = compWithImports ? imports.add(compWithImports, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const hydCode = hydWithImports ? imports.add(hydWithImports, filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
     if (rawComp) collectRuntimeImports(rawComp);
     if (rawHyd) collectRuntimeImports(rawHyd);
 
@@ -518,8 +630,8 @@ export async function generateClientBundle(
       cache.files.set(filePath, {
         mtimeMs: st.mtimeMs,
         size: st.size,
-        compCode,
-        hydCode,
+        compCode: compWithImports,
+        hydCode: hydWithImports,
         actualName,
         runtimeNames: [...runtimeImportNames].filter((n) => !namesBefore.has(n)),
         imports: importedPaths,
@@ -556,37 +668,45 @@ export async function generateClientBundle(
     function walkSplit(nodes: RouteNode[], _chain: RouteNode[]): void {
       for (const node of nodes) {
         const chunkCode: string[] = [];
+        const chunkImports = new ChunkImports();
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (node.page && existsSync(pagePath)) {
-          compileFile(pagePath, node.page, chunkCode);
+          compileFile(pagePath, node.page, chunkCode, chunkImports);
         }
         const layoutPath = resolve(appDir, node.sourceDir, 'layout.vsk');
         if (node.layout && existsSync(layoutPath)) {
-          compileFile(layoutPath, node.layout, chunkCode);
+          compileFile(layoutPath, node.layout, chunkCode, chunkImports);
         }
         const errorPath = resolve(appDir, node.sourceDir, 'error.vsk');
         if (node.error && existsSync(errorPath)) {
-          compileFile(errorPath, node.error, chunkCode);
+          compileFile(errorPath, node.error, chunkCode, chunkImports);
         }
         const notFoundPath = resolve(appDir, node.sourceDir, 'not-found.vsk');
         if (node.notFound && existsSync(notFoundPath)) {
-          compileFile(notFoundPath, node.notFound, chunkCode);
+          compileFile(notFoundPath, node.notFound, chunkCode, chunkImports);
         }
         const offlinePath = resolve(appDir, node.sourceDir, 'offline.vsk');
         if (node.offline && existsSync(offlinePath)) {
-          compileFile(offlinePath, node.offline, chunkCode);
+          compileFile(offlinePath, node.offline, chunkCode, chunkImports);
         }
         const networkPath = resolve(appDir, node.sourceDir, 'network.vsk');
         if (node.network && existsSync(networkPath)) {
-          compileFile(networkPath, node.network, chunkCode);
+          compileFile(networkPath, node.network, chunkCode, chunkImports);
         }
         const loadingPath = resolve(appDir, node.sourceDir, 'loading.vsk');
         if (node.loading && existsSync(loadingPath)) {
-          compileFile(loadingPath, node.loading, chunkCode);
+          compileFile(loadingPath, node.loading, chunkCode, chunkImports);
         }
         if (chunkCode.length > 0) {
           const chunkName = `page-${buildChunkName(node)}.js`;
-          chunkEntries.push({ name: chunkName, code: chunkCode.join('\n\n'), node });
+          // Prepend this chunk's deduped imports (one statement per source, no
+          // duplicate bindings) so the classic script exposes the bare
+          // identifiers its file bodies reference, and esbuild can parse and
+          // inline them.
+          if (!chunkImports.ok) console.error('[vesk] chunk import merge aborted for', chunkName + ':', chunkImports.reason);
+          const head = chunkImports.render();
+          const code = (head ? head + '\n\n' : '') + chunkCode.join('\n\n');
+          chunkEntries.push({ name: chunkName, code, node });
         }
         walkSplit(node.children || [], [..._chain, node]);
       }
@@ -594,12 +714,16 @@ export async function generateClientBundle(
     walkSplit(routeTree, []);
 
     const sharedCode: string[] = [];
+    const sharedImports = new ChunkImports();
     const compMap = componentMap || new Map();
     for (const [compName, compPath] of compMap) {
-      compileFile(compPath, compName, sharedCode);
+      compileFile(compPath, compName, sharedCode, sharedImports);
     }
     if (sharedCode.length > 0) {
-      chunkEntries.push({ name: 'shared.js', code: sharedCode.join('\n\n'), node: null as unknown as RouteNode });
+      if (!sharedImports.ok) console.error('[vesk] chunk import merge aborted for shared.js:', sharedImports.reason);
+      const head = sharedImports.render();
+      const code = (head ? head + '\n\n' : '') + sharedCode.join('\n\n');
+      chunkEntries.push({ name: 'shared.js', code, node: null as unknown as RouteNode });
     }
 
     const chunkIIFE = (body: string): string =>
@@ -613,7 +737,9 @@ export async function generateClientBundle(
         // packages like lucide-vesk and rewritten relative `.ts` value
         // modules) is inlined into the IIFE — a classic script cannot carry
         // a live `import`, and a stripped binding referenced by a component
-        // would otherwise throw `X is not defined` at hydration.
+        // would otherwise throw `X is not defined` at hydration. Imports were
+        // already deduped per file by `ChunkImports`, so esbuild can parse the
+        // bundle entry.
         const tmpBase = mkdtempSync(join(resolve(appDir, '..'), 'tmp-vesk-chunk-'));
         const tmpFile = join(tmpBase, 'entry.js');
         const toBundle = `const __components = globalThis.__components || (globalThis.__components = {});\nconst __hydrators = globalThis.__hydrators || (globalThis.__hydrators = {});\n${entry.code}\n`;
@@ -627,7 +753,6 @@ export async function generateClientBundle(
             write: false,
             logLevel: 'silent',
             loader: { '.js': 'tsx' },
-            extensions: ['.js', '.ts', '.tsx', '.jsx'],
           });
           finalCode = result.outputFiles[0].text;
         } catch (e) {

@@ -169,6 +169,72 @@ export default __components["Layout"];`;
     delete (globalThis as Record<string, unknown>).__components;
   }
 
+  // ── Duplicate identical value-module import (regression) ──
+  // Two components importing the SAME named binding from the SAME value module
+  // (e.g. both `import { Menu, X } from 'lucide-vesk'`) previously duplicated
+  // the binding in the concatenated chunk. acorn's `parse()` AND esbuild both
+  // reject that (`Identifier 'Menu' has already been declared`), so the chunk
+  // silently shipped with a live `import` inside its classic-script IIFE and
+  // hydration died with `Cannot use import statement outside a module`. Here we
+  // use a real resolvable `.ts` value module so the esbuild inline path runs.
+  console.log('\n=== Duplicate value-module import merging ===');
+  {
+    const dir2 = mkdtempSync(join(tmpdir(), 'vesk-cb-dup-'));
+    const appDir2 = join(dir2, 'app');
+    const compDir2 = join(appDir2, 'components');
+    mkdirSync(compDir2, { recursive: true });
+    mkdirSync(join(appDir2, 'lib'), { recursive: true });
+    writeFileSync(join(appDir2, 'lib', 'icons.ts'), `export const Menu = 'MENU_VSK';
+export const X = 'X_VSK';
+export const Box = 'BOX_VSK';
+`);
+
+    // MenuA imports two of the same bindings; MenuB imports them PLUS an extra
+    // (Box), so the merged import must keep every distinct binding exactly once.
+    writeFileSync(join(compDir2, 'MenuA.vsk'), `import { Menu, X } from '../lib/icons'
+component MenuA client {
+	return <span>{Menu}{X}</span>
+}
+`);
+    writeFileSync(join(compDir2, 'MenuB.vsk'), `import { Menu, X, Box } from '../lib/icons'
+component MenuB {
+	return <span>{Menu}{Box}</span>
+}
+`);
+    writeFileSync(join(appDir2, 'page.vsk'), `import { MenuA } from './components/MenuA.vsk'
+import { MenuB } from './components/MenuB.vsk'
+component Home {
+	return <div><MenuA /><MenuB /></div>
+}
+`);
+
+    const tree2 = [{
+      path: '', fullPath: '/', isGroup: false, isDynamic: false, isCatchAll: false,
+      page: 'Page_Index', layout: null, loading: null, error: null, notFound: null,
+      hasMiddleware: false, children: [], sourceDir: appDir2, segmentCount: 0,
+    }];
+    const bundle2 = await generateClientBundle(tree2 as any, appDir2, new Map(), {
+      importRuntime: true,
+      codeSplit: true,
+    } as any);
+
+    const chunkCode = (bundle2.chunks ?? []).map((c: any) => String((c as any).code ?? c)).join('\n');
+    await assert(chunkCode.length > 0, 'chunk emitted');
+    if (chunkCode.length > 0) {
+      let chunkParses = true;
+      try { new Function(chunkCode); } catch { chunkParses = false; }
+      await assert(chunkParses, 'chunk IIFE parses as a classic script');
+      await assert(!/^\s*import\s/m.test(chunkCode), 'no raw import survives in the classic-script chunk');
+      // esbuild inlined the value module's exports into the IIFE.
+      await assert(chunkCode.includes('MENU_VSK'), 'Menu binding inlined (got: ' + ((chunkCode.match(/MENU_VSK/g) || []).length) + ')');
+      await assert(chunkCode.includes('BOX_VSK'), 'Box binding inlined (no duplicate dropped the extra binding)');
+      const menuDecls = (chunkCode.match(/Menu_VSK/g) || []).length;
+      await assert(menuDecls <= 1, 'Menu binding declared no more than once in the IIFE (' + menuDecls + ')');
+    }
+
+    rmSync(dir2, { recursive: true });
+  }
+
   rmSync(dir, { recursive: true });
 
   console.log(`\n${passed} passed, ${failed} failed`);
