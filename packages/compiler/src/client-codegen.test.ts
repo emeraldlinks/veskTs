@@ -825,11 +825,12 @@ describe('Effect blocks collected into per-item arrays', () => {
 	// client chunk fails with a SyntaxError and the page never hydrates.
 	// (Surfaced by nested loops inside component children, e.g. Roadmap.)
 	bothModes('effectful nested map in component children of keyed item compiles', `
-		const groups = [{ label: 'g', items: ['a', 'b'] }];
+		const groups = [{ label: 'g' }];
 		component Wrap(props) { return <div>{props.children}</div>; }
 		component App {
 			let &[active] = track(0);
-			return <div>{groups.map(g => <Wrap key={g.label}><ul>{g.items.map(i => <li class={active === 0 ? 'a' : 'b'}>{i}</li>)}</ul></Wrap>)}</div>;
+			let &[items] = track(['a', 'b']);
+			return <div>{groups.map(g => <Wrap key={g.label}><ul>{items.map(i => <li class={active === 0 ? 'a' : 'b'}>{i}</li>)}</ul></Wrap>)}</div>;
 		}
 	`, (code) => {
 		try {
@@ -841,11 +842,12 @@ describe('Effect blocks collected into per-item arrays', () => {
 	});
 
 	bothModes('statement-mode effectful nested map in component children of keyed item compiles', `
-		const groups = [{ label: 'g', items: ['a', 'b'] }];
+		const groups = [{ label: 'g' }];
 		component Wrap(props) { <div>{props.children}</div> }
 		component App {
 			let &[active] = track(0);
-			<div>{groups.map(g => <Wrap key={g.label}><ul>{g.items.map(i => <li class={active === 0 ? 'a' : 'b'}>{i}</li>)}</ul></Wrap>)}</div>;
+			let &[items] = track(['a', 'b']);
+			<div>{groups.map(g => <Wrap key={g.label}><ul>{items.map(i => <li class={active === 0 ? 'a' : 'b'}>{i}</li>)}</ul></Wrap>)}</div>;
 		}
 	`, (code) => {
 		try {
@@ -981,6 +983,43 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		expect(code).toContain('while (i < 3) {');
 		expect(code).not.toContain('let __iv = !(i < 3)');
 		expect(code).not.toContain('const __nv = (i < 3)');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// A for-of loop over a static collection (module const, member of a loop
+	// variable, or statement-mode local) must NOT emit a top-level re-render
+	// effect: that effect would reference the loop-local variable from the
+	// component scope where it is undefined. Reproduced in vesk-doc: the Footer
+	// iterates `for (const col of columns)` with an inner `for (const link of
+	// col.links)`, and /docs iterates `for (const group of docGroups)` with a
+	// statement-mode `const pages = …` — both threw `ReferenceError` at hydrate.
+	bothModes('nested for-of over static member collection emits no outer effect', `
+		const columns = [{ title: 'a', links: ['x', 'y'] }];
+		component App() {
+			for (const col of columns) {
+				<div>{col.title}</div>
+				for (const link of col.links) { <a>{link}</a> }
+			}
+		}
+	`, (code) => {
+		expect(code).not.toContain('__nv = col.links');
+		expect(code).not.toContain('__nv = col.title');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('for-of with statement-mode local derived array emits no outer effect', `
+		const docGroups = [{ name: 'a' }];
+		const docPages = [{ title: 'p', group: 'a' }];
+		component App() {
+			for (const group of docGroups) {
+				const pages = docPages.filter((p) => p.group === group);
+				if (pages.length > 0) {
+					for (const p of pages) { <span>{p.title}</span> }
+				}
+			}
+		}
+	`, (code) => {
+		expect(code).not.toContain('__nv = pages');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 

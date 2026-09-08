@@ -825,6 +825,11 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       }
     });`;
 
+  // A static condition renders once; an effect referencing it would only ever
+  // reference statement/loop-local bindings that are out of scope at the flush
+  // site (e.g. `const pages = …; if (pages.length > 0)` inside a for-of body).
+  if (!isReactiveExpression(node.condition as any, tracked)) return null;
+
   if (effTarget) {
     ctx.push(`${effTarget}.push((() => {
     let __iv = ${condExpr};
@@ -960,6 +965,14 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
 
   if (node.kind === 'for-in') {
     const srcExpr = transformTracked(node.condition as any, tracked);
+    // A `for ... of x` loop is only reactive when its source references a
+    // tracked cell/prop. Emitting the re-render effect unconditionally would
+    // reference the loop-local item variable (e.g. `col`, `group`, `p`) at
+    // the top level, where it is out of scope — `ReferenceError` at hydrate
+    // for loops over static/member collections or statement-mode locals.
+    if (!isReactiveExpression(node.condition, tracked)) {
+      return null;
+    }
     ctx.effects.push(`{
   let __busy = false;
   let __iv = undefined;
@@ -1063,6 +1076,12 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   const keyed = !!node.keyExpr;
   const hyd = ctx.hydrate && !keyed;
   const parent = parentVar || '$root';
+  // A re-render effect is only valid when the map iterates a tracked/reactive
+  // source. Iterating a static collection (module const, top-level array) or a
+  // loop/statement-local derived value (e.g. `col.links`, `pages`) renders once;
+  // emitting a top-level effect there would reference the loop/statement local
+  // (`col`, `pages`) which is out of scope — `ReferenceError` at hydrate.
+  const reactiveSource = isReactiveExpression(node.expression as any, tracked);
 
   ctx.push(`const ${anchor} = document.createComment('map');`);
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
@@ -1124,6 +1143,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
       const isEmptyVar = ctx.n();
       ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
       ctx.push(`if (!${isEmptyVar}) { ${initList}(); } else { ${aw}${emptyRenderName}(); }`);
+      if (!reactiveSource) return null;
       ctx.effects.push(`{
   let __first = true;
   effect(${effOpen}
@@ -1142,6 +1162,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
 }`);
     } else {
       ctx.push(`${initList}();`);
+      if (!reactiveSource) return null;
       ctx.effects.push(`{
   let __first = true;
   effect(() => {
@@ -1177,6 +1198,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
       ctx.push(indent(renderAllItems('', collectVar)));
       ctx.push(indent(`} else { ${aw}${emptyRenderName}(${collectVar ? collectVar : ''}); }`));
       if (collectVar) ctx.push(`__place(${anchor}, ${endAnchor}, ${collectVar}, ${parent});`);
+      if (!reactiveSource) return null;
       ctx.effects.push(`{
   let __first = true;
   effect(${effOpen}
@@ -1205,6 +1227,7 @@ ${renderAllItems('      ', null)}
       if (collectVar) ctx.push(`const ${collectVar} = [];`);
       ctx.push(renderAllItems('', collectVar));
       if (collectVar) ctx.push(`__place(${anchor}, ${endAnchor}, ${collectVar}, ${parent});`);
+      if (!reactiveSource) return null;
       ctx.effects.push(`{
   let __first = true;
   effect(${effOpen}
