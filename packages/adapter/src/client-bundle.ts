@@ -263,7 +263,9 @@ function rewriteChunkImports(code: string, filePath: string): string {
       const start = (node.source as unknown as { start?: number }).start;
       const end = (node.source as unknown as { end?: number }).end;
       if (typeof start === 'number' && typeof end === 'number') {
-        edits.push({ start, end, text: JSON.stringify(abs) });
+        // Append .ts extension so esbuild loads the module as TypeScript and inlines
+        // the exported values (e.g. const docPages = [...]).
+        edits.push({ start, end, text: JSON.stringify(abs + '.ts') });
       }
     }
   }
@@ -625,6 +627,7 @@ export async function generateClientBundle(
             write: false,
             logLevel: 'silent',
             loader: { '.js': 'tsx' },
+            extensions: ['.js', '.ts', '.tsx', '.jsx'],
           });
           finalCode = result.outputFiles[0].text;
         } catch (e) {
