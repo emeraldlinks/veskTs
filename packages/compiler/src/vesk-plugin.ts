@@ -414,16 +414,33 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
         }
         if (this.#componentDepth > 0 && code === 60 && this.#isBlockContext()) {
           const next = this.input.charCodeAt(this.pos + 1);
-          if (next === 47 || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
-            const startsNewStatement = (this as any).hasPrecedingLineBreak();
-            const inType = (this as any).inType;
-            const forceJsx = () => {
-              const savedExprAllowed = (this as any).exprAllowed;
-              (this as any).exprAllowed = true;
-              const result = super.readToken(code);
-              (this as any).exprAllowed = savedExprAllowed;
-              return result;
-            };
+          const startsNewStatement = (this as any).hasPrecedingLineBreak();
+          const inType = (this as any).inType;
+          const forceJsx = () => {
+            const savedExprAllowed = (this as any).exprAllowed;
+            (this as any).exprAllowed = true;
+            const result = super.readToken(code);
+            (this as any).exprAllowed = savedExprAllowed;
+            return result;
+          };
+          const prev = this.type;
+          const canEndExpr =
+            prev === tt.name || prev === tt.num || prev === tt.string || prev === tt.regexp ||
+            prev === tt.bracketR || prev === tt.backQuote || prev === tt.template ||
+            prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
+            prev === tt._null || prev === tt.jsxTagEnd;
+          // A bare `<>` fragment opening a statement (rather than a
+          // relational/type token) is JSX. It is only safe to force when it
+          // follows a line break — e.g. a semicolon-less declaration such as
+          // `const &[x] = track(...)` in statement mode, where plain
+          // tokenisation emits a `<`/`>` pair. No expression can end in `<>`,
+          // so a line break alone is sufficient to disambiguate.
+          const fragmentStart = !inType && next === 62 && startsNewStatement;
+          if (next === 47 || fragmentStart || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
+            if (fragmentStart) {
+              this.#jsxStartsStatement = true;
+              return forceJsx();
+            }
             if (inType) {
               if (startsNewStatement) {
                 if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
@@ -435,12 +452,6 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
                 return this.finishToken(tstt.jsxTagStart);
               }
             } else {
-              const prev = this.type;
-              const canEndExpr =
-                prev === tt.name || prev === tt.num || prev === tt.string || prev === tt.regexp ||
-                prev === tt.bracketR || prev === tt.backQuote || prev === tt.template ||
-                prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
-                prev === tt._null || prev === tt.jsxTagEnd;
               if (!canEndExpr || startsNewStatement) {
                 if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
                   this.#jsxStartsStatement = false;

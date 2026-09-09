@@ -1,122 +1,102 @@
-# VeskTS Development Summary - 2026-08-02
+# Vesk — Session Summary (2026-09-09)
 
-## Overview
-This session added three demo pages exercising every supported JS statement in the compiler (if/else, ternary, switch, for, for-in, for-of, while, do-while, try/catch+throw, labeled blocks, runtime statements, async `load()`, inline `.map()`), curled each page one at a time, and fixed four real compiler/dev-server bugs uncovered along the way. Ended with `tests/hydration-test.mjs` at 60/60 passing.
+## Goal
+Make SSR page responses <100ms in dev and prod regardless of page size (user directive),
+then diagnose/fix `#routing` (hash-mode) Link + NavLink.
 
----
+## What was FIXED
 
-## New Demo Pages (`test-app/app`)
+### 1. Lazy barrel loading in SSR module loader — DONE, big win
+- **File:** `packages/compiler/src/module-imports.ts`
+- **Problem:** vesk's `loadSsrModule`/`evaluateModuleFile` eagerly evaluated the full
+  transitive closure of re-export barrels. `import { Menu, X } from 'lucide-vesk'`
+  loaded/compiled all 4,782 lucide icons (~66s cold module load on this box).
+- **Fix (implemented + rebuilt):** in `loadSsrModule`, parse source once
+  (`readSsrSource`); if `isPureReexportBarrel(body)` build a lazy spec
+  (`buildBarrelSpec`) and return `createLazyBarrelExports(...)` — a Proxy with
+  `get`/`has`/`ownKeys`/`getOwnPropertyDescriptor` traps that resolve a named export
+  only when requested. `export *` re-exported lazily, `export * as ns` returns the
+  submodule's exports object, `export *` never re-exports default. Barrels cache with
+  empty deps (no 4,782-file stat walk). Per-statement esrap `print()` replaced with
+  direct `Literal.value` read (`quotedSourceValue`, fallback `printNode` +
+  `stripOuterQuotes`).
+- **Measured (tsx on this box):** cold `applyLocalModuleImports` 1705.6ms; warm
+  recompile **27.5ms**; steady request **~23-30ms**; vesk-doc end-to-end real SSR
+  function module load **66s → 4.1s**, `handle()` #1 115ms, #2 29ms.
+- Verified: `import { Menu, X, Boxes, Cpu }` all resolve; unrequested names undefined;
+  `'Menu' in scope` true; `Object.keys(scope)` = exactly the requested names.
 
-### `/statements` — `app/statements/page.vsk`
-Exercises statement-mode compilation of every supported construct with visible SSR output:
-- `if / else` blocks, ternary expressions
-- `switch` with JSX cases + `break`
-- `for` loop with counter, `for-of` over array values, `for-in` over object keys
-- `while` and `do-while` loops (shared counter carries across)
-- `try / catch / throw` (`throw new Error('Boom!')` caught and rendered)
-- labeled block (`summary: { ... }`)
-- runtime statements (`const total = items.length * 2`, counter mutation)
+### 2. Parser regression: bare `<>` fragment after a semicolon-less statement — DONE
+- **File:** `packages/compiler/src/vesk-plugin.ts`
+- **Problem:** `const &[open] = track(false)\n  <>\n...` failed to parse
+  (`Unexpected token`). Also any semicolon-less declarator + bare fragment
+  (`const x = 1` then `<>`), and a void call + fragment. After `;`-terminated,
+  after `return`, or as first statement the fragment parsed — inconsistency.
+- **Root cause:** acorn tokenizes `<`/`>` via `readToken_lt_gt`
+  (getTokenFromCode case 60/62), bypassing the plugin's `readToken`. Statement-mode
+  forcing happened only when `exprAllowed` was true (first statement, after `;`,
+  after `return`) or for `<div`/`</` (the plugin's `readToken` gate excludes `>`).
+  After a semicolon-less declaration `exprAllowed` is false → `<>` became a
+  relational pair → parse error.
+- **Fix:** in `readToken`, `fragmentStart = !inType && next === 62 && startsNewStatement`
+  (newline before `<`), then `forceJsx()`. No expression can end in `<>`, so a line
+  break alone disambiguates. Hoisted `prev`/`canEndExpr` to avoid duplicate consts.
+- **Verified:** 10-case matrix passes including full `DocsHeader.vsk`; added 3
+  regression tests to `packages/compiler/src/parser.test.ts` (track→fragment,
+  plain const→fragment, expression stmt→fragment) — **98 passed, 0 failed**.
+  Also reran `expression-mode` (16✓), `render-plugins` (16✓), `vsk-codegen` (15✓),
+  `ir-generator` (9✓), `server-codegen` (145✓), `cli` (14✓).
 
-### `/async` — `app/async/page.vsk`
-- `export async function load()` — fetches `/api/posts` during SSR using `globalThis.__vesk_ssr_base_url` (set per-request by the dev server), returns `{ props: { posts } }`
-- `for-of` over `props.posts` renders post cards
+### IMPORTANT gotcha discovered (not yet fixed)
+- **`packages/cli/dist/cli.js` is a BUNDLED snapshot** (built by `packages/cli/build.ts`,
+  NOT `build-packages.ts`). It embeds its own compiler+adapter. After changing compiler
+  src, `npx tsx packages/cli/src/build-packages.ts` is NOT enough for the CLI/dev
+  server — the CLI bundle must be rebuilt with `cd packages/cli && npx tsx build.ts`.
+  I ran this at the very end; **verify it completed and that vesk-doc build/serve now
+  pass** (see "Where left off").
+  - The user's `vesk-doc` uses **tarballs** (`node_modules/.bin/vesk` → tarball cli.js);
+    monorepo cli dist was byte-identical to the old tarball. Fresh bundle needed for
+    either path.
 
-### `/map` — `app/map/page.vsk`
-- Inline `.map()` in JSX: single-param, index-param `(u, i)`, keyed maps (`key={n}`), chained `filter().map()`
+## Measured SSR performance (already-good parts)
+- Steady-state dev-server requests on a fresh boot: **~10-52ms** (measured on :4040/:4050).
+- First request on a fresh dev server was fast because the dev server's `doBuild`
+  (adapter build/compile + prerender) imports the SSR function at startup.
+- **Remaining >100ms case = COLD module load at boot:** ~4s (lucide lazy barrel
+  parse ~466ms + first-use icon closures ~1.3s + docs.ts eval ~1.2s + codegen).
+  Options not yet pursued: persistent on-disk compiled-module cache keyed by content
+  hash (skip parse at cold boot), tokenizer-only barrel scan.
 
-### Layout
-- `test-app/app/layout.vsk` — added Statements/Async/Map `NavLink`s
+## Where left off (next steps on PC)
+1. **Confirm the CLI bundle rebuild worked:** vesk-doc build was FAILING with the old
+   bundled parser (`Unexpected token` in `DocsHeader.vsk` at the `<>`); my `parse()`
+   probe passes, confirming the parser fix is good but the bundle was stale. After
+   `npx tsx packages/cli/build.ts`, re-run:
+   `cd /root/vesk/vesk-doc && rm -rf .vesk && node /root/vesk/packages/cli/dist/cli.js build`
+   → expect "vesk build: done" with no errors.
+   Then boot a detached dev server and curl cold/warm:
+   `setsid nohup node /root/vesk/packages/cli/dist/cli.js dev --port 4060 > /tmp/opencode/vesk-4060.log 2>&1 < /dev/null &`
+2. **Add lazy-barrel tests** to `packages/compiler/src/module-imports.test.ts`
+   (fixture-based; run `npx tsx packages/compiler/src/module-imports.test.ts`): aliased/
+   direct/star/namespace re-exports, minimal submodule eval (side-effect counters),
+   mtime invalidation (submodule vs barrel), warm re-load ~0ms.
+3. If cold start must be <100ms, implement persistent compiled-module cache (content-
+   hash keyed; skip parse at boot) or tokenizer barrel scan; re-measure.
+4. Then **`#routing` hash-mode Link/NavLink fix** — the pending user task:
+   - `packages/runtime/src/router.ts` :1109 hash handling, :1211 scheme checks
+   - `packages/runtime/src/router-components.ts`
+   - deliver with `router.test.ts` tests + hydration checks.
+5. Full verification when done: `cd /root/vesk && npx tsx packages/cli/src/build-packages.ts`
+   then unit tests + `node tests/hydration-test.mjs` (needs test-app dev server on :3000
+   + CHROMIUM_PATH) + `npm run typecheck`.
+6. Cleanup leftover probe scripts: `probe-*.mjs` in repo root (untracked), and note
+   `/tmp/opencode/vesk-plugin.bak.ts` is the pre-fragment-fix plugin backup.
 
----
-
-## Bug Fixes
-
-### 1. `renderPage` ignored `load()` (`packages/compiler/src/server-render.ts`)
-- Dev server calls `renderPage` directly (not `renderFullPage`); `renderPage` never ran `loadFn`, so `/async` 500'd with `props.posts is not iterable`.
-- Refactored `renderPage` into a `doRender(ssrProps)` closure; when `ir.loadFn` exists it awaits `callLoadFunction`, merges `result.props` (or the result itself) into props, then renders. Sync path preserved for pages without `loadFn`.
-
-### 2. `.map((item, index) => ...)` index param dropped
-- `MapRegion` IR gained `indexVariable: string | null` (`packages/compiler/src/ir.ts`).
-- `ir-generator.ts` extracts `arrowFn.params[1]?.name` at both map-call sites.
-- Server (`server-jsgen.ts` `mapRegionToJS`): emits `let __i = 0; for (const item of arr) { const i = __i; ...; __i++; }`.
-- Client (`client-codegen.ts` `emitMap`): `renderItem` gains `__i` param; non-keyed loops pass a counter; keyed path passes index through.
-- Runtime (`packages/runtime/src/reconcile.ts`): `createItem(item, index, effs)` — index threaded through initial render and reconcile re-renders.
-
-### 3. Home page rendered the wrong component (`packages/compiler/src/server-utils.ts`)
-- `resolveComponentName` preferred the first **exported** component; home page's `export component Appx`/`Appxx` beat `component Home`, so `/` showed `Appx`'s body.
-- New precedence: `defaultExport` → **first component** → exported component (matches all page conventions: home/about/blog use first, posts uses `export default`).
-
-### 4. Client bundle duplicate `export default` broke hydration
-- `compileClient` emits `export default __components["Posts"]` for default-export pages; `generateClientBundle` (adapter `client-bundle.ts`) only stripped `export const|let|var ...` lines, so a single `/_vesk/client.js` module ended up with **two** `export default` statements → browser error `Identifier '.default' has already been declared` killed hydration (no count updates, markers never claimed).
-- Fixed by stripping `export default __components[...]` in both the code-split `compileFile` and mono `compileFileMono` paths (new `stripExports` helper), plus the dev-server HMR compile path.
-
----
-
-## Verification
-
-- All 8 pages HTTP 200 with correct content: `/`, `/about`, `/blog`, `/blog/hello-world`, `/posts`, `/statements`, `/async`, `/map`
-- `tests/hydration-test.mjs`: **60/60 passed** (was failing on JS error on load, reactivity, error boundaries, markers claimed)
-- Compiler unit suites: client-codegen **104**, server-codegen **69**, integration **77** — all green
-- `tsc --noEmit` clean on compiler, runtime, adapter, cli
-
----
-
-## Previous Session: useFetch System (2026-08-01)
-
-### Core Runtime Changes
-
-#### `packages/runtime/src/ripple-runtime.ts`
-- `Block.tc: (() => void)[]` teardown callbacks; `on_destroy(fn)` exported from `index-client.ts`/`index-server.ts`
-
-#### `packages/runtime/src/resource.ts` — complete rewrite
-- Full `RequestInit` compatibility, JSON body auto-stringify
-- Request dedup by key, per-render token scoping on SSR
-- SWR-style cache: `staleTime`, `keepPreviousData`, `mutate(key, data?)`
-- Retry with exponential backoff (GET only, never 4xx)
-- Race-based `timeout`, `HttpError`/`TimeoutError`, abort on unmount via `on_destroy`
-- SSR: `resolveSsrResources()`, `globalThis.__vsk_ssr_data` injection
-- Helpers: `useFetch.text/json/arrayBuffer`, fn-form for custom fetchers
-
-#### Compiler
-- Tracked for-in loops (`for (const x in trackedCell)` → `get(...)`), `TrackDecl` with per-render token keys, 3-pass SSR re-render loop for async components, `ssrAwait` auto-detection
-
-#### Demo
-- `test-app/app/api/posts/route.ts` (`?delay=&fail=&limit=`), `test-app/app/posts/page.vsk` full feature demo, Posts nav link
-
-#### Tests
-- `resource.test.ts` (21 tests); integration tests +3; total **852 passing** (28 files)
-
----
-
-## Files Changed This Session
-
-### Compiler
-- `packages/compiler/src/server-render.ts` — `renderPage` runs `loadFn`
-- `packages/compiler/src/server-utils.ts` — `resolveComponentName` precedence
-- `packages/compiler/src/ir.ts` — `MapRegion.indexVariable`
-- `packages/compiler/src/ir-generator.ts` — extract map index param
-- `packages/compiler/src/server-jsgen.ts` — index-aware `mapRegionToJS`
-- `packages/compiler/src/client-codegen.ts` — index-aware `emitMap`
-
-### Runtime
-- `packages/runtime/src/reconcile.ts` — `createItem(item, index, effs)`
-
-### Adapter / CLI
-- `packages/adapter/src/client-bundle.ts` — strip `export default` from bundle (both paths)
-- `packages/cli/src/dev-server.ts` — strip `export default` in HMR compile; HMR client injection
-
-### Demo App
-- `test-app/app/statements/page.vsk` — **new**
-- `test-app/app/async/page.vsk` — **new**
-- `test-app/app/map/page.vsk` — **new**
-- `test-app/app/layout.vsk` — new nav links
-
----
-
-## Future Improvements (Not Implemented)
-
-1. **`.vsk` as a first-class TS toolchain citizen**: make `tsc` typecheck `.vsk` and `tsx` execute `.vsk` "just as `.tsx`" — e.g., a `.vsk → .tsx` transpile step (or `foo.vsk.d.ts` + `allowArbitraryExtensions`) for tsc, and a Node module-loader hook (chained via `node --import`) or esbuild plugin for tsx
-2. **Reactive keys**: `useFetch(() => url, { depends: [dep1, dep2] })`
-3. **Server-side shared cache**: cross-request dedup
-4. **Per-region re-render** of `MapRegion` on data arrival
-5. **Prefetch on hover**, WebSocket/SSE support
+## Environment notes / gotchas
+- Slow filesystem; stale/ghost servers on :3000/:3001 unreliable.
+- Tool-timeout SIGTERMs kill background dev servers → use `setsid`+`disown` to detach.
+- `pkill -f "cli.js dev"` matches its own invoking shell — kills it. Use `ss -ltnp` +
+  exact PIDs instead.
+- `packages/cli/dist/index.js` does NOT exist; the entry is `packages/cli/dist/cli.js`.
+- Compiler `parser.ts`/`ir-generator.ts` import plugins via `@vesk/compiler/src/...`
+  (exports map → `dist/`), so probes must run against REBUILT dist to reflect src edits.

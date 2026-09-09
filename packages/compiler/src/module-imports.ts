@@ -251,12 +251,24 @@ export function loadSsrModule(absPath: string): Record<string, unknown> | null {
         exportsObj = null;
       }
     } else {
-      exportsObj = {};
-      EVALUATING.set(absPath, exportsObj);
-      const ran = evaluateModuleFile(absPath, exportsObj);
-      // Runtime evaluation failure (already warned) — give Node's own loader
-      // a chance before giving up.
-      if (!ran) exportsObj = null;
+      // Pure re-export barrels (`export { x as y } from`, `export * from`,
+      // `export * as ns from`) return a lazy Proxy: only the submodule backing
+      // a name the consumer actually touches gets evaluated. Without this, a
+      // several-thousand-export barrel (e.g. lucide's icon index) pays its full
+      // transitive closure on every cold load (tens of seconds dev, too slow to
+      // ship in prod).
+      const src = readSsrSource(absPath);
+      const body = (src?.ast?.body || []) as Array<{ type: string } & Record<string, unknown>>;
+      if (src && isPureReexportBarrel(body)) {
+        exportsObj = createLazyBarrelExports(buildBarrelSpec(body), dirname(absPath));
+      } else {
+        exportsObj = {};
+        EVALUATING.set(absPath, exportsObj);
+        const ran = evaluateModuleFile(absPath, exportsObj, src);
+        // Runtime evaluation failure (already warned) — give Node's own loader
+        // a chance before giving up.
+        if (!ran) exportsObj = null;
+      }
     }
 
     if (exportsObj === null) {
@@ -299,25 +311,235 @@ function depsFresh(cachedVal: CachedModule): boolean {
   return true;
 }
 
-/**
- * Runs one module file. Returns `true` when the body executed, `false` when a
- * runtime failure was already warned about. Unsupported ESM constructs throw —
- * the only honest outcome is a loud, specific error, never silently undefined.
- */
-function evaluateModuleFile(absPath: string, exportsObj: Record<string, unknown>): boolean {
+function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
   let raw: string;
   try {
     raw = readFileSync(absPath, 'utf-8');
   } catch (err) {
     console.warn(`[vesk] SSR: failed to read ${absPath}: ${(err as Error)?.message ?? String(err)}`);
-    return false;
+    return null;
   }
-
   let ast: ReturnType<typeof parse> | null = null;
   try {
     ast = parse(raw, { filename: absPath });
   } catch {
     ast = null;
+  }
+  return { raw, ast };
+}
+
+/** True when every statement in a module body is a re-export (or a type-only /
+ *  directive statement). Such "pure barrels" carry no computation of their own,
+ *  so they can be served lazily instead of paying their full transitive closure. */
+function isPureReexportBarrel(body: Array<{ type: string } & Record<string, unknown>>): boolean {
+  for (const stmt of body) {
+    if (stmt.type === 'EmptyStatement') continue;
+    if (stmt.type === 'ExpressionStatement') {
+      // A leading directive such as 'use strict' — no runtime effect here.
+      const expr = stmt.expression as { type?: string; value?: unknown } | null | undefined;
+      if (expr && expr.type === 'Literal' && typeof expr.value === 'string' && expr.value.length > 0) continue;
+      return false;
+    }
+    if (stmt.type === 'ExportAllDeclaration') {
+      if (stmt.exportKind === 'type') continue;
+      continue;
+    }
+    if (stmt.type === 'ExportNamedDeclaration') {
+      if (stmt.exportKind === 'type') continue;
+      if (stmt.source) continue; // `export { x } from 'm'` re-export
+      return false; // local declaration or local re-export — real code
+    }
+    if (stmt.type === 'ImportDeclaration' && stmt.importKind === 'type') continue;
+    return false;
+  }
+  return true;
+}
+
+interface BarrelSpec {
+  /** name -> submodule source + name to pull. */
+  direct: Map<string, { source: string; imported: string }>;
+  /** `export * as ns from 'x'` — ns name -> source. */
+  namespaces: Map<string, string>;
+  /** `export * from 'x'` sources. */
+  stars: string[];
+}
+
+function buildBarrelSpec(body: Array<{ type: string } & Record<string, unknown>>): BarrelSpec {
+  const spec: BarrelSpec = { direct: new Map(), namespaces: new Map(), stars: [] };
+  for (const stmt of body) {
+    if (stmt.type === 'ExportNamedDeclaration') {
+      if (stmt.exportKind === 'type' || !stmt.source) continue;
+      // The module source is a string literal — read its value directly instead
+      // of reprinting the node (esrap print per statement is the dominant cost
+      // in multi-thousand-export barrels).
+      const source = quotedSourceValue(stmt.source);
+      const specifiers = (stmt.specifiers as Array<Record<string, unknown>>) || [];
+      for (const ex of specifiers) {
+        if (ex.exportKind === 'type') continue;
+        const imported = exportKeyName(ex.local as { type: string; name?: string });
+        const exported = exportKeyName(ex.exported as { type: string; name?: string; value?: unknown });
+        if (!exported || !imported) continue;
+        if (source !== null) spec.direct.set(exported, { source, imported });
+      }
+    } else if (stmt.type === 'ExportAllDeclaration') {
+      if (stmt.exportKind === 'type') continue;
+      const source = quotedSourceValue(stmt.source);
+      if (stmt.exported) {
+        const nsName = exportKeyName(stmt.exported as { type: string; name?: string; value?: unknown });
+        if (source !== null && nsName) spec.namespaces.set(nsName, source);
+      } else if (source !== null) {
+        spec.stars.push(source);
+      }
+    }
+  }
+  return spec;
+}
+
+/**
+ * Raw string value of an `... from <literal>` source node. Returns the unquoted
+ * specifier, or `null` when the node isn't a plain string literal (callers fall
+ * back — and caching the string is safer than reprinting per statement).
+ */
+/**
+ * Raw string value of an `... from <literal>` source node. String literals are
+ * read directly (esrap printing per statement is the dominant cost in
+ * multi-thousand-export barrels); any other node falls back to a reprinted,
+ * quote-stripped value so no export is ever dropped.
+ */
+function quotedSourceValue(node: unknown): string | null {
+  const n = node as { type?: string; value?: unknown } | null | undefined;
+  if (n && (n.type === 'Literal' || n.type === 'StringLiteral') && typeof n.value === 'string') {
+    return n.value;
+  }
+  const printed = printNode(node);
+  return printed ? stripOuterQuotes(printed) : null;
+}
+
+/**
+ * A lazy exports object for a pure re-export barrel. Names resolve on access;
+ * the submodule backing them is loaded (and cached) only then. Barrels load
+ * with an empty dependency closure, so editing one re-exported module
+ * invalidates that module alone — never the whole barrel (a several-thousand
+ * file stat walk otherwise).
+ */
+function createLazyBarrelExports(spec: BarrelSpec, dir: string): Record<string, unknown> {
+  const resolved = new Map<string, Record<string, unknown> | null>();
+  const starKeys = new Set<string>();
+  let starsEnumerated = false;
+
+  const loadSource = (source: string): Record<string, unknown> | null => {
+    if (resolved.has(source)) return resolved.get(source) ?? null;
+    let mod: Record<string, unknown> | null = null;
+    const target = resolveSsrModule(source, dir);
+    if (target) {
+      const loaded = loadSsrModule(target);
+      if (loaded && typeof loaded === 'object') mod = loaded;
+    }
+    resolved.set(source, mod);
+    return mod;
+  };
+
+  const hasPresent = (prop: string): boolean => {
+    if (spec.direct.has(prop) || spec.namespaces.has(prop)) return true;
+    if (starsEnumerated && starKeys.has(prop)) return true;
+    if (prop === 'default') return false; // `export *` never re-exports default
+    for (const source of spec.stars) {
+      const mod = loadSource(source);
+      if (mod && Object.prototype.hasOwnProperty.call(mod, prop)) return true;
+    }
+    return false;
+  };
+
+  const getNamed = (prop: string): unknown => {
+    const direct = spec.direct.get(prop);
+    if (direct) {
+      const mod = loadSource(direct.source);
+      if (!mod) return undefined;
+      return (mod as Record<string, unknown>)[direct.imported];
+    }
+    const nsSource = spec.namespaces.get(prop);
+    if (nsSource) {
+      return loadSource(nsSource) ?? undefined;
+    }
+    if (prop === 'default') return undefined;
+    for (const source of spec.stars) {
+      const mod = loadSource(source);
+      if (mod && Object.prototype.hasOwnProperty.call(mod, prop)) {
+        return (mod as Record<string, unknown>)[prop];
+      }
+    }
+    return undefined;
+  };
+
+  return new Proxy(Object.create(null) as Record<string, unknown>, {
+    get(_target, prop) {
+      if (typeof prop === 'symbol') return undefined;
+      return getNamed(prop as string);
+    },
+    has(_target, prop) {
+      if (typeof prop === 'symbol') return false;
+      return hasPresent(prop as string);
+    },
+    ownKeys() {
+      if (!starsEnumerated) {
+        for (const source of spec.stars) {
+          const mod = loadSource(source);
+          if (!mod) continue;
+          for (const k of Reflect.ownKeys(mod)) {
+            if (typeof k === 'string' && k !== 'default') starKeys.add(k);
+          }
+        }
+        starsEnumerated = true;
+      }
+      return [...new Set([...spec.direct.keys(), ...spec.namespaces.keys(), ...starKeys])];
+    },
+    getOwnPropertyDescriptor(_target, prop) {
+      if (typeof prop === 'symbol') return undefined;
+      if (!hasPresent(prop as string)) return undefined;
+      // Accessor descriptor so iteration doesn't force-load every submodule;
+      // values are pulled via the getter only when a consumer reads them.
+      return {
+        enumerable: true,
+        configurable: true,
+        get: () => getNamed(prop as string),
+      };
+    },
+  });
+}
+
+/**
+ * Runs one module file. Returns `true` when the body executed, `false` when a
+ * runtime failure was already warned about. Unsupported ESM constructs throw —
+ * the only honest outcome is a loud, specific error, never silently undefined.
+ * `src` carries a read+parse already done by the caller (either a barrel probe
+ * or a plain load) so big files aren't read/parsed twice.
+ */
+function evaluateModuleFile(
+  absPath: string,
+  exportsObj: Record<string, unknown>,
+  src?: { raw: string; ast: ReturnType<typeof parse> | null } | null
+): boolean {
+  let raw: string;
+  if (src) {
+    raw = src.raw;
+  } else {
+    try {
+      raw = readFileSync(absPath, 'utf-8');
+    } catch (err) {
+      console.warn(`[vesk] SSR: failed to read ${absPath}: ${(err as Error)?.message ?? String(err)}`);
+      return false;
+    }
+  }
+
+  let ast: ReturnType<typeof parse> | null;
+  if (src) {
+    ast = src.ast;
+  } else {
+    try {
+      ast = parse(raw, { filename: absPath });
+    } catch {
+      ast = null;
+    }
   }
 
   if (!ast) {

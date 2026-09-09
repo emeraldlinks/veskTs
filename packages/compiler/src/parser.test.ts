@@ -987,6 +987,50 @@ describe('Statement Mode (Default)', () => {
 		expect(body[body.length - 1].type).toBe('JSXElement');
 	});
 
+	it('parses a bare fragment after a semicolon-less declarator (track)', () => {
+		const ast = parse(`
+			component App() {
+				const &[open] = track(false)
+				<>
+					<div>hi</div>
+				</>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[0].type).toBe('VariableDeclaration');
+		expect(body[1].type).toBe('JSXFragment');
+	});
+
+	it('parses a bare fragment after a plain semicolon-less const', () => {
+		const ast = parse(`
+			component App() {
+				const x = 1
+				<>
+					<div>{x}</div>
+				</>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[1].type).toBe('JSXFragment');
+	});
+
+	it('parses a bare fragment after a semicolon-less expression statement', () => {
+		const ast = parse(`
+			component App() {
+				console.log('x')
+				<>
+					<div>hi</div>
+				</>
+			}
+		`);
+		const body = ast.body[0].body.body;
+		expect(body).toHaveLength(2);
+		expect(body[0].type).toBe('ExpressionStatement');
+		expect(body[1].type).toBe('JSXFragment');
+	});
+
 	it('parses a trailing semicolon-less statement with no following JSX', () => {
 		const ast = parse(`
 			component App() {
