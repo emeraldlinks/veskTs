@@ -171,6 +171,22 @@ describe('Client Codegen — Reactivity', () => {
 		expect(code).toContain('get(count)');
 	});
 
+	// Tracks reads inside a `derived(...)` init and makes an `if (derived)` region
+	// reactive — the vesk-doc DocTabs pattern (`const &[current] = derived(() => props.tabs[index] …)`).
+	bothModes('derived cell rewrites tracked reads in its fn and if-region', `
+		component App(props: { tabs: string[] }) {
+			const &[index] = track(0);
+			const &[current] = derived(() => props.tabs[index] ?? props.tabs[0]);
+			if (current) { <pre>{current}</pre> }
+		}
+	`, (code) => {
+		expect(code).toContain('derived(() => props.tabs[get(index)] ?? props.tabs[0])');
+		expect(code).toContain('if (get(current)) {');
+		expect(code).toContain('let __iv = get(current);');
+		expect(code).not.toContain('props.tabs[index]');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
 	bothModes('includes runtime import', `
 		component App { return <div>Hi</div>; }
 	`, (code) => {
@@ -960,14 +976,15 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 
-	bothModes('classic for loop emits init + while + update', `
+	bothModes('classic for loop emits a real for statement', `
 		component App() {
 			let i = 0;
 			for (i = 0; i < 3; i = i + 1) { <span>{i}</span> }
 		}
 	`, (code) => {
 		expect(code).toContain('i = 0');
-		expect(code).toContain('while (i < 3) {');
+		expect(code).toContain('for (i = 0; i < 3; i = i + 1) {');
+		expect(code).not.toContain('while (i < 3) {');
 		expect(code).toContain('i = i + 1');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
@@ -980,11 +997,47 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			for (let i = 0; i < 3; i++) { <span>{i}</span> }
 		}
 	`, (code) => {
-		expect(code).toContain('while (i < 3) {');
+		expect(code).toContain('for (let i = 0; i < 3; i++) {');
 		expect(code).not.toContain('let __iv = !(i < 3)');
 		expect(code).not.toContain('const __nv = (i < 3)');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
+
+// Closures created inside a classic for-loop body (event handlers, effects)
+		// must capture that iteration's loop variable, not the alias-exited final
+		// value the old hoisted `let init; while (…) { …; update }` shape produced.
+		bothModes('classic for loop closures capture the per-iteration binding', `
+		component App(props: { tabs: string[] }) {
+			const &[sel] = track(0);
+			for (let i = 0; i < props.tabs.length; i++) {
+				<button aria-pressed={i === sel} onClick={() => sel = i}>{props.tabs[i]}</button>
+			}
+		}
+	`, (code) => {
+			const header = 'for (let i = 0; i < props.tabs.length; i++) {';
+			const headerIdx = code.indexOf(header);
+			expect(headerIdx !== -1).toBe(true);
+			// Body = everything between the header line and the `}` that closes it
+			// (tracked with brace depth so nested effect/render braces are skipped).
+			const bodyStart = code.indexOf('\n', headerIdx) + 1;
+			let depth = 1;
+			let closeIdx = -1;
+			for (let pos = bodyStart; pos < code.length; pos++) {
+				const ch = code[pos];
+				if (ch === '{') depth++;
+				if (ch === '}') depth--;
+				if (depth === 0) { closeIdx = pos; break; }
+			}
+			expect(closeIdx > bodyStart).toBe(true);
+			const body = code.slice(bodyStart, closeIdx);
+			// The write must be the closure's own loop variable (`set(sel, i)`), and
+			// the reactive read must compare the same per-iteration binding.
+			expect(body).toContain('set(sel, i)');
+			expect(body).toContain('i === get(sel)');
+			// The update must live in the `for` header, not as a body statement.
+			expect(body).not.toContain('i++');
+			try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+		});
 
 	// A for-of loop over a static collection (module const, member of a loop
 	// variable, or statement-mode local) must NOT emit a top-level re-render

@@ -5,7 +5,7 @@ import {
   TrackDecl, RuntimeStatement, ComponentRef, ComponentCall,
   ServerBlock, ClientBlock, HeadBlock, SlotNode,
 } from '@vesk/compiler/src/ir';
-import { isStaticIR, collectTrackedNames, transformTracked, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
+import { isStaticIR, collectTrackedNames, transformTracked, transformTrackedInit, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
 import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, findBalancedEnd, startsWithIdentifier } from '@vesk/compiler/src/scan';
@@ -44,8 +44,13 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
   if (node instanceof ForLoop) return forLoopToJS(node, isAsync, tracked);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
-    const unwrapped = unwrapTrackCall(node.init);
-    const inner = hasTopLevelComma(unwrapped) ? stripTrackGeneric(node.init) : unwrapped;
+    // Tracked reads inside a `track`/`derived` init are re-emitted as `get(…)`
+    // (matching client codegen) so a function init like
+    // `track(() => x * 2)` / `derived(() => props.tabs[x])` computes against the
+    // cell VALUES server-side instead of the raw cell objects.
+    const init = transformTrackedInit(node.init, tracked || new Map());
+    const unwrapped = unwrapTrackCall(init);
+    const inner = hasTopLevelComma(unwrapped) ? stripTrackGeneric(init) : unwrapped;
     const key = JSON.stringify(`${compKey(node)}:${node.name}`);
     return [
       `const ${cellName} = (() => {`,
@@ -313,13 +318,21 @@ function forLoopToJS(node: ForLoop, isAsync = false, tracked?: Map<string, Track
     }
     lines.push(`}`);
   } else {
-    if (node.init) lines.push(`${node.init}`);
-    lines.push(`while (${exprJSX(node.condition, tracked)}) {`);
+    // Emit a real `for` statement (matching the client codegen): a `let`/`const`
+    // declared in the init clause gets a fresh binding per iteration, so closures
+    // created in the body capture that iteration's value rather than the loop
+    // variable's final value after the last pass.
+    let initPart = (node.init || '').trim();
+    let updatePart = (node.update || '').trim();
+    if (initPart.endsWith(';')) initPart = initPart.slice(0, -1).trim();
+    if (updatePart.endsWith(';')) updatePart = updatePart.slice(0, -1).trim();
+    const cond = exprJSX(node.condition, tracked);
+    const head = initPart ? `${initPart}; ${cond}` : `; ${cond}`;
+    lines.push(`for (${head}; ${updatePart}) {`);
     for (const n of node.bodyTemplate) {
       const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
-    if (node.update) lines.push(indent(`${node.update}`));
     lines.push(`}`);
   }
   return lines.join('\n');

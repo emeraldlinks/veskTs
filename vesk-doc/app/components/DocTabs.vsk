@@ -2,7 +2,7 @@ import { CodePanel } from './docs/CodePanel.vsk'
 
 export component DocTabs(props: { tabs: { label: string; filename: string; code: string }[] }) {
 	const &[index] = track(0)
-	const current = props.tabs[index] ?? props.tabs[0]
+	const &[current] = derived(() => props.tabs[index] ?? props.tabs[0])
 
 	<div>
 		<div class="flex flex-wrap gap-px bg-border">

@@ -240,6 +240,27 @@ export function collectTrackedNames(body: IRNode[]): Map<string, TrackedInfo> {
   return names;
 }
 
+/**
+ * Tracked reads inside a track/derived declaration init are re-emitted as
+ * `get(…)` subscriptions so a `derived(() => … cell …)` (or
+ * `track(() => … cell …)`) recomputes when the cell changes, instead of
+ * reading the raw cell object as a key/property. The init is parsed with the
+ * normal vesk parser so TS generics and `.vsk` syntax survive.
+ */
+export function transformTrackedInit(init: string, tracked: Map<string, TrackedInfo>): string {
+  if (!init) return init;
+  let expr: Record<string, unknown> | null = null;
+  try {
+    const prog = parse(`(${init})`) as unknown as { body?: Array<{ type: string; expression?: Record<string, unknown> }> };
+    expr = prog.body?.[0]?.type === 'ExpressionStatement' ? (prog.body[0].expression ?? null) : null;
+  } catch {
+    // Unparseable init (defensive) — leave raw; the generated code is checked
+    // for syntax at build time and would be reported there.
+  }
+  if (!expr) return init;
+  return transformTracked({ raw: init, ast: expr as unknown as ESTreeNode } as Expression, tracked);
+}
+
 const NON_BUBBLING_EVENTS = new Set([
   'focus', 'blur',
   'mouseenter', 'mouseleave',
@@ -310,7 +331,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
   if (node instanceof DynamicBinding) return emitDynamicBinding(ctx, node, tracked, effectsVar);
   if (node instanceof TrackDecl) {
     const cellName = node.rawName || node.name;
-    const init = stripTrackGeneric(node.init);
+    const init = transformTrackedInit(stripTrackGeneric(node.init), tracked);
     ctx.push(`const ${cellName} = ${init};`);
     return null;
   }
@@ -947,8 +968,20 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     ctx.push(indent(`}`));
   } else {
     const condExpr = transformTracked(node.condition as any, tracked);
-    if (node.init) ctx.push(indent(`${node.init}`));
-    ctx.push(indent(`while (${condExpr}) {`));
+    // Emit a real `for` statement. A `let`/`const` declared in the init clause
+    // gets a fresh binding per iteration (per the spec), so closures created in
+    // the body — event handlers, effects, `createComment('if')` render fns —
+    // capture that iteration's value instead of the loop variable's final value.
+    // The old hoisted `let i = 0; while (…) { …; i++; }` shape made every
+    // closure alias-exit to the final counter (e.g. `onClick={() => index = i}`
+    // inside `for (let i = 0; i < n; i++)` always wrote n-last, and
+    // `aria-pressed={i === index}` compared against n-last for every button).
+    let initPart = (node.init || '').trim();
+    let updatePart = (node.update || '').trim();
+    if (initPart.endsWith(';')) initPart = initPart.slice(0, -1).trim();
+    if (updatePart.endsWith(';')) updatePart = updatePart.slice(0, -1).trim();
+    const head = initPart ? `${initPart}; ${condExpr}` : `; ${condExpr}`;
+    ctx.push(indent(`for (${head}; ${updatePart}) {`));
     for (const n of node.bodyTemplate) {
       const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b');
       if (v) {
@@ -956,7 +989,6 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
         else ctx.push(indent(`__b.appendChild(${v});`));
       }
     }
-    if (node.update) ctx.push(indent(`${node.update}`));
     ctx.push(indent(`}`));
   }
   if (!hyd) ctx.push(indent(`__p.insertBefore(__b, ${endAnchor});`));

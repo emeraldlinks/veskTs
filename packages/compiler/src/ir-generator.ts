@@ -1251,6 +1251,30 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       if (node instanceof RuntimeStatement && node.raw) {
         addUsedFrom(node.raw);
       }
+      if (node instanceof TrackDecl && node.init) {
+        addUsedFrom(node.init);
+      }
+      if (node instanceof ForLoop) {
+        if (node.init) addUsedFrom(node.init);
+        if (node.update) addUsedFrom(node.update);
+        if (node.condition && node.condition.raw) addUsedFrom(node.condition.raw);
+        scanForAutoImport(node.bodyTemplate);
+      }
+      if (node instanceof WhileLoop) {
+        if (node.condition && node.condition.raw) addUsedFrom(node.condition.raw);
+        scanForAutoImport(node.bodyTemplate);
+      }
+      if (node instanceof SwitchBlock) {
+        if (node.discriminant && node.discriminant.raw) addUsedFrom(node.discriminant.raw);
+        for (const c of node.cases) {
+          if (c.test && c.test.raw) addUsedFrom(c.test.raw);
+          scanForAutoImport(c.body);
+        }
+      }
+      if (node instanceof TryCatch) {
+        scanForAutoImport(node.bodyTemplate);
+        scanForAutoImport(node.catchBody);
+      }
       if (node instanceof ComponentCall) {
         if (autoImportable.includes(node.componentName)) {
           usedFunctions.add(node.componentName);

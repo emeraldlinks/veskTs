@@ -1,0 +1,11 @@
+import puppeteer from 'puppeteer-core';
+const CHROME = '/tmp/opencode/chrome/chrome-headless-shell/linux-153.0.8010.36/chrome-headless-shell-linux64/chrome-headless-shell';
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'shell', args: ['--no-sandbox'] });
+const page = await browser.newPage();
+page.on('response', async r => { if (r.url().includes('_vesk') || r.url().endsWith('.js')) console.log('LOADED:', r.url().replace('http://localhost:3000', '')); });
+await page.goto('http://localhost:3000/docs/installation', { waitUntil: 'networkidle0', timeout: 30000 });
+await sleep(800);
+const scripts = await page.evaluate(() => performance.getEntriesByType('resource').map(r => r.name.replace(location.origin, '')).filter(n => n.includes('_vesk') || n.endsWith('.js')));
+console.log('resources:', JSON.stringify(scripts, null, 1));
+await browser.close();

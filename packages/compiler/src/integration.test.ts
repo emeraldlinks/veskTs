@@ -1309,6 +1309,30 @@ it('[effect] derived/untrack/peek auto-import for server scope', () => {
   assert(html.includes('<p>0</p>'), `ssr failed: ${JSON.stringify(html)}`);
 });
 
+it('[effect] derived cell over a tracked cell renders in SSR', () => {
+  const source = `component App {
+    const &[count] = track(4);
+    const &[twice] = derived(() => count * 2);
+    const &[greeting] = derived(() => "hi-" + count);
+    <p>{twice}</p><p>{greeting}</p>
+  }`;
+  const ir = generateIR(parse(source), source);
+  assert(ir.imports.join(', ').includes('derived'), `missing derived import: ${JSON.stringify(ir.imports)}`);
+  const html = show('html', render(source, 'App')) as string;
+  assert(html.includes('<p>8</p>'), `derived read did not use cell value: ${JSON.stringify(html)}`);
+  assert(html.includes('<p>hi-4</p>'), `string derived failed: ${JSON.stringify(html)}`);
+});
+
+it('[effect] derived cell over a tracked index selects from props in SSR and client', () => {
+  const source = `component DocTabs(props: { tabs: string[] }) {
+    const &[index] = track(0);
+    const &[current] = derived(() => props.tabs[index] ?? props.tabs[0]);
+    if (current) { <pre>{current}</pre> }
+  }`;
+  const html = show('html', render(source, 'DocTabs', { tabs: ['npm', 'pnpm', 'bun'] })) as string;
+  assert(html.includes('<pre>npm</pre>'), `derived-props selection ssr failed: ${JSON.stringify(html)}`);
+});
+
 it('[effect] on_destroy and createContext auto-import', () => {
   const source = `component App {
     const Ctx = createContext(1);
