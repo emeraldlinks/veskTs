@@ -81,7 +81,6 @@ export function generateSsrFunction(
   const middlewareCode = options?.middlewareCode || null;
   const headExtra = options?.headExtra || null;
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
-  const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
 
   const parts = routeNode.fullPath.split('/').filter(Boolean);
   const name = routeName(parts);
@@ -97,8 +96,25 @@ export function generateSsrFunction(
   const headExtraOption = headExtra ? `, headExtra: ${JSON.stringify(headExtra)}` : '';
   const bakedOptions = cssOption + headExtraOption;
 
-  const hasLayout = !!routeNode.layout;
-  const hasAncestorLayout = ancestorLayouts.length > 0;
+  const layoutStack = [
+    ...ancestorLayouts.map((a) => ({ sourceDir: a.sourceDir, layoutCompName: a.layoutCompName })),
+    ...(routeNode.layout ? [{ sourceDir: routeNode.sourceDir, layoutCompName: routeNode.layout }] : []),
+  ];
+
+  const layoutDecls: { src: string; comp: string; path: string; compiled: string }[] = [];
+  for (const entry of layoutStack) {
+    const entryPath = resolve(appDir, entry.sourceDir, 'layout.vsk');
+    const entrySrc = readFileSync(entryPath, 'utf-8');
+    const entryComp = extractCompName(entrySrc) || 'Layout';
+    const escaped = escapeSource(entrySrc);
+    layoutDecls.push({
+      src: `\`${escaped}\``,
+      comp: JSON.stringify(entryComp),
+      path: JSON.stringify(entryPath),
+      compiled: `(() => { try { setVskHydrate(true); return compileFile(\`${escaped}\`, { sourcePath: ${JSON.stringify(entryPath)} }); } catch { return null; } finally { setVskHydrate(false); } })()`,
+    });
+  }
+
   const pageSrc = readFileSync(pagePath, 'utf-8');
   const pageComp = extractCompName(pageSrc) || 'Page';
 
@@ -110,27 +126,15 @@ export function generateSsrFunction(
     : 'const _errorSrc = null;\nconst _errorComp = null;\nconst _errorPath = null;\nconst _errorCompiled = null;\n';
 
   let src = '';
-  if (hasLayout) {
-    const layoutSrc = readFileSync(layoutPath, 'utf-8');
-    const layoutComp = extractCompName(layoutSrc) || 'Layout';
-    src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
-    src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _layoutPath = ${JSON.stringify(layoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
-    src += `const _layoutCompiled = (() => { try { setVskHydrate(true); return compileFile(_layoutSrc, { sourcePath: _layoutPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
-    src += `const _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
-    src += errorVars;
-  } else if (hasAncestorLayout) {
-    const outerLayout = ancestorLayouts[0];
-    const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
-    const outerLayoutSrc = readFileSync(outerLayoutPath, 'utf-8');
-    const outerLayoutComp = extractCompName(outerLayoutSrc) || 'Layout';
+  if (layoutDecls.length > 0) {
     src = `const _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
-    src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
-    src += `const _layoutPath = ${JSON.stringify(outerLayoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
-    src += `const _layoutCompiled = (() => { try { setVskHydrate(true); return compileFile(_layoutSrc, { sourcePath: _layoutPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
+    src += `const _pagePath = ${JSON.stringify(pagePath)};\n`;
     src += `const _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
+    src += `const _layoutSrcList = [\n${layoutDecls.map((d) => '  ' + d.src + ',').join('\n')}\n];\n`;
+    src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
+    src += `const _layoutPathList = [${layoutDecls.map((d) => d.path).join(', ')}];\n`;
+    src += `const _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n];\n`;
     src += errorVars;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
@@ -161,7 +165,7 @@ export function generateSsrFunction(
   }
 
   let htmlFnCode: string;
-  if (hasLayout || hasAncestorLayout) {
+  if (layoutDecls.length > 0) {
     htmlFnCode = [
       'async function __renderErrorBody(props) {',
       '  if (!_errorSrc) throw props.error || new Error("Internal Server Error");',
@@ -187,7 +191,14 @@ export function generateSsrFunction(
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' }), head: '' };",
       '  }',
-      "  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : 'Internal Server Error') : '') + '-->' : '') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled" + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      '  let _body = (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : \'Internal Server Error\') : \'\') + \'-->\' : \'\') + page.body;',
+      '  let _head = page.head || \'\';',
+      '  for (let _i = _layoutSrcList.length - 1; _i > 0; _i--) {',
+      '    const _inner = await renderPage(_layoutSrcList[_i], _layoutCompList[_i], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i], sourcePath: _layoutPathList[_i] });',
+      '    _body = _inner.body;',
+      '    if (_inner.head) _head = _inner.head + _head;',
+      '  }',
+      '  const html = await renderFullPage(_layoutSrcList[0], _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]' + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: _head, sourcePath: _layoutPathList[0] });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',
@@ -239,7 +250,7 @@ export function generateSsrFunction(
 
   let dataCode: string;
   const exposeErr = "process.env.NODE_ENV !== 'production'";
-  if (hasLayout || hasAncestorLayout) {
+  if (layoutDecls.length > 0) {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
       '    let dataPage;',
@@ -250,8 +261,12 @@ export function generateSsrFunction(
       '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
       `      return new Response(JSON.stringify({ error: ${exposeErr} ? message : 'Internal Server Error' }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });`,
       '    }',
-      '    const dataLayout = await renderPage(_layoutSrc, _layoutComp, { params, children: \'\' }, __componentRegistry, { hydrate: true, cached: _layoutCompiled, sourcePath: _layoutPath });',
-      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: (dataLayout.head || '') + (dataPage.head || '') }), {",
+      '    let _dataHead = dataPage.head || \'\';',
+      '    for (let _i = _layoutSrcList.length - 1; _i >= 0; _i--) {',
+      '      const _dl = await renderPage(_layoutSrcList[_i], _layoutCompList[_i], { params, children: \'\' }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i], sourcePath: _layoutPathList[_i] });',
+      '      _dataHead = (_dl.head || \'\') + _dataHead;',
+      '    }',
+      "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: _dataHead }), {",
       "      headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },",
       '    });',
       '  }',
@@ -320,12 +335,12 @@ export function generateSsrFunction(
   }
 
   let registerActionsCode: string;
-  if (hasLayout || hasAncestorLayout) {
+  if (layoutDecls.length > 0) {
     registerActionsCode = [
       'async function __registerActions() {',
       '  if (__actionsRegistered) return;',
       '  __actionsRegistered = true;',
-      '  compileFile(_layoutSrc, { sourcePath: _layoutPath });',
+      '  for (let _i = 0; _i < _layoutSrcList.length; _i++) compileFile(_layoutSrcList[_i], { sourcePath: _layoutPathList[_i] });',
       '  compileFile(_pageSrc, { sourcePath: _pagePath });',
       '}',
       '',

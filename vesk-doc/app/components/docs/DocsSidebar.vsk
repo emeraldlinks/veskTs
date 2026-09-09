@@ -1,0 +1,71 @@
+import { Search, X } from 'lucide-vesk'
+import { docGroups, docPages } from '../../../src/content/docs'
+import { Link } from '@vesk/runtime/router'
+
+export component DocsSidebar(props: { activeSlug?: string; onNavigate?: () => void }) {
+	const &[query] = track("")
+	const q = query.trim().toLowerCase()
+	const match = (t: string) => t.toLowerCase().includes(q)
+	const groups = docGroups
+		.map((group) => ({
+			group,
+			pages: docPages.filter((p) => p.group === group && (!q || match(p.title) || match(p.description))),
+		}))
+		.filter((g) => g.pages.length > 0)
+
+	<div class="flex h-full flex-col">
+		<div class="relative border-b border-border">
+			<Search class="pointer-events-none absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+			<input
+				value={query}
+				onInput={(e) => { query = (e.target as HTMLInputElement).value }}
+				placeholder="Search docs"
+				aria-label="Search documentation"
+				class="w-full bg-transparent px-9 py-3 font-mono text-[12px] text-foreground placeholder:text-muted-foreground focus:outline-none"
+			/>
+			if (query) {
+				<button
+					type="button"
+					aria-label="Clear search"
+					onClick={() => { query = "" }}
+					class="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center text-muted-foreground hover:text-foreground"
+				>
+					<X size={14} />
+				</button>
+			}
+		</div>
+
+		<nav class="flex-1 overflow-y-auto py-5">
+			if (groups.length === 0) {
+				<p class="px-4 font-mono text-[12px] text-muted-foreground">No pages match.</p>
+			}
+			for (const g of groups) {
+				const pages = g.pages
+				<div class="mb-6 last:mb-0">
+					<p class="eyebrow px-4 pb-2">{g.group}</p>
+					<ul class="list-none m-0 p-0">
+						for (const p of pages) {
+							const active = p.slug === props.activeSlug
+							<li>
+								<Link
+									href={"/docs/" + p.slug}
+									onClick={props.onNavigate}
+									class={active
+										? "flex items-center justify-between gap-2 border-l border-accent bg-surface/60 px-4 py-1.5 font-mono text-[12.5px] text-foreground no-underline"
+										: "flex items-center justify-between gap-2 border-l border-transparent px-4 py-1.5 font-mono text-[12.5px] text-muted-foreground hover:border-border-strong hover:text-foreground no-underline"}
+								>
+									<span>{p.title}</span>
+									<span class="text-[10px] text-muted-foreground/70">{String(docPages.indexOf(p) + 1).padStart(2, "0")}</span>
+								</Link>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+		</nav>
+
+		<div class="border-t border-border px-4 py-3">
+			<Link href="/" onClick={props.onNavigate} class="font-mono text-[11px] text-muted-foreground hover:text-foreground no-underline">← back to vesk.dev</Link>
+		</div>
+	</div>
+}

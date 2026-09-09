@@ -1,3 +1,5 @@
+import { CodePanel } from './docs/CodePanel.vsk'
+
 export component DocTabs(props: { tabs: { label: string; filename: string; code: string }[] }) {
 	const &[index] = track(0)
 	const current = props.tabs[index] ?? props.tabs[0]
@@ -9,17 +11,13 @@ export component DocTabs(props: { tabs: { label: string; filename: string; code:
 				<button
 					type="button"
 					onClick={() => index = i}
+					aria-pressed={i === index}
 					class={i === index ? "px-3 py-2 font-mono text-[11.5px] bg-foreground text-background" : "px-3 py-2 font-mono text-[11.5px] bg-surface text-muted-foreground hover:text-foreground"}
 				>{t.label}</button>
 			}
 		</div>
 		if (current) {
-			<div class="panel-strong min-w-0 overflow-hidden">
-				<div class="flex items-center justify-between border-b border-border px-3 py-2">
-					<span class="font-mono text-[11px] text-foreground/70">{current.filename}</span>
-				</div>
-				<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] sm:text-[12.5px] text-foreground/85"><code>{current.code}</code></pre>
-			</div>
+			<CodePanel filename={current.filename} code={current.code} />
 		}
 	</div>
 }

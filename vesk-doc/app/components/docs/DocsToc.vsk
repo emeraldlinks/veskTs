@@ -1,0 +1,43 @@
+export component DocsToc(props: { items: { id: string; text: string }[] }) {
+	const &[active] = track(props.items[0]?.id ?? "")
+
+	if (props.items.length === 0) return null
+
+	effect(() => {
+		if (typeof IntersectionObserver === 'undefined' || typeof document === 'undefined') return
+		if (props.items.length === 0) return
+		active = props.items[0]?.id ?? ""
+		const observer = new IntersectionObserver(
+			(entries) => {
+				const visible = entries
+					.filter((e) => e.isIntersecting)
+					.sort((a, b) => a.boundingClientRect.top - b.boundingClientRect.top)[0]
+				if (visible && visible.target.id) active = visible.target.id as string
+			},
+			{ rootMargin: "-96px 0px -70% 0px", threshold: [0, 1] },
+		)
+		for (const item of props.items) {
+			const el = document.getElementById(item.id)
+			if (el) observer.observe(el)
+		}
+		on_destroy(() => observer.disconnect())
+	})
+
+	<aside class="hidden xl:block">
+		<div class="sticky top-24">
+			<p class="eyebrow pb-3">on this page</p>
+			<ul class="space-y-1 border-l border-border list-none m-0 p-0">
+				for (const item of props.items) {
+					<li>
+						<a
+							href={"#" + item.id}
+							class={active === item.id
+								? "-ml-px block border-l border-accent pl-3 py-1 font-mono text-[11.5px] text-foreground no-underline"
+								: "-ml-px block border-l border-transparent pl-3 py-1 font-mono text-[11.5px] text-muted-foreground hover:text-foreground no-underline"}
+						>{item.text}</a>
+					</li>
+				}
+			</ul>
+		</div>
+	</aside>
+}

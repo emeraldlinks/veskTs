@@ -1,0 +1,39 @@
+import { Menu, X } from 'lucide-vesk'
+import { Link } from '@vesk/runtime/router'
+import { DocsSidebar } from './DocsSidebar.vsk'
+
+export component DocsHeader(props: { activeSlug?: string }) {
+	const &[open] = track(false)
+
+	<>
+		<header class="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
+			<div class="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-3 sm:px-8">
+				<Link href="/" class="flex items-center gap-2 no-underline">
+					<span class="grid size-6 place-items-center bg-foreground font-display text-[11px] font-bold text-background">V</span>
+					<span class="font-display text-sm font-semibold tracking-tight text-foreground">vesk</span>
+					<span class="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">docs</span>
+				</Link>
+				<div class="flex items-center gap-3">
+					<Link href="/docs/getting-started" class="hidden font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground sm:inline no-underline">quickstart</Link>
+					<Link href="/" class="btn-outline px-3 py-1.5 font-mono text-[11px] no-underline">vesk.dev</Link>
+					<button
+						type="button"
+						aria-label={open ? "Close documentation menu" : "Open documentation menu"}
+						aria-expanded={open}
+						onClick={() => { open = !open }}
+						class="grid size-8 place-items-center border border-border lg:hidden bg-transparent text-foreground"
+					>
+						{open ? <X size={16} /> : <Menu size={16} />}
+					</button>
+				</div>
+			</div>
+		</header>
+		if (open) {
+			<div class="border-b border-border bg-background lg:hidden">
+				<div class="max-h-[70vh] overflow-y-auto">
+					<DocsSidebar activeSlug={props.activeSlug} onNavigate={() => { open = false }} />
+				</div>
+			</div>
+		}
+	</>
+}

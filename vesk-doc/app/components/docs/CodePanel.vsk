@@ -1,0 +1,27 @@
+import { Check, Copy } from 'lucide-vesk'
+
+export component CodePanel(props: { filename: string; code: string }) {
+	const &[copied] = track(false)
+
+	<div class="relative">
+		<button
+			type="button"
+			aria-label={copied ? "Copied" : "Copy code"}
+			onClick={() => {
+				navigator.clipboard.writeText(props.code).then(() => {
+					copied = true
+					setTimeout(() => { copied = false }, 1400)
+				}).catch(() => { copied = false })
+			}}
+			class="absolute right-2 top-1.5 z-10 grid size-7 place-items-center border border-border bg-surface text-muted-foreground transition-colors hover:text-foreground"
+		>
+			{copied ? <Check size={14} class="text-accent" /> : <Copy size={14} />}
+		</button>
+		<div class="panel-strong min-w-0 overflow-hidden">
+			<div class="flex items-center justify-between border-b border-border px-3 py-2">
+				<span class="font-mono text-[11px] text-foreground/70">{props.filename}</span>
+			</div>
+			<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] sm:text-[12.5px] text-foreground/85"><code>{props.code}</code></pre>
+		</div>
+	</div>
+}

@@ -270,7 +270,6 @@ function regenerateSsrFunction(
   const ancestorLayouts = options?.ancestorLayouts || [];
   const headExtra = options?.headExtra || null;
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
-  const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
   const cssUrls = resolveCssUrls({
     enabled: hasBuiltGlobalCss(outDir),
   });
@@ -281,10 +280,27 @@ function regenerateSsrFunction(
   const name = routeName(parts);
   const funcDir = resolve(outDir, 'server', 'functions');
   const funcPath = resolve(funcDir, `${name}.js`);
-  const hasLayout = !!routeNode.layout;
-  const hasAncestorLayout = ancestorLayouts.length > 0;
   const pageSrc = readFileSync(pagePath, 'utf-8');
   const pageComp = extractCompName(pageSrc) || 'Page';
+
+  const layoutStack = [
+    ...ancestorLayouts.map((a) => ({ sourceDir: a.sourceDir, layoutCompName: a.layoutCompName })),
+    ...(routeNode.layout ? [{ sourceDir: routeNode.sourceDir, layoutCompName: routeNode.layout }] : []),
+  ];
+
+  const layoutDecls: { src: string; comp: string; path: string; compiled: string }[] = [];
+  for (const entry of layoutStack) {
+    const entryPath = resolve(appDir, entry.sourceDir, 'layout.vsk');
+    const entrySrc = readFileSync(entryPath, 'utf-8');
+    const entryComp = extractCompName(entrySrc) || 'Layout';
+    const escaped = escapeSource(entrySrc);
+    layoutDecls.push({
+      src: `\`${escaped}\``,
+      comp: JSON.stringify(entryComp),
+      path: JSON.stringify(entryPath),
+      compiled: `(() => { try { setVskHydrate(true); return compileFile(\`${escaped}\`, { sourcePath: ${JSON.stringify(entryPath)} }); } catch { return null; } finally { setVskHydrate(false); } })()`,
+    });
+  }
 
   const errorPath = resolveErrorFile(routeNode.sourceDir, appDir);
   const errorSrc = errorPath ? readFileSync(errorPath, 'utf-8') : null;
@@ -297,27 +313,15 @@ function regenerateSsrFunction(
   const dataScriptOption = ', externalDataScript: storeDataScriptGlobal';
 
   let src = '';
-  if (hasLayout) {
-    const layoutSrc = readFileSync(layoutPath, 'utf-8');
-    const layoutComp = extractCompName(layoutSrc) || 'Layout';
-    src = `const _layoutSrc = \`${escapeSource(layoutSrc)}\`;\nconst _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
-    src += `const _layoutComp = ${JSON.stringify(layoutComp)};\nconst _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _layoutPath = ${JSON.stringify(layoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
-    src += `const _layoutCompiled = (() => { try { setVskHydrate(true); return compileFile(_layoutSrc, { sourcePath: _layoutPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
-    src += `const _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
-    src += errorVars;
-  } else if (hasAncestorLayout) {
-    const outerLayout = ancestorLayouts[0];
-    const outerLayoutPath = resolve(appDir, outerLayout.sourceDir, 'layout.vsk');
-    const outerLayoutSrc = readFileSync(outerLayoutPath, 'utf-8');
-    const outerLayoutComp = extractCompName(outerLayoutSrc) || 'Layout';
+  if (layoutDecls.length > 0) {
     src = `const _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
     src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _layoutSrc = \`${escapeSource(outerLayoutSrc)}\`;\n`;
-    src += `const _layoutComp = ${JSON.stringify(outerLayoutComp)};\n`;
-    src += `const _layoutPath = ${JSON.stringify(outerLayoutPath)};\nconst _pagePath = ${JSON.stringify(pagePath)};\n`;
-    src += `const _layoutCompiled = (() => { try { setVskHydrate(true); return compileFile(_layoutSrc, { sourcePath: _layoutPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
+    src += `const _pagePath = ${JSON.stringify(pagePath)};\n`;
     src += `const _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
+    src += `const _layoutSrcList = [\n${layoutDecls.map((d) => '  ' + d.src + ',').join('\n')}\n];\n`;
+    src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
+    src += `const _layoutPathList = [${layoutDecls.map((d) => d.path).join(', ')}];\n`;
+    src += `const _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n];\n`;
     src += errorVars;
   } else {
     src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
@@ -345,7 +349,7 @@ function regenerateSsrFunction(
   }
 
   let renderCode: string;
-  if (hasLayout) {
+  if (layoutDecls.length > 0) {
     renderCode = [
       '  let page;',
       '  let caughtError = null;',
@@ -358,23 +362,14 @@ function regenerateSsrFunction(
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: url.href }), head: '' };",
       '  }',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
-      "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
-    ].join('\n');
-  } else if (hasAncestorLayout) {
-    renderCode = [
-      '  let page;',
-      '  let caughtError = null;',
-      '  try {',
-      '    page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled, sourcePath: _pagePath });',
-      '  } catch (err) {',
-      "    if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;",
-      '    caughtError = err;',
-      "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
-      "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
-      "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: message, stack, url: url.href }), head: '' };",
+      "  let _body = (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(String(caughtError.message)) : '') + '-->' : '') + page.body;",
+      "  let _head = page.head || '';",
+      "  for (let _i = _layoutSrcList.length - 1; _i > 0; _i--) {",
+      "    const _inner = await renderPage(_layoutSrcList[_i], _layoutCompList[_i], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i], sourcePath: _layoutPathList[_i] });",
+      '    _body = _inner.body;',
+      "    if (_inner.head) _head = _inner.head + _head;",
       '  }',
-      '  const html = await renderFullPage(_layoutSrc, _layoutComp, { params, children: (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(String(caughtError.message)) : \'\') + \'-->\' : \'\') + page.body }, __componentRegistry, { hydrate: true, cached: _layoutCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: page.head, sourcePath: _layoutPath });',
+      "  const html = await renderFullPage(_layoutSrcList[0], _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: _head, sourcePath: _layoutPathList[0] });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
     ].join('\n');
   } else {

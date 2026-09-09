@@ -1,7 +1,10 @@
-import { getDoc, getNeighbours, headingId, docPages, docGroups } from '../../../src/content/docs'
+import { getDoc, getNeighbours, headingId } from '../../../src/content/docs'
+import { Info, TriangleAlert } from 'lucide-vesk'
 import { Link } from '@vesk/runtime/router'
 import { NotFoundError } from '@vesk/runtime/router'
 import { DocTabs } from '../../components/DocTabs.vsk'
+import { DocsToc } from '../../components/docs/DocsToc.vsk'
+import { CodePanel } from '../../components/docs/CodePanel.vsk'
 
 component DocsPage(props: { params: { slug: string } }) {
 	const doc = getDoc(props.params.slug)
@@ -18,154 +21,88 @@ component DocsPage(props: { params: { slug: string } }) {
 		<meta name="description" content={doc.description} />
 	</Head>
 
-	<div class="min-h-screen bg-background text-foreground">
-		<header class="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
-			<div class="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-3 sm:px-8">
-				<Link href="/" class="flex items-center gap-2 no-underline">
-					<span class="grid size-6 place-items-center bg-foreground font-display text-[11px] font-bold text-background">V</span>
-					<span class="font-display text-sm font-semibold tracking-tight text-foreground">vesk</span>
-					<span class="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">docs</span>
-				</Link>
-				<div class="flex items-center gap-3">
-					<Link href="/docs/getting-started" class="hidden font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground sm:inline no-underline">quickstart</Link>
-					<Link href="/" class="btn-outline px-3 py-1.5 font-mono text-[11px] no-underline">vesk.dev</Link>
-				</div>
-			</div>
-		</header>
+	<div class="grid gap-10 px-5 py-12 sm:px-10 sm:py-14 xl:grid-cols-[minmax(0,1fr)_180px]">
+		<article class="min-w-0">
+			<p class="eyebrow mb-4 flex items-center gap-2">
+				<Link href="/docs" class="hover:text-foreground no-underline text-muted-foreground">docs</Link>
+				<span aria-hidden>/</span>
+				<span>{doc.group}</span>
+			</p>
+			<h1 class="max-w-[26ch] font-display text-2xl font-semibold leading-[1.1] tracking-tight sm:text-3xl">{doc.title}</h1>
+			<p class="mt-4 max-w-[64ch] font-mono text-[13px] leading-relaxed text-muted-foreground">{doc.description}</p>
 
-		<div class="mx-auto flex w-full max-w-7xl">
-			<aside class="sticky top-[53px] hidden h-[calc(100vh-53px)] w-64 shrink-0 border-r border-border lg:block overflow-y-auto">
-				<div class="flex h-full flex-col">
-					<nav class="flex-1 overflow-y-auto py-5">
-						for (const group of docGroups) {
-							const pages = docPages.filter((p) => p.group === group)
-							<div class="mb-6 last:mb-0">
-								<p class="eyebrow px-4 pb-2">{group}</p>
-								<ul class="list-none m-0 p-0">
-									for (const p of pages) {
-										const to = "/docs/" + p.slug
-										const active = p.slug === doc.slug
-										<li>
-											<Link
-												href={to}
-												class={active ? "flex items-center justify-between gap-2 border-l border-accent bg-surface/60 px-4 py-1.5 font-mono text-[12.5px] text-foreground no-underline" : "flex items-center justify-between gap-2 border-l border-transparent px-4 py-1.5 font-mono text-[12.5px] text-muted-foreground hover:border-border-strong hover:text-foreground no-underline"}
-											>
-												<span>{p.title}</span>
-												<span class="text-[10px] text-muted-foreground/70">{String(docPages.indexOf(p) + 1).padStart(2, "0")}</span>
-											</Link>
-										</li>
-									}
-								</ul>
-							</div>
-						}
-					</nav>
-					<div class="border-t border-border px-4 py-3">
-						<Link href="/docs" class="font-mono text-[11px] text-muted-foreground hover:text-foreground no-underline">← docs index</Link>
+			<div class="mt-10 space-y-6">
+				for (const block of doc.blocks) {
+					if (block.kind === "h2") {
+						<h2 id={headingId(block.text)} class="scroll-mt-24 border-t border-border pt-8 font-display text-lg font-semibold tracking-tight text-foreground sm:text-xl">{block.text}</h2>
+					} else if (block.kind === "p") {
+						<p class="max-w-[70ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty">{block.text}</p>
+					} else if (block.kind === "list") {
+						<ul class="max-w-[70ch] space-y-2 list-none m-0 p-0">
+							for (const item of block.items) {
+								<li class="flex gap-3 font-mono text-[13px] leading-relaxed text-muted-foreground">
+									<span class="mt-[7px] size-1 shrink-0 bg-accent"></span>
+									<span>{item}</span>
+								</li>
+							}
+						</ul>
+					} else if (block.kind === "note") {
+						<div class={block.tone === "warn" ? "flex max-w-[70ch] gap-3 border-l-2 border-accent bg-surface/50 px-4 py-3" : "flex max-w-[70ch] gap-3 border-l-2 border-border-strong bg-surface/50 px-4 py-3"}>
+						{block.tone === "warn"
+							? <TriangleAlert size={16} class="mt-0.5 shrink-0 text-accent" />
+							: <Info size={16} class="mt-0.5 shrink-0 text-muted-foreground" />}
+						<p class="font-mono text-[12.5px] leading-relaxed text-foreground/80">{block.text}</p>
 					</div>
-				</div>
-			</aside>
-
-			<main class="min-w-0 flex-1">
-				<div class="grid gap-10 px-5 py-12 sm:px-10 sm:py-14 xl:grid-cols-[minmax(0,1fr)_180px]">
-					<article class="min-w-0">
-						<p class="eyebrow mb-4 flex items-center gap-2">
-							<Link href="/docs" class="hover:text-foreground no-underline text-muted-foreground">docs</Link>
-							<span aria-hidden>/</span>
-							<span>{doc.group}</span>
-						</p>
-						<h1 class="max-w-[26ch] font-display text-2xl font-semibold leading-[1.1] tracking-tight sm:text-3xl">{doc.title}</h1>
-						<p class="mt-4 max-w-[64ch] font-mono text-[13px] leading-relaxed text-muted-foreground">{doc.description}</p>
-
-						<div class="mt-10 space-y-6">
-							for (const block of doc.blocks) {
-								if (block.kind === "h2") {
-									<h2 id={headingId(block.text)} class="scroll-mt-24 border-t border-border pt-8 font-display text-lg font-semibold tracking-tight text-foreground sm:text-xl">{block.text}</h2>
-								} else if (block.kind === "p") {
-									<p class="max-w-[70ch] font-mono text-[13px] leading-relaxed text-muted-foreground text-pretty">{block.text}</p>
-								} else if (block.kind === "list") {
-									<ul class="max-w-[70ch] space-y-2 list-none m-0 p-0">
-										for (const item of block.items) {
-											<li class="flex gap-3 font-mono text-[13px] leading-relaxed text-muted-foreground">
-												<span class="mt-[7px] size-1 shrink-0 bg-accent"></span>
-												<span>{item}</span>
-											</li>
+				} else if (block.kind === "code") {
+					<CodePanel filename={block.filename} code={block.code} />
+					} else if (block.kind === "tabs") {
+						<DocTabs tabs={block.tabs} />
+					} else if (block.kind === "table") {
+						<div class="overflow-x-auto border border-border">
+							<table class="w-full border-collapse font-mono text-[12px]">
+								<thead>
+									<tr class="border-b border-border bg-surface/60 text-left">
+										for (const h of block.head) {
+											<th class="px-3 py-2 font-medium uppercase tracking-[0.14em] text-[10px] text-muted-foreground">{h}</th>
 										}
-									</ul>
-								} else if (block.kind === "note") {
-									<div class={block.tone === "warn" ? "flex max-w-[70ch] gap-3 border-l-2 border-accent bg-surface/50 px-4 py-3" : "flex max-w-[70ch] gap-3 border-l-2 border-border-strong bg-surface/50 px-4 py-3"}>
-										<p class="font-mono text-[12.5px] leading-relaxed text-foreground/80">{block.text}</p>
-									</div>
-								} else if (block.kind === "code") {
-									<div class="panel-strong min-w-0 overflow-hidden">
-										<div class="flex items-center justify-between border-b border-border px-3 py-2">
-											<span class="font-mono text-[11px] text-foreground/70">{block.filename}</span>
-										</div>
-										<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] sm:text-[12.5px] text-foreground/85"><code>{block.code}</code></pre>
-									</div>
-								} else if (block.kind === "tabs") {
-									<DocTabs tabs={block.tabs} />
-								} else if (block.kind === "table") {
-									<div class="overflow-x-auto border border-border">
-										<table class="w-full border-collapse font-mono text-[12px]">
-											<thead>
-												<tr class="border-b border-border bg-surface/60 text-left">
-													for (const h of block.head) {
-														<th class="px-3 py-2 font-medium uppercase tracking-[0.14em] text-[10px] text-muted-foreground">{h}</th>
-													}
-												</tr>
-											</thead>
-											<tbody>
-												for (const row of block.rows) {
-													<tr class="border-b border-border/60 last:border-b-0">
-														for (let ci = 0; ci < row.length; ci++) {
-															const cell = row[ci]
-															<td class={ci === 0 ? "px-3 py-2 align-top text-foreground" : "px-3 py-2 align-top text-muted-foreground"}>{cell}</td>
-														}
-													</tr>
-												}
-											</tbody>
-										</table>
-									</div>
-								}
-							}
-						</div>
-
-						<nav class="mt-14 grid gap-px border-t border-border bg-border sm:grid-cols-2">
-							if (prev) {
-								<Link href={"/docs/" + prev.slug} class="bg-background px-4 py-4 transition-colors hover:bg-surface/60 no-underline block">
-									<span class="eyebrow">previous</span>
-									<span class="mt-1 block font-display text-sm font-medium text-foreground">← {prev.title}</span>
-								</Link>
-							} else {
-								<span class="bg-background"></span>
-							}
-							if (next) {
-								<Link href={"/docs/" + next.slug} class="bg-background px-4 py-4 text-right transition-colors hover:bg-surface/60 no-underline block">
-									<span class="eyebrow">next</span>
-									<span class="mt-1 block font-display text-sm font-medium text-foreground">{next.title} →</span>
-								</Link>
-							} else {
-								<span class="bg-background"></span>
-							}
-						</nav>
-					</article>
-
-					<aside class="hidden xl:block">
-						if (toc.length > 0) {
-							<div class="sticky top-24">
-								<p class="eyebrow pb-3">on this page</p>
-								<ul class="space-y-1 border-l border-border list-none m-0 p-0">
-									for (const item of toc) {
-										<li>
-											<a href={"#" + item.id} class="-ml-px block border-l border-transparent pl-3 py-1 font-mono text-[11.5px] text-muted-foreground hover:text-foreground no-underline">{item.text}</a>
-										</li>
+									</tr>
+								</thead>
+								<tbody>
+									for (const row of block.rows) {
+										<tr class="border-b border-border/60 last:border-b-0">
+											for (let ci = 0; ci < row.length; ci++) {
+												const cell = row[ci]
+												<td class={ci === 0 ? "px-3 py-2 align-top text-foreground" : "px-3 py-2 align-top text-muted-foreground"}>{cell}</td>
+											}
+										</tr>
 									}
-								</ul>
-							</div>
-						}
-					</aside>
-				</div>
-			</main>
-		</div>
+								</tbody>
+							</table>
+						</div>
+					}
+				}
+			</div>
+
+			<nav class="mt-14 grid gap-px border-t border-border bg-border sm:grid-cols-2">
+				if (prev) {
+					<Link href={"/docs/" + prev.slug} class="bg-background px-4 py-4 transition-colors hover:bg-surface/60 no-underline block">
+						<span class="eyebrow">previous</span>
+						<span class="mt-1 block font-display text-sm font-medium text-foreground">← {prev.title}</span>
+					</Link>
+				} else {
+					<span class="bg-background"></span>
+				}
+				if (next) {
+					<Link href={"/docs/" + next.slug} class="bg-background px-4 py-4 text-right transition-colors hover:bg-surface/60 no-underline block">
+						<span class="eyebrow">next</span>
+						<span class="mt-1 block font-display text-sm font-medium text-foreground">{next.title} →</span>
+					</Link>
+				} else {
+					<span class="bg-background"></span>
+				}
+			</nav>
+		</article>
+
+		<DocsToc items={toc} />
 	</div>
 }

@@ -7,83 +7,37 @@ component DocsIndex {
 		<meta name="description" content="Guides and reference for the Vesk compiler-first framework: installation, core concepts, styling, native Kotlin output, diagnostics and deployment." />
 	</Head>
 
-	<div class="min-h-screen bg-background text-foreground">
-		<header class="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
-			<div class="mx-auto flex w-full max-w-7xl items-center justify-between px-5 py-3 sm:px-8">
-				<Link href="/" class="flex items-center gap-2 no-underline">
-					<span class="grid size-6 place-items-center bg-foreground font-display text-[11px] font-bold text-background">V</span>
-					<span class="font-display text-sm font-semibold tracking-tight text-foreground">vesk</span>
-					<span class="font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground">docs</span>
-				</Link>
-				<div class="flex items-center gap-3">
-					<Link href="/docs/getting-started" class="hidden font-mono text-[11px] text-muted-foreground transition-colors hover:text-foreground sm:inline no-underline">quickstart</Link>
-					<Link href="/" class="btn-outline px-3 py-1.5 font-mono text-[11px] no-underline">vesk.dev</Link>
-				</div>
-			</div>
-		</header>
+	<div class="px-5 py-12 sm:px-10 sm:py-16">
+		<p class="eyebrow mb-5">documentation</p>
+		<h1 class="max-w-[24ch] font-display text-3xl font-semibold leading-[1.05] tracking-tight sm:text-4xl">Everything the compiler does, written down.</h1>
+		<p class="mt-5 max-w-[58ch] font-mono text-[13px] leading-relaxed text-muted-foreground">
+			Start with the quickstart, then read concepts before reference. Every diagnostic, target behaviour and configuration option has a page.
+		</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-5 py-3 font-display text-sm no-underline">Quickstart</Link>
+			<Link href="/docs/api" class="btn-outline px-5 py-3 font-display text-sm no-underline">API reference</Link>
+		</div>
 
-		<div class="mx-auto flex w-full max-w-7xl">
-			<aside class="sticky top-[53px] hidden h-[calc(100vh-53px)] w-64 shrink-0 border-r border-border lg:block overflow-y-auto">
-				<div class="flex h-full flex-col">
-					<nav class="flex-1 overflow-y-auto py-5">
-						for (const group of docGroups) {
-							const pages = docPages.filter((p) => p.group === group)
-							<div class="mb-6 last:mb-0">
-								<p class="eyebrow px-4 pb-2">{group}</p>
-								<ul class="list-none m-0 p-0">
-									for (const p of pages) {
-										<li>
-											<Link href={"/docs/" + p.slug} class="flex items-center justify-between gap-2 border-l border-transparent px-4 py-1.5 font-mono text-[12.5px] text-muted-foreground hover:border-border-strong hover:text-foreground no-underline">
-												<span>{p.title}</span>
-												<span class="text-[10px] text-muted-foreground/70">{String(docPages.indexOf(p) + 1).padStart(2, "0")}</span>
-											</Link>
-										</li>
-									}
-								</ul>
-							</div>
-						}
-					</nav>
-					<div class="border-t border-border px-4 py-3">
-						<Link href="/" class="font-mono text-[11px] text-muted-foreground hover:text-foreground no-underline">← back to vesk.dev</Link>
-					</div>
-				</div>
-			</aside>
-
-			<main class="min-w-0 flex-1">
-				<div class="px-5 py-12 sm:px-10 sm:py-16">
-					<p class="eyebrow mb-5">documentation</p>
-					<h1 class="max-w-[24ch] font-display text-3xl font-semibold leading-[1.05] tracking-tight sm:text-4xl">Everything the compiler does, written down.</h1>
-					<p class="mt-5 max-w-[58ch] font-mono text-[13px] leading-relaxed text-muted-foreground">
-						Start with the quickstart, then read concepts before reference. Every diagnostic, target behaviour and configuration option has a page.
-					</p>
-					<div class="mt-8 flex flex-wrap gap-3">
-						<Link href="/docs/getting-started" class="btn-solid px-5 py-3 font-display text-sm no-underline">Quickstart</Link>
-						<Link href="/docs/api" class="btn-outline px-5 py-3 font-display text-sm no-underline">API reference</Link>
-					</div>
-
-					<div class="mt-14 space-y-10">
-						for (const group of docGroups) {
-							const pages = docPages.filter((p) => p.group === group)
-							if (pages.length > 0) {
-								<section>
-									<p class="eyebrow mb-4 border-b border-border pb-2">{group}</p>
-									<div class="grid gap-px bg-border sm:grid-cols-2">
-										for (const p of pages) {
-											<Link href={"/docs/" + p.slug} class="group bg-background p-5 transition-colors hover:bg-surface/60 no-underline block">
-												<div class="flex items-center justify-between gap-3">
-													<h2 class="font-display text-base font-semibold tracking-tight text-foreground">{p.title}</h2>
-													<span class="font-mono text-[11px] text-muted-foreground transition-transform group-hover:translate-x-0.5">→</span>
-												</div>
-												<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">{p.description}</p>
-											</Link>
-										}
+		<div class="mt-14 space-y-10">
+			for (const group of docGroups) {
+				const pages = docPages.filter((p) => p.group === group)
+				if (pages.length > 0) {
+					<section>
+						<p class="eyebrow mb-4 border-b border-border pb-2">{group}</p>
+						<div class="grid gap-px bg-border sm:grid-cols-2">
+							for (const p of pages) {
+								<Link href={"/docs/" + p.slug} class="group bg-background p-5 transition-colors hover:bg-surface/60 no-underline block">
+									<div class="flex items-center justify-between gap-3">
+										<h2 class="font-display text-base font-semibold tracking-tight text-foreground">{p.title}</h2>
+										<span class="font-mono text-[11px] text-muted-foreground transition-transform group-hover:translate-x-0.5">→</span>
 									</div>
-								</section>
+									<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">{p.description}</p>
+								</Link>
 							}
-						}
-					</div>
-				</div>
-			</main>
+						</div>
+					</section>
+				}
+			}
 		</div>
 	</div>
 }

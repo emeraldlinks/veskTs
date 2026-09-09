@@ -102,7 +102,7 @@ async function loadFallbackModule(id: string, base: string): Promise<{ module: u
   return { module: mod.default ?? mod, base: path.dirname(pkgPath) }
 }
 
-const TAILWIND_BLOCK = /^\s*@(theme\s*\{|layer\s+(base|components|utilities)\s*\{|utility\s+\w+\s*\{)/m
+const TAILWIND_BLOCK = /^\s*@theme(?:\s+(inline|static|reference))?\s*\{|^\s*@layer\s+(base|components|utilities)\s*\{|^\s*@utility\s+\w+\s*\{/m
 
 /**
  * Scans a CSS block starting at `start` (an opening `{`) and returns the
