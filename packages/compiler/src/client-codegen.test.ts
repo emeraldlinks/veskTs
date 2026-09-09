@@ -1101,7 +1101,62 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 
-	// Classic `for` loops are non-reactive: in hydrate mode they still must run
+	// A `for` loop whose item body starts with a block-level node (`if`) must
+	// NOT let that node sink to `$root` on fresh (non-hydrate) renders. Each
+	// item renders into its own DocumentFragment (`__it`) which is inserted
+	// before the refresh anchor; the block anchors must attach to the fragment.
+	// Reproduced in vesk-doc: the docs route iterates `doc.blocks` with a
+	// statement-mode `if (block.kind === 'h2')` chain — before the fix the page
+	// content escaped into the layout slot container, above the article.
+	bothModes('map item with top-level if stays inside its item fragment', `
+		const blocks = [{ kind: 'h2', value: 'A' }, { kind: 'p', value: 'B' }];
+		component App() {
+			<article>
+				for (const block of blocks) {
+					if (block.kind === 'h2') { <h2>{block.value}</h2> }
+					<p>{block.value}</p>
+				}
+			</article>
+		}
+	`, (code, mode) => {
+		const fragIdx = code.indexOf('const __it = document.createDocumentFragment();');
+		if (mode === 'normal') {
+			expect(fragIdx).not.toBe(-1);
+			expect(code.indexOf('__p.insertBefore(__it, __r);')).not.toBe(-1);
+			const between = code.slice(fragIdx, code.indexOf('__p.insertBefore(__it, __r);'));
+			expect(between).not.toContain('$root.appendChild');
+		} else {
+			expect(fragIdx).toBe(-1);
+			expect(code).toContain('__cl.push(');
+			expect(code).toContain('__place(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// Statement-mode block-level bodies inside `while`/`switch`/`try` containers
+	// follow the same rule on fresh renders: their anchors anchor to the container
+	// fragment, never to `$root`.
+	bothModes('while/switch/try block-level bodies do not sink to $root', `
+		const items = [1, 2];
+		component App() {
+			while (false) { if (x) { <i>a</i> } }
+			for (const it of items) { switch (it) { case 1: <b>1</b> } }
+			try { if (y) { <u>c</u> } } catch (e) { <em>err</em> }
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).not.toContain('const __it = document.createDocumentFragment();');
+			expect(code).not.toContain('const __b = document.createDocumentFragment();');
+			expect(code).not.toContain('const __c = document.createDocumentFragment();');
+			expect(code).toContain('const __cl = [];');
+			expect(code).toContain('__place(');
+			return;
+		}
+		for (const m of ['insertBefore(__it, __r);', 'insertBefore(__b,']) {
+			expect(code).toContain(m);
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
 	// during body execution so their SSR content gets claimed in DOM order.
 	bothModes('classic for renders during body execution', `
 		component App() {

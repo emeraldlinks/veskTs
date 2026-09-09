@@ -272,6 +272,7 @@ export function Link(
 			if (typeof props.children === 'string' || typeof props.children === 'number') {
 				a.textContent = String(props.children);
 			} else {
+				a.replaceChildren();
 				mountLinkChildren(a, props.children);
 			}
 		}
@@ -346,6 +347,7 @@ export function NavLink(
 				if (typeof props.children === 'string' || typeof props.children === 'number') {
 					a.textContent = String(props.children);
 				} else {
+					a.replaceChildren();
 					mountLinkChildren(a, props.children);
 				}
 			}

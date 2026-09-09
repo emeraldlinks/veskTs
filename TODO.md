@@ -4,6 +4,31 @@
 
 **Current phase:** pure-TS pipeline (haul parked)
 
+**Completed (SPA block-content sink + Link hydration duplicates):** Fixed a
+regression where statement-mode `for`/map routes rendered fresh client (SPA nav)
+with item content escaping its container. `emitMap`/`emitForLoop`/
+`emitWhileLoop`/`emitSwitchBlock`/`emitTryCatch` in `client-codegen.ts` passed no
+`parentVar` to non-hydrate body/item nodes, so block-level bodies (a top-level
+`if` chain iterating `doc.blocks` in vesk-doc's docs route) self-appended their
+anchors to `$root` — the docs content landed directly in the layout slot, above
+the `<article>`. Full reloads were unaffected (hydrate claims in place). Fix:
+each map item and each loop/switch region gets a private DocumentFragment
+(`__it`/`__b`/`__c`) as its `parentVar`, inserted before the region's `endAnchor`/
+refresh anchor; try/catch non-hydrate body children now anchor to `__p`. Second
+bug fixed too: `Link`/`NavLink` hydrate paths appended caller-built children
+fragments into an already-claimed SSR `<a>` (via the `hydrate.root.querySelector`
+adoption fallback), producing double text on full reload ("quickstart
+quickstart", "vesk.dev vesk.dev"); they now `replaceChildren()` before mounting so
+the SSR originals are replaced by the canonical fragment. Tests: client-codegen
+211 (+4: map item with top-level `if` and while/switch/try bodies must not sink to
+`$root`), router 71 (+2 Link/NavLink SSR-adoption), `tests/hydration-test.mjs`
+315/315 incl. new **Test 20** (`test-app/app/blocknav/page.vsk` fixture:
+statement-mode for-over-blocks with `if/else` item bodies; 20a full load, 20b SPA
+nav /store→/blocknav — the critical fresh-render path — asserts each section title
+appears exactly once and none leak out of `article.blocknav-article`, 20c hard
+reload). vesk-doc + test-app tarballs refreshed/verified in Chromium (SPA nav
+article content + single header link text).
+
 **Completed (SSR import resolver + `#routing` hash mode):** (1) **SSR import resolution of `.`/`..` specifiers** — literal relative specifiers now anchor against the *importing module's* directory (`fromDir`) instead of `process.cwd()` (imports like `../src/content/docs` from `app/pages/…` resolved against the repo root, wrong on every mount). (2) **Lazy-barrel stale-cache bug** — `createLazyBarrelExports` cached the *values* of re-exported submodules forever, so editing a barrel target never invalidated it via the mtime key (1 stat per module); the barrel now caches only resolved *target paths* and pulls values through `loadSsrModule(target)` on every access (mtime-keyed per module: edit a submodule invalidates exactly that module, edit a barrel nothing else). (3) **Hash-mode routing (`hash: true`)** across both router factories + `Link`/`NavLink`: `#/path` URLs navigate via `pushState`, back/forward dedupes popstate+hashchange (state-compare, engine-order independent), plain `#anchor` stays native, `start()` skips SSR hydration when the hash routes elsewhere (full client render instead of claiming mismatched markup), scroll keys + error/offline retry paths + `useRouter().refresh()`/`prefetch`/`hmrUpdate` all route-aware. Tests: module-imports.test.ts 34 (`.`/`..` anchoring, depth-correct resolution, lazy-barrel aliased/star/namespace, mtime invalidation, warm-reload), router.test.ts 69 (+9 hash-mode), runtime + full-suite typecheck clean, `tests/hydration-test.mjs` 281/281, full suite 67 files / 2431 / 0 failed (CHROMIUM_PATH required for code-split/hydration browser E2E), vesk-doc deps refreshed + `.vesk` cache cleared.
 
 **Completed (server events):** `app/_events.ts` lifecycle hooks shipped end to end.

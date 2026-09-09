@@ -1,5 +1,5 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from '@vesk/runtime/src/router';
-import { findErrorComponent, findNotFoundComponent, findLoadingComponent } from '@vesk/runtime/src/router-components';
+import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating } from '@vesk/runtime/src/router-components';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
 let passed = 0;
@@ -283,6 +283,39 @@ test('NavLink creates anchor with active state', () => {
 	const a = NavLink({ href: '/', activeClass: 'is-active' });
 	expect(a.tagName).toBe('A');
 	expect(a.classList.contains('is-active')).toBe(true);
+});
+
+test('Link hydrate adopts SSR anchor without duplicating children', () => {
+	const ssrRoot = document.createElement('div');
+	const ssrA = document.createElement('a');
+	ssrA.appendChild(document.createTextNode('quickstart'));
+	ssrRoot.appendChild(ssrA);
+	ssrRoot.querySelector = () => ssrA;
+	const frag = document.createDocumentFragment();
+	frag.appendChild(document.createTextNode('quickstart'));
+	const walker = { root: ssrRoot, nextElement(tag) { return document.createElement(tag || 'a'); } };
+	const out = Link({ href: '/docs/getting-started', class: 'x', children: frag }, undefined, walker);
+	expect(ssrA.children.length).toBe(1);
+	expect(ssrA.textContent).toBe('quickstart');
+	expect(out.nodeType).toBe(11);
+});
+
+test('NavLink hydrate adopts SSR anchor without duplicating children', () => {
+	const ssrA = document.createElement('a');
+	ssrA.appendChild(document.createTextNode('vesk.dev'));
+	document.querySelector = (sel) => (sel === 'a[href="/"]' ? ssrA : null);
+	setIsHydrating(true);
+	try {
+		const frag = document.createDocumentFragment();
+		frag.appendChild(document.createTextNode('vesk.dev'));
+		const out = NavLink({ href: '/', children: frag });
+		expect(ssrA.children.length).toBe(1);
+		expect(ssrA.textContent).toBe('vesk.dev');
+		expect(out).toBeTruthy();
+	} finally {
+		setIsHydrating(false);
+		document.querySelector = () => null;
+	}
 });
 
 test('Outlet returns a DOM node', () => {

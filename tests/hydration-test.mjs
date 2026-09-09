@@ -1334,6 +1334,109 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 20: statement-mode map item body escaping (SPA nav) ──
+  // Regression (vesk-doc): a `for` loop whose item body STARTS with a
+  // block-level `if` sink its anchors into the component root on fresh
+  // (non-hydrate) renders, so on SPA navigation the docs content escaped its
+  // <article> and was appended above the layout slot. Full loads were fine
+  // because hydrate-mode claims in place. 20b is the critical case.
+  {
+    console.log('\n=== TEST 20: map item with top-level if stays in place on SPA nav ===');
+    const H2S = ['Alpha section', 'Beta section'];
+
+    const readBlockNav = () => page.evaluate(() => {
+      const root = document.getElementById('root');
+      const article = document.querySelector('article.blocknav-article');
+      const title = article?.querySelector('h1');
+      return {
+        survived: !!root,
+        article: !!article,
+        // Count every occurrence of the section titles anywhere in #root.
+        counts: ['Alpha section', 'Beta section'].map(t =>
+          ((root?.textContent || '') + ' ').split(t).length - 1),
+        // Where the h2s actually live: descendants of the article or leaked out.
+        leaked: ['Alpha section', 'Beta section'].filter(t => {
+          const inArticle = Array.from(article?.querySelectorAll('h2.blocknav-h2') || [])
+            .some(h => h.textContent.trim() === t);
+          const all = Array.from(root?.querySelectorAll('h2, p') || [])
+            .filter(el => (root && el.classList.contains('blocknav-h2')) || el.classList.contains('blocknav-p'));
+          return !inArticle || all.length !== 4;
+        }),
+      };
+    });
+
+    console.log('  20a: full load — block content renders inside the article');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await goto(page, BASE + '/blocknav', { waitUntil: 'networkidle0', timeout: 15000 });
+    {
+      const s = await readBlockNav();
+      assert(s.survived, '/blocknav: #root survives client hydration');
+      assert(s.article, '/blocknav: article.blocknav-article exists');
+      assert(s.counts.every(c => c === 1), '/blocknav: each section title appears exactly once (got ' + s.counts.join(', ') + ')');
+      assert(s.leaked.length === 0, '/blocknav: no block content leaks out of the article');
+      assert(errors.length === 0, '/blocknav full load zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    }
+
+    console.log('  20b: SPA navigation — fresh render must keep item content inside the article');
+    // Start the SPA session on a different route, then navigate to /blocknav so
+    // the target renders via the fresh (non-hydrate) code path — the buggy one.
+    await page.evaluate(() => { const r = window.__vesk_router; if (r && r.navigate) r.navigate('/store'); });
+    const t0 = Date.now();
+    while (Date.now() - t0 < 15000) {
+      const p = await page.evaluate(() => window.location.pathname);
+      if (p === '/store') break;
+      await new Promise(r => setTimeout(r, 100));
+    }
+    await page.evaluate(() => { const r = window.__vesk_router; if (r && r.navigate) { window.__spaFlag = true; r.navigate('/blocknav'); } });
+    {
+      const t1 = Date.now();
+      let landed = false;
+      while (Date.now() - t1 < 15000) {
+        const path = await page.evaluate(() => window.location.pathname);
+        if (path === '/blocknav') {
+          const s = await readBlockNav();
+          if (s.article) { landed = s; break; }
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+      assert(!!landed, 'SPA nav /store -> /blocknav lands on the route');
+      if (landed) {
+        assert(landed.survived, 'SPA nav: #root survives (did not reload)');
+        assert(landed.article, 'SPA nav: article.blocknav-article exists');
+        assert(landed.counts.every(c => c === 1),
+          'SPA nav: each section title appears exactly once (got ' + landed.counts.join(', ') + ')');
+        assert(landed.leaked.length === 0, 'SPA nav: no block content leaks out of the article');
+      }
+      assert(errors.length === 0, 'SPA nav to /blocknav zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    }
+
+    console.log('  20c: hard reload after the SPA session');
+    await page.reload({ waitUntil: 'networkidle0' });
+    {
+      const s = await readBlockNav();
+      assert(s.survived, 'hard reload keeps #root on /blocknav');
+      assert(s.counts.every(c => c === 1), 'hard reload: each section title appears exactly once (got ' + s.counts.join(', ') + ')');
+      assert(s.leaked.length === 0, 'hard reload: no block content leaks out of the article');
+      const markers = await page.evaluate(() => {
+        const root = document.getElementById('root');
+        let vsk = 0, hold = 0;
+        const w = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+        while (w.nextNode()) {
+          const t = w.currentNode.textContent || '';
+          if (t === 'vsk') vsk++;
+          else if (t === 'vsk-hold') hold++;
+        }
+        return { vsk, hold };
+      });
+      assert(markers.vsk === 0 && markers.hold === 0,
+        'hard reload claims all markers (got vsk=' + markers.vsk + ' hold=' + markers.hold + ')');
+      assert(errors.length === 0, 'blocknav session zero pageerrors (got: ' + errors.join(', ') + ')');
+    }
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${passed + failed + skipped} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

@@ -1,5 +1,45 @@
 # Vesk — Session Summary (2026-09-09, afternoon)
 
+## RESOLVED — SPA block-content sink + full-reload Link duplicates
+The user-reported vesk-doc bug — *"docs pages in spa navigation renders actual
+page content above the layout"* — is fixed and browser-verified.
+
+**Root cause:** the non-hydrate (fresh client render) emitters in
+`packages/compiler/src/client-codegen.ts` passed **no `parentVar`** to
+map-item / loop-body / switch-case / try-body nodes. Any block-level body (a
+statement-mode `if` chain, nested map, try) self-appended its anchors to the
+component's `$root` fragment instead of the region's container. On vesk-doc's
+docs route — `for (const block of doc.blocks)` where each item starts with
+`if (block.kind === "h2")` — the entire page content escaped the `<article>` and
+landed directly in the layout slot container, above the article. A full reload
+looked fine because hydrate-mode claims SSR markers in place.
+
+**Fix:** each map item and each loop/switch region now builds a private
+DocumentFragment as its `parentVar` (`__it` per item; `__b` per for/while;
+`__c` per switch), inserted before the region's `endAnchor`; try/catch
+non-hydrate body children anchor to `__p`. Content can no longer leak to `$root`.
+
+**Verified (real chromium via puppeteer-core):**
+- vesk-doc dev :3000 — SPA nav /docs → /docs/getting-started renders all map
+  content (Create a project / Project layout / What you already know applies +
+  code panels, tips, links) inside `article` within `main > .grid`, TOC aside in
+  place, zero page errors.
+- **Bonus fix found while probing:** on full reload the header links duplicated
+  their text ("quickstart quickstart", "vesk.dev vesk.dev"). `Link`/`NavLink`
+  hydrate paths append caller-built children into the already-claimed SSR `<a>`
+  (adopted via `hydrate.root.querySelector` after `nextElement('a')` produced a
+  fresh, parentless element). They now `replaceChildren()` before mounting so the
+  SSR originals are replaced by the canonical fragment. Verified: single
+  "quickstart" text, ONE child node.
+- **Test 20** added to `tests/hydration-test.mjs` (16 assertions) against new
+  `test-app/app/blocknav/page.vsk` (statement-mode for-over-blocks with `if/else`
+  item bodies): 20a full load, 20b SPA nav /store→/blocknav (the critical
+  fresh-render path), 20c hard reload — each section title appears exactly once
+  and nothing leaks outside `article.blocknav-article`.
+- Full suite **315 passed, 0 failed**; client-codegen **211**, router **71**,
+  integration **124**, hydrate **13**, typecheck clean. test-app + vesk-doc
+  tarballs refreshed.
+
 ## RESOLVED — client-side wipe on nested-layout routes
 The blocking browser hydration wipe is fixed and browser-verified.
 

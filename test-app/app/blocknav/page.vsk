@@ -1,0 +1,33 @@
+interface Block {
+	kind: 'h2' | 'p'
+	value: string
+}
+
+const blocks: Block[] = [
+	{ kind: 'h2', value: 'Alpha section' },
+	{ kind: 'p', value: 'Alpha body' },
+	{ kind: 'h2', value: 'Beta section' },
+	{ kind: 'p', value: 'Beta body' },
+]
+
+// Regression fixture: a statement-mode `for` whose item body STARTS with a
+// block-level `if`. Mirrors vesk-doc's docs route (for over `doc.blocks`).
+// On SPA (fresh, non-hydrate) renders the item body used to sink its anchors
+// to the component root, escaping the <article> and landing above the layout.
+component BlockNav {
+	<Head>
+		<title>BlockNav — statement-mode for over blocks</title>
+	</Head>
+
+	<h1 class="text-3xl font-bold mb-4">Block Nav Demo</h1>
+
+	<article class="blocknav-article border rounded p-4">
+		for (const block of blocks) {
+			if (block.kind === 'h2') {
+				<h2 class="blocknav-h2 text-xl font-semibold mt-4 mb-1">{block.value}</h2>
+			} else {
+				<p class="blocknav-p text-sm text-gray-600">{block.value}</p>
+			}
+		}
+	</article>
+}
