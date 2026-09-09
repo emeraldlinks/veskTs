@@ -1,10 +1,33 @@
 # Vesk — Session Summary (2026-09-09, afternoon)
 
-## Goal
-Fix the framework so nested route layouts compose fully on the server, matching
-the client — specifically `/docs/[slug]` must receive the **docs layout AND the
-root layout** (fonts/favicon/header/sidebar), not just the innermost ancestor.
-Then complete the vesk-doc docs-layout refactor and browser-verify.
+## RESOLVED — client-side wipe on nested-layout routes
+The blocking browser hydration wipe is fixed and browser-verified.
+
+**Root cause:** `hydrateInitial`'s `renderLayoutChain` in
+`packages/runtime/src/router.ts` rendered each nested layout **eagerly,
+inner-first**, so the innermost layout (docs) called `walker.nextElement(...)`
+and claimed the OUTER (root-layout) SSR markers. The SSR markers are laid out
+in DOM order (outermost-first), but claiming happened inner-first, so every
+nested layout claimed the wrong element and fabricated fresh DOM, cascading a
+marker-count mismatch across the entire `#root` and wiping all SSR content
+through the error/fallback path (final DOM = dev shell with no `#root`).
+
+**Fix:** `renderLayoutChain(i)` now returns a hydrator **function** that only
+renders a layout when its enclosing layout's `{children}` slot invokes it (via
+`props.children(walker.subWalker(...))`). Claims therefore run outermost →
+innermost, matching document order, while the outer layout still wraps the
+inner result. Invoked as `runInBlockWindow(() => renderLayoutChain(0)(walker))`.
+
+**Verified (real chromium via puppeteer-core):**
+- vesk-doc dev :3007 — `/docs`, `/docs/getting-started` (root+docs layout),
+  `/`, `/blog`, `/blog/first-post` all keep `#root`, render the full chain
+  (fonts/header/footer/sidebar/search), claim every `vsk` marker (0 leftover),
+  zero console/page errors; SPA nav + hard reload survive.
+- test-app — new `app/store/layout.vsk` nested fixture added; new
+  **Test 19 (18 assertions)** in `tests/hydration-test.mjs` proves `#root`
+  survives, all markers claimed, both layout levels + page render, SPA nav and
+  hard reload work with zero errors. Full suite: **299 passed, 0 failed**.
+- Unit: router 69, hydrate 13, client-codegen 207, integration 124. Typecheck clean.
 
 ## WORKING (verified)
 
@@ -35,58 +58,36 @@ Then complete the vesk-doc docs-layout refactor and browser-verify.
 
 ## BROKEN (blocking)
 
-6. **Client-side wipe on nested-layout routes (dev browser, puppeteer-core)**:
-   `/docs` + `/docs/getting-started` SSR correctly, but after client JS runs the
-   **entire `#root` and all SSR content disappear**; the final DOM is the dev
-   server's *shell variant* — module scripts + `#__vesk_dev` widget +
-   `<head>`-injected `page-index.js`/`page-docs.js` preloads — with **no** `#root`
-   and **no** `<!--vsk-->` markers. Zero page/console errors, HTTP 200 both loads,
-   `<title>` + fonts persist.
-   - Raw HTTP response (23,391 B) HAS `#root` + SSR content and NO dev widget;
-     final outerHTML (26,990 B) has the widget + injected head chunks and NO `#root`.
-   - Bisection (block individual scripts): block `client.js` → page intact (SSR stays);
-     block `page-docs.js` → `#root` survives + pageerror `node.layout is not a function`
-     (docs layout chunk missing, error boundary renders). So the wipe happens through
-     the client hydration path **with the docs layout chunk present**.
-   - Not HMR: WebSocket neutered + `location.*` patched → wipe persists, zero
-     `location.replace/assign/reload` calls, zero DOM mutations observed
-     (observer on `document.documentElement` subtree saw nothing → the document is
-     replaced internally, detaching the observed tree — e.g.
-     `document.replaceChild(docElement, …)` — or a second server response is committed).
-   - Prime suspect: nested-layout hydration claim in `packages/runtime/src/router.ts`
-     `renderLayoutChain` (≈:1070–1098) + `packages/runtime/src/hydrate.ts`
-     `createHydrateWalker` marker ordering for nested slot trees, plus the dev-server
-     shell-fallback decision (the `__vesk_dev` widget exists only in the shell
-     template, never in the SSR page).
-7. `vesk-doc` prod `.vesk` build is stale (pre-chain layout format) — needs a fresh
-   `npm run build` + `npm run start` once the browser hydration issue is closed.
+6. **(RESOLVED this session)** Client-side wipe on nested-layout routes — see
+   "RESOLVED" at the top. Root cause was inner-first marker claiming in
+   `hydrateInitial`'s `renderLayoutChain`; fixed by deferring each inner layout
+   to a hydrator function invoked from its enclosing layout's `{children}` slot.
+7. `vesk-doc` prod `.vesk` build — not re-run this session (dev-path verified).
 
-## Next steps
-1. Trace the shell: in puppeteer log **every** network request/response while loading
-   `/docs` — confirm whether a second GET `/docs` returns the widget-shell (a server
-   response difference) or the document is replaced client-side. Grep the dev server
-   bundle for the `__vesk_dev` injection site (only the shell template contains it).
-2. Fix the hydration claim for nested layouts in `router.ts`/`hydrate.ts` (walker
-   subWalker ordering across nested `{children}` slots; keep claims/removals to the
-   slot subtree only, never touch `#root` or the outer document).
-3. Rebuild packages (`npx tsx packages/cli/src/build-packages.ts`), refresh vesk-doc
-   tarballs (`node scripts/refresh-testapp-deps.mjs vesk-doc`), verify with puppeteer:
-   full page + hard reload → `#root` survives, sidebar/header/content render, hydration
-   markers → 0, zero errors, on `/docs` and `/docs/[slug]`. Then `node tests/hydration-test.mjs`.
-4. Rebuild vesk-doc prod (`npm run build` + `npm run start`), re-verify, then clean up
-   `probe-*.mjs` throwaways and update TODO.md.
+## Next steps (remaining)
+1. Rebuild vesk-doc prod (`npm run build` + `npm run start`) and re-verify the
+   prod hydration path, since only the dev path was re-run.
+2. Note: `tests/dev-test.mjs` currently fails to boot because the loose
+   `packages/adapter/dist/*.js` (built with `moduleResolution: bundler`) emits
+   extensionless relative imports that raw Node ESM cannot resolve
+   (`dist/dev-api.js` imports `./plugins`). This is pre-existing and independent
+   of the hydration fix; the `vesk` CLI (bundled `dist/cli.js`) and all browser
+   tests are unaffected. A durable fix = emit `.js` extensions in the adapter/
+   compiler dist (e.g. `rewriteRelativeImportExtensions` / NodeNext).
 
-## Root-cause clues (gathered)
+## Root-cause clues (resolved)
 - `createHydrateWalker.nextElement` removes the marker comment before mapping; on
-  exhaustion it fabricates new elements — a nested-chain marker-count mismatch makes
-  claims degrade silently, then the error/fallback path re-renders and the dev shell
-  replaces everything. Hydration catch in `matchHydrate` falls back to `renderMatch`
-  (container only) — so the wipe is likely a higher-level document replacement, not
-  that catch path.
+  exhaustion it fabricates new elements. With nested layouts, `hydrateInitial`'s
+  `renderLayoutChain` rendered inner layouts eagerly and called `nextElement`
+  against the root walker in inner-first order, so each nested layout claimed the
+  OUTER layout's markers and fabricated fresh DOM, cascading a marker-count
+  mismatch across `#root` through the error/fallback path (dev-shell replacement).
+  Fixing claim order (outermost→innermost, via function-style child hydrators)
+  makes claims match document order and keeps claims inside each slot subtree.
 - `client.js` (dev) end: match → `ensureChunk` per chain chunk → `createFileRouter`
   → `__router.start()`; hydrators live in `page-docs.js`/`page-index.js` chunks.
 
 ## Commit status
-- Pushed: adapter full-chain SSR fix + `ssr-function.test.ts` + vesk-doc docs layout/
-  components/import fixes + tarball re-pin. Browser hydration wipe still open — see
-  "Broken".
+- Pushed this session: `router.ts` nested-layout hydration fix + test-app
+  `store/layout.vsk` nested fixture + `tests/hydration-test.mjs` Test 19 (18
+  assertions) + fresh CI tarball re-pins for test-app and vesk-doc.

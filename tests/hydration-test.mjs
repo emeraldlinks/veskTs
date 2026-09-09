@@ -1253,6 +1253,87 @@ async function main() {
     }
   }
 
+  // ── Test 19: Nested layout hydration (root layout + route layout) ──
+  // Regression: nested-layout routes (e.g. /docs/[slug] in vesk-doc) hydrated
+  // by claiming SSR markers inner-first, which mismatched the outer-first DOM
+  // order and wiped the entire #root through the error/fallback path. Test 19
+  // proves a full nested chain (root layout -> store layout -> page) hydrates
+  // in place: #root survives, every composition level renders, every `vsk`
+  // marker is claimed, and SPA navigation between nested routes works.
+  {
+    console.log('\n=== TEST 19: nested layout hydration ===');
+    const NESTED = ['/store', '/store/widget'];
+
+    // Counts unclaimed hydration markers (`<!--vsk-->` / `<!--vsk-hold-->`
+    // comment nodes) inside #root. Text nodes containing the substring "vsk"
+    // (e.g. code samples) are NOT markers and must not be counted.
+    const countMarkers = () => page.evaluate(() => {
+      const root = document.getElementById('root');
+      if (!root) return { vsk: -1, hold: -1 };
+      let vsk = 0, hold = 0;
+      const w = document.createTreeWalker(root, NodeFilter.SHOW_COMMENT);
+      while (w.nextNode()) {
+        const t = w.currentNode.textContent || '';
+        if (t === 'vsk') vsk++;
+        else if (t === 'vsk-hold') hold++;
+      }
+      return { vsk, hold };
+    });
+
+    // 19a: Fresh full load of each nested-layout route — #root must survive
+    // (the headline wipe regression) and the whole chain must render.
+    console.log('  19a: full load — #root survives, no leftover markers');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    for (const route of NESTED) {
+      await goto(page, BASE + route, { waitUntil: 'networkidle0', timeout: 15000 });
+      const survive = await page.evaluate(() => !!document.getElementById('root'));
+      assert(survive, `${route}: #root survives client hydration (wipe regression)`);
+      const markers = await countMarkers();
+      assert(markers.vsk === 0 && markers.hold === 0,
+        `${route}: all hydration markers claimed (got vsk=${markers.vsk} hold=${markers.hold})`);
+      const text = await page.evaluate(() => document.getElementById('root').textContent.replace(/\s+/g, ' '));
+      assert(text.includes('Store layout'), `${route} renders the route (store) layout`);
+      assert(text.includes('Powered by Vesk'), `${route} renders the root layout`);
+      const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim());
+      assert(h1 === (route === '/store' ? 'Store' : 'Item: widget'),
+        `${route}: page h1 is "${h1}" (expected ${route === '/store' ? 'Store' : 'Item: widget'})`);
+      assert(errors.length === 0, `${route} zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+    }
+    assert(errors.length === 0, 'nested-layout full loads zero pageerrors (got: ' + errors.join(', ') + ')');
+
+    // 19b: SPA navigation between the nested-layout routes stays client-side
+    // and re-renders the correct page in the surviving chain.
+    console.log('  19b: SPA navigation between nested-layout routes');
+    await page.evaluate(() => { const r = window.__vesk_router; if (r && r.navigate) r.navigate('/store'); });
+    const t0 = Date.now();
+    let spaLanded = false;
+    while (Date.now() - t0 < 15000) {
+      const s = await page.evaluate(() => ({
+        path: window.location.pathname,
+        survived: !!document.getElementById('root'),
+        h1: document.querySelector('h1')?.textContent?.trim(),
+      }));
+      if (s.path === '/store' && s.survived && s.h1 === 'Store') { spaLanded = true; break; }
+      await new Promise(r => setTimeout(r, 100));
+    }
+    assert(spaLanded, 'SPA nav /store/widget -> /store renders Store in surviving #root');
+
+    // 19c: Hard reload after the SPA session still keeps #root and claims all markers.
+    console.log('  19c: hard reload after SPA nav');
+    await page.reload({ waitUntil: 'networkidle0' });
+    const reloadSurvive = await page.evaluate(() => !!document.getElementById('root'));
+    assert(reloadSurvive, 'hard reload keeps #root on nested-layout route');
+    const relMarkers = await countMarkers();
+    assert(relMarkers.vsk === 0 && relMarkers.hold === 0,
+      'hard reload claims all markers (got vsk=' + relMarkers.vsk + ' hold=' + relMarkers.hold + ')');
+    const relH1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim());
+    assert(relH1 === 'Store', 'hard reload renders Store (got ' + relH1 + ')');
+    assert(errors.length === 0, 'nested-layout session zero pageerrors (got: ' + errors.join(', ') + ')');
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${passed + failed + skipped} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

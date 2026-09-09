@@ -1,0 +1,16 @@
+import type { Component } from '@vesk/types';
+
+interface StoreLayoutProps {
+	children?: Component
+	params?: { item?: string }
+}
+
+component StoreLayout(props: StoreLayoutProps) {
+	<div class="store-layout">
+		<div class="flex items-center gap-3 border-b border-gray-200 bg-gray-50 px-8 py-2">
+			<span class="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Store layout</span>
+			{props.params?.item ? <span class="text-[11px] text-gray-500">item: {props.params.item}</span> : null}
+		</div>
+		{props.children}
+	</div>
+}

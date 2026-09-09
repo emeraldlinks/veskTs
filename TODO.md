@@ -178,6 +178,23 @@ green, `npm run typecheck` clean, `tests/hydration-test.mjs` 284/284 against tes
 
 ## Current Session Work
 
+### Done this session — nested-layout hydration wipe (blocking bug)
+- [x] **Fixed `hydrateInitial` nested-layout wipe** — `packages/runtime/src/router.ts`
+      `renderLayoutChain` now returns a hydrator **function** so SSR marker claims run
+      outermost→innermost (matching document order) via each layout's `{children}` slot
+      subWalker, instead of inner-first eager rendering that wiped `#root` through the
+      error/fallback path. Call site: `renderLayoutChain(0)(walker)`.
+- [x] **Fixture + tests** — new `test-app/app/store/layout.vsk` (store layout nested under
+      root); `tests/hydration-test.mjs` **Test 19** (18 assertions): full load keeps `#root`,
+      zero leftover markers, both layout levels + page render, SPA nav + hard reload work,
+      zero errors. Full suite **299 passed**; router 69, hydrate 13, client-codegen 207,
+      integration 124; typecheck clean.
+- [x] **Browser-verified** on vesk-doc (`/docs`, `/docs/getting-started`, `/`, `/blog`,
+      `/blog/first-post`) — `#root` survives, all markers claimed, no console/page errors.
+- [x] Refreshed CI tarballs for test-app + vesk-doc (new runtime carries the fix).
+- [ ] Remaining: `vesk-doc` prod build re-verify (dev path was verified). Pre-existing,
+      unrelated: `dev-test.mjs` can't boot loose adapter dist (extensionless ESM imports).
+
 ### Focus: Dev floating panel → tabbed/resizable/themed devtool
 - [x] **Floating dev bar → full devtool** — `packages/runtime/src/hmr-client.ts` panel rewritten from a fixed websocket-status bubble into a tabbed panel: Overview / Errors / Plugins / Log / Settings, each tab acting as its own scrollable page inside the shared shell (`DEV_TABS`, `renderTabBar`, per-tab renderer map + default fallback, per-pane `overflow-y:auto` + `__v_tab` pane animation).
 - [x] **Websocket status text removed** — no more "WS: connected true/false" line/dot; status dot now `idle`/`compiling`/`error` only. Adapter-asserted substrings (`__vesk_dev`, `WebSocket`, nonce, `__vesk_router`) preserved; tests re-verified (`packages/adapter/src/hmr.test.ts` 39/39, `dev-server.test.ts` 46/46).

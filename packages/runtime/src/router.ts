@@ -1067,7 +1067,18 @@ async function hydrateInitial(
 		// suspensions, so an async page resuming from `await useFetch(...)` still
 		// attaches its track()/effect() blocks to the root instead of orphaning them
 		// (orphaned effects never flush — async pages would hydrate with empty lists).
-		function renderLayoutChain(index: number): unknown {
+		//
+		// renderLayoutChain(i) returns a hydrator FUNCTION rather than rendering
+		// eagerly. The layout/page chain must CLAIM SSR markers in DOM order —
+		// outermost layout first, then each inner layout, then the page — but the
+		// DOM wrapping happens inside-out. Returning a function defers each inner
+		// layout's claim until its enclosing layout's `{children}` slot invokes it,
+		// so claims run outermost→innermost (matching document order) while the
+		// outer layout still wraps the inner result. Rendering a layout eagerly (as
+		// a plain call) would claim the OUTER markers with the INNER component and
+		// cascade a marker-count mismatch across the whole `#root`, wiping the SSR
+		// content through the error/fallback path.
+		function renderLayoutChain(index: number): (walker: HydrateWalker) => unknown {
 			if (index >= layoutNodes.length) {
 				return (subWalker: HydrateWalker) => {
 					if (!strategy || strategy === 'full') {
@@ -1088,14 +1099,16 @@ async function hydrateInitial(
 			const node = layoutNodes[index]!;
 			const hydLayout = hydLayouts[index]!;
 			const childHydrator = renderLayoutChain(index + 1);
-			const layoutProps = { children: childHydrator, params: paramValues };
-			const result = hydLayout(layoutProps, new Map(), walker);
-			storeLayoutInstance(router, node, layoutProps, result);
-			return result;
+			return (walker: HydrateWalker) => {
+				const layoutProps = { children: childHydrator, params: paramValues };
+				const result = hydLayout(layoutProps, new Map(), walker);
+				storeLayoutInstance(router, node, layoutProps, result);
+				return result;
+			};
 		}
 
 		const walker = createHydrateWalker(container);
-		await runInBlockWindow(() => renderLayoutChain(0));
+		await runInBlockWindow(() => renderLayoutChain(0)(walker));
 		setIsHydrating(false);
 	} catch (error: unknown) {
 		setIsHydrating(false);
