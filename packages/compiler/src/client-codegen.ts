@@ -835,7 +835,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
 
   const renderBranch = `if (__nv) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : '');
   const effectBody = `effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
-      if (__first) { __first = false; return; }
+      if (__first) { __first = false; __iv = ${condExpr}; return; }
       const __nv = ${condExpr};
       if (__nv !== __iv) {
         for (const e of ${effectsVar}) destroy_block(e);
@@ -920,7 +920,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   let __iv = (${condExpr});
   let __first = true;
   effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __iv = (${condExpr}); return; }
     if (__busy) return;
     const __nv = (${condExpr});
     if (__nv !== __iv) {
@@ -1014,7 +1014,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   let __iv = undefined;
   let __first = true;
   effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __iv = (${srcExpr}); return; }
     if (__busy) return;
     const __nv = (${srcExpr});
     if (__nv !== __iv) {
@@ -1091,7 +1091,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   let __iv = (${discExpr});
   let __first = true;
   effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __iv = (${discExpr}); return; }
     if (__busy) return;
     const __nv = (${discExpr});
     if (__nv !== __iv) {
@@ -1203,7 +1203,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   let __first = true;
   effect(${effOpen}
     const __new = ${hasItems}();
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __new; return; }
     if (__new !== ${isEmptyVar}) {
       if (__new) ${reconciler}(${arrExpr});
       return;
@@ -1222,7 +1222,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   let __first = true;
   effect(() => {
     const __nv = ${arrExpr};
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __nv; ${reconciler}(${arrExpr}); return; }
     ${reconciler}(${arrExpr});
   });
 }`);
@@ -1258,7 +1258,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   let __first = true;
   effect(${effOpen}
     const __new = ${hasItems}();
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __new; return; }
     if (__new !== ${isEmptyVar}) {
       if (__new) {
         for (const e of ${effectsVar}) destroy_block(e);
@@ -1287,7 +1287,7 @@ ${renderAllItems('      ', null)}
   let __first = true;
   effect(${effOpen}
     const __nv = ${arrExpr};
-    if (__first) { __first = false; return; }
+    if (__first) { __first = false; __nv; return; }
     for (const e of ${effectsVar}) destroy_block(e);
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});

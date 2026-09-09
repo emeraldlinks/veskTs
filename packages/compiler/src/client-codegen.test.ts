@@ -1081,6 +1081,9 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	// props.x is undefined.
 	// The if/else region must render its branch during body execution (so SSR
 	// claims happen in DOM order) and guard the mount-time effect with __first.
+	// The first (mount) run must still read the condition so the effect registers
+	// its dependencies — otherwise the region never re-renders on a tracked
+	// change (the `__first` guard previously returned before any tracked read).
 	bothModes('if/else negated condition is parenthesized', `
 		component App(props: { posts?: { title: string }[] }) {
 			if (props.posts && props.posts.length > 0) {
@@ -1093,7 +1096,7 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		expect(code).toContain('if (props.posts && props.posts.length > 0) { ');
 		expect(code).toContain('} else { ');
 		expect(code).toContain('let __first = true;');
-		expect(code).toContain('if (__first) { __first = false; return; }');
+		expect(code).toContain('if (__first) { __first = false; __iv = props.posts && props.posts.length > 0; return; }');
 		expect(code).not.toContain('let __iv = !(props.posts && props.posts.length > 0);');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
@@ -1149,7 +1152,7 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			expect(code).not.toContain('__cl.push(');
 		}
 		expect(code).toContain('__place(');
-		expect(code).toContain('if (__first) { __first = false; return; }');
+		expect(code).toContain('if (__first) { __first = false; __iv =');
 		expect(code).toContain('__cleanup(');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
