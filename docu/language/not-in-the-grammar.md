@@ -25,9 +25,12 @@ relying on any of these will not compile.
 
 ## Reactivity
 
-- **No `batch`.** `batch` does not exist in the runtime. Synchronous
-  multi-write flushes use `flushSync(fn)`; the default scheduler is
-  microtask-batched.
+- **No `batch`.** `batch` does not exist in the runtime and is not exported
+  from either barrel. Synchronous multi-write flushes use `flushSync(fn)`;
+  the default scheduler is microtask-batched. Note: the compiler's
+  `VESK_BUILTINS` list includes `'batch'` for error-message purposes (to
+  produce a helpful "did you mean `flushSync`?" message), but no runtime
+  export backs it.
 - **No React hooks.** `useState`, `useEffect`, `useMemo` are not part of
   the runtime; the equivalents are `track()`, `effect()`, `derived()`.
 - **No virtual DOM.** Updates compile to per-cell DOM mutations; there is

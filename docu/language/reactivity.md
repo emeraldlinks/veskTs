@@ -28,7 +28,8 @@ let &[count, rawCell] = track(0);   // also bind the raw cell itself
 | `track(initial)` | Create a reactive cell |
 | `get(cell)` / `cell.get()` | Read a value (subscribes inside effects) |
 | `set(cell, v)` / `cell.set(v)` | Write a value; `Object.is`-guarded, schedules subscribers |
-| `update(cell, fn)` / `cell.update(fn)` | `set(cell, fn(get(cell)))` |
+| `increment(cell)` | Post-increment: reads current numeric value, writes `value + 1`, returns the **original** value (like `x++`) |
+| `decrement(cell)` | Post-decrement: reads current numeric value, writes `value - 1`, returns the **original** value (like `x--`) |
 | `untrack(fn)` | Run `fn` without subscribing |
 | `peek(cell)` | Read a cell value without subscribing |
 | `derived(fn)` | Computed cell that re-runs `fn` when its deps change |
@@ -109,8 +110,9 @@ component Notifier {
 
 ## Verified against
 
-- `packages/runtime/src/ripple-runtime.ts` — `track`, `derived`, `untrack`,
-  `peek_tracked`, `flush_sync`, `tick`, `on_destroy`
+- `packages/runtime/src/ripple-runtime.ts` — `track`, `get`, `set`,
+  `increment`, `decrement`, `derived`, `untrack`, `peek_tracked`,
+  `flush_sync`, `tick`, `on_destroy`
 - `packages/runtime/src/ripple-blocks.ts` — `effect`
 - `packages/runtime/src/index-client.ts` — public export surface
 - `packages/compiler/src/vesk-plugin.ts` — `&[]` binding atom

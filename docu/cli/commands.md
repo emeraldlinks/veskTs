@@ -59,7 +59,8 @@ export async function onRequest(ctx: ServerEventContext) {
   ctx.set('lastVisit', Date.now());
 }
 export async function onStop(ctx: ServerEventContext) {
-  await ctx.get<Db>('db')?.close();
+  const db = ctx.get('db') as Db;
+  await db?.close();
 }
 ```
 
@@ -86,5 +87,5 @@ export async function onStop(ctx: ServerEventContext) {
 - `packages/cli/docs.md` — dev server behaviors
 - `packages/cli/src/dev-server.ts` — server events wiring, events HMR
 - `packages/adapter/src/events.ts` — prod/edge `_events.ts` bundling
-- `docs/haul.md`, `packages/haul/internal/cli/` — haul commands
+- ~~`docs/haul.md`~~ — haul is parked on the `haul-parked` branch
 - Commit `2a5b19d`

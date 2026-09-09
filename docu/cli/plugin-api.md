@@ -6,7 +6,7 @@ into those pipelines directly.
 
 ## Plugin shape
 
-`VeskPlugin` (`packages/compiler/src/types.ts`):
+`VeskPlugin` (`@vesk/types`, re-exported by `packages/compiler/src/types.ts`):
 
 ```ts
 interface VeskPlugin {
@@ -20,6 +20,9 @@ interface VeskPlugin {
   onStop?: (ctx: ServerEventContext) => void | Promise<void>;
   onBuildStart?: () => void | Promise<void>;
   onBuildEnd?: () => void | Promise<void>;
+  onHead?: (headHtml: string, ctx?: RenderPluginContext) => string | null | Promise<string | null>;
+  onHtml?: (html: string, ctx?: RenderPluginContext) => string | null | Promise<string | null>;
+  [key: string]: unknown;
 }
 ```
 
