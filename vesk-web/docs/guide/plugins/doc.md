@@ -119,8 +119,8 @@ Internals worth knowing as a plugin author:
 - Dynamic class bindings (`class={expr}`) are not scanned — keep static
   occurrences of conditionally used classes somewhere in source.
 
-Dev serves `_tailwind.css`; production writes
-`.vesk/static/_tailwind.css`.
+Dev serves and production writes the single compiled stylesheet as
+`.vesk/static/global.css` (user rules + Tailwind utilities in one file).
 
 ## Writing your own transformer
 

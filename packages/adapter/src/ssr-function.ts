@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
-import { resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
+import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
 function escapeSource(src: string): string {
@@ -89,8 +89,7 @@ export function generateSsrFunction(
   const funcPath = resolve(funcDir, `${name}.js`);
 
   const cssUrls = resolveCssUrls({
-    tailwind: hasBuiltTailwindCss(outDir),
-    userCss: hasUserCss(appDir),
+    enabled: hasBuiltGlobalCss(outDir),
   });
   const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
   // Static head snippet baked from the active onHead plugins — merged into

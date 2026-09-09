@@ -65,7 +65,7 @@ vesk init                         # create src/global.css if missing
   `server/runtime.js`, `server/middleware.js`,
   `server/functions/<name>.js` (one SSR function per page),
   `server/api/<name>.js`, `static/client.js` (+ per-route chunks),
-  `static/global.css`, `static/_tailwind.css`, `static/public/`
+  `static/global.css` (single compiled stylesheet), `static/public/`
   (public/ + sitemap.xml + robots.txt), `static/images/`, `prerendered/`.
   Platforms: `node` \| `vercel` \| `netlify` \| `cloudflare` \| `deno` \|
   `aws` \| `edge` \| `coxmos` (auto-detected from CI, else `node`).

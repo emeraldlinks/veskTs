@@ -238,7 +238,7 @@ export default function tailwindcss(options: TailwindOptions = {}): TailwindPlug
         return null
       }
 
-      const { directives } = extractTailwindDirectives(content)
+      const { directives, userCSS } = extractTailwindDirectives(content)
       if (!directives) return content
 
       try {
@@ -254,14 +254,14 @@ export default function tailwindcss(options: TailwindOptions = {}): TailwindPlug
           compileOpts.loadStylesheet = (id, base) => loadFallbackStylesheet(id, base)
           compileOpts.loadModule = (id, base) => loadFallbackModule(id, base)
         }
-        const result = await compile(directives, compileOpts)
+        const result = await compile(content, compileOpts)
 
         const candidates = scanCandidates(baseDir)
         const finalCss = result.build(candidates)
         return finalCss
       } catch (err) {
         console.error(`[vesk/plugin-tailwind] Compile error:`, err instanceof Error ? err.message : String(err))
-        return content
+        return userCSS || content
       }
     },
 

@@ -65,8 +65,8 @@ export default defineConfig({
 - Scans `.vsk`/`.js`/`.ts`/`.jsx`/`.tsx` files for `class="..."`
   attributes to build a purge content list, then runs the Tailwind CLI to
   generate the final CSS.
-- Handles the dev path (`src/global.css` / `src/app.css` with Tailwind
-  directives stripped for dev CSS) and production `_tailwind.css` output.
+- Compiles the single `src/global.css` entry (directives + user rules) into
+  one `static/global.css` — served as a single stylesheet like other frameworks.
 - Integrates with HMR rebuilds.
 
 ## Verified against

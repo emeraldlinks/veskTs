@@ -76,8 +76,7 @@ Output layout:
 │   └── api/<name>.js         # one handler per API route
 ├── static/
 │   ├── client.js             # client bundle (+ per-route chunks when split)
-│   ├── global.css            # user CSS
-│   ├── _tailwind.css         # compiled Tailwind output
+│   ├── global.css            # single compiled stylesheet (user CSS + Tailwind output)
 │   ├── public/               # copy of public/ + generated sitemap.xml + robots.txt
 │   └── images/               # optimized image variants (sharp pipeline)
 └── prerendered/              # SSG output (index.html, <path>.html)

@@ -88,13 +88,13 @@ assert(!!staticDir, `static assets emitted (${staticCandidates.join(' | ')})`);
 let tailwindOk = false;
 let tailwindSize = 0;
 for (const d of staticDir ? [staticDir, ...staticCandidates] : staticCandidates) {
-	const f = join(d, '_tailwind.css');
+	const f = join(d, 'global.css');
 	if (existsSync(f)) {
 		tailwindSize = statSync(f).size;
 		if (tailwindSize > 10000) { tailwindOk = true; break; }
 	}
 }
-assert(tailwindOk, `_tailwind.css fully resolved (${tailwindSize} bytes)`);
+assert(tailwindOk, `global.css fully resolved (${tailwindSize} bytes)`);
 
 // Manifest sanity: correct platform and runtime class.
 const manifest = JSON.parse(readFileSync(join(deployRoot, shellPrefix, 'manifest.json'), 'utf-8'));

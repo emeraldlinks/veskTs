@@ -47,6 +47,7 @@ interface RouterInstance {
 	readonly route: { pathname: string; params: Record<string, string>; pattern: string } | null;
 	_beforeGuards?: GuardFn[];
 	_viewTransitions?: boolean;
+	_hashMode?: boolean;
 	_guardDepth?: number;
 	_runGuards(to: string): false | string | void | Promise<false | string | void>;
 	hmrUpdate(): void;
@@ -68,6 +69,15 @@ interface RouterOptions {
 	hydrate?: 'full' | 'viewport' | 'idle' | 'interaction';
 	/** Route-data freshness TTL in ms. Default 0 = always refetch on SPA nav. */
 	routeDataCache?: number;
+	/**
+	 * Hash-mode routing: the route is read from and written to
+	 * `window.location.hash` (`#/path`) instead of the pathname. Use it when
+	 * the app is served from a static host that rewrites every path to one
+	 * index.html. In hash mode `<Link href="/about">` renders `#/about` and
+	 * `#/...` hrefs are SPA-navigated. Plain `#anchor` in-page links stay
+	 * native. Default false.
+	 */
+	hash?: boolean;
 	/**
 	 * Offline experience for SPA navigations that fail due to loss of
 	 * connectivity: a component `(props, registry, walker) => Node | string`
@@ -421,7 +431,7 @@ function registerOnlineRecovery(router: RouterInstance): void {
 	r._onlineHandler = () => {
 		if (!r._showingOffline) return;
 		r._showingOffline = false;
-		router.navigate(window.location.pathname + window.location.search, { replace: true });
+		router.navigate(routeFromLocation(hashModeOf(r)), { replace: true });
 	};
 	window.addEventListener('online', r._onlineHandler);
 }
@@ -767,10 +777,10 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		if (!errorFn) throw error;
 		const retry = () => {
 			if (router && router.navigate) {
-				router.navigate(window.location.pathname, { replace: true });
+				router.navigate(routeFromLocation(hashModeOf(router)), { replace: true });
 			}
 		};
-		const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? window.location.pathname : '', offline: (error as Error & { offline?: boolean })?.offline === true, networkState: getNetworkState() };
+		const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? routeFromLocation(hashModeOf(router)) : '', offline: (error as Error & { offline?: boolean })?.offline === true, networkState: getNetworkState() };
 		return runInBlockWindow(() => renderLayoutWith(0, () => {
 			const result = errorFn(errorProps, new Map(), clientWalker) as unknown;
 			if (result && typeof (result as { then?: unknown }).then === 'function') {
@@ -788,10 +798,10 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		if (!errorFn) throw error;
 		const retry = () => {
 			if (router && router.navigate) {
-				router.navigate(window.location.pathname, { replace: true });
+				router.navigate(routeFromLocation(hashModeOf(router)), { replace: true });
 			}
 		};
-		const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? window.location.pathname : '', offline: (error as Error & { offline?: boolean })?.offline === true, networkState: getNetworkState() };
+		const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? routeFromLocation(hashModeOf(router)) : '', offline: (error as Error & { offline?: boolean })?.offline === true, networkState: getNetworkState() };
 		const errDom = runInBlockWindow(() => errorFn(errorProps, new Map(), clientWalker));
 		if (errDom && typeof (errDom as { then?: unknown }).then === 'function') {
 			(errDom as Promise<unknown>).then(mountDom);
@@ -898,10 +908,10 @@ async function renderErrorPage(
 	const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
 	const retry = () => {
 		if (router && router.navigate) {
-			router.navigate(window.location.pathname, { replace: true });
+			router.navigate(routeFromLocation(hashModeOf(router)), { replace: true });
 		}
 	};
-	const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? window.location.pathname : '', offline: (error as Error & { offline?: boolean })?.offline === true, networkState: getNetworkState() };
+	const errorProps = { error, retry, params: paramValues, statusCode: (error as Error & { statusCode?: number })?.statusCode ?? 500, stack: error instanceof Error ? error.stack : String(error), url: typeof window !== 'undefined' ? routeFromLocation(hashModeOf(router)) : '', offline: (error as Error & { offline?: boolean })?.offline === true, networkState: getNetworkState() };
 
 	const renderErrorChain = (index: number): unknown => {
 		if (index >= layoutNodes.length) {
@@ -1105,7 +1115,33 @@ async function hydrateInitial(
 	}
 }
 
+/** True when a router was created with `hash: true` (route lives in the URL fragment). */
+function hashModeOf(r: { _hashMode?: boolean } | null | undefined): boolean {
+	return !!r && r._hashMode === true;
+}
+
+/** Returns the current route path from the browser location, honoring the mode. */
+function routeFromLocation(mode: boolean): string {
+	if (mode) {
+		const h = typeof window !== 'undefined' ? window.location.hash : '';
+		// Only `#/path` is a route in hash mode; plain `#anchor` in-page
+		// links are never treated as routes.
+		if (h.length > 1 && h[1] === '/') return h.slice(1);
+		return '/';
+	}
+	return window.location.pathname + window.location.search;
+}
+
+/** Current route used as a scroll-position / navigation key (mode aware). */
+function routeKey(mode: boolean): string {
+	return (get(_state.path) as string) || routeFromLocation(mode);
+}
+
 function scrollToHash(): void {
+	// In hash mode the fragment IS the route — never treat it as an in-page
+	// anchor target.
+	const r = getCurrentRouter();
+	if (hashModeOf(r)) return;
 	const h = typeof window !== 'undefined' ? window.location.hash : '';
 	if (!h || h === '#') return;
 	const id = h.slice(1);
@@ -1129,6 +1165,7 @@ export function createRouter(
 	const hydrateStrategy = options.hydrate || 'full';
 
 	const routeTree = Array.isArray(routes) ? routes as RouteNode[] : buildTreeFromMap(routes as Record<string, Function>, options);
+	const hashMode = options.hash === true;
 
 	const router: RouterInstance = {
 		routeTree,
@@ -1141,6 +1178,7 @@ export function createRouter(
 		_offlineUI: (options.offline ?? null) as OfflineEntry | null,
 		_beforeGuards: [],
 		_viewTransitions: options.viewTransitions === true,
+		_hashMode: hashMode,
 
 		beforeEach(fn: GuardFn): () => void {
 			(this._beforeGuards as GuardFn[]).push(fn);
@@ -1155,7 +1193,7 @@ export function createRouter(
 		},
 
 		_runGuards(to: string): false | string | void | Promise<false | string | void> {
-			const from = window.location.pathname;
+			const from = (get(_state.path) as string) || window.location.pathname;
 			for (const g of (this._beforeGuards as GuardFn[]) ?? []) {
 				const d = g(to, from);
 				if (d instanceof Promise) {
@@ -1195,7 +1233,7 @@ export function createRouter(
 					if (_scrollTimer) return;
 					_scrollTimer = setTimeout(() => {
 						if (window.scrollY !== undefined) {
-							_scrollPositions.set(window.location.pathname, window.scrollY);
+							_scrollPositions.set(routeKey(hashMode), window.scrollY);
 						}
 						_scrollTimer = null;
 					}, 100);
@@ -1211,9 +1249,25 @@ export function createRouter(
 			// download, external origins, hash/mailto/tel schemes.
 
 			window.addEventListener('popstate', () => {
+				const p = routeFromLocation(hashMode);
+				// Browser order of popstate/hashchange differs by engine; if the
+				// route is already current the sibling handler navigated first.
+				if ((get(_state.path) as string) === p) return;
 				setIsPopStateNavigation(true);
-				this.navigate(window.location.href, { replace: true });
+				this.navigate(p, { replace: true });
 			});
+
+			if (hashMode) {
+				window.addEventListener('hashchange', () => {
+					const p = routeFromLocation(true);
+					// Back/forward fires popstate (and often hashchange). If the
+					// route is already current, popstate handled it — skip the
+					// duplicate navigation.
+					if ((get(_state.path) as string) === p) return;
+					setIsPopStateNavigation(true);
+					this.navigate(p, { replace: true });
+				});
+			}
 
 			document.addEventListener('click', (e) => {
 				const target = e.target as Element | null;
@@ -1228,7 +1282,10 @@ export function createRouter(
 				if (anchor.hasAttribute('download')) return;
 				if (anchor.getAttribute('rel') === 'external') return;
 				const href = anchor.getAttribute('href');
-				if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+				if (!href || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+				// In hash mode `#/path` is a SPA route and gets intercepted;
+				// plain `#anchor` in-page links always stay native.
+				if (href.startsWith('#') && (!hashMode || !href.startsWith('#/'))) return;
 				try {
 					const url = new URL(href, window.location.origin);
 					if (url.origin !== window.location.origin) return;
@@ -1245,8 +1302,8 @@ export function createRouter(
 				}, { passive: true });
 			}
 
-			const path = window.location.pathname + window.location.search;
-			if (container.children.length > 0) {
+			const path = routeFromLocation(hashMode);
+			if (container.children.length > 0 && !hashMode) {
 				const url = new URL(path, window.location.origin);
 				const match = matchRoute(this.routeTree, url.pathname);
 				if (match) {
@@ -1264,7 +1321,9 @@ export function createRouter(
 		},
 
 		navigate(path: string, opts = {}) {
-			const url = new URL(path, window.location.origin);
+			const mode = hashModeOf(this);
+			const raw = mode && typeof path === 'string' && path.startsWith('#/') ? path.slice(1) : path;
+			const url = new URL(raw, window.location.origin);
 			const match = matchRoute(this.routeTree, url.pathname);
 
 			if (!match) {
@@ -1279,7 +1338,7 @@ export function createRouter(
 			const guardResult = self._runGuards(url.pathname);
 			const proceedNav = () => {
 				if (!_isPopStateNavigation) {
-					_scrollPositions.set(window.location.pathname, window.scrollY);
+					_scrollPositions.set(routeKey(mode), window.scrollY);
 				}
 
 				const loadingFn = findLoadingComponent(match.matchChain as Record<string, unknown>[]);
@@ -1290,10 +1349,12 @@ export function createRouter(
 				let firstRenderFailed = false;
 
 				const updateUrl = () => {
+					const fullPath = url.pathname + url.search;
+					const target = mode ? (fullPath.startsWith('/') ? '#' + fullPath : '#' + fullPath) : fullPath;
 					if (!opts.replace) {
-						window.history.pushState({ path: url.pathname }, '', url.pathname + url.search);
+						window.history.pushState({ path: url.pathname }, '', target);
 					} else {
-						window.history.replaceState({ path: url.pathname }, '', url.pathname + url.search);
+						window.history.replaceState({ path: url.pathname }, '', target);
 					}
 					set(_state.path, url.pathname);
 					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
@@ -1375,7 +1436,9 @@ export function createRouter(
 		},
 
 		prefetch(path: string) {
-			const url = new URL(path, window.location.origin);
+			const mode = hashModeOf(this);
+			const raw = mode && typeof path === 'string' && path.startsWith('#/') ? path.slice(1) : path;
+			const url = new URL(raw, window.location.origin);
 			const match = matchRoute(this.routeTree, url.pathname);
 			if (!match) return;
 			match.pathname = url.pathname;
@@ -1430,11 +1493,11 @@ export function createRouter(
 					}
 				}
 				if (!didUpdate) {
-					const path = window.location.pathname + window.location.search;
+					const path = routeFromLocation(hashMode);
 					this.navigate(path, { replace: true });
 				}
 			} else {
-				const path = window.location.pathname + window.location.search;
+				const path = routeFromLocation(hashMode);
 				this.navigate(path, { replace: true });
 			}
 		},
@@ -1458,6 +1521,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 	const middleware = options.middleware || null;
 	const renderFn = options.render || renderMatch;
 	const hydrateStrategy = options.hydrate || 'full';
+	const hashMode = options.hash === true;
 
 	const router: FileRouterInstance = {
 		_hydrateStrategy: hydrateStrategy,
@@ -1471,6 +1535,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		_offlineUI: (options.offline ?? null) as OfflineEntry | null,
 		_beforeGuards: [],
 		_viewTransitions: options.viewTransitions === true,
+		_hashMode: hashMode,
 
 		beforeEach(fn: GuardFn): () => void {
 			(this._beforeGuards as GuardFn[]).push(fn);
@@ -1485,7 +1550,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		},
 
 		_runGuards(to: string): false | string | void | Promise<false | string | void> {
-			const from = window.location.pathname;
+			const from = (get(_state.path) as string) || window.location.pathname;
 			for (const g of (this._beforeGuards as GuardFn[]) ?? []) {
 				const d = g(to, from);
 				if (d instanceof Promise) {
@@ -1525,7 +1590,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					if (_scrollTimer) return;
 					_scrollTimer = setTimeout(() => {
 						if (window.scrollY !== undefined) {
-							_scrollPositions.set(window.location.pathname, window.scrollY);
+							_scrollPositions.set(routeKey(hashMode), window.scrollY);
 						}
 						_scrollTimer = null;
 					}, 100);
@@ -1534,9 +1599,25 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			}
 
 			window.addEventListener('popstate', () => {
+				const p = routeFromLocation(hashMode);
+				// Browser order of popstate/hashchange differs by engine; if the
+				// route is already current the sibling handler navigated first.
+				if ((get(_state.path) as string) === p) return;
 				setIsPopStateNavigation(true);
-				router.navigate(window.location.pathname + window.location.search, { replace: true });
+				router.navigate(p, { replace: true });
 			});
+
+			if (hashMode) {
+				window.addEventListener('hashchange', () => {
+					const p = routeFromLocation(true);
+					// Back/forward fires popstate (and often hashchange). If the
+					// route is already current, popstate handled it — skip the
+					// duplicate navigation.
+					if ((get(_state.path) as string) === p) return;
+					setIsPopStateNavigation(true);
+					router.navigate(p, { replace: true });
+				});
+			}
 
 			document.addEventListener('click', (e) => {
 				const target = e.target as Element | null;
@@ -1551,7 +1632,8 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				if (anchor.hasAttribute('download')) return;
 				if (anchor.getAttribute('rel') === 'external') return;
 				const href = anchor.getAttribute('href');
-				if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+				if (!href || href.startsWith('mailto:') || href.startsWith('tel:') || href.startsWith('javascript:')) return;
+				if (href.startsWith('#') && (!hashMode || !href.startsWith('#/'))) return;
 				try {
 					const url = new URL(href, window.location.origin);
 					if (url.origin !== window.location.origin) return;
@@ -1568,8 +1650,8 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				}, { passive: true });
 			}
 
-			const path = window.location.pathname;
-			if (container.children.length > 0) {
+			const path = routeFromLocation(hashMode).split('?')[0];
+			if (container.children.length > 0 && !hashMode) {
 				const match = matchRoute(routeTree, path);
 				if (match) {
 					match.pathname = path;
@@ -1585,7 +1667,9 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		},
 
 		navigate(pathname: string, opts = {}) {
-			const url = (pathname as unknown) instanceof URL ? (pathname as unknown as URL) : new URL(pathname, window.location.origin);
+			const mode = hashModeOf(router);
+			const raw = mode && typeof pathname === 'string' && pathname.startsWith('#/') ? pathname.slice(1) : pathname;
+			const url = (raw as unknown) instanceof URL ? (raw as unknown as URL) : new URL(raw, window.location.origin);
 			const match = matchRoute(routeTree, url.pathname);
 			if (!match) {
 				const chain = flattenLayoutChain(routeTree, url.pathname.split('/').filter(Boolean));
@@ -1613,7 +1697,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 			const afterGuards = () => {
 				if (!_isPopStateNavigation) {
-					_scrollPositions.set(window.location.pathname, window.scrollY);
+					_scrollPositions.set(routeKey(mode), window.scrollY);
 				}
 
 				const swapView = (fn: () => void | Promise<void>) => {
@@ -1634,10 +1718,11 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 				const updateUrl = () => {
 					const fullUrl = url.pathname + url.search;
+					const target = mode ? (fullUrl.startsWith('/') ? '#' + fullUrl : '#' + fullUrl) : fullUrl;
 					if (!opts.replace) {
-						window.history.pushState({ path: fullUrl }, '', fullUrl);
+						window.history.pushState({ path: fullUrl }, '', target);
 					} else {
-						window.history.replaceState({ path: fullUrl }, '', fullUrl);
+						window.history.replaceState({ path: fullUrl }, '', target);
 					}
 					set(_state.path, url.pathname);
 					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
@@ -1810,7 +1895,9 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		},
 
 		prefetch(path: string) {
-			const url = new URL(path, window.location.origin);
+			const mode = hashModeOf(router);
+			const raw = mode && typeof path === 'string' && path.startsWith('#/') ? path.slice(1) : path;
+			const url = new URL(raw, window.location.origin);
 			const match = matchRoute(routeTree, url.pathname);
 			if (!match) return;
 			match.pathname = url.pathname;
@@ -1840,7 +1927,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			if (typeof router.__updateComponents === 'function') {
 				router.__updateComponents(router.routeTree);
 			}
-			const path = window.location.pathname + window.location.search;
+			const path = routeFromLocation(hashModeOf(router)).split('?')[0];
 			const match = matchRoute(router.routeTree, path);
 			if (match) {
 				match.pathname = path;

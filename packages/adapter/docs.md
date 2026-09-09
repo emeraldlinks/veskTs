@@ -80,9 +80,10 @@ It also exposes `startDevServer` from `src/dev-server.ts` (not re-exported from
    chunk to `static/page-<slug>.js`. This stage also produces the tree-shaken
    client runtime (unless `importRuntime` is set).
 8. **Static assets** — `copyStaticAssets(publicDir, outDir)` → `static/public/`.
-9. **CSS** — reads `src/global.css` (or `src/app.css`), strips Tailwind
-   directives → `static/global.css`; runs any `plugin.onCSS` hooks and writes
-   `static/_tailwind.css`.
+9. **CSS** — reads `src/global.css` (or `src/app.css`) and writes the single
+   `static/global.css`. When the Tailwind plugin is active, `plugin.onCSS`
+   compiles the whole file (directives + user rules) into it; otherwise the raw
+   CSS is written as-is. One stylesheet link (`/_vesk/static/global.css`).
 10. **SSG** (only if `options.ssg`) — `generateSsgRoutes` renders
     `getStaticProps`/`getStaticPaths` pages into `prerendered/*.html`.
 11. **Images** — `optimizeImages(appDir, outDir)` → `static/images/*`.
@@ -141,8 +142,7 @@ Default `outDir` is `<project>/.vesk`:
 ├── static/
 │   ├── client.js            # Main client bundle (also aliased to /_vesk/runtime.js)
 │   ├── page-<slug>.js       # Code-split route chunks (only when codeSplit: true)
-│   ├── global.css           # Stripped user CSS
-│   ├── _tailwind.css        # Tailwind output (post plugin.onCSS)
+│   ├── global.css           # Single compiled stylesheet (user CSS + Tailwind output)
 │   ├── images/              # Optimized image variants (sharp)
 │   └── public/              # Copied public assets + sitemap.xml + robots.txt
 ├── prerendered/             # SSG output (only when ssg: true)

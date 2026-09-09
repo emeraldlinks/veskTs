@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { resolve } from 'node:path';
 import {
   compileFile,
   renderPage,
@@ -19,20 +19,7 @@ import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 
 function actionCssUrls(appDirPath: string): string[] {
-  let tailwind = true;
-  try {
-    const veskDir = join(resolve(appDirPath, '..'), '.vesk');
-    const statePath = join(veskDir, 'plugins.json');
-    if (existsSync(statePath)) {
-      const raw = readFileSync(statePath, 'utf-8');
-      const state = JSON.parse(raw) as { plugins?: Array<{ name: string; active: boolean }> };
-      const entries = state?.plugins || [];
-      tailwind = !entries.some(
-        (p) => String(p.name).toLowerCase().includes('tailwind') && p.active === false,
-      );
-    }
-  } catch {}
-  return resolveCssUrls({ tailwind, userCss: hasUserCss(appDirPath) });
+  return resolveCssUrls({ enabled: hasUserCss(appDirPath) });
 }
 function actionCssLinkTags(appDirPath: string): string {
   return actionCssUrls(appDirPath).map((u) => `\t<link rel="stylesheet" href="${u}" />`).join('\n') + '\n';

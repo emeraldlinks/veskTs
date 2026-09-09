@@ -174,7 +174,7 @@ function setupMockDom() {
 	};
 	let _rAFQueue = [];
 	global.window = {
-		location: { pathname: '/', search: '', href: 'http://localhost/', origin: 'http://localhost' },
+		location: { pathname: '/', search: '', hash: '', href: 'http://localhost/', origin: 'http://localhost' },
 		scrollY: 0,
 		scrollTo(x, y) { this.scrollY = y; },
 		requestAnimationFrame(fn) { _rAFQueue.push(fn); },
@@ -187,6 +187,7 @@ function setupMockDom() {
 					const url = new URL(u, 'http://localhost');
 					global.window.location.pathname = url.pathname;
 					global.window.location.search = url.search;
+					global.window.location.hash = url.hash || '';
 					global.window.location.href = url.href;
 				} catch {}
 			},
@@ -196,6 +197,7 @@ function setupMockDom() {
 					const url = new URL(u, 'http://localhost');
 					global.window.location.pathname = url.pathname;
 					global.window.location.search = url.search;
+					global.window.location.hash = url.hash || '';
 					global.window.location.href = url.href;
 				} catch {}
 			},
@@ -1495,6 +1497,175 @@ test('nearest function error node wins over a closer string node', () => {
 		{ path: '/x', page: () => document.createTextNode('x'), error: err },
 	] as unknown as Record<string, unknown>[];
 	expect(findErrorComponent(chain)).toBe(err);
+});
+
+// ── Hash-mode (`#/path`) routing ─────────────────────────────
+
+test('createRouter hash mode renders the route from location.hash on start', () => {
+	const container = document.createElement('div');
+	const routes = { '/': () => document.createTextNode('Home'), '/about': () => document.createTextNode('About') };
+	globalThis.window.location.hash = '#/about';
+	try {
+		const router = createRouter(routes, { container, hash: true });
+		router.start();
+		expect(container.textContent).toBe('About');
+		expect(router.route.pathname).toBe('/about');
+	} finally {
+		globalThis.window.location.hash = '';
+	}
+});
+
+test('createRouter hash mode navigate pushes #path and keeps the pathname intact', () => {
+	const container = document.createElement('div');
+	const routes = { '/': () => document.createTextNode('Home'), '/about': () => document.createTextNode('About') };
+	const router = createRouter(routes, { container, hash: true });
+	router.start();
+	router.navigate('/about');
+	expect(container.textContent).toBe('About');
+	expect(globalThis.window.location.hash).toBe('#/about');
+	expect(globalThis.window.location.pathname).toBe('/');
+	expect(router.route.pathname).toBe('/about');
+});
+
+test('createRouter hash mode treats plain #anchor as native, not a route', () => {
+	const container = document.createElement('div');
+	const routes = { '/': () => document.createTextNode('Home'), '/about': () => document.createTextNode('About') };
+	globalThis.window.location.hash = '#section';
+	try {
+		const router = createRouter(routes, { container, hash: true });
+		router.start();
+		expect(container.textContent).toBe('Home');
+		expect(router.route.pathname).toBe('/');
+	} finally {
+		globalThis.window.location.hash = '';
+	}
+});
+
+test('createRouter hash mode accepts #/ prefixed navigate() calls', () => {
+	const container = document.createElement('div');
+	const routes = { '/': () => document.createTextNode('Home'), '/about': () => document.createTextNode('About') };
+	const router = createRouter(routes, { container, hash: true });
+	router.start();
+	router.navigate('#/about');
+	expect(container.textContent).toBe('About');
+	expect(globalThis.window.location.hash).toBe('#/about');
+});
+
+test('Link renders #/path href and intercepts clicks in hash mode', () => {
+	globalThis.window.location.hash = '';
+	const container = document.createElement('div');
+	let href = '';
+	let clickListeners = 0;
+	const routes = {
+		'/': () => {
+			const a = Link({ href: '/about', children: 'About' });
+			href = a.href;
+			clickListeners = (a._listeners.click || []).length;
+			return document.createTextNode('Home');
+		},
+		'/about': () => document.createTextNode('About'),
+	};
+	const router = createRouter(routes, { container, hash: true });
+	router.start();
+	expect(href).toBe('#/about');
+	expect(clickListeners).toBeGreaterThanOrEqual(1);
+	// clicking the link navigates the route without reload
+	const anchor = Link({ href: '/about', children: 'About' });
+	anchor._listeners.click[0]({ preventDefault() {}, stopPropagation() {}, metaKey: false, ctrlKey: false, shiftKey: false, altKey: false, button: 0 });
+	expect(router.route.pathname).toBe('/about');
+});
+
+test('NavLink computes active state against the route path in hash mode', () => {
+	const container = document.createElement('div');
+	const routes = { '/': () => document.createTextNode('Home'), '/about': () => document.createTextNode('About') };
+	globalThis.window.location.hash = '#/about';
+	try {
+		const router = createRouter(routes, { container, hash: true });
+		router.start();
+		expect(router.route.pathname).toBe('/about');
+		const active = NavLink({ href: '#/about', activeClass: 'is-active' });
+		expect(active.classList.contains('is-active')).toBe(true);
+		const notActive = NavLink({ href: '/contact', activeClass: 'is-active' });
+		expect(notActive.classList.contains('is-active')).toBe(false);
+		expect(notActive.href).toBe('#/contact');
+	} finally {
+		globalThis.window.location.hash = '';
+	}
+});
+
+test('createFileRouter hash mode renders the hash route on start', () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([
+		{ path: '/', page: () => document.createTextNode('Home') },
+		{ path: '/about', page: () => document.createTextNode('About') },
+	]);
+	globalThis.window.location.hash = '#/about';
+	try {
+		const router = createFileRouter(tree, { container, hash: true });
+		router.start();
+		expect(container.textContent).toBe('About');
+		expect(router.route.pathname).toBe('/about');
+		expect(globalThis.window.location.hash).toBe('#/about');
+	} finally {
+		globalThis.window.location.hash = '';
+	}
+});
+
+test('createFileRouter hash mode navigate updates the hash', () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([
+		{ path: '/', page: () => document.createTextNode('Home') },
+		{ path: '/about', page: () => document.createTextNode('About') },
+	]);
+	const router = createFileRouter(tree, { container, hash: true });
+	router.start();
+	router.navigate('/about');
+	expect(container.textContent).toBe('About');
+	expect(globalThis.window.location.hash).toBe('#/about');
+	expect(globalThis.window.location.pathname).toBe('/');
+});
+
+test('back/forward popstate + hashchange dedupe to a single navigation', () => {
+	globalThis.window.location.hash = '';
+	const container = document.createElement('div');
+	let renders = 0;
+	const routes = {
+		'/': () => { renders++; return document.createTextNode('Home'); },
+		'/about': () => { renders++; return document.createTextNode('About'); },
+	};
+	const router = createRouter(routes, { container, hash: true });
+	globalThis.window._listeners = {};
+	router.start();
+	expect(renders).toBe(1);
+	const pop = (globalThis.window._listeners.popstate || []).slice();
+	const hashChange = (globalThis.window._listeners.hashchange || []).slice();
+	expect(pop.length).toBeGreaterThanOrEqual(1);
+	expect(hashChange.length).toBeGreaterThanOrEqual(1);
+	// Browser A order: popstate first, then hashchange.
+	globalThis.window.location.hash = '#/about';
+	for (const fn of pop) fn();
+	for (const fn of hashChange) fn();
+	expect(renders).toBe(2);
+	expect(router.route.pathname).toBe('/about');
+	// Browser B order: hashchange first, then popstate.
+	globalThis.window.location.hash = '';
+	const container2 = document.createElement('div');
+	let renders2 = 0;
+	const routes2 = {
+		'/': () => { renders2++; return document.createTextNode('Home'); },
+		'/about': () => { renders2++; return document.createTextNode('About'); },
+	};
+	const router2 = createRouter(routes2, { container: container2, hash: true });
+	globalThis.window._listeners = {};
+	router2.start();
+	expect(renders2).toBe(1);
+	const pop2 = (globalThis.window._listeners.popstate || []).slice();
+	const hashChange2 = (globalThis.window._listeners.hashchange || []).slice();
+	globalThis.window.location.hash = '#/about';
+	for (const fn of hashChange2) fn();
+	for (const fn of pop2) fn();
+	expect(renders2).toBe(2);
+	expect(router2.route.pathname).toBe('/about');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

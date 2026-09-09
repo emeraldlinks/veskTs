@@ -423,20 +423,23 @@ function quotedSourceValue(node: unknown): string | null {
  * file stat walk otherwise).
  */
 function createLazyBarrelExports(spec: BarrelSpec, dir: string): Record<string, unknown> {
-  const resolved = new Map<string, Record<string, unknown> | null>();
+  // Resolved submodule TARGETS are cached, but their values are pulled through
+  // `loadSsrModule` on every access — that call is mtime-keyed per module, so
+  // editing a re-exported file invalidates exactly that module (and is cheap:
+  // one stat), while the barrel itself stays cached with no dependency walk.
+  const targets = new Map<string, string>();
   const starKeys = new Set<string>();
   let starsEnumerated = false;
 
   const loadSource = (source: string): Record<string, unknown> | null => {
-    if (resolved.has(source)) return resolved.get(source) ?? null;
-    let mod: Record<string, unknown> | null = null;
-    const target = resolveSsrModule(source, dir);
-    if (target) {
-      const loaded = loadSsrModule(target);
-      if (loaded && typeof loaded === 'object') mod = loaded;
+    let target = targets.get(source);
+    if (!target) {
+      target = resolveSsrModule(source, dir) ?? '';
+      if (!target) return null;
+      targets.set(source, target);
     }
-    resolved.set(source, mod);
-    return mod;
+    const mod = loadSsrModule(target);
+    return mod && typeof mod === 'object' ? mod : null;
   };
 
   const hasPresent = (prop: string): boolean => {
@@ -654,7 +657,12 @@ function createModuleRequire(fromDir: string): (specifier: string) => unknown {
  */
 export function resolveSsrModule(specifier: string, fromDir: string): string | null {
   let resolved: string | null = null;
-  if (specifier === '.' || specifier === '..' || isAbsolute(specifier)) {
+  if (specifier === '.' || specifier === '..') {
+    // Literal `.`/`..` are relative — anchor them to the importing file's
+    // directory like every other relative specifier (a bare resolve()
+    // against process.cwd() silently resolved the wrong directory).
+    resolved = probeFile(resolve(fromDir, specifier));
+  } else if (isAbsolute(specifier)) {
     resolved = probeFile(resolve(specifier));
   } else if (specifier.startsWith('./') || specifier.startsWith('../')) {
     resolved = probeFile(resolve(fromDir, specifier));

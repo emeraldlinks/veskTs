@@ -206,18 +206,14 @@ async function runHydrationTests() {
   {
     const page = await browser.newPage();
     await page.goto(BASE, { waitUntil: 'networkidle0' });
-    const twCss = await page.evaluate(async () => {
-      const res = await fetch('/_vesk/static/_tailwind.css');
-      return { ok: res.ok, length: (await res.text()).length };
-    });
-    hydrateAssert(twCss.ok, '_tailwind.css OK');
-    hydrateAssert(twCss.length > 1000, `_tailwind.css ${twCss.length} bytes`);
-    const userCss = await page.evaluate(async () => {
+    const globalCss = await page.evaluate(async () => {
       const res = await fetch('/_vesk/static/global.css');
-      return { ok: res.ok, hasImport: (await res.text()).includes("@import 'tailwindcss'") };
+      return { ok: res.ok, css: await res.text() };
     });
-    hydrateAssert(userCss.ok, 'global.css OK');
-    hydrateAssert(!userCss.hasImport, 'global.css no tailwind import');
+    hydrateAssert(globalCss.ok, 'global.css OK');
+    hydrateAssert(globalCss.css.length > 1000, `global.css ${globalCss.css.length} bytes`);
+    hydrateAssert(!globalCss.css.includes("@import 'tailwindcss'"), 'global.css no raw tailwind import');
+    hydrateAssert(globalCss.css.includes('text-4xl'), 'global.css contains compiled tailwind utilities');
     const h1Styles = await page.evaluate(() => {
       const h1 = document.querySelector('h1');
       if (!h1) return null;

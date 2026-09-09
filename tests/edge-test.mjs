@@ -108,11 +108,8 @@ async function main() {
     assert((css.headers.get('content-type') || '').includes('text/css'), 'css content-type');
     const cssText = await css.text();
     assert(!cssText.includes("@import 'tailwindcss'"), 'global.css tailwind import processed');
-
-    const tw = await GET('/_vesk/static/_tailwind.css');
-    assert(tw.status === 200, 'GET /_vesk/static/_tailwind.css → 200');
-    const twText = await tw.text();
-    assert(twText.length > 0, `_tailwind.css non-empty (${twText.length} bytes)`);
+    assert(cssText.includes('text-4xl'), `global.css contains compiled tailwind utilities (${cssText.length} bytes)`);
+    assert(cssText.length > 1000, `global.css non-empty compiled output (${cssText.length} bytes)`);
   }
 
   console.log('\n=== 404 handling ===');

@@ -352,34 +352,14 @@ async function main() {
     await page.close();
   }
 
-  // ── Test 8: Tailwind CSS (separated global.css + _tailwind.css) ──
+  // ── Test 8: Tailwind CSS (single global.css, like other frameworks) ──
   console.log('\n=== TEST 8: Tailwind CSS ===');
   {
     const page = await browser.newPage();
     await goto(page, BASE, { waitUntil: 'networkidle0' });
 
-    // All tailwind utilities live in _tailwind.css (auto-generated)
+    // The single global.css holds the compiled tailwind output AND user rules
     const twCss = await page.evaluate(async () => {
-      try {
-        const res = await fetch('/_vesk/static/_tailwind.css');
-        const css = await res.text();
-        return {
-          ok: res.ok,
-          length: css.length,
-          hasTheme: css.includes('@layer theme'),
-          hasText4xl: css.includes('text-4xl'),
-          hasFontBold: css.includes('font-bold'),
-        };
-      } catch (e) { return { error: e.message }; }
-    });
-    assert(twCss.ok, '_tailwind.css fetched OK');
-    assert(twCss.length > 1000, '_tailwind.css has content (' + twCss.length + ' bytes)');
-    assert(twCss.hasTheme, '_tailwind.css contains @layer theme');
-    assert(twCss.hasText4xl, '_tailwind.css contains text-4xl utility');
-    assert(twCss.hasFontBold, '_tailwind.css contains font-bold utility');
-
-    // User CSS (global.css) should NOT contain tailwind-generated content
-    const userCss = await page.evaluate(async () => {
       try {
         const res = await fetch('/_vesk/static/global.css');
         const css = await res.text();
@@ -394,20 +374,28 @@ async function main() {
         };
       } catch (e) { return { error: e.message }; }
     });
-    assert(userCss.ok, 'global.css fetched OK');
-    assert(!userCss.hasTheme, 'global.css does NOT contain @layer theme');
-    assert(!userCss.hasText4xl, 'global.css does NOT contain text-4xl utility');
-    assert(!userCss.hasFontBold, 'global.css does NOT contain font-bold utility');
-    assert(!userCss.hasImport, 'global.css does NOT contain @import tailwindcss');
+    assert(twCss.ok, 'global.css fetched OK');
+    assert(twCss.length > 1000, 'global.css has compiled content (' + twCss.length + ' bytes)');
+    assert(twCss.hasTheme, 'global.css contains @layer theme');
+    assert(twCss.hasText4xl, 'global.css contains text-4xl utility');
+    assert(twCss.hasFontBold, 'global.css contains font-bold utility');
+    assert(!twCss.hasImport, 'global.css does NOT contain a raw @import tailwindcss');
+    assert(twCss.hasLayerBase, 'global.css keeps user @layer base rules');
 
-    // Verify both CSS links are present in the page HTML
+    // The separate _tailwind.css route must be gone
+    const tailwindRoute = await page.evaluate(async () => {
+      const res = await fetch('/_vesk/static/_tailwind.css');
+      return { ok: res.ok, status: res.status };
+    });
+
+    // Exactly one stylesheet link → global.css
     const cssLinks = await page.evaluate(() => {
       const links = document.querySelectorAll('link[rel="stylesheet"]');
       return Array.from(links).map(l => l.href);
     });
-    assert(cssLinks.length >= 2, `at least 2 stylesheet links (got ${cssLinks.length})`);
-    assert(cssLinks.some(h => h.includes('_tailwind.css')), 'includes _tailwind.css link');
+    assert(cssLinks.length === 1, `exactly 1 stylesheet link (got ${cssLinks.length})`);
     assert(cssLinks.some(h => h.includes('global.css')), 'includes global.css link');
+    assert(!cssLinks.some(h => h.includes('_tailwind.css')), 'no separate _tailwind.css link');
 
     // Verify elements use tailwind classes and they compute correct styles
     const h1Styles = await page.evaluate(() => {

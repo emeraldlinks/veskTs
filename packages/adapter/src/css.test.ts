@@ -7,7 +7,7 @@
  * Run: npx tsx packages/adapter/src/css.test.ts
  */
 
-import { resolveCssUrls, isTailwindPlugin, hasUserCss, hasBuiltTailwindCss, resolveUserCssPath, stripTailwindDirectives, TAILWIND_CSS_URL, GLOBAL_CSS_URL } from '@vesk/adapter/src/css';
+import { resolveCssUrls, isTailwindPlugin, hasUserCss, hasBuiltGlobalCss, resolveUserCssPath, GLOBAL_CSS_URL } from '@vesk/adapter/src/css';
 import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -42,18 +42,12 @@ function makeFixture(): void {
 }
 
 describe('resolveCssUrls orderings', () => {
-  it('tailwind + global → tailwind first, then global', () => {
+  it('enabled → single global.css link', () => {
     assert(
-      JSON.stringify(resolveCssUrls({ tailwind: true, userCss: true })) ===
-        JSON.stringify([TAILWIND_CSS_URL, GLOBAL_CSS_URL]),
-      'tailwind must come before global'
+      JSON.stringify(resolveCssUrls({ enabled: true })) ===
+        JSON.stringify([GLOBAL_CSS_URL]),
+      'single compiled global.css when a stylesheet output exists'
     );
-  });
-  it('tailwind only', () => {
-    assert(JSON.stringify(resolveCssUrls({ tailwind: true })) === JSON.stringify([TAILWIND_CSS_URL]), 'only _tailwind.css');
-  });
-  it('global only', () => {
-    assert(JSON.stringify(resolveCssUrls({ userCss: true })) === JSON.stringify([GLOBAL_CSS_URL]), 'only global.css');
   });
   it('no facts → empty', () => {
     assert(resolveCssUrls({}).length === 0, 'no css URLs when no output available');
@@ -103,87 +97,29 @@ describe('resolveUserCssPath / hasUserCss', () => {
   });
 });
 
-describe('hasBuiltTailwindCss', () => {
-  it('false when _tailwind.css missing', () => {
+describe('hasBuiltGlobalCss', () => {
+  it('false when global.css missing', () => {
     makeFixture();
-    assert(!hasBuiltTailwindCss(fixture), 'missing file');
+    assert(!hasBuiltGlobalCss(fixture), 'missing file');
   });
-  it('false when _tailwind.css is empty/whitespace-only', () => {
-    makeFixture();
-    mkdirSync(resolve(fixture, 'static'), { recursive: true });
-    writeFileSync(resolve(fixture, 'static', '_tailwind.css'), '   \n  ', 'utf-8');
-    assert(!hasBuiltTailwindCss(fixture), 'empty file treated as absent');
-  });
-  it('true when _tailwind.css has content', () => {
+  it('false when global.css is empty/whitespace-only', () => {
     makeFixture();
     mkdirSync(resolve(fixture, 'static'), { recursive: true });
-    writeFileSync(resolve(fixture, 'static', '_tailwind.css'), '@layer theme { .tw { } }', 'utf-8');
-    assert(hasBuiltTailwindCss(fixture), 'non-empty file');
+    writeFileSync(resolve(fixture, 'static', 'global.css'), '   \n  ', 'utf-8');
+    assert(!hasBuiltGlobalCss(fixture), 'empty file treated as absent');
   });
-});
-
-describe('stripTailwindDirectives', () => {
-  it('strips both quote styles of the tailwind import', () => {
-    const out = stripTailwindDirectives(`@import 'tailwindcss';
-
-body { color: red; }`);
-    assert(!out.includes('@import'), 'single-quote import stripped');
-    assert(out.includes('body'), 'user rule kept');
-    const out2 = stripTailwindDirectives(`@import "tailwindcss";
-p { margin: 0; }`);
-    assert(!out2.includes('@import'), 'double-quote import stripped');
-  });
-  it('strips @source directives', () => {
-    const out = stripTailwindDirectives(`@import 'tailwindcss';
-@source "./components";
-body {}`);
-    assert(!out.includes('@source'), '@source stripped');
-  });
-  it('strips multiline @theme blocks but keeps sibling rules', () => {
-    const out = stripTailwindDirectives(`@theme {
-  --color-brand: oklch(0.5 0.2 240);
-  --font-sans: "Inter", sans-serif;
-}
-.card { padding: 1rem; }`);
-    assert(!out.includes('--color-brand'), '@theme block gone');
-    assert(out.includes('.card'), 'following rule kept');
-  });
-  it('strips @layer components/utilities blocks, keeps @layer base', () => {
-    const out = stripTailwindDirectives(`@layer base {
-  html { scroll-behavior: smooth; }
-}
-@layer components {
-  .btn { display: inline-block; }
-}
-@layer utilities {
-  .underline { text-decoration: underline; }
-}`);
-    assert(out.includes('@layer base'), '@layer base preserved');
-    assert(!out.includes('.btn'), '@layer components stripped');
-    assert(!out.includes('.underline'), '@layer utilities stripped');
-  });
-  it('strips @utility blocks', () => {
-    const out = stripTailwindDirectives(`@utility text-balance {
-  text-wrap: balance;
-}`);
-    assert(!out.includes('text-balance'), '@utility stripped');
-  });
-  it('returns the stripped user css (test-app global.css shape) trimmed', () => {
-    const out = stripTailwindDirectives(`@import 'tailwindcss';
-
-@layer base {
-	html { scroll-behavior: smooth; }
-}`);
-    assert(!out.includes('@import'), 'no import left');
-    assert(out.includes('@layer base'), 'base layer kept');
-    assert(out.includes('scroll-behavior'), 'rule kept');
+  it('true when global.css has content', () => {
+    makeFixture();
+    mkdirSync(resolve(fixture, 'static'), { recursive: true });
+    writeFileSync(resolve(fixture, 'static', 'global.css'), '@layer theme { .tw { } }', 'utf-8');
+    assert(hasBuiltGlobalCss(fixture), 'non-empty file');
   });
 });
 
 describe('shared facts match each consumer contract', () => {
   it('per-route bake (ssr-function/hmr) uses same shape the renderer consumes', () => {
-    const cssUrls = resolveCssUrls({ tailwind: true, userCss: true });
-    assert(JSON.stringify(cssUrls) === '["/_vesk/static/_tailwind.css","/_vesk/static/global.css"]', 'baked option JSON matches generated functions');
+    const cssUrls = resolveCssUrls({ enabled: true });
+    assert(JSON.stringify(cssUrls) === '["/_vesk/static/global.css"]', 'baked option JSON matches generated functions');
   });
 });
 

@@ -122,6 +122,72 @@ test('resolveSsrModule: extension probing and directory/index resolution', () =>
   }
 });
 
+test('resolveSsrModule: literal "." and ".." anchor to fromDir, not process.cwd()', () => {
+  const fx = makeFixture();
+  try {
+    mkdirSync(fx.file('sub'));
+    writeFileSync(fx.file('sub/index.ts'), '');
+    writeFileSync(fx.file('index.ts'), '');
+    expect(resolveSsrModule('.', fx.file('sub'))).toEqual(fx.file('sub/index.ts'));
+    expect(resolveSsrModule('..', fx.file('sub'))).toEqual(fx.file('index.ts'));
+    // Missing dir: "." from a nonexistent path probes the dir itself → null,
+    // proving resolution was anchored to fromDir (never cwd).
+    expect(resolveSsrModule('.', fx.file('sub/nope'))).toEqual(null);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('resolveSsrModule: relative specifiers resolve depth-correctly from the importing file dir', () => {
+  const fx = makeFixture();
+  try {
+    mkdirSync(fx.file('app/pages/docs'), { recursive: true });
+    mkdirSync(fx.file('app/components/docs'), { recursive: true });
+    mkdirSync(fx.file('app/src/content'), { recursive: true });
+    mkdirSync(fx.file('src/content'), { recursive: true });
+    writeFileSync(fx.file('src/content/docs.ts'), `export const G = 1;`);
+    writeFileSync(fx.file('app/src/content/docs.ts'), `export const G = 2;`);
+
+    // `../src/content/docs` from app/pages → <root>/app/src/content/docs.ts
+    expect(resolveSsrModule('../src/content/docs', fx.file('app/pages'))).toEqual(fx.file('app/src/content/docs.ts'));
+    // `../../src/content/docs` from app/components/docs also lands on the
+    // app-level module — standard node `..` semantics: identical relative
+    // specifiers reach the same file only at equal depth (depth-correct).
+    expect(resolveSsrModule('../../src/content/docs', fx.file('app/components/docs'))).toEqual(fx.file('app/src/content/docs.ts'));
+    // Three `..` from app/pages/docs clears app/ → the root-level module.
+    expect(resolveSsrModule('../../../src/content/docs', fx.file('app/pages/docs'))).toEqual(fx.file('src/content/docs.ts'));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: import "." resolves to the importing dir index module', () => {
+  const fx = makeFixture();
+  try {
+    mkdirSync(fx.file('pkg'));
+    writeFileSync(fx.file('pkg/index.ts'), `export const SELF = 'dir-self';`);
+    const scope: Record<string, unknown> = {};
+    applyLocalModuleImports(scope, [`import { SELF } from '.';`], fx.file('pkg/page.vsk'));
+    expect(scope.SELF).toEqual('dir-self');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: import ".." resolves to the parent dir index module', () => {
+  const fx = makeFixture();
+  try {
+    mkdirSync(fx.file('parent'));
+    mkdirSync(fx.file('parent/child'));
+    writeFileSync(fx.file('parent/index.ts'), `export const PARENT = 'up';`);
+    const scope: Record<string, unknown> = {};
+    applyLocalModuleImports(scope, [`import { PARENT } from '..';`], fx.file('parent/child/page.vsk'));
+    expect(scope.PARENT).toEqual('up');
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test('loadSsrModule: TS stripping + ESM export forms', () => {
   const fx = makeFixture();
   try {
@@ -181,6 +247,102 @@ test('loadSsrModule: JSON module exposes values (with default self-reference)', 
     const mod = loadSsrModule(fx.file('cfg.json')) as Record<string, unknown>;
     expect((mod as { name: string }).name).toEqual('jsonval');
     if (mod.default !== mod) throw new Error('json module default should self-reference');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ============================================================
+// Lazy re-export barrels (lucide-style pure barrels)
+// ============================================================
+test('loadSsrModule: pure barrel resolves lazily — aliased, star and namespace', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('a.ts'), `export const Alpha = 'A';`);
+    writeFileSync(fx.file('b.ts'), `export const Beta = 'B';`);
+    writeFileSync(fx.file('barrel.ts'), [
+      `export { Alpha as Alias } from './a';`,
+      `export * from './b';`,
+      `export * as group from './a';`,
+    ].join('\n'));
+    const mod = loadSsrModule(fx.file('barrel.ts')) as Record<string, unknown>;
+    // Nothing evaluated yet — resolve on demand.
+    expect((mod as { Alias: string }).Alias).toEqual('A');
+    expect(mod.Beta).toEqual('B');
+    expect((mod.group as Record<string, unknown>).Alpha).toEqual('A');
+    expect((mod as Record<string, unknown>).Alpha).toEqual(undefined);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: barrel defers submodule evaluation until a name is touched', () => {
+  const fx = makeFixture();
+  try {
+    delete (globalThis as { __VESK_BARREL_A?: number }).__VESK_BARREL_A;
+    delete (globalThis as { __VESK_BARREL_B?: number }).__VESK_BARREL_B;
+    writeFileSync(fx.file('a.ts'), `(globalThis as any).__VESK_BARREL_A = 1;\nexport const A = 'a';`);
+    writeFileSync(fx.file('b.ts'), `(globalThis as any).__VESK_BARREL_B = 1;\nexport const B = 'b';`);
+    writeFileSync(fx.file('barrel.ts'), [
+      `export { A } from './a';`,
+      `export { B } from './b';`,
+    ].join('\n'));
+    const mod = loadSsrModule(fx.file('barrel.ts')) as Record<string, unknown>;
+    if (globalThis.__VESK_BARREL_A || globalThis.__VESK_BARREL_B) {
+      throw new Error('barrel load should not evaluate submodules');
+    }
+    expect(mod.B).toEqual('b');
+    if (!globalThis.__VESK_BARREL_B) throw new Error('touching B should evaluate ./b');
+    if (globalThis.__VESK_BARREL_A) throw new Error('touching B should NOT evaluate ./a');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: editing a barrel submodule invalidates that module, not the whole barrel', () => {
+  const fx = makeFixture();
+  try {
+    const t0 = new Date(Date.now() - 60000);
+    const t1 = new Date(Date.now() - 30000);
+    writeFileSync(fx.file('a.ts'), `export const A = 'a1';`);
+    utimesSync(fx.file('a.ts'), t0, t0);
+    writeFileSync(fx.file('b.ts'), `export const B = 'b1';`);
+    utimesSync(fx.file('b.ts'), t0, t0);
+    writeFileSync(fx.file('barrel.ts'), [
+      `export { A } from './a';`,
+      `export { B } from './b';`,
+    ].join('\n'));
+    utimesSync(fx.file('barrel.ts'), t0, t0);
+
+    const mod1 = loadSsrModule(fx.file('barrel.ts')) as Record<string, unknown>;
+    expect(mod1.A).toEqual('a1');
+    expect(mod1.B).toEqual('b1');
+
+    writeFileSync(fx.file('a.ts'), `export const A = 'a2';`);
+    utimesSync(fx.file('a.ts'), t1, t1);
+
+    const mod2 = loadSsrModule(fx.file('barrel.ts')) as Record<string, unknown>;
+    expect(mod2.A).toEqual('a2');
+    expect(mod2.B).toEqual('b1');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: warm barrel re-load is ~0ms (cached, no stat walk)', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('a.ts'), `export const A = 'a';`);
+    writeFileSync(fx.file('barrel.ts'), `export { A } from './a';\nexport * from './a';`);
+    const mod1 = loadSsrModule(fx.file('barrel.ts')) as Record<string, unknown>;
+    expect(mod1.A).toEqual('a');
+    const t0 = performance.now();
+    for (let i = 0; i < 500; i++) {
+      const m = loadSsrModule(fx.file('barrel.ts')) as Record<string, unknown>;
+      if (m.A !== 'a') throw new Error('cached barrel returned wrong value');
+    }
+    const elapsed = performance.now() - t0;
+    if (elapsed > 200) throw new Error(`warm barrel reload too slow: ${elapsed.toFixed(1)}ms for 500 loads`);
   } finally {
     fx.cleanup();
   }

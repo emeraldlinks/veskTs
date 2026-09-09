@@ -7,7 +7,7 @@ import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { buildHmrEvalSnippet } from './client-bundle';
 import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
 import { resolveErrorFile } from '@vesk/adapter/src/ssr-function';
-import { resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
+import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
 import { parseCompilerError, buildCodeframe, type Codeframe } from '@vesk/adapter/src/error-codeframe';
 import { suggestFor } from '@vesk/adapter/src/error-tips';
@@ -272,8 +272,7 @@ function regenerateSsrFunction(
   const pagePath = resolve(appDir, routeNode.sourceDir, 'page.vsk');
   const layoutPath = resolve(appDir, routeNode.sourceDir, 'layout.vsk');
   const cssUrls = resolveCssUrls({
-    tailwind: hasBuiltTailwindCss(outDir),
-    userCss: hasUserCss(appDir),
+    enabled: hasBuiltGlobalCss(outDir),
   });
   const cssOption = cssUrls.length > 0 ? `, cssUrls: ${JSON.stringify(cssUrls)}` : '';
   const headExtraOption = headExtra ? `, headExtra: ${JSON.stringify(headExtra)}` : '';

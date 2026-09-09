@@ -11,6 +11,7 @@ interface Router {
 	_outletPlaceholders?: HTMLElement[];
 	_currentSegments?: { rendered: Node }[] | null;
 	_depth?: number;
+	_hashMode?: boolean;
 	[k: string]: unknown;
 }
 
@@ -52,6 +53,23 @@ export const RouterCtx = createContext<Router | null>(null);
 
 let _currentRouter: Router | null = null;
 let _outletId = 0;
+
+/** True when the active router was created with `hash: true`. */
+function routerMode(): boolean {
+	const r = RouterCtx.get() || _currentRouter;
+	return !!(r && (r as { _hashMode?: boolean })._hashMode);
+}
+
+/** Strips a leading `#` from an href in hash mode so it compares to the route path. */
+function routeHrefOf(href: string): string {
+	return routerMode() && href.startsWith('#') ? href.slice(1) : href;
+}
+
+/** Whether an href is a SPA route ("/path" or "#/path" in hash mode) vs a native target. */
+function isRouteHref(href: string): boolean {
+	if (!routerMode()) return !href.startsWith('#');
+	return !href.startsWith('#') || href.startsWith('#/');
+}
 
 export let __isHydrating = false;
 
@@ -226,6 +244,18 @@ interface LinkProps {
 
 type HydrateWalker = ReturnType<typeof createHydrateWalker>;
 
+/** Mounts DOM (non-string) link children inside a target, preserving element structure. */
+function mountLinkChildren(target: Element, children: unknown): void {
+	if ((children as Node).nodeType) {
+		target.appendChild(children as Node);
+	} else if (Array.isArray(children)) {
+		for (const c of children) {
+			if (c && (c as Node).nodeType) target.appendChild(c as Node);
+			else if (c != null) target.appendChild(document.createTextNode(String(c)));
+		}
+	}
+}
+
 export function Link(
 	props: LinkProps,
 	registry?: Map<string, unknown>,
@@ -241,13 +271,14 @@ export function Link(
 		if (props.children != null) {
 			if (typeof props.children === 'string' || typeof props.children === 'number') {
 				a.textContent = String(props.children);
-			} else if ((props.children as Node).textContent) {
-				a.textContent = (props.children as Node).textContent;
+			} else {
+				mountLinkChildren(a, props.children);
 			}
 		}
 		a.addEventListener('click', (e) => {
 			if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 			if (props.target === '_blank') return;
+			if (!isRouteHref(href)) return;
 			e.preventDefault();
 			e.stopPropagation();
 			const nav = useNavigate();
@@ -271,8 +302,9 @@ export function Link(
 	if (typeof document === 'undefined') {
 		return `<a ${attrs}>${childStr}</a>`;
 	}
+	const displayHref = routerMode() && !href.startsWith('#') ? '#' + href : href;
 	const a = document.createElement('a');
-	a.href = href;
+	a.href = displayHref;
 	if (props.class) a.className = props.class;
 	if (props.style) a.setAttribute('style', props.style);
 	if (props.target) a.target = props.target;
@@ -280,18 +312,12 @@ export function Link(
 	if (childStr) {
 		a.textContent = childStr;
 	} else if (props.children != null) {
-		if ((props.children as Node).nodeType) {
-			a.appendChild(props.children as Node);
-		} else if (Array.isArray(props.children)) {
-			for (const c of props.children) {
-				if (c && (c as Node).nodeType) a.appendChild(c as Node);
-				else if (c != null) a.appendChild(document.createTextNode(String(c)));
-			}
-		}
+		mountLinkChildren(a, props.children);
 	}
 	a.addEventListener('click', (e) => {
 		if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 		if (props.target === '_blank') return;
+		if (!isRouteHref(href)) return;
 		e.preventDefault();
 		e.stopPropagation();
 		const nav = useNavigate();
@@ -319,20 +345,22 @@ export function NavLink(
 			if (props.children != null) {
 				if (typeof props.children === 'string' || typeof props.children === 'number') {
 					a.textContent = String(props.children);
-				} else if ((props.children as Node).textContent) {
-					a.textContent = (props.children as Node).textContent;
+				} else {
+					mountLinkChildren(a, props.children);
 				}
 			}
 			a.addEventListener('click', (e) => {
 				if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
 				if (props.target === '_blank') return;
+				if (!isRouteHref(props.href)) return;
 				e.preventDefault();
 				e.stopPropagation();
 				const nav = useNavigate();
 				nav(props.href);
 			});
 			const path = usePathname();
-			const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href) && (path.length === props.href.length || path[props.href.length] === '/' || path[props.href.length] === '?'));
+			const routeHref = routeHrefOf(props.href);
+			const isActive = routeHref === path || (routeHref !== '/' && path.startsWith(routeHref) && (path.length === routeHref.length || path[routeHref.length] === '/' || path[routeHref.length] === '?'));
 			if (isActive) {
 				a.classList.add(props.activeClass || 'active');
 				if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
@@ -342,7 +370,8 @@ export function NavLink(
 	}
 	const a = Link(props, registry, hydrate) as HTMLAnchorElement;
 	const path = usePathname();
-	const isActive = props.href === path || (props.href !== '/' && path.startsWith(props.href) && (path.length === props.href.length || path[props.href.length] === '/' || path[props.href.length] === '?'));
+	const routeHref = routeHrefOf(props.href);
+	const isActive = routeHref === path || (routeHref !== '/' && path.startsWith(routeHref) && (path.length === routeHref.length || path[routeHref.length] === '/' || path[routeHref.length] === '?'));
 	if (isActive) {
 		a.classList.add(props.activeClass || 'active');
 		if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
@@ -417,7 +446,11 @@ export function useRouter(): {
 		back: () => window.history.back(),
 		forward: () => window.history.forward(),
 		go: (n: number) => window.history.go(n),
-		refresh: () => router?.navigate?.(window.location.pathname, { replace: true }),
+		refresh: () => {
+			const mode = routerMode();
+			const p = mode && typeof window !== 'undefined' && window.location.hash && window.location.hash.length > 1 ? window.location.hash.slice(1) : (typeof window !== 'undefined' ? window.location.pathname : '');
+			router?.navigate?.(p, { replace: true });
+		},
 		prefetch: (href: string) => router?.prefetch?.(href),
 		beforeEach: (fn) => {
 			const r = router as { beforeEach?: (f: typeof fn) => () => void } | null | undefined;

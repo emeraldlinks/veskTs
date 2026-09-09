@@ -3,10 +3,11 @@
  *
  * Validates that a DEACTIVATED plugin never ships:
  *  - its hooks are not iterated (filterActivePlugins gate)
- *  - tailwind output is empty and not linked when inactive
+ *  - tailwind output is not compiled and not linked when inactive
+ *    (the single global.css still serves the raw user CSS)
  *  - generic plugin output is absent when inactive
  *  - middleware plugins are filtered (dev)
- *  - prod and dev HTML do not contain tailwind link when inactive
+ *  - prod and dev HTML never carry a separate tailwind link (single-file css)
  *
  * Tests both pure logic (via adapter helpers) and the wiring in
  * dev-server.ts / index.ts / prod-server.ts / action-handler.ts.
@@ -48,39 +49,27 @@ async function main(){
   assert(filterPluginsForBuild([recased], { version:1, plugins:[{ name:'my-plugin', active:false }] }).length===0, 'case-insensitive generic deactivation drops recased plugin');
   assert(filterPluginsForBuild([recased], { version:1, plugins:[{ name:'MY-PLUGIN', active:true }] }).length===1, 'case-insensitive keeps active recased plugin');
 
-  // tailwind helpers (dev's isTailwindActive / activeCssUrls logic)
+  // tailwind helpers (single-file css: tailwind activation only decides whether onCSS runs)
   function isTailwindActiveDev(active: {name:string}[]){ return active.some(p=> String(p.name).toLowerCase().includes('tailwind')); }
-  function activeCssUrls(active: {name:string}[]){
-    const urls:string[]=[]; if(isTailwindActiveDev(active)) urls.push('/_vesk/static/_tailwind.css'); urls.push('/_vesk/static/global.css'); return urls;
-  }
-  assert(activeCssUrls(filteredGenericInactive).includes('/_vesk/static/_tailwind.css'), 'activeCssUrls includes tailwind when tailwind active');
-  assert(!activeCssUrls(filteredTwInactive).includes('/_vesk/static/_tailwind.css'), 'activeCssUrls omits tailwind when inactive (no output expected)');
-  assert(activeCssUrls(filteredGenericInactive).includes('/_vesk/static/global.css'), 'global.css always present');
-  // build empty file expectation
-  function simulatedTwOutput(active:{name:string}[]){ return isTailwindActiveDev(active) ? 'compiled' : ''; }
-  assert(simulatedTwOutput(filteredTwInactive)==='', 'build tailwind output empty when inactive');
-  assert(simulatedTwOutput(filteredGenericInactive)!=='', 'build tailwind output present when active');
+  function activeCssUrls(){ return ['/_vesk/static/global.css']; }
+  assert(activeCssUrls().length===1 && activeCssUrls()[0]==='/_vesk/static/global.css', 'single global.css link regardless of tailwind state');
+  // build output simulation: inactive → raw user CSS passes through unmodified
+  function simulatedTwOutput(active:{name:string}[]){ return isTailwindActiveDev(active) ? 'compiled-tailwind' : 'raw-user-css'; }
+  assert(simulatedTwOutput(filteredTwInactive)==='raw-user-css', 'build global.css output unmodified when tailwind inactive');
+  assert(simulatedTwOutput(filteredGenericInactive)==='compiled-tailwind', 'build global.css compiled when tailwind active');
 
-  // action-handler helper (mirrors file read logic)
+  // action-handler helper (single-file css: presence of a user stylesheet only)
   const tmp = mkdtempSync(join(tmpdir(), 'vesk-action-gate-'));
-  const appDir = join(tmp,'app'); const veskDir = join(tmp,'.vesk');
-  mkdirSync(appDir,{recursive:true}); mkdirSync(veskDir,{recursive:true});
-  writeFileSync(join(veskDir,'plugins.json'), JSON.stringify({ version:1, plugins:[{ name:'@vesk/plugin-tailwind', package:'@vesk/plugin-tailwind', active:false }]}));
+  const appDir = join(tmp,'app');
+  mkdirSync(appDir,{recursive:true}); mkdirSync(join(tmp,'src'),{recursive:true});
+  const srcDir = join(tmp,'src');
   function actionCssUrls(appDirPath:string){
-    try{
-      const vd = join(resolve(appDirPath,'..'), '.vesk');
-      const p = join(vd,'plugins.json');
-      if(existsSync(p)){
-        const raw = readFileSync(p,'utf-8'); const st = JSON.parse(raw) as {plugins?:Array<{name:string,active:boolean}>};
-        const entries = st?.plugins||[];
-        if(entries.some(e=> String(e.name).toLowerCase().includes('tailwind') && e.active===false)) return ['/_vesk/static/global.css'];
-      }
-    }catch{}
-    return ['/_vesk/static/_tailwind.css','/_vesk/static/global.css'];
+    const hasUserCss = existsSync(join(resolve(appDirPath,'..'),'src','global.css')) || existsSync(join(resolve(appDirPath,'..'),'src','app.css'));
+    return hasUserCss ? ['/_vesk/static/global.css'] : [];
   }
-  assert(actionCssUrls(appDir).length===1 && !actionCssUrls(appDir).includes('/_vesk/static/_tailwind.css'), 'action handler omits tailwind link when inactive');
-  writeFileSync(join(veskDir,'plugins.json'), JSON.stringify({ version:1, plugins:[{ name:'@vesk/plugin-tailwind', package:'@vesk/plugin-tailwind', active:true }]}));
-  assert(actionCssUrls(appDir).length===2, 'action handler includes tailwind when active');
+  assert(actionCssUrls(appDir).length===0, 'action handler omits css link when no user stylesheet');
+  writeFileSync(join(srcDir,'global.css'), 'body{}', 'utf-8');
+  assert(actionCssUrls(appDir).length===1 && actionCssUrls(appDir)[0]==='/_vesk/static/global.css', 'action handler links single global.css when stylesheet present');
   rmSync(tmp,{recursive:true,force:true});
 
   // middleware filtering: my-plugin provides / onRequest should be dropped
@@ -107,15 +96,16 @@ async function main(){
   const devSrc = readFileSync(resolve(__dirname, 'dev-server.ts'), 'utf-8');
   assert(/import \{ getPluginRecords, filterActivePlugins \} from '@vesk\/adapter\/src\/plugins'/.test(devSrc), 'dev-server imports getPluginRecords + filterActivePlugins from adapter');
   assert(/function getActiveDevPlugins\(\)/.test(devSrc), 'dev-server defines getActiveDevPlugins helper');
-  assert(/function isTailwindActive\(\)/.test(devSrc), 'dev-server defines isTailwindActive');
   assert(/function activeCssUrls\(\)/.test(devSrc), 'dev-server defines activeCssUrls');
   assert(/function cssLinkTags\(\)/.test(devSrc), 'dev-server defines cssLinkTags');
   const activeLoops = (devSrc.match(/for \(const plugin of activeAtStart\)/g)||[]).length;
   assert(activeLoops>=1, `initial CSS uses activeAtStart loop (got ${activeLoops})`);
   const rebuildUsesActive = /async function rebuildTailwindCss[\s\S]*?getActiveDevPlugins\(\)/.test(devSrc);
   assert(rebuildUsesActive, 'rebuildTailwindCss uses getActiveDevPlugins (gated)');
-  assert(/if \(!isTailwindActive\(\)\)/.test(devSrc) && devSrc.includes("devTailwindCssContent = ''"), 'rebuildTailwindCss sets tailwind empty when inactive');
-  assert(devSrc.includes('isTailwindActive() ? devTailwindCssContent :'), 'tailwind CSS serving gated by isTailwindActive');
+  assert(devSrc.includes('devGlobalCssContent'), 'dev server keeps a single global.css content buffer');
+  assert(!devSrc.includes('devTailwindCssContent'), 'no separate tailwind content buffer anymore');
+  assert(devSrc.includes("url.pathname === '/_vesk/static/global.css'"), 'dev server serves the single global.css route');
+  assert(!devSrc.includes("url.pathname === '/_vesk/static/_tailwind.css'"), 'no separate _tailwind.css route in dev');
   assert(/onPluginChange[\s\S]*?rebuildTailwindCss/.test(devSrc), 'onPluginChange triggers rebuildTailwindCss before reload');
   const cssUrlsDyn = (devSrc.match(/activeCssUrls\(\)/g)||[]).length;
   assert(cssUrlsDyn >= 6, `all renderFullPage/renderPageStream/cssUrls use activeCssUrls (got ${cssUrlsDyn})`);
@@ -127,17 +117,15 @@ async function main(){
   // --- static wiring: adapter/src/index.ts ---
   console.log('\n=== Static wiring: adapter/src/index.ts ===');
   const idxSrc = readFileSync(resolve(__dirname, '../../adapter/src/index.ts'), 'utf-8');
-  assert(/const isTailwindActive = pluginsPipelines\.some/.test(idxSrc), 'build detects tailwind active via pluginsPipelines');
-  assert(/if \(!isTailwindActive\)/.test(idxSrc) && idxSrc.includes("empty, tailwind plugin inactive"), 'build writes empty _tailwind.css when tailwind inactive (no output)');
-  const twGatedLogs = (idxSrc.match(/tailwind plugin inactive/g)||[]).length;
-  assert(twGatedLogs===1, 'single inactive tailwind log line');
+  assert(/const tailwindActive = isTailwindPlugin\(pluginsPipelines\)/.test(idxSrc), 'build detects tailwind active via isTailwindPlugin');
+  assert(/if \(tailwindActive\)/.test(idxSrc) && idxSrc.includes('static/global.css'), 'build compiles the single global.css only when tailwind active');
+  assert(!idxSrc.includes('_tailwind.css'), 'build no longer writes a separate _tailwind.css file');
 
   // --- static wiring: prod-server.ts ---
   console.log('\n=== Static wiring: adapter/src/prod-server.ts ===');
   const prodSrc = readFileSync(resolve(__dirname, '../../adapter/src/prod-server.ts'), 'utf-8');
-  assert(prodSrc.includes('hasTailwindNF') && prodSrc.includes('cssUrlsNF'), 'prod not-found uses hasTailwindNF file check + cssUrlsNF');
-  assert(prodSrc.includes('hasTailwindErr') && prodSrc.includes('cssUrlsErr'), 'prod error page uses hasTailwindErr file check');
-  assert(!prodSrc.includes("cssUrls: ['/_vesk/static/_tailwind.css'"), 'no longer hardcodes both cssUrls unconditionally for not-found/error');
+  assert(prodSrc.includes('hasBuiltGlobalCss(outDir)') && prodSrc.includes('pageCssUrls'), 'prod not-found/error pages resolve css via hasBuiltGlobalCss');
+  assert(!prodSrc.includes('_tailwind.css'), 'prod server never references _tailwind.css');
 
   // --- static wiring: action-handler.ts ---
   console.log('\n=== Static wiring: cli/src/action-handler.ts ===');

@@ -341,7 +341,7 @@ const boomPage = await get('/store/boom');
 assert(boomPage.type.includes('text/html'), 'page 500 body is HTML');
 
 // Static assets keep their own types.
-const css = await fetch(`${BASE}/_vesk/static/_tailwind.css`);
+const css = await fetch(`${BASE}/_vesk/static/global.css`);
 assert((css.headers.get('content-type') || '').includes('text/css'), 'css served as css');
 const js = await fetch(`${BASE}/_vesk/static/client.js`);
 assert((js.headers.get('content-type') || '').includes('javascript'), 'client.js served as javascript');

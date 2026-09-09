@@ -32,7 +32,7 @@ import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin, VeskEventHandlers, ServerEventContext } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
-import { resolveCssUrls, isTailwindPlugin, hasUserCss, stripTailwindDirectives } from '@vesk/adapter/src/css';
+import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
 import { buildErrorPayload } from '@vesk/adapter/src/hmr';
 import { buildCodeframe } from '@vesk/adapter/src/error-codeframe';
 import type { HmrErrorPayload } from '@vesk/adapter/src/hmr';
@@ -538,23 +538,17 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     }
   }
-  function isTailwindActive(): boolean {
-    return isTailwindPlugin(getActiveDevPlugins());
-  }
   function activeCssUrls(): string[] {
     return resolveCssUrls({
-      tailwind: isTailwindActive(),
-      userCss: hasUserCss(appDirPath),
+      enabled: hasUserCss(appDirPath),
     });
   }
   function cssLinkTags(): string {
     return activeCssUrls().map((u) => `\t<link rel="stylesheet" href="${u}" />`).join('\n') + '\n';
   }
 
-  let devUserCssContent = '';
-  let devTailwindCssContent = '';
+  let devGlobalCssContent = '';
   let lastServedCssGlobal = '';
-  let lastServedCssTailwind = '';
   const srcDir = join(projectDir, 'src');
   const cssPath = join(srcDir, 'global.css');
   const altCssPath = join(srcDir, 'app.css');
@@ -571,25 +565,16 @@ export async function startDevServer(port: number, projectDir: string, config: R
         await plugin.onBuildStart();
       }
     }
-    devUserCssContent = stripTailwindDirectives(rawCss);
-    if (!isTailwindActive()) {
-      devTailwindCssContent = '';
-    } else {
-      devTailwindCssContent = rawCss;
-      for (const plugin of activeAtStart) {
-        if (typeof plugin.onCSS === 'function') {
-          const result = await plugin.onCSS(rawCss, cssPath);
-          if (result !== null && typeof result === 'string') {
-            devTailwindCssContent = result;
-          }
+    devGlobalCssContent = rawCss;
+    for (const plugin of activeAtStart) {
+      if (typeof plugin.onCSS === 'function') {
+        const result = await plugin.onCSS(rawCss, cssPath);
+        if (result !== null && typeof result === 'string') {
+          devGlobalCssContent = result;
         }
       }
-      if (devUserCssContent === devTailwindCssContent || devUserCssContent === rawCss) {
-        devTailwindCssContent = devUserCssContent;
-      }
     }
-    lastServedCssGlobal = devUserCssContent;
-    lastServedCssTailwind = devTailwindCssContent;
+    lastServedCssGlobal = devGlobalCssContent;
   }
 
   let routeTree: RouteNode[] = scanRoutes(appDirPath);
@@ -806,30 +791,19 @@ export async function startDevServer(port: number, projectDir: string, config: R
   async function rebuildTailwindCss(): Promise<boolean> {
     if (!rawCss) return false;
     try {
-      const nextUser = stripTailwindDirectives(rawCss);
-      let nextTailwind: string;
-      if (!isTailwindActive()) {
-        nextTailwind = '';
-      } else {
-        const active = getActiveDevPlugins();
-        nextTailwind = rawCss;
-        for (const plugin of active) {
-          if (typeof plugin.onCSS === 'function') {
-            const result = await plugin.onCSS(rawCss, cssPath);
-            if (result !== null && typeof result === 'string') {
-              nextTailwind = result;
-            }
+      let nextGlobal = rawCss;
+      const active = getActiveDevPlugins();
+      for (const plugin of active) {
+        if (typeof plugin.onCSS === 'function') {
+          const result = await plugin.onCSS(rawCss, cssPath);
+          if (result !== null && typeof result === 'string') {
+            nextGlobal = result;
           }
         }
-        if (nextUser === nextTailwind || nextUser === rawCss) {
-          nextTailwind = nextUser;
-        }
       }
-      const changed = nextUser !== lastServedCssGlobal || nextTailwind !== lastServedCssTailwind;
-      devUserCssContent = nextUser;
-      devTailwindCssContent = nextTailwind;
-      lastServedCssGlobal = nextUser;
-      lastServedCssTailwind = nextTailwind;
+      const changed = nextGlobal !== lastServedCssGlobal;
+      devGlobalCssContent = nextGlobal;
+      lastServedCssGlobal = nextGlobal;
       return changed;
     } catch (e) {
       LOG.err(`CSS rebuild error:`, (e as Error).message);
@@ -1147,12 +1121,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
     if (url.pathname === '/_vesk/static/global.css') {
       res.writeHead(200, { 'Content-Type': 'text/css' });
-      res.end(devUserCssContent);
-      return;
-    }
-    if (url.pathname === '/_vesk/static/_tailwind.css') {
-      res.writeHead(200, { 'Content-Type': 'text/css' });
-      res.end(isTailwindActive() ? devTailwindCssContent : '');
+      res.end(devGlobalCssContent);
       return;
     }
     if (url.pathname === '/_vesk/hmr' || url.pathname === '/_vesk/hmr.js') {

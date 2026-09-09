@@ -1,14 +1,64 @@
 # Vesk — Session Summary (2026-09-09)
 
-## Latest session (second half): Tailwind theming + vesk-doc docs layout parity
+## Latest session (final part): SSR import resolver + full hash-mode routing
+
+### What was FIXED (all verified)
+1. **SSR relative-path resolution bug** (`packages/compiler/src/module-imports.ts`):
+   literal `.`/`..` specifiers resolved against `process.cwd()` instead of the
+   *importing module's directory* — sidebar-type imports like `../src/content/docs`
+   landed in the wrong tree. Now anchored against `fromDir`. Depth-correct Node
+   semantics tested (nested component dirs)
+2. **Lazy-barrel invalidation bug**: barrels cached submodule VALUE snapshots forever,
+   so editing a re-exported file never invalidated it (the loader's mtime key hit the
+   barrel, and the barrel's cache had a stale submodule value). Barrels now cache only
+   resolved TARGET PATHS and pull values through `loadSsrModule(target)` per access
+   (mtime-keyed per module). 34 module-imports tests (incl. aliased/star/namespace,
+   deferred eval counters, mtime invalidation, warm reload).
+3. **Hash-mode routing** (`hash: true`) — `createRouter` + `createFileRouter` +
+   `Link`/`NavLink`:
+   - `#/path` URLs; `pushState('#'+path)` never fires hashchange (no loop); back/forward
+     fires popstate AND hashchange → deduped by comparing the target against `_state.path`
+     (engine-order independent); plain `#anchor` stays native in hash mode.
+   - `start()` skips SSR DOM claiming when the hash routes elsewhere (SSR served the
+     pathname route, not the hash route) → full client render instead of broken hydrate.
+   - Scroll keys (`routeKey`), `prefetch`, `hmrUpdate`, error/offline retry + `url` props,
+     `useRouter().refresh`, delegated `no-reload` click interception all mode-aware.
+   - `routeFromLocation(true)` only treats `#/` as a route.
+   - Tests: 9 new in `router.test.ts` → 69/69 green.
+4. **Verification**: `npm run typecheck` clean; `node tests/hydration-test.mjs` 281/281;
+   full suite `node scripts/test.js` → **67 files / 2431 passed / 0 failed** (needs
+   `CHROMIUM_PATH=/home/codespace/.cache/puppeteer/chrome/linux-152.0.7977.64/chrome-linux64/chrome`).
+   CLI bundle rebuilt (`packages/cli && npx tsx build.ts`); packages rebuilt;
+   `node scripts/refresh-testapp-deps.mjs vesk-doc` ran + `vesk-doc/.vesk` cleared.
+
+### Known unrelated pre-existing failures (NOT caused by this session)
+- `tests/production-hydration-test.mjs` standalone: 5 failures all SSR/serve-only —
+  (a) `/_vesk/static/tailwindcss` served as `text/html` (missing built CSS file — ties to
+  the uncommitted `packages/plugin-tailwind/src/index.ts` + `packages/adapter/src/css.ts` WIP),
+  (b) `nav a` textContent carries extra whitespace on hard reload. The **SPA nav chain, data
+  fetch, back/forward, and hydration-consumed sections all pass with zero JS errors** — the
+  router paths changed this session are exercised green.
+- `scripts/test.js` lines for `tests/production-hydration-test.mjs`/`edge-test.mjs` use a
+  doubled `tests/tests/...` path → those two are silently skipped in the suite (pre-existing).
+
+### Next steps (opts, none blocking)
+- Start the vesk-doc dev server and curl `/docs/getting-started` (now that tarballs are
+  refreshed + `.vesk` cleared) for the original sidebar 500 repro.
+- Decide whether the plugin-tailwind/adapter CSS WIP (uncommitted) should be finished so the
+  prod-style `tailwindcss` static asset emits (fixes the prod-hydration MIME errors).
+- Update `TODO.md` is done for this session.
+
+---
+
+## Tailwind theming + vesk-doc docs layout parity (first half, 2026-09-09)
 
 ### What was FIXED (verified)
 1. **`@theme inline` extraction / tree-shaking** — `packages/plugin-tailwind/src/index.ts`
    `TAILWIND_BLOCK` regex now matches `@theme inline|static|reference` and `@layer`,
    `@utility`. Root cause understood: Tailwind only emits theme vars that are *referenced*
-   (e.g. `@layer base { body { ... var(--color-background) } }`); vesk serves TWO CSS files
-   by design (`/_vesk/static/_tailwind.css` + `/_vesk/static/global.css`,
-   `packages/adapter/src/css.ts:12-13`) — the separation is NOT the problem, extraction was.
+(e.g. `@layer base { body { ... var(--color-background) } }`); vesk serves ONE CSS file
+    (a single `/_vesk/static/global.css`, `packages/adapter/src/css.ts:10` — user rules and
+    compiled Tailwind output merged, like Next.js/Remix) — the separation is NOT the problem, extraction was.
    Browser-verified: `/`, `/docs`, `/docs/getting-started` all compute
    `bg oklch(0.155 0.006 60)` + Space Grotesk, `--color-background`/`--font-display` defined.
    Plugin tests rewritten as async-aware: **9/9 passing.**

@@ -42,7 +42,7 @@ otherwise).
 | `/_vesk/action/:id` | server actions |
 | `/_vesk/client.js` | client bundle for the current app |
 | `/_vesk/runtime.js` | shared runtime |
-| `/_vesk/static/*` | build assets (global.css, `_tailwind.css`, …) |
+| `/_vesk/static/*` | build assets (global.css, …) |
 | `/_vesk/ssr-data.js?t=…` | hydration-data script (token store capped at 100) |
 | `/_vesk/hmr` | HMR WebSocket |
 

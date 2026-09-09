@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
-import { resolveCssUrls, hasUserCss, hasBuiltTailwindCss } from '@vesk/adapter/src/css';
+import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const _require = createRequire(import.meta.url);
@@ -472,8 +472,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
 
     const appDir = resolve(projectDir, 'app');
     const pageCssUrls = resolveCssUrls({
-      tailwind: hasBuiltTailwindCss(outDir),
-      userCss: hasUserCss(appDir),
+      enabled: hasBuiltGlobalCss(outDir),
     });
     const nfPath = resolve(appDir, 'not-found.vsk');
     let notFoundHtml: string | null = null;
