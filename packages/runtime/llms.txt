@@ -538,7 +538,7 @@ removal; never import/emit `batch` (matches repo AGENTS.md rule).
 
 ## 7. Cross-module dependencies
 
-- `@vesk/runtime` depends on **`@vesk/compiler ^0.1.0`** (package.json).
+- `@vesk/runtime` depends on **`@vesk/compiler ^0.2.16`** (package.json).
   Runtime only dynamically imports compiler internals for signed cookies
   (`@vesk/compiler/src/server-utils`, then `@vesk/compiler` fallback) —
   optional at runtime.
