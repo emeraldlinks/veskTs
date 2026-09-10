@@ -152,6 +152,8 @@ export interface VeskConfig {
     routeDataCache?: number;
     /** Markdown (`<Md>`) rendering options. */
     md?: MdConfig;
+    /** Control which console.* output is streamed to the devtool log tab. */
+    logs?: boolean | { log?: boolean; warn?: boolean; error?: boolean; info?: boolean; debug?: boolean };
 }
 export interface AncestorLayout {
     sourceDir: string;

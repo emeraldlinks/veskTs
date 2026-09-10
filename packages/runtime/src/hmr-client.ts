@@ -58,6 +58,8 @@ export interface HmrLogEntry {
 	time?: number;
 	ms?: number;
 	ts: number;
+	message?: string;
+	level?: 'log' | 'warn' | 'error' | 'info' | 'debug';
 }
 
 export interface PluginInfo {
@@ -210,9 +212,14 @@ export function renderPluginRow(p: PluginInfo, index: number): string {
 
 export function renderLogRow(entry: HmrLogEntry): string {
 	const type = entry.type || '?';
-	const time = entry.ms != null ? String(entry.ms) : entry.time != null ? String(entry.time) : '?';
 	const stamp = entry.ts ? new Date(entry.ts).toLocaleTimeString() : '--:--:--';
-	return '<div class="kl-row">' + escapeHtml(stamp) + '  ' + escapeHtml(type) + '  ' + time + 'ms' + '</div>';
+	const lvl = entry.level || '';
+	const lvlCls = lvl ? ' kl-lvl-' + lvl : '';
+	if (entry.message != null) {
+		return '<div class="kl-row' + lvlCls + '">' + escapeHtml(stamp) + '  <span class="kl-type">' + escapeHtml(type) + '</span>  ' + escapeHtml(entry.message) + '</div>';
+	}
+	const time = entry.ms != null ? String(entry.ms) : entry.time != null ? String(entry.time) : '?';
+	return '<div class="kl-row">' + escapeHtml(stamp) + '  <span class="kl-type">' + escapeHtml(type) + '</span>  ' + time + 'ms' + '</div>';
 }
 
 export const DEV_TABS: string[] = ['overview', 'agentic', 'errors', 'diagnostics', 'plugins', 'log', 'settings'];
@@ -1638,8 +1645,8 @@ const CSS =
 	'@keyframes __v_in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}' +
 	'@keyframes __v_tab{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}' +
 	'@keyframes __v_vo{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:translateY(0) scale(1)}}' +
-	'#__vesk_dev,#__vesk_overlay{--vk-bg:#000;--vk-fg:#fff;--vk-border:#fff;--vk-line:#444;--vk-line-soft:#333;--vk-soft:#111;--vk-soft-hi:#222;--vk-muted:#bbb;--vk-dim:#666;--vk-codebg:#0a0a0a;--vk-inv-bg:#fff;--vk-inv-fg:#000;--vk-err-bg:#b91c1c;--vk-err-fg:#fff;--vk-dot:#555;}' +
-	'#__vesk_dev[data-theme="light"],#__vesk_overlay[data-theme="light"]{--vk-bg:#fff;--vk-fg:#111;--vk-border:#111;--vk-line:#ccc;--vk-line-soft:#ddd;--vk-soft:#f5f5f5;--vk-soft-hi:#ececec;--vk-muted:#444;--vk-dim:#888;--vk-codebg:#fafafa;--vk-inv-bg:#111;--vk-inv-fg:#fff;--vk-err-bg:#dc2626;--vk-err-fg:#fff;--vk-dot:#999;}' +
+	'#__vesk_dev,#__vesk_overlay{--vk-bg:oklch(0.155 0.006 60);--vk-fg:oklch(0.931 0.014 88);--vk-border:oklch(0.29 0.009 75);--vk-line:oklch(0.235 0.009 72);--vk-line-soft:oklch(0.196 0.008 70);--vk-soft:oklch(0.196 0.008 70);--vk-soft-hi:oklch(0.235 0.009 72);--vk-muted:oklch(0.618 0.016 80);--vk-dim:oklch(0.40 0.011 75);--vk-codebg:oklch(0.12 0.004 60);--vk-inv-bg:oklch(0.931 0.014 88);--vk-inv-fg:oklch(0.155 0.006 60);--vk-err-bg:oklch(0.577 0.185 25);--vk-err-fg:oklch(0.96 0.01 85);--vk-dot:oklch(0.40 0.011 75);--vk-accent:oklch(0.632 0.132 45);}' +
+	'#__vesk_dev[data-theme="light"],#__vesk_overlay[data-theme="light"]{--vk-bg:oklch(0.97 0.006 85);--vk-fg:oklch(0.155 0.006 60);--vk-border:oklch(0.82 0.009 75);--vk-line:oklch(0.88 0.008 72);--vk-line-soft:oklch(0.92 0.008 70);--vk-soft:oklch(0.95 0.006 70);--vk-soft-hi:oklch(0.92 0.008 72);--vk-muted:oklch(0.45 0.016 80);--vk-dim:oklch(0.65 0.011 75);--vk-codebg:oklch(0.98 0.004 60);--vk-inv-bg:oklch(0.155 0.006 60);--vk-inv-fg:oklch(0.931 0.014 88);--vk-err-bg:oklch(0.577 0.185 25);--vk-err-fg:oklch(0.96 0.01 85);--vk-dot:oklch(0.65 0.011 75);--vk-accent:oklch(0.632 0.132 45);}' +
 	'#__vesk_dev *,#__vesk_overlay *{transition:background .18s ease,color .18s ease,border-color .18s ease;}' +
 	'#__vesk_dev,#__vesk_dev *,#__vesk_overlay,#__vesk_overlay *{scrollbar-width:none;}' +
 	'#__vesk_dev *::-webkit-scrollbar,#__vesk_overlay *::-webkit-scrollbar{display:none;}' +
@@ -1647,9 +1654,11 @@ const CSS =
 	'#__vesk_dev[data-pos="left"]{left:16px;right:auto;}' +
 	'#__vesk_dev .__v_bar{display:flex;align-items:center;gap:8px;background:var(--vk-bg);border:1px solid var(--vk-border);border-radius:0;padding:6px 12px;cursor:pointer;animation:__v_in .3s cubic-bezier(.22,.61,.36,1);transition:background .15s ease,transform .15s ease,border-color .15s ease;}' +
 	'#__vesk_dev .__v_bar:hover{background:var(--vk-soft);transform:translateY(-1px);border-color:var(--vk-dim);}' +
-	'#__vesk_dev .__v_dot{width:8px;height:8px;flex-shrink:0;background:var(--vk-dot);transition:background .12s ease;}' +
-	'#__vesk_dev .__v_dot.compiling{background:var(--vk-fg);animation:__v_pulse .8s infinite;}' +
-	'#__vesk_dev .__v_dot.error{background:var(--vk-fg);animation:__v_pulse .4s infinite;}' +
+	'#__vesk_dev .__v_dot{width:8px;height:8px;flex-shrink:0;background:var(--vk-dot);transition:background .2s ease;}' +
+	'#__vesk_dev .__v_dot.connected{background:var(--vk-accent);animation:none;}' +
+	'#__vesk_dev .__v_dot.compiling{background:var(--vk-accent);animation:__v_pulse .8s infinite;}' +
+	'#__vesk_dev .__v_dot.error{background:var(--vk-err-bg);animation:__v_pulse .5s infinite;}' +
+	'#__vesk_dev .__v_dot.disconnected{background:var(--vk-dim);animation:none;opacity:.5;}' +
 	'#__vesk_overlay{all:initial;position:fixed;inset:0;z-index:2147483646;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;line-height:1.5;color:var(--vk-fg);display:flex;visibility:hidden;opacity:0;pointer-events:none;transition:opacity .16s ease,visibility 0s linear .16s;}' +
 	'#__vesk_overlay.open{visibility:visible;opacity:1;pointer-events:auto;transition:opacity .16s ease;}' +
 	'#__vesk_overlay .__vo_backdrop{position:absolute;inset:0;background:var(--vk-bg);opacity:.85;}' +
@@ -1734,7 +1743,14 @@ const CSS =
 	'#__vesk_dev .__kp_stack pre{background:var(--vk-codebg);border:1px solid var(--vk-line-soft);border-top:none;padding:8px;margin:0;font-size:11px;color:var(--vk-muted);max-height:160px;overflow:auto;white-space:pre;}' +
 	'#__vesk_dev .kp-row{font-size:12px;color:var(--vk-muted);}' +
 	'#__vesk_dev .kp-err{font-size:12px;color:var(--vk-inv-fg);background:var(--vk-inv-bg);padding:6px 10px;font-weight:700;}' +
-	'#__vesk_dev .kl-row{font-size:11px;color:var(--vk-muted);}' +
+	'#__vesk_dev .kl-row{font-size:11px;color:var(--vk-muted);padding:1px 0;}' +
+	'#__vesk_dev .kl-row .kl-type{color:var(--vk-dim);font-weight:700;text-transform:uppercase;letter-spacing:.05em;min-width:48px;display:inline-block;}' +
+	'#__vesk_dev .kl-row.kl-lvl-error{color:var(--vk-err-bg);}' +
+	'#__vesk_dev .kl-row.kl-lvl-error .kl-type{color:var(--vk-err-bg);}' +
+	'#__vesk_dev .kl-row.kl-lvl-warn{color:var(--vk-accent);}' +
+	'#__vesk_dev .kl-row.kl-lvl-warn .kl-type{color:var(--vk-accent);}' +
+	'#__vesk_dev .kl-row.kl-lvl-info{color:var(--vk-muted);}' +
+	'#__vesk_dev .kl-row.kl-lvl-info .kl-type{color:var(--vk-dim);}' +
 	'#__vesk_dev .__kp_tab .__kp_tab_label{display:none;}' +
 	'#__vesk_dev[data-sidebar="rail"] .__kp{display:grid;grid-template-columns:auto minmax(0,1fr);grid-template-rows:auto minmax(0,1fr);grid-template-areas:"head head" "tabs body";gap:0;}' +
 	'#__vesk_dev[data-sidebar="rail"] .__kp_head{grid-area:head;}' +
@@ -1953,7 +1969,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	function logEvent(type: string, ms: number | undefined): void {
 		log.push({ type, ms, time: ms, ts: Date.now() });
-		if (log.length > 30) log.shift();
+		if (log.length > 200) log.shift();
 	}
 
 	function setStatus(next: string): void {
@@ -2045,7 +2061,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 				// settled — a connect racing the /__vesk/hmr/state fetch would
 				// otherwise drop the error again right after a refresh.
 				if (!pendingStateSync) clearError();
-				setStatus('idle');
+				setStatus('connected');
 			}
 		};
 			ws.onmessage = function (e: MessageEvent) {
@@ -2073,21 +2089,28 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 							clearError();
 							setStatus('compiling');
 							break;
+						case 'console':
+							if (typeof msg.level === 'string' && typeof msg.message === 'string') {
+								log.push({ type: msg.level, message: msg.message, level: msg.level as HmrLogEntry['level'], ts: Date.now() });
+								if (log.length > 200) log.shift();
+								if (activeTab === 'log') renderPanel();
+							}
+							break;
 					}
 				} catch {
 					/* ignore bad messages */
 				}
 			};
-			ws.onclose = function () {
-				if (disposed) return;
-				if (status !== 'error') setStatus('idle');
-				scheduleReconnect();
-			};
-			ws.onerror = function () {
-				if (disposed) return;
-				if (status !== 'error') setStatus('idle');
-				scheduleReconnect();
-			};
+		ws.onclose = function () {
+			if (disposed) return;
+			if (status !== 'error') setStatus('disconnected');
+			scheduleReconnect();
+		};
+		ws.onerror = function () {
+			if (disposed) return;
+			if (status !== 'error') setStatus('disconnected');
+			scheduleReconnect();
+		};
 		} catch {
 			/* WebSocket unavailable */
 		}
@@ -2120,6 +2143,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		}
 		lastCompileMs = (msg.time as number) || 0;
 		status = 'connected';
+		updateDot();
 		clearError();
 		renderPanel();
 		logEvent('update', lastCompileMs);
@@ -2141,6 +2165,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			parent.insertBefore(fresh, el.nextSibling);
 		});
 		status = 'connected';
+		updateDot();
 		renderPanel();
 		logEvent('css-update', undefined);
 	}
@@ -2225,7 +2250,7 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 			CSS +
 			'</style>' +
 			'<div class="__v_bar">' +
-			'  <span class="__v_dot idle"></span>' +
+			'  <span class="__v_dot disconnected"></span>' +
 			'  <span class="__v_label">Vesk</span>' +
 			'  <span class="__v_version">dev</span>' +
 			'</div>';
@@ -2758,6 +2783,8 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 						/* ignore selection restore failures */
 					}
 				}
+			} else if (activeTab === 'log') {
+				pane.scrollTop = pane.scrollHeight;
 			} else {
 				pane.scrollTop = 0;
 			}

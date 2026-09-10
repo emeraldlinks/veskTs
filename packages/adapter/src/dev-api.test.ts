@@ -111,6 +111,62 @@ async function main() {
     assert(onDisk.includes('// keep me') && onDisk.includes('ssg: true'), 'toggle preserves comments + untouched keys');
   }
 
+  // ── POST /__vesk/config { key, value }: toggle with function calls in values ──
+  {
+    const { projectDir, veskDir, appDir } = freshProject();
+    // Plugin objects must have a `name` field to pass validateConfig.
+    // defineConfig is injected via globalThis.__vesk_inject during compilation.
+    const original = [
+      'const myPreset = (mode: string, opts: Record<string, unknown>) => ({ mode, ...opts });',
+      'const myPlugin = (opts: Record<string, unknown>) => ({ name: "my-plugin", onRequest: () => {}, ...opts });',
+      '',
+      'export default defineConfig({',
+      '  routeDataCache: 100,',
+      '  security: myPreset("production", { trustProxy: true }),',
+      '  plugins: [',
+      '    myPlugin({ entry: "src/global.css" }),',
+      '  ],',
+      '  ssg: {},',
+      '});',
+    ].join('\n');
+    writeFileSync(resolve(projectDir, 'vesk.config.ts'), original, 'utf-8');
+    const router = createDevApiRouter({ appDir, veskDir, configPluginNames: [], projectDir });
+    const res = await router.route('POST', '/__vesk/config', { key: 'routeDataCache', value: 0 });
+    assert(res!.status === 200, 'toggle with function-call values returns 200');
+    const onDisk = readFileSync(resolve(projectDir, 'vesk.config.ts'), 'utf-8');
+    assert(onDisk.includes('routeDataCache: 0'), 'toggle updates routeDataCache');
+    assert(onDisk.includes('myPreset("production"') || onDisk.includes("myPreset('production'"), 'function call in security preserved');
+    assert(onDisk.includes('myPlugin('), 'function call in plugins preserved');
+    assert(onDisk.includes('ssg: {'), 'ssg preserved');
+  }
+
+  // ── POST /__vesk/config { key, value }: toggle with array of mixed values ─────
+  {
+    const { projectDir, veskDir, appDir } = freshProject();
+    const original = [
+      'const variableRef = { name: "v", type: "plugin", onRequest: () => {} };',
+      'const fnCall = (opts: Record<string, unknown>) => ({ name: "fn", onRequest: () => {}, ...opts });',
+      '',
+      'export default defineConfig({',
+      '  plugins: [',
+      '    { name: "nested", nested: true, onRequest: () => {} },',
+      '    variableRef,',
+      '    fnCall({ entry: "x" }),',
+      '  ],',
+      '  ssg: true,',
+      '});',
+    ].join('\n');
+    writeFileSync(resolve(projectDir, 'vesk.config.ts'), original, 'utf-8');
+    const router = createDevApiRouter({ appDir, veskDir, configPluginNames: [], projectDir });
+    const res = await router.route('POST', '/__vesk/config', { key: 'ssg', value: false });
+    assert(res!.status === 200, 'toggle with mixed array elements returns 200');
+    const onDisk = readFileSync(resolve(projectDir, 'vesk.config.ts'), 'utf-8');
+    assert(onDisk.includes('ssg: false'), 'toggle updates ssg');
+    assert(onDisk.includes('fnCall('), 'fn call in array preserved');
+    assert(onDisk.includes('variableRef'), 'variable ref in array preserved');
+    assert(onDisk.includes('{ name: "nested"'), 'nested object in array preserved');
+  }
+
   // ── GET /__vesk/diagnostics: returns injected findings ───────────────────
   {
     const { projectDir, veskDir, appDir } = freshProject();

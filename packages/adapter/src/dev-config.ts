@@ -187,7 +187,7 @@ function tryParseJsObject(src: string): Record<string, unknown> | null {
       key = src.slice(keyStart, i).trim();
     }
     while (i < src.length && /\s/.test(src[i])) i++;
-    if (src[i] === '=') return null; // `key = value` — not a literal object; bail
+    if (src[i] === '=') return null;
     if (src[i] !== ':') return null;
     i++;
     while (i < src.length && /\s/.test(src[i])) i++;
@@ -199,9 +199,46 @@ function tryParseJsObject(src: string): Record<string, unknown> | null {
   return out;
 }
 
+/** Skip a balanced (…) expression starting at `i`, returning the index after the closing ')' (or on failure, `i` unchanged). */
+function skipBalancedParens(src: string, i: number): number {
+  if (src[i] !== '(') return i;
+  let depth = 0;
+  let inStr: string | null = null;
+  let esc = false;
+  for (let j = i; j < src.length; j++) {
+    const ch = src[j];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+    if (ch === '(') depth++;
+    if (ch === ')') { depth--; if (depth === 0) return j + 1; }
+  }
+  return i; // unbalanced — bail
+}
+
+/**
+ * Return a raw source span (used for function calls, variable refs, spreads
+ * that can't be round-tripped as literals). The value is stored as a wrapper
+ * object so serializeValue can emit it verbatim.
+ */
+function rawSpan(src: string, from: number, to: number): { value: unknown; next: number } {
+  return { value: { __veskRaw: src.slice(from, to) }, next: to };
+}
+
 function parseLiteralValue(src: string, i: number): { value: unknown; next: number; __invalid?: boolean } | null {
   const c = src[i];
   if (c === undefined) return null;
+  // spread: ...expr
+  if (c === '.' && src.slice(i, i + 3) === '...') {
+    const expr = parseLiteralValue(src, i + 3);
+    if (expr === null || expr.__invalid) return rawSpan(src, i, skipToEndOfRaw(src, i + 3));
+    // preserve spread marker in the serialized output
+    return { value: { __veskRaw: '...' + serializeValue(expr.value) }, next: expr.next };
+  }
   if (c === '{') {
     const end = findMatchingBrace(src, i);
     if (end === -1) return { value: undefined, next: i, __invalid: true };
@@ -218,7 +255,10 @@ function parseLiteralValue(src: string, i: number): { value: unknown; next: numb
       if (cc === ']') { j++; break; }
       if (cc === ',') { j++; continue; }
       const r = parseLiteralValue(src, j);
-      if (r === null || r.__invalid) return { value: undefined, next: i, __invalid: true };
+      if (r === null || r.__invalid) {
+        // Can't parse this array element — fall back to raw span for the whole array
+        return rawSpan(src, i, skipToEndOfArray(src, i));
+      }
       vals.push(r.value);
       j = r.next;
     }
@@ -231,6 +271,7 @@ function parseLiteralValue(src: string, i: number): { value: unknown; next: numb
     while (j < src.length && (src[j] !== q || src[j - 1] === '\\')) { s += src[j]; j++; }
     return { value: s, next: j + 1 };
   }
+  // identifiers, numbers, booleans, null, and tokens followed by '(' (function calls)
   let j = i;
   while (j < src.length && /[\w.\-]/.test(src[j])) j++;
   const token = src.slice(i, j);
@@ -238,7 +279,55 @@ function parseLiteralValue(src: string, i: number): { value: unknown; next: numb
   if (token === 'false') return { value: false, next: j };
   if (token === 'null') return { value: null, next: j };
   if (/^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(token)) return { value: Number(token), next: j };
+  // token is an identifier or a function name — check if it's followed by '(' (call)
+  if (j < src.length && src[j] === '(') {
+    const end = skipBalancedParens(src, j);
+    return rawSpan(src, i, end);
+  }
+  // bare variable reference (e.g. `testPlugin`, `tailwindcss`)
+  if (token.length > 0) return rawSpan(src, i, j);
   return { value: undefined, next: i, __invalid: true };
+}
+
+/** Skip forward from `i` to find the end of a raw expression (used for spread fallback). */
+function skipToEndOfRaw(src: string, i: number): number {
+  let depth = 0;
+  let inStr: string | null = null;
+  let esc = false;
+  for (let j = i; j < src.length; j++) {
+    const ch = src[j];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+    if (ch === '(') depth++;
+    if (ch === ')') { if (depth === 0) return j; depth--; }
+    if (depth === 0 && (ch === ',' || ch === '}' || ch === ']')) return j;
+  }
+  return src.length;
+}
+
+/** Skip to the matching ']' for a raw array span. */
+function skipToEndOfArray(src: string, i: number): number {
+  let depth = 0;
+  let inStr: string | null = null;
+  let esc = false;
+  for (let j = i; j < src.length; j++) {
+    const ch = src[j];
+    if (inStr) {
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === inStr) inStr = null;
+      continue;
+    }
+    if (ch === '"' || ch === "'" || ch === '`') { inStr = ch; continue; }
+    if (ch === '[') depth++;
+    if (ch === ']') { depth--; if (depth === 0) return j + 1; }
+  }
+  return src.length;
 }
 
 function serializeObject(obj: Record<string, unknown>): string {
@@ -252,6 +341,9 @@ function isBareKey(k: string): boolean {
 }
 
 function serializeValue(v: unknown): string {
+  if (v !== null && typeof v === 'object' && '__veskRaw' in (v as Record<string, unknown>)) {
+    return String((v as Record<string, unknown>).__veskRaw);
+  }
   if (v === null) return 'null';
   if (typeof v === 'string') return JSON.stringify(v);
   if (Array.isArray(v)) return '[' + v.map(serializeValue).join(', ') + ']';

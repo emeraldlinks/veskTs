@@ -262,6 +262,11 @@ export interface VeskConfig {
   routeDataCache?: number;
   /** Markdown (`<Md>`) rendering options. */
   md?: MdConfig;
+  /** Control which console.* output is streamed to the devtool log tab.
+   *  - `false` disables all console streaming.
+   *  - `true` streams all levels (default in dev).
+   *  - Per-type object to selectively enable levels: `{ log, warn, error, info, debug }`. */
+  logs?: boolean | { log?: boolean; warn?: boolean; error?: boolean; info?: boolean; debug?: boolean };
 }
 
 // ────────────────────────────────────────────────────────────────────────────
