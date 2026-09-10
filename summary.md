@@ -54,10 +54,17 @@
 - `vesk-doc/src/content/docs.ts` defines `Block`/`DocPage`/`docGroups`/`docPages` (inline pages).
 - The 8 deep-dive modules live in `vesk-doc/src/content/docs-*.ts`, each exporting `pages` —
   `docs.ts` imports them and MERGES into `docPages` by slug (replace in place or append).
+- **docPages is now built position-preserving:** `basePages` (the 25 un-reworked pages inline)
+  + `extendedPages` (the 12 module pages) merged through `docSlugOrder` (explicit slug list,
+  original sidebar order). No stale inline copies remain — the 12 reworked slugs live ONLY in
+  their modules. If a slug is missing from both, it throws at module load.
 - Pages still shallow but "decent" (not reworked): `seo`, `bindings`, `reconcile`,
   `reactive-core`, `built-in-components`, `headless`, `errors`, `pipeline`, `ir-format`,
   `static-codegen`, `client-reachability`, `hydration`, `deployment`, `lsp`, `prettier`,
-  `markdown`, `styles`, `gotchas` (not-in-the-grammar). They already compile (115/115 site-wide probe).
+  `markdown`, `styles`, `gotchas` (not-in-the-grammar), `getting-started`, `components`,
+  `track-declarations`, `reactivity`, `expression-mode`, `statement-mode`, `client-boundary`.
+  They already compile (115/115 site-wide probe) but were **never audited against source** —
+  this is the remaining gap if you want every page API-accurate.
 
 ## Repos
 - `/workspaces/veskTs` (PC) / `/root/vesk` (WSL) — monorepo: types, adapter, cli, compiler,
