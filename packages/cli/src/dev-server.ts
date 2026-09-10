@@ -815,13 +815,11 @@ export async function startDevServer(port: number, projectDir: string, config: R
   try {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let cssDebounceTimer: ReturnType<typeof setTimeout> | null = null;
-    const watchDirs = [appDirPath];
-    if (existsSync(srcDir)) watchDirs.push(srcDir);
-    const libDir = join(projectDir, 'lib');
-    if (existsSync(libDir)) watchDirs.push(libDir);
-    for (const watchDir of watchDirs) {
-      watch(watchDir, { recursive: true }, (eventType, filename) => {
+    const skipDirs = new Set(['node_modules', '.vesk', 'tarballs']);
+    const watchDir = projectDir;
+    watch(watchDir, { recursive: true }, (eventType, filename) => {
         if (!filename) return;
+        if (skipDirs.has(filename.split('/')[0]) || filename.includes('node_modules/') || filename.includes('.vesk/') || filename.includes('tmp-vesk-chunk-')) return;
         const isVsk = filename.endsWith('.vsk') || filename.endsWith('.md') || filename.endsWith('.markdown');
         const isCss = filename.endsWith('.css');
         const isApiRoute = filename.endsWith('.ts') || filename.endsWith('.js') || filename.endsWith('.tsx');
@@ -1009,7 +1007,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
           }
         }
       });
-    }
   } catch (e) {
     LOG.warn('file watching unavailable, serving without auto-rebuild');
   }
