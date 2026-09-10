@@ -48,7 +48,11 @@ log "Fetching vesk extension from $REPO"
 SRC="$PREFIX/src"
 mkdir -p "$PREFIX"
 if [[ -d "$SRC/.git" ]]; then
-  git -C "$SRC" pull --ff-only --depth 1 >/dev/null 2>&1 || true
+  # Force-sync the shallow clone to origin/main: a plain "pull --ff-only" and
+  # "clone --depth 1" can diverge after multiple shallow fetches, silently
+  # skipping updates. reset --hard always lands on the current upstream.
+  git -C "$SRC" fetch --depth 1 --quiet origin main || true
+  git -C "$SRC" reset --hard --quiet origin/main || true
 else
   git clone --depth 1 --quiet "$REPO" "$SRC" || die "failed to fetch $REPO"
 fi
