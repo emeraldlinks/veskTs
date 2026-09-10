@@ -24,6 +24,15 @@ export const docGroups = [
   "Tooling",
 ] as const;
 
+import { pages as dataFetchingPages } from "./docs-data-fetching";
+import { pages as middlewarePages } from "./docs-middleware";
+import { pages as routingPages } from "./docs-routing";
+import { pages as serverApisPages } from "./docs-server-apis";
+import { pages as configPluginPages } from "./docs-config-plugin";
+import { pages as apiRoutesPages } from "./docs-api-routes";
+import { pages as cliPages } from "./docs-cli";
+import { pages as nativePages } from "./docs-native";
+
 export const docPages: DocPage[] = [
   {
     slug: "getting-started",
@@ -217,7 +226,7 @@ export default async component Page(props: { id: string }) {
         filename: "app/components/Counter.vsk",
         code: `let &[count] = track(0);           // count is the auto-tracked cell
 const &[items] = track<string[]>([]);  // works with const too
-let &[count, rawCell] = track(0);      // rawCell is the raw Tracked<number>`,
+let &[total, rawTotal] = track(0);     // rawTotal is the raw Tracked<number>`,
       },
       {
         kind: "list",
@@ -529,10 +538,12 @@ let &[count, rawCell] = track(0);      // rawCell is the raw Tracked<number>`,
       {
         kind: "code",
         filename: "app/components/Table.vsk",
-        code: `for (const row of rows; key row.id; index i) {
-  <Row data={row} index={i} />
-} empty {
-  <p>No rows.</p>
+        code: `component Table(props: { rows: Row[] }) {
+  for (const row of props.rows; key row.id; index i) {
+    <Row data={row} index={i} />
+  } empty {
+    <p>No rows.</p>
+  }
 }`,
       },
       {
@@ -2425,6 +2436,23 @@ export default defineConfig({
     ],
   },
 ];
+
+const extendedPages: DocPage[] = [
+  ...dataFetchingPages,
+  ...middlewarePages,
+  ...routingPages,
+  ...serverApisPages,
+  ...configPluginPages,
+  ...apiRoutesPages,
+  ...cliPages,
+  ...nativePages,
+];
+
+for (const page of extendedPages) {
+  const i = docPages.findIndex((p) => p.slug === page.slug);
+  if (i >= 0) docPages[i] = page;
+  else docPages.push(page);
+}
 
 export const docSlugs = docPages.map((p) => p.slug);
 
