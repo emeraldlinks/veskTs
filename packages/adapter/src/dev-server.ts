@@ -317,7 +317,10 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   async function buildAdapterAgenticProvider(cfg: Record<string, unknown>): Promise<import('@vesk/agentic/src/loop').Provider> {
     const providerName = String((cfg.provider as string) || loadAgenticConfig(agenticProjectDir).provider || 'openai');
     const apiKey = (cfg.apiKey as string) || getApiKey(agenticProjectDir, providerName) || '';
-    const model = (cfg.model as string) || (loadAgenticConfig(agenticProjectDir).model as string) || (providerName === 'anthropic' ? 'claude-sonnet-4-6' : providerName === 'google' ? 'gemini-2.0-flash' : providerName === 'ollama' ? 'llama3.1' : providerName === 'opencode' ? 'claude-sonnet-4-6' : providerName === 'opencode-go' ? 'opencode-go/kimi-k3' : providerName === 'openrouter' ? 'openrouter/auto' : 'gpt-4o-mini');
+    const model = (cfg.model as string) || (loadAgenticConfig(agenticProjectDir).model as string) || '';
+    if (!model) {
+      throw new Error('no model configured — open Settings → Agentic and pick a model');
+    }
     const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(agenticProjectDir).baseUrl as string) || undefined;
     const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
     if (providerName === 'anthropic') return anthropicProvider({ apiKey, model, baseUrl, maxTokens });
@@ -706,6 +709,38 @@ await doBuild();
 
   const hmr = createHmrServer(server, appDir, devDir, componentMap);
   hmrSession = hmr;
+
+  // ── Console streaming to devtool ────────────────────────────────────────
+  // Read `logs` from vesk.config and wire up server-side console interception
+  // so console.log/warn/error/info/debug are forwarded to the devtool Log tab.
+  {
+    let logsLevels: Record<string, boolean> | null = null;
+    try {
+      const { readConfig } = await import('@vesk/adapter/src/dev-config');
+      const cfgResult = await readConfig(resolve(appDir, '..'));
+      const logsCfg = (cfgResult.config as Record<string, unknown>)?.logs;
+      if (logsCfg === false) {
+        logsLevels = null; // disabled
+      } else if (typeof logsCfg === 'object' && logsCfg !== null) {
+        logsLevels = { log: true, warn: true, error: true, info: true, debug: true, ...logsCfg as Record<string, boolean> };
+      } else {
+        logsLevels = { log: true, warn: true, error: true, info: true, debug: true };
+      }
+    } catch {
+      logsLevels = { log: true, warn: true, error: true, info: true, debug: true };
+    }
+    if (logsLevels) {
+      const origFns: Record<string, (...args: unknown[]) => void> = {};
+      for (const lvl of ['log', 'warn', 'error', 'info', 'debug'] as const) {
+        origFns[lvl] = console[lvl].bind(console);
+        console[lvl] = (...args: unknown[]) => {
+          origFns[lvl](...args);
+          if (!logsLevels![lvl]) return;
+          hmr.broadcast('console', { level: lvl, message: args.map(String).join(' ') });
+        };
+      }
+    }
+  }
 
   const srcDir = resolve(appDir, '..', 'src');
 

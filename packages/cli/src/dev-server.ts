@@ -311,14 +311,8 @@ async function readBodyJson(req: IncomingMessage, maxBodyBytes: number): Promise
 
 class DevBodyTooLargeError extends Error {}
 
-function defaultAgenticModel(providerName: string): string {
-  return providerName === 'anthropic' ? 'claude-sonnet-4-6'
-    : providerName === 'google' ? 'gemini-2.0-flash'
-    : providerName === 'ollama' ? 'llama3.1'
-    : providerName === 'opencode' ? 'claude-sonnet-4-6'
-    : providerName === 'opencode-go' ? 'opencode-go/kimi-k3'
-    : providerName === 'openrouter' ? 'openrouter/auto'
-    : 'gpt-4o-mini';
+function defaultAgenticModel(_providerName: string): string {
+  return '';
 }
 
 /** Build the agentic provider from a request providerConfig (request wins),
@@ -328,6 +322,9 @@ async function buildAgenticProvider(projectDir: string, providerConfig: Record<s
   const providerName = String((cfg.provider as string) || loadAgenticConfig(projectDir).provider || 'openai');
   const apiKey = (cfg.apiKey as string) || getApiKey(projectDir, providerName) || '';
   const model = (cfg.model as string) || (loadAgenticConfig(projectDir).model as string) || defaultAgenticModel(providerName);
+  if (!model) {
+    throw new Error('no model configured — open Settings → Agentic and pick a model');
+  }
   const baseUrl = (cfg.baseUrl as string) || (loadAgenticConfig(projectDir).baseUrl as string) || undefined;
   const maxTokens = typeof cfg.maxTokens === 'number' ? (cfg.maxTokens as number) : undefined;
   let provider: import('@vesk/agentic/src/loop').Provider;
@@ -1670,6 +1667,32 @@ export async function startDevServer(port: number, projectDir: string, config: R
       if (ws.readyState === 1) ws.send(msg);
     }
   };
+
+  // ── Console streaming to devtool ────────────────────────────────────────
+  // Intercept server-side console.log/warn/error/info/debug and forward them
+  // to connected devtool clients over the HMR WebSocket so they appear in
+  // the devtool Log tab. Gated by `logs` in vesk.config.
+  const logsCfg = (config as Record<string, unknown>)?.logs;
+  const logsEnabled = logsCfg !== false;
+  const logsLevels: Record<string, boolean> =
+    typeof logsCfg === 'object' && logsCfg !== null
+      ? { log: true, warn: true, error: true, info: true, debug: true, ...logsCfg as Record<string, boolean> }
+      : { log: true, warn: true, error: true, info: true, debug: true };
+
+  if (logsEnabled) {
+    const origFns: Record<string, (...args: unknown[]) => void> = {};
+    for (const lvl of ['log', 'warn', 'error', 'info', 'debug'] as const) {
+      origFns[lvl] = console[lvl].bind(console);
+      console[lvl] = (...args: unknown[]) => {
+        origFns[lvl](...args);
+        if (!logsLevels[lvl]) return;
+        const msg = JSON.stringify({ type: 'console', level: lvl, message: args.map(String).join(' '), nonce: hmrNonce });
+        for (const ws of hmrClients) {
+          if (ws.readyState === 1) ws.send(msg);
+        }
+      };
+    }
+  }
 
   let stopping = false;
   const shutdown = (signal: string) => {

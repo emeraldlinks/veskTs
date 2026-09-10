@@ -11,7 +11,7 @@ export interface AgenticConfig {
 
 const DEFAULT_CONFIG: AgenticConfig = {
   provider: 'openai',
-  model: 'gpt-4o-mini',
+  model: '',
   mode: 'explore',
   maxSteps: 25,
 };
