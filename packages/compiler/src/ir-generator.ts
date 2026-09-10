@@ -1232,6 +1232,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     'createContext',
     'redirect', 'permanentRedirect', 'notFound', 'NotFoundError',
     'createResource', 'getAction', 'validateActionInput', 'issuesToFieldMap', 'isFormAction',
+    'Show', 'For', 'Switch', 'Match',
   ];
   const usedFunctions = new Set<string>();
   const addUsedFrom = (code: string): void => {

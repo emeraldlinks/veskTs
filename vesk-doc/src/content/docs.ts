@@ -1365,19 +1365,80 @@ throw new VeskError({
       {
         kind: "p",
         text:
-          "Vesk provides headless render helpers for conditional rendering, list rendering, and pattern matching. These are composable building blocks — no markup, no styling.",
+          "Vesk provides headless render helpers — `Show`, `For`, `Switch`, `Match` — for conditional rendering, list rendering, and pattern matching. They are composable building blocks with no markup and no styling, and they are **auto-imported** from `@vesk/runtime` (no import statement needed).",
+      },
+      { kind: "h2", text: "Why headless components exist alongside native statements" },
+      {
+        kind: "p",
+        text:
+          "Vesk has two rendering systems that overlap in purpose but differ in where they can appear. Understanding the difference is the key to picking the right one.",
       },
       {
-        kind: "note",
-        tone: "info",
+        kind: "p",
+        text: "**Native statements: `if`, `for`, `switch`**",
+      },
+      {
+        kind: "p",
         text:
-          "Unlike `effect`, `derived`, `track` and the rest of the runtime surface, `Show`, `For`, `Switch` and `Match` are **not** auto-imported. Import them explicitly: `import { Show, For, Switch, Match } from '@vesk/runtime';`.",
+          "The compiler lowers statement-mode `if`, `for...of`, `switch`, and `while` directly into reactive IR. They are always available — no import, no helper, no ceremony. They are the **default** way to render in a component body.",
+      },
+      {
+        kind: "list",
+        items: [
+          "`if (cond) return <p>Loading</p>;` — guard-clause early return, idiomatic for `useFetch` loading/error guards.",
+          "`for (const item of items; key item.id) { <li>{item}</li> }` — keyed list rendering that compiles to efficient DOM updates.",
+          "`switch (status) { case 'active': return <span>Active</span>; ... }` — multi-way branching with strict equality.",
+        ],
+      },
+      {
+        kind: "p",
+        text:
+          "These work **only in statement position** — the top of a component body, inside a block, or as a guard-clause return. They cannot appear inside a `return (...)` expression, inside `{...}` interpolation, or as arguments to `.map()`.",
+      },
+      {
+        kind: "p",
+        text: "**Headless components: `Show`, `For`, `Switch`, `Match`**",
+      },
+      {
+        kind: "p",
+        text:
+          "Headless components are JSX tags. They work **wherever a JSX tag works** — inside `return (...)`, inside `{...}` interpolation, inside `.map()` callbacks, as children of other components, or as standalone statement-mode JSX. They are values, not control flow.",
+      },
+      {
+        kind: "list",
+        items: [
+          "`<Show when={cond}>...</Show>` — the expression-position `if`. Useful inside a `return (...)`, inside a `map`, or anywhere you need a conditional that is itself just a value.",
+          "`<Switch><Match when=.../>...</Switch>` — the expression-position `switch`. Stays flat where nested ternaries would indent. Multiple `<Match>` arms, with `<Match fallback>` for the default.",
+          "`<For each={items}>` — the expression-position list render. Takes a `children` render function. In `.vsk`, prefer the native `for...of ; key` loop instead (see below).",
+        ],
+      },
+      {
+        kind: "p",
+        text: "**When to pick which**",
+      },
+      {
+        kind: "table",
+        head: ["Scenario", "Use native statement", "Use headless component"],
+        rows: [
+          ["Guard clause at top of body", "`if (loading) return <Spinner/>;`", "—"],
+          ["Conditional inside `return (...)`", "—", "`return (<Show when={user}>{user.name}</Show>)`"],
+          ["Conditional inside a `map`", "—", "`items.map(i => <Show when={i.active}>{i.name}</Show>)`"],
+          ["Keyed list, statement body", "`for (const x of items; key x.id) { ... }`", "—"],
+          ["List inside `return (...)`", "—", "`return (<ul>{items.map(...)}</ul>)`"],
+          ["Multi-way, statement body", "`switch (x) { case 'a': ... }`", "—"],
+          ["Multi-way inside JSX", "—", "`<Switch><Match when=...>...</Match>...</Switch>`"],
+        ],
+      },
+      {
+        kind: "p",
+        text:
+          "Both forms compile to the same rendering. Pick whichever reads more naturally in the surrounding code.",
       },
       { kind: "h2", text: "Show" },
       {
         kind: "p",
         text:
-          "`Show` renders its children when `when` is truthy, otherwise its `fallback`. It is the composable, expression-position answer to `if` — useful inside a `return (...)`, inside `{...}` interpolation, or wherever you need a conditional that is itself just a value. The `fallback` is a string, an element, or omitted (`null`).",
+          "`Show` renders its children when `when` is truthy, otherwise its `fallback`. The `fallback` is a string, a JSX element, or omitted (`null`).",
       },
       {
         kind: "tabs",
@@ -1385,9 +1446,7 @@ throw new VeskError({
           {
             label: "statement mode",
             filename: "app/components/Greeting.vsk",
-            code: `import { Show } from '@vesk/runtime';
-
-component Greeting(props: { name?: string }) {
+            code: `component Greeting(props: { name?: string }) {
   <Show when={props.name} fallback="Hello, stranger">
     <p>Hello, {props.name}</p>
   </Show>
@@ -1396,9 +1455,7 @@ component Greeting(props: { name?: string }) {
           {
             label: "expression mode",
             filename: "app/components/Greeting.vsk",
-            code: `import { Show } from '@vesk/runtime';
-
-component Greeting(props: { name?: string }) {
+            code: `component Greeting(props: { name?: string }) {
   return (
     <Show when={props.name} fallback="Hello, stranger">
       <p>Hello, {props.name}</p>
@@ -1408,39 +1465,11 @@ component Greeting(props: { name?: string }) {
           },
         ],
       },
-      { kind: "h2", text: "When to use Show vs. a plain if" },
-      {
-        kind: "p",
-        text:
-          "In statement position the headless helpers and the native control flow often achieve the same result, and you should pick whichever reads more naturally. The compiler lowers statement-mode `if`, `switch`, `for` and `while` directly to reactive IR, so they are always available — no import required.",
-      },
-      {
-        kind: "list",
-        items: [
-          "`if (cond) return <p>Loading</p>` — guard-clause early return at the top of a body. This is idiomatic for `useFetch` loading/error guards and needs no helper.",
-          "`{show ? <A/> : <B/>}` — a plain ternary in interpolation when both branches are simple.",
-          "`<Show when={cond}>...</Show>` — prefer when the branch content is large, when you want a rich name (e.g. `<Show when={auth.user}>`), or when you are working in a purely expression-position context like a `map` callback.",
-          "`<Switch><Match when=.../>...</Switch>` — prefer when there are three or more mutually exclusive branches; it stays flat where a nested ternary would indent.",
-        ],
-      },
-      {
-        kind: "p",
-        text:
-          "A one-to-one `Show`/`Switch` map is cheat-sheeted below. Both forms compile to the same rendering; choose the reading that matches the surrounding code.",
-      },
-      {
-        kind: "table",
-        head: ["Goal", "Statement-mode (native)", "Expression-mode helper"],
-        rows: [
-          ["conditional", "`if (cond) return <A/>;` or `if (cond) { <A/> }`", "`<Show when={cond}><A/></Show>`"],
-          ["multi-way", "`switch (x) { case 'a': return <A/>; default: return <B/>; }`", "`<Switch><Match when={x==='a'}><A/></Match>...`"],
-        ],
-      },
       { kind: "h2", text: "For" },
       {
         kind: "p",
         text:
-          "`For` takes an `each` list and a `children` render function `(item, index) => vnode`. In Vesk you should use the native `for...of` loop with a `; key` clause instead: it compiles to keyed reconciliation with far less ceremony and reads like plain JavaScript.",
+          "`For` takes an `each` list and a `children` render function `(item, index) => vnode`. In `.vsk`, JSX render-function children (`{(item, i) => ...}` directly inside the tag) do **not** compile — prefer the native `for...of ; key` loop for list rendering. The `for...of` form compiles to keyed reconciliation and reads like plain JavaScript.",
       },
       {
         kind: "tabs",
@@ -1448,9 +1477,7 @@ component Greeting(props: { name?: string }) {
           {
             label: "statement mode",
             filename: "app/components/TodoList.vsk",
-            code: `import { For } from '@vesk/runtime';
-
-interface Todo { id: number; text: string }
+            code: `interface Todo { id: number; text: string }
 
 component TodoList(props: { items: Todo[] }) {
   if (props.items.length === 0) return <p>No items</p>;
@@ -1464,9 +1491,7 @@ component TodoList(props: { items: Todo[] }) {
           {
             label: "expression mode",
             filename: "app/components/TodoList.vsk",
-            code: `import { For } from '@vesk/runtime';
-
-interface Todo { id: number; text: string }
+            code: `interface Todo { id: number; text: string }
 
 component TodoList(props: { items: Todo[] }) {
   return (
@@ -1482,7 +1507,7 @@ component TodoList(props: { items: Todo[] }) {
         kind: "note",
         tone: "warn",
         text:
-          "`<For>` uses `props.children` as a render function, but JSX render-function children (a `{(item, index) => ...}` arrow directly inside the tag) do **not** compile in `.vsk`. Prefer the statement-mode `for...of ; key` loop, or `.map` with a `key` prop in expression mode. The `; key` clause you see in the statement-mode example is a Vesk extension and is covered on the List Rendering page.",
+          "The `; key` clause you see in the statement-mode example is a Vesk extension and is covered on the List Rendering page. It compiles to keyed DOM reconciliation — adding, removing, and reordering elements without re-rendering the whole list.",
       },
       { kind: "h2", text: "Switch / Match" },
       {
@@ -1496,9 +1521,7 @@ component TodoList(props: { items: Todo[] }) {
           {
             label: "statement mode",
             filename: "app/components/StatusBadge.vsk",
-            code: `import { Switch, Match } from '@vesk/runtime';
-
-component StatusBadge(props: { status: string }) {
+            code: `component StatusBadge(props: { status: string }) {
   <Switch>
     <Match when={props.status === 'active'}>
       <span class="bg-green-100 text-green-800">Active</span>
@@ -1515,9 +1538,7 @@ component StatusBadge(props: { status: string }) {
           {
             label: "expression mode",
             filename: "app/components/StatusBadge.vsk",
-            code: `import { Switch, Match } from '@vesk/runtime';
-
-component StatusBadge(props: { status: string }) {
+            code: `component StatusBadge(props: { status: string }) {
   return (
     <Switch>
       <Match when={props.status === 'active'}>
