@@ -51,6 +51,11 @@ end
 
 function M.setup(opts)
   opts = opts or {}
+  -- ftdetect/vsk.vim only fires when the plugin dir is on runtimepath during
+  -- startup's one-shot ftdetect phase. Plugin managers that append rtp late
+  -- (e.g. LazyVim, or this installer's rtp:append) miss that phase, so also
+  -- register the filetype here — setup() runs before any buffer is opened.
+  vim.filetype.add({ extension = { vsk = "vsk" } })
   local lsp_cmd = opts.cmd
     or (opts.lsp_cmd and { "node", opts.lsp_cmd, "--stdio" })
     or find_lsp_server()
