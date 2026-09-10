@@ -1,10 +1,10 @@
 # llms.txt — vesk CLI (`packages/cli`)
 
-> Machine-oriented reference for LLM agents. Verified against source at commit 2a5b19d.
+> Machine-oriented reference for LLM agents. Verified against source at commit d05a1d6.
 
 ## Package identity
 
-- `name`: `vesk` (the CLI binary), version: 0.1.0, ESM, `type: module`, Node >= 20.
+- `name`: `@vesk/vesk-cli` (ships the `vesk` binary), version: 0.2.16, ESM, `type: module`, Node >= 20.
 - `bin`: `./dist/cli.js`.
 - Deps: `@vesk/adapter`, `@vesk/compiler`, `@vesk/plugin-tailwind`, `@vesk/runtime`, `esbuild`, `esrap`, `sharp`, `typescript`, `ws`, `zimmerframe`.
 

@@ -1,10 +1,10 @@
 # llms.txt — create-vesk
 
-> Verified against `packages/create-vesk/src/index.js` and `package.json` at commit 5b94b66.
+> Verified against `packages/create-vesk/src/index.js` and `package.json` at commit d05a1d6.
 
 ## Package identity
 
-- `name`: `create-vesk`, `version`: 0.1.0, ESM, `type: module`, Node >= 20.
+- `name`: `create-vesk`, `version`: 0.2.16, ESM, `type: module`, Node >= 20.
 - `bin`: `create-vesk` → `./src/index.js`.
 - Deps: none.
 
@@ -15,7 +15,7 @@
 ## Scaffold algorithm
 
 1. Creates directories: `app/`, `app/about/`, `app/blog/`, `app/blog/[slug]/`, `app/posts/`, `app/statements/`, `app/api/posts/`, `app/api/hello/`, `app/api/echo/[msg]/`, `src/`, `public/`.
-2. Writes `package.json` (scripts: `dev`, `build`, `start`, `typecheck`; deps: `@vesk/compiler`, `@vesk/runtime`, `vesk`, `@vesk/adapter`, `@vesk/plugin-tailwind`; devDeps: `tailwindcss`, `typescript`).
+2. Writes `package.json` (scripts: `dev`, `build`, `start`, `typecheck`; deps: `@vesk/compiler`, `@vesk/runtime`, `@vesk/types`, `@vesk/vesk-cli`, `@vesk/adapter`, `@vesk/plugin-tailwind`; devDeps: `tailwindcss ^4.0.0`, `typescript ^5.8.0`).
 3. Writes `vesk.config.ts` (defineConfig + tailwind plugin + security preset).
 4. Writes `tsconfig.json` (strict, bundler resolution, `jsxImportSource: '@vesk/compiler'`, path aliases `@/*` and `@app/*`).
 5. Writes `src/global.css` (`@import 'tailwindcss'` + base layer).
@@ -25,9 +25,12 @@
 
 ## Hardcoded versions
 
-The scaffold hardcodes dependency versions as `^0.1.0`. `scripts/release.mjs` patches `packages/create-vesk/src/index.js` replacing `^0.1.0` with `^<newVersion>` during releases.
+The scaffold hardcodes dependency versions as `^0.2.16`. `scripts/release.mjs`
+bumps every `@vesk/*` dependency literal in `packages/create-vesk/src/index.js`
+to `^<newVersion>` (regex `/(['"]@vesk\/[a-z0-9-]+['"]\s*:\s*['"])\^[^'"]+(['"])/g`)
+and fails the release if any `@vesk/*` or `vesk` literal remains unpatched.
 
 ## Modification checklist
 
 - **Add a new scaffolded file** → write it in `src/index.js`; ensure the template strings are syntactically valid JS/TS/Vesk.
-- **Change dependency versions** → update the `package.json` template AND the `^0.1.0` replacement in `scripts/release.mjs`.
+- **Change dependency versions** → update the `package.json` template AND the `^0.2.16` literals expected by `scripts/release.mjs`.

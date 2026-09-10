@@ -1,13 +1,13 @@
 export component DevExperience {
 	const lines = [
-		{ text: "$ npm create vesk@latest", kind: "cmd" },
-		{ text: "$ cd my-app", kind: "cmd" },
-		{ text: "$ npm run dev", kind: "cmd" },
-		{ text: "✓ Vesk compiler ready", kind: "ok" },
-		{ text: "✓ Development server started · :3000", kind: "ok" },
-		{ text: "✓ HMR enabled", kind: "ok" },
-		{ text: "✓ Application running", kind: "ok" },
-		{ text: "→ web target · kotlin target", kind: "note" },
+		{ text: "$ npx create-vesk@latest my-app", kind: "cmd" },
+		{ text: "    my-app created successfully!", kind: "ok" },
+		{ text: "    cd my-app", kind: "note" },
+		{ text: "    npm install", kind: "note" },
+		{ text: "    npm run dev", kind: "note" },
+		{ text: "vesk dev server at http://localhost:3000 (listening on localhost)", kind: "ok" },
+		{ text: "vesk dev: rebuilt in 11ms", kind: "ok" },
+		{ text: "→ web output in .vesk/ · kotlin via @vesk/native-compiler", kind: "note" },
 	]
 
 	const &[shown] = track(0)
@@ -37,16 +37,16 @@ export component DevExperience {
 					</p>
 					<div class="mt-7 grid gap-px border border-border bg-border font-mono text-[11px] sm:grid-cols-3">
 						<div class="bg-background px-3 py-3">
-							<div class="text-muted-foreground">cold start</div>
-							<div class="mt-1 font-display text-base font-semibold tracking-tight">412 ms</div>
+							<div class="text-muted-foreground">start</div>
+							<div class="mt-1 font-display text-base font-semibold tracking-tight">1 command</div>
 						</div>
 						<div class="bg-background px-3 py-3">
-							<div class="text-muted-foreground">hmr patch</div>
-							<div class="mt-1 font-display text-base font-semibold tracking-tight">18 ms</div>
+							<div class="text-muted-foreground">dev server</div>
+							<div class="mt-1 font-display text-base font-semibold tracking-tight">:3000</div>
 						</div>
 						<div class="bg-background px-3 py-3">
-							<div class="text-muted-foreground">native build</div>
-							<div class="mt-1 font-display text-base font-semibold tracking-tight">6.4 s</div>
+							<div class="text-muted-foreground">targets</div>
+							<div class="mt-1 font-display text-base font-semibold tracking-tight">web + kotlin</div>
 						</div>
 					</div>
 				</div>

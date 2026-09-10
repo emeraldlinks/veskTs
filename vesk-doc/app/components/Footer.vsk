@@ -37,7 +37,7 @@ export component Footer {
 
 			<div class="mt-12 flex flex-col gap-2 border-t border-border pt-5 font-mono text-[11px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
 				<span>© 2026 Vesk · a compiler-first application framework</span>
-				<span>compiler v0.4 · build stable</span>
+				<span>compiler v0.2.16</span>
 			</div>
 		</div>
 	</footer>

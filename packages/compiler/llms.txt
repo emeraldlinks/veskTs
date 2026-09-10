@@ -2,12 +2,12 @@
 
 > Machine-oriented reference for LLM agents working in this package. Unusually comprehensive:
 > full export inventory with real signatures, IR shape, data flow, conventions, edge cases, and
-> cross-module coupling. All items verified against source at commit 5b94b66 (Aug 2026); anything
+> cross-module coupling. All items verified against source at commit d05a1d6 (Sep 2026); anything
 > that could not be verified is tagged **[UNVERIFIED]**.
 
 ## Package identity
 
-- `name`: `@vesk/compiler`, `version`: 0.1.6, ESM, `type: module`, Node >= 20.
+- `name`: `@vesk/compiler`, `version`: 0.2.16, ESM, `type: module`, Node >= 20.
 - `exports`: `.` → `./dist/index.js` (+ `.d.ts`), `./src/*` → `./dist/*.js`, `./package.json`.
   **`./src/*` is load-bearing** — monorepo tooling imports compiler source via
   `@vesk/compiler/src/<file>` and the adapter's `resolveCompilerApi` maps those to `src/*.ts`

@@ -4,7 +4,7 @@ import { Link } from '@vesk/runtime/router'
 component DocsIndex {
 	<Head>
 		<title>Vesk Documentation — compiler-first framework reference</title>
-		<meta name="description" content="Guides and reference for the Vesk compiler-first framework: installation, core concepts, styling, native Kotlin output, diagnostics and deployment." />
+		<meta name="description" content="Guides and reference for the Vesk compiler-first framework: quickstart, components, reactivity with track, routing, data fetching, hydration, native Kotlin output and deployment." />
 	</Head>
 
 	<div class="px-5 py-12 sm:px-10 sm:py-16">
@@ -15,7 +15,7 @@ component DocsIndex {
 		</p>
 		<div class="mt-8 flex flex-wrap gap-3">
 			<Link href="/docs/getting-started" class="btn-solid px-5 py-3 font-display text-sm no-underline">Quickstart</Link>
-			<Link href="/docs/api" class="btn-outline px-5 py-3 font-display text-sm no-underline">API reference</Link>
+			<Link href="/docs/cli" class="btn-outline px-5 py-3 font-display text-sm no-underline">CLI reference</Link>
 		</div>
 
 		<div class="mt-14 space-y-10">

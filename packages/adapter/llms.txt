@@ -4,7 +4,7 @@ Source-verified inventory of `packages/adapter/src/*.ts`. All signatures below
 were read from the actual source. Anything unverifiable is tagged `[UNVERIFIED]`.
 ESM + TypeScript monorepo package; `"type": "module"`; entry `dist/index.js`.
 
-Package: `@vesk/adapter` v0.1.6 — builds deployable `.vesk/` output for Node and
+Package: `@vesk/adapter` v0.2.16 — builds deployable `.vesk/` output for Node and
 serverless platforms. Public exports from `src/index.ts`: `build`,
 `startProdServer` (re-exported).
 

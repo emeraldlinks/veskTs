@@ -1,6 +1,6 @@
 # @vesk/runtime — llms.txt (machine-focused reference)
 
-Package: `@vesk/runtime` v0.1.6 · ESM + TypeScript · source `/root/vesk/packages/runtime/src`
+Package: `@vesk/runtime` v0.2.16 · ESM + TypeScript · source `/root/vesk/packages/runtime/src`
 Companion docs: `docs.md` (human), `AGENTS.md` (agent rules).
 Every signature below was verified against source. Unverifiable items are
 marked `[UNVERIFIED]`.
@@ -16,7 +16,7 @@ marked `[UNVERIFIED]`.
   "./package.json": "./package.json"
 }
 ```
-- `type: module`, `engines.node >= 20`, dependency `@vesk/compiler ^0.1.0`.
+- `type: module`, `engines.node >= 20`, dependency `@vesk/compiler ^0.2.16`.
 - Main/types point at the **client** entry.
 - Server-only APIs are NOT reachable from the `.`/`client` entries.
 

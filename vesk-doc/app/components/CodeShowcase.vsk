@@ -5,29 +5,55 @@ const sourceCode = `component About {
   </div>
 }`
 
-const webOutput = `export function About() {
-  const el = document.createElement("div")
-  el.className = "max-w-3xl mx-auto px-4 py-14"
-  el.append(
-    h("h1", "text-3xl font-semibold text-ink", "About Vesk"),
-    h("p", "text-muted", "Some text here."),
-  )
-  return el
-}`
+const ssrOutput = `<div class="max-w-3xl mx-auto px-4 py-14"><h1 class="text-3xl font-semibold text-ink">About Vesk</h1><p class="text-muted">Some text here.</p></div>`
+
+const webOutput = `__components["About"] = (props) => {
+  props = reactiveProps(props);
+  const __prev = getActiveComponent();
+  setActiveComponent({ c: null, p: __prev });
+  try {
+    const $root = document.createDocumentFragment();
+    let __pendingChild = null;
+    const $n0 = document.createElement("div");
+    $n0.setAttribute("class", "max-w-3xl mx-auto px-4 py-14");
+    const $n1 = document.createElement("h1");
+    $n1.setAttribute("class", "text-3xl font-semibold text-ink");
+    const $n2 = document.createTextNode("About Vesk");
+    $n1.appendChild($n2);
+    $n0.appendChild($n1);
+    const $n3 = document.createElement("p");
+    $n3.setAttribute("class", "text-muted");
+    const $n4 = document.createTextNode("Some text here.");
+    $n3.appendChild($n4);
+    $n0.appendChild($n3);
+    $root.appendChild($n0);
+    return __pendingChild || $root;
+  } finally {
+    setActiveComponent(__prev);
+  }
+};`
 
 const nativeOutput = `@Composable
-fun About() {
-  Column(modifier = Modifier.widthIn(max = 768.dp)
-    .padding(horizontal = 16.dp, vertical = 56.dp)) {
-    Text("About Vesk", style = Type.headlineSmall, color = Ink)
-    Text("Some text here.", color = Muted)
+fun About(content: @Composable () -> Unit = {}) {
+  Column(
+    modifier = Modifier.widthIn(max = 768.dp).padding(horizontal = 16.dp).padding(vertical = 56.dp),
+  ) {
+    Text(
+      text = "About Vesk",
+      modifier = Modifier.fillMaxWidth(),
+      style = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold),
+    )
+    Text(
+      text = "Some text here.",
+      modifier = Modifier.fillMaxWidth(),
+    )
   }
 }`
 
-const stages = ["parse", "analyze", "emit"]
+const stages = ["preprocess", "parse", "ir", "codegen"]
 
 export component CodeShowcase {
-	const &[target] = track("native")
+	const &[target] = track("ssr")
 	const &[stage] = track(0)
 
 	effect(() => {
@@ -67,6 +93,11 @@ export component CodeShowcase {
 							<div class="flex min-w-0">
 								<button
 									type="button"
+									onClick={() => target = "ssr"}
+									class={target === "ssr" ? "shrink-0 px-3 py-1 font-mono text-[11px] bg-foreground text-background" : "shrink-0 px-3 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"}
+								>ssr.html</button>
+								<button
+									type="button"
 									onClick={() => target = "web"}
 									class={target === "web" ? "shrink-0 px-3 py-1 font-mono text-[11px] bg-foreground text-background" : "shrink-0 px-3 py-1 font-mono text-[11px] text-muted-foreground hover:text-foreground"}
 								>about.js</button>
@@ -78,7 +109,9 @@ export component CodeShowcase {
 							</div>
 							<span class="eyebrow shrink-0 text-[10px] text-accent">compiled</span>
 						</div>
-						if (target === "web") {
+						if (target === "ssr") {
+							<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-foreground/70 sm:text-[12.5px]"><code>{ssrOutput}</code></pre>
+						} else if (target === "web") {
 							<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-foreground/70 sm:text-[12.5px]"><code>{webOutput}</code></pre>
 						} else {
 							<pre class="min-w-0 max-w-full overflow-x-auto px-4 py-4 font-mono text-[11.5px] leading-[1.75] text-foreground/70 sm:text-[12.5px]"><code>{nativeOutput}</code></pre>
@@ -87,7 +120,7 @@ export component CodeShowcase {
 							for (let i = 0; i < stages.length; i++) {
 								<span class={i < stage ? "text-accent" : ""}>{i < stage ? "✓" : "·"} {stages[i]}</span>
 							}
-							<span class="ml-auto">{stage > 2 ? "done · 3.1 ms" : "…"}</span>
+							<span class="ml-auto">{stage > 2 ? "done · ssr + web + kotlin" : "…"}</span>
 						</div>
 					</div>
 				</div>
