@@ -1,4 +1,6 @@
-import { needsHydration, hydrationCount, createHydrateWalker, createHydrateChildWalker, hydrateOnInteraction } from '@vesk/runtime/src/hydrate';
+import { needsHydration, hydrationCount, createHydrateWalker, createHydrateChildWalker, hydrateOnInteraction, hydrate } from '@vesk/runtime/src/hydrate';
+import { effect } from '@vesk/runtime/src/ripple-blocks';
+import { flush_sync, get, set, track } from '@vesk/runtime/src/ripple-runtime';
 
 let passed = 0;
 let failed = 0;
@@ -171,6 +173,46 @@ describe('hydrateOnInteraction', () => {
     const container = document.createElement('div');
     const ctrl = hydrateOnInteraction(container, () => {}, {}, { events: ['mouseenter'] });
     expect(typeof ctrl.cancel).toBe('function');
+    cleanupDocument();
+  });
+});
+
+describe('hydrate block window', () => {
+  it('runs component effects created during hydration (no external root needed)', () => {
+    mockDocument();
+    const container = document.createElement('div');
+    const textNode = { data: '' };
+    const componentFn = () => {
+      effect(() => { textNode.data = 'updated'; });
+    };
+    hydrate(container, componentFn as unknown as (props: Record<string, unknown>, registry: Map<string, unknown>, walker: unknown) => unknown, {});
+    flush_sync();
+    expect(textNode.data).toBe('updated');
+    cleanupDocument();
+  });
+
+  // Proof that effects created inside hydration stay live AFTER hydration
+  // completes: a tracked cell read by the effect keeps re-rendering across
+  // post-hydration writes (e.g. later user interaction), not just the initial
+  // hydration flush. The cell is created inside the component body (as compiled
+  // code does) so its dependency chain sits inside the hydration block window.
+  it('effects keep reacting after hydration completes (post-hydration set)', () => {
+    mockDocument();
+    const container = document.createElement('div');
+    const el = { data: '' };
+    let setCell: (v: number) => void = () => {};
+    const componentFn = () => {
+      const cell = track(0);
+      effect(() => { el.data = String(get(cell)); });
+      setCell = (v: number) => { set(cell, v); };
+    };
+    hydrate(container, componentFn as unknown as (props: Record<string, unknown>, registry: Map<string, unknown>, walker: unknown) => unknown, {});
+    flush_sync();
+    expect(el.data).toBe('0');
+    flush_sync(() => { setCell(1); });
+    expect(el.data).toBe('1');
+    flush_sync(() => { setCell(2); });
+    expect(el.data).toBe('2');
     cleanupDocument();
   });
 });

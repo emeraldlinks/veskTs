@@ -1,4 +1,25 @@
-import { get } from '@vesk/runtime/src/ripple-runtime';
+import { get, scope, set_active_block } from '@vesk/runtime/src/ripple-runtime';
+import { root } from '@vesk/runtime/src/ripple-blocks';
+
+// Hydrators invoke user component functions outside the router. componentFn
+// runs `track()`/`effect()` calls that attach to whatever block is active.
+// With no active block, `schedule_update` walks an empty parent chain and
+// queues a null root — the effects never flush. Establish a root block window
+// (mirroring the router's runInBlockWindow) so effects created during
+// hydration attach to a real root and run on the microtask flush.
+function runInHydrateBlock<T>(fn: () => T): T {
+	const previous = scope();
+	const block = root(() => {});
+	set_active_block(block);
+	try {
+		const result = fn();
+		set_active_block(previous);
+		return result;
+	} catch (error) {
+		set_active_block(previous);
+		throw error;
+	}
+}
 
 export interface HydrateWalker {
 	root: HTMLElement | null;
@@ -123,7 +144,7 @@ export function hydrate(
 	props?: Record<string, unknown>,
 ): unknown {
 	const walker = createHydrateWalker(container);
-	return componentFn(props || {}, new Map(), walker);
+	return runInHydrateBlock(() => componentFn(props || {}, new Map(), walker));
 }
 
 export function hydrateViewport(
@@ -161,7 +182,7 @@ export function hydrateViewport(
 	}
 
 	const viewportWalker = createHydrateWalker(container, viewportMarkers);
-	componentFn(props || {}, new Map(), viewportWalker);
+	runInHydrateBlock(() => componentFn(props || {}, new Map(), viewportWalker));
 
 	if (deferredMarkers.length > 0) {
 		return new Promise<void>((resolve) => {
@@ -181,9 +202,9 @@ export function hydrateViewport(
 						observer.unobserve(el);
 					}
 				}
-				if (toHydrate.length > 0) {
+if (toHydrate.length > 0) {
 					const w = createHydrateWalker(container, toHydrate);
-					componentFn(props || {}, new Map(), w);
+					runInHydrateBlock(() => componentFn(props || {}, new Map(), w));
 				}
 				if ((observer as unknown as { _observed: number })._observed === 0) {
 					observer.disconnect();
@@ -227,7 +248,7 @@ export function hydrateIdle(
 
 		if (chunk.length > 0) {
 			const walker = createHydrateWalker(container, chunk);
-			componentFn(props || {}, new Map(), walker);
+			runInHydrateBlock(() => componentFn(props || {}, new Map(), walker));
 		}
 
 		if (idx < allMarkers.length && (!deadline || deadline.timeRemaining() > 0 || deadline.didTimeout)) {
@@ -275,7 +296,7 @@ export function hydrateOnInteraction(
 		const markers = collectVskMarkers(container);
 		if (markers.length > 0) {
 			const walker = createHydrateWalker(container, markers);
-			componentFn(props || {}, new Map(), walker);
+			runInHydrateBlock(() => componentFn(props || {}, new Map(), walker));
 		}
 	}
 
@@ -309,5 +330,5 @@ export function hydrateInitial(
 	props?: Record<string, unknown>,
 ): void {
 	const walker = createHydrateWalker(container);
-	componentFn(props || {}, new Map(), walker);
+	runInHydrateBlock(() => componentFn(props || {}, new Map(), walker));
 }

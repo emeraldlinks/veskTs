@@ -268,6 +268,13 @@ export function Link(
 			const existing = hydrate.root.querySelector('a');
 			if (existing) a = existing as HTMLAnchorElement;
 		}
+		// The claimed SSR anchor is already attached in place; returning it lets
+		// compiled call sites re-insert it and duplicate the element. Keep it
+		// claimed and return an inert fragment. Only a genuinely fresh anchor
+		// (conditional region re-run with no SSR counterpart) is returned.
+		const claimed = a ? a.parentNode !== null : false;
+		if (!a) a = document.createElement('a');
+		applyLinkDom(a, props, href);
 		if (props.children != null) {
 			if (typeof props.children === 'string' || typeof props.children === 'number') {
 				a.textContent = String(props.children);
@@ -285,7 +292,7 @@ export function Link(
 			const nav = useNavigate();
 			nav(href);
 		});
-		return document.createDocumentFragment();
+		return claimed ? document.createDocumentFragment() : a;
 	}
 	const attrs = [
 		`href="${href.replace(/"/g, '&quot;')}"`,
@@ -303,13 +310,8 @@ export function Link(
 	if (typeof document === 'undefined') {
 		return `<a ${attrs}>${childStr}</a>`;
 	}
-	const displayHref = routerMode() && !href.startsWith('#') ? '#' + href : href;
 	const a = document.createElement('a');
-	a.href = displayHref;
-	if (props.class) a.className = props.class;
-	if (props.style) a.setAttribute('style', props.style);
-	if (props.target) a.target = props.target;
-	if (props.rel) a.rel = props.rel;
+	applyLinkDom(a, props, href);
 	if (childStr) {
 		a.textContent = childStr;
 	} else if (props.children != null) {
@@ -332,6 +334,15 @@ interface NavLinkProps extends LinkProps {
 	ariaCurrent?: boolean | string;
 }
 
+function applyLinkDom(a: HTMLAnchorElement, props: LinkProps, href: string): void {
+	const displayHref = routerMode() && !href.startsWith('#') ? '#' + href : href;
+	a.href = displayHref;
+	if (props.class) a.className = props.class;
+	if (props.style) a.setAttribute('style', props.style);
+	if (props.target) a.target = props.target;
+	if (props.rel) a.rel = props.rel;
+}
+
 export function NavLink(
 	props: NavLinkProps,
 	registry?: Map<string, unknown>,
@@ -343,6 +354,7 @@ export function NavLink(
 	if (__isHydrating) {
 		const a = document.querySelector(`a[href="${props.href}"]`) as HTMLAnchorElement;
 		if (a) {
+			applyLinkDom(a, props, props.href);
 			if (props.children != null) {
 				if (typeof props.children === 'string' || typeof props.children === 'number') {
 					a.textContent = String(props.children);

@@ -321,6 +321,45 @@ describe('Client Codegen — Control Flow', () => {
 
 });
 
+describe('Client Codegen — wipe-style component children (Link/NavLink)', () => {
+
+	// Link/NavLink replaceChildren() their SSR anchor on hydration, so fully-static
+	// child subtrees must be fresh-built instead of suppressed/claimed — otherwise
+	// the anchors wipe their own children (Bug: static Link children lost on load).
+	bothModes('Link static children are fresh-built in hydrate mode', `
+		import { Link } from '@vesk/runtime/router'
+		component App { <Link href="/"><span class="a">V</span><span class="b">vesk</span></Link> }
+	`, (code, mode) => {
+		expect(code).toContain('document.createElement("span")');
+		if (mode === 'normal') {
+			expect(code).not.toContain('__hydrate.subWalker');
+		}
+	});
+
+	// Alias import (import { Link as L }) must be treated as wipe-style too: the
+	// discriminator is the origin import name, not the local binding.
+	bothModes('alias-imported Link (import { Link as L }) keeps static children', `
+		import { Link as L } from '@vesk/runtime/router'
+		component App { <L href="/"><span class="a">V</span><span class="b">vesk</span></L> }
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('document.createElement("span")');
+		}
+	});
+
+	// A local (append-style) component with a slot must NOT get the wipe
+	// fresh-build: its claimed children re-appended in place would duplicate.
+	bothModes('non-wipe child component still suppresses static children in hydrate mode', `
+		component Inner { <slot /> }
+		component App { <Inner><span class="a">V</span></Inner> }
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).not.toContain('document.createElement("span")');
+		}
+	});
+
+});
+
 describe('Client Codegen — Event Handlers', () => {
 
 	// Expression mode

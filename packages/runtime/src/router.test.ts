@@ -297,7 +297,26 @@ test('Link hydrate adopts SSR anchor without duplicating children', () => {
 	const out = Link({ href: '/docs/getting-started', class: 'x', children: frag }, undefined, walker);
 	expect(ssrA.children.length).toBe(1);
 	expect(ssrA.textContent).toBe('quickstart');
+	// Claimed anchors return an inert fragment — returning the anchor itself lets
+	// compiled call sites re-insert it and duplicate the element in the live DOM.
 	expect(out.nodeType).toBe(11);
+	expect(ssrA.className).toBe('x');
+});
+
+test('Link hydrate re-run builds a fresh anchor WITH attributes when no SSR anchor exists', () => {
+	// A reactive branch re-run after hydration has no SSR anchor left to claim —
+	// the walker's nextElement() falls back to a freshly created <a>. Link must
+	// still apply href/class/style/target/rel and mount children, or the
+	// regenerated link loses its href and becomes non-navigable.
+	const ssrRoot = document.createElement('div');
+	const walker = { root: ssrRoot, nextElement(tag) { return document.createElement(tag || 'a'); } };
+	const frag = document.createDocumentFragment();
+	frag.appendChild(document.createTextNode('previous'));
+	const out = Link({ href: '/prev', class: 'nav', children: frag }, undefined, walker);
+	expect(out.tagName).toBe('A');
+	expect(out.href).toBe('/prev');
+	expect(out.className).toBe('nav');
+	expect(out.textContent).toBe('previous');
 });
 
 test('NavLink hydrate adopts SSR anchor without duplicating children', () => {

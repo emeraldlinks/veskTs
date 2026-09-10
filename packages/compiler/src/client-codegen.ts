@@ -284,6 +284,7 @@ class Ctx {
   effects: string[] = [];
   c = 0;
   importedNames = new Set<string>();
+  linkNames = new Set<string>();
   delegatedEvents = new Set<string>();
   directEvents = new Set<string>();
   hydrate = false;
@@ -648,6 +649,12 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
       const savedWalker = ctx.walker;
       const savedEffects = ctx.effects;
+      // Link/NavLink hydrate branches WIPE their SSR anchor (a.replaceChildren())
+      // and remount the children fragment. Suppressed fully-static children would
+      // therefore be lost, so rebuild the whole subtree fresh instead of claiming.
+      const wipeMount = ctx.linkNames.has(node.componentName);
+      const savedHydrate = ctx.hydrate;
+      if (wipeMount) ctx.hydrate = false;
       ctx.walker = walkerVar;
       ctx.effects = [];
       for (const child of node.children) {
@@ -657,6 +664,7 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
       ctx.effects = savedEffects;
       ctx.walker = savedWalker;
+      ctx.hydrate = savedHydrate;
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
       ctx.push(`const ${v} = ${awaitKw}${access}({ ${propsEntries.join(', ')} }, __registry, ${walkerVar});`);
@@ -1304,10 +1312,11 @@ function computeAsyncComponents(comps: ComponentIR[]): Set<string> {
   return new Set(comps.filter((c) => c.isAsync).map((c) => c.name));
 }
 
-function generateComponent(comp: ComponentIR, importedNames: Set<string> = new Set(), hydrate = false, asyncComps: Set<string> = new Set()): string {
+function generateComponent(comp: ComponentIR, importedNames: Set<string> = new Set(), hydrate = false, asyncComps: Set<string> = new Set(), linkNames: Set<string> = new Set()): string {
   const tracked = collectTrackedNames(comp.body);
   const ctx = new Ctx();
   ctx.importedNames = importedNames;
+  ctx.linkNames = linkNames;
   ctx.hydrate = hydrate;
   ctx.asyncComps = asyncComps;
   ctx.isAsyncScope = comp.isAsync || asyncComps.has(comp.name);
@@ -1339,7 +1348,7 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
     const v = emitNode(ctx, node, tracked, null);
     if (v) {
       if (ctx.hydrate) {
-        ctx.push(indent(`if (${v}.parentNode !== $root) $root.appendChild(${v});`));
+        ctx.push(indent(`if (${v}.parentNode !== $root) { if (!$root || ${v}.parentNode == null || !$root.contains(${v})) $root.appendChild(${v}); }`));
       } else {
         ctx.push(indent(`$root.appendChild(${v});`));
       }
@@ -1372,6 +1381,16 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
   mapLines.push(`const __components = {};`);
   const asyncComps = computeAsyncComponents(irRoot.components);
 
+  // Wipe-style router components (Link/NavLink) replace their SSR children on
+  // hydration, so their children fragments must be rebuilt in full. Track the
+  // file-local binding names regardless of aliasing (`const Nav = NavLink`).
+  const linkNames = new Set<string>();
+  for (const imp of irRoot.imports) {
+    for (const pair of importBindingPairs(imp)) {
+      if (pair.imported === 'Link' || pair.imported === 'NavLink') linkNames.add(pair.local);
+    }
+  }
+
   // Top-level value bindings (`const MyIcon = Cpu`) live in module scope
   // alongside the component map, so a same-named JSX tag must invoke that
   // in-scope value directly — not a registry lookup. File-defined components
@@ -1386,7 +1405,7 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false): string {
       mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
-    const code = generateComponent(comp, directNames, hydrate, asyncComps);
+    const code = generateComponent(comp, directNames, hydrate, asyncComps, linkNames);
     mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
   }
 
