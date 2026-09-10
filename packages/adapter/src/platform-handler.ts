@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RouteNode, ApiRouteNode } from '@vesk/adapter/src/types';
 
@@ -11,6 +11,8 @@ export interface PlatformHandlerInput {
   prerenderedPaths: string[];
   hasMiddleware: boolean;
   hasEvents?: boolean;
+  /** Project root (app dir) — used to resolve @vesk/compiler from node_modules. */
+  appDir: string;
 }
 
 export function routeName(segments: string[]): string {
@@ -30,9 +32,17 @@ export function toId(s: string): string {
   return s.replace(/[^a-zA-Z0-9_]/g, '_').replace(/^_/, '');
 }
 
-function findCompilerSrc(): string {
-  const monorepo = resolve(__dirname, '..', '..', '..', 'packages', 'compiler', 'dist');
-  if (existsSync(monorepo)) return monorepo;
+function findCompilerSrc(appDir: string): string {
+  const candidates = [
+    resolve(__dirname, '..', '..', '..', 'packages', 'compiler', 'dist'),
+    resolve(appDir, '..', 'node_modules', '@vesk/compiler'),
+    resolve(appDir, 'node_modules', '@vesk/compiler'),
+  ];
+  for (const base of candidates) {
+    for (const dir of [base, join(base, 'dist')]) {
+      if (existsSync(join(dir, 'server-cookies.js'))) return dir;
+    }
+  }
   throw new Error('@vesk/compiler/dist not found — run "npm run build" first');
 }
 
@@ -43,7 +53,7 @@ function findCompilerSrc(): string {
  * with esbuild for each target platform.
  */
 export function generatePlatformHandlerSource(input: PlatformHandlerInput): string {
-  const { ssrRoutes, apiRoutes, prerenderedPaths, hasMiddleware } = input;
+  const { ssrRoutes, apiRoutes, prerenderedPaths, hasMiddleware, appDir } = input;
   const hasEvents = !!input.hasEvents;
 
   let imports = '';
@@ -82,7 +92,7 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
   const eventsRequestLine = hasEvents ? '  await __eventsRequest(mwCtx);' : '';
   const localsSeed = hasEvents ? 'Object.assign({}, __serverStore)' : '{}';
 
-  const compilerSrc = findCompilerSrc();
+  const compilerSrc = findCompilerSrc(appDir);
   const parseCookiesImport = hasMiddleware
     ? `import { parseCookies } from ${JSON.stringify(resolve(compilerSrc, 'server-cookies.js'))};`
     : '';

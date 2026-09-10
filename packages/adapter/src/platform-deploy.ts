@@ -53,6 +53,7 @@ export async function emitPlatformOutput(platform: Platform, ctx: DeployContext)
     prerenderedPaths,
     hasMiddleware: ctx.hasMiddleware,
     hasEvents: ctx.hasEvents,
+    appDir: resolve(ctx.outDir, '..'),
   });
 
   const shell = shellFor(platform);
