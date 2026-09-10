@@ -181,11 +181,9 @@ async function main() {
         const dot = document.querySelector('#__vesk_dev .__v_dot');
         return dot ? dot.className : '';
       });
-      // The HMR status dot supports idle (connected-but-idle resting state),
-      // compiling, and error. The legacy `connected`/`loading` statuses were
-      // removed from hmr-client.ts; `idle` is the correct idle-connection dot.
+      // The HMR status dot supports connected, compiling, and error.
       const dotStatus = hmrDot.replace(/^__v_dot\s*/, '').trim();
-      assert(dotStatus === 'idle' || dotStatus === 'compiling' || dotStatus === 'error', 'HMR dot has status class: ' + hmrDot);
+      assert(dotStatus === 'connected' || dotStatus === 'compiling' || dotStatus === 'error', 'HMR dot has status class: ' + hmrDot);
     }
 
     await page.close();
