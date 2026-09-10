@@ -33,7 +33,7 @@ import { pages as apiRoutesPages } from "./docs-api-routes";
 import { pages as cliPages } from "./docs-cli";
 import { pages as nativePages } from "./docs-native";
 
-export const docPages: DocPage[] = [
+const basePages: DocPage[] = [
   {
     slug: "getting-started",
     title: "Getting Started",
@@ -794,69 +794,6 @@ component ClientOnly() client {
     ],
   },
   {
-    slug: "config",
-    title: "Configuration",
-    description:
-      "vesk.config.js / vesk.config.ts, the defineConfig/definePlugin/preset helpers, security presets, and environment loading.",
-    group: "Language",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk projects are configured with `vesk.config.js` or `vesk.config.ts` in the project root. TypeScript configs are transpiled inline at startup — no extra build step needed.",
-      },
-      { kind: "h2", text: "Basic config" },
-      {
-        kind: "code",
-        filename: "vesk.config.ts",
-        code: `import { defineConfig } from '@vesk/compiler';
-
-export default defineConfig({
-  appDir: './app',
-  publicDir: './public',
-});`,
-      },
-      { kind: "h2", text: "Config options" },
-      {
-        kind: "table",
-        head: ["Option", "Type", "Description"],
-        rows: [
-          ["appDir", "string", "Source directory containing routes and components"],
-          ["outDir", "string", "Build output directory (vesk build writes to .vesk/)"],
-          ["publicDir", "string", "Static assets directory"],
-          ["ssg", "SSGConfig", "Static site generation options"],
-          ["plugins", "VeskPlugin[]", "Build/dev plugins"],
-          ["security", "SecurityConfig", "Security presets (strict/default/minimal)"],
-          ["routeDataCache", "number", "Default TTL in ms for route data caching"],
-          ["md", "MdConfig", "Global markdown configuration"],
-        ],
-      },
-      { kind: "h2", text: "Security presets" },
-      {
-        kind: "table",
-        head: ["Preset", "CSP", "Rate Limiting", "CORS"],
-        rows: [
-          ["'strict'", "Full lockdown", "Enabled", "Disabled"],
-          ["'default'", "Balanced", "Enabled", "Same-origin"],
-          ["'minimal'", "Relaxed", "Disabled", "Open"],
-        ],
-      },
-      { kind: "h2", text: "Environment variables" },
-      {
-        kind: "list",
-        items: [
-          "Vesk loads `.env` then `.env.local` before starting; `.env.local` takes precedence.",
-          "`KEY=VAL` lines only — no quotes needed (stripped if present); existing process.env keys are never overridden.",
-          "Public variables accessible in client code should be prefixed with `PUBLIC_` by convention.",
-        ],
-      },
-      { kind: "h2", text: "Platforms" },
-      {
-        kind: "p",
-        text: "The `--platform` flag (or `VESK_PLATFORM` env) controls the server output format: `node`, `vercel`, `netlify`, `cloudflare`, `deno`, `aws`, `edge`, `coxmos`. The default is a standard Node server.",
-      },
-    ],
-  },
-  {
     slug: "not-in-the-grammar",
     title: "Not in the Grammar",
     description:
@@ -1163,199 +1100,6 @@ throw new VeskError({
     ],
   },
   {
-    slug: "routing",
-    title: "Routing",
-    description:
-      "File-based routing, dynamic segments, nested layouts, the Link/NavLink/Redirect components, and router hooks.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk uses file-based routing. The file-system structure under `app/` determines URL routes.",
-      },
-      { kind: "h2", text: "Route conventions" },
-      {
-        kind: "table",
-        head: ["File path", "URL route"],
-        rows: [
-          ["app/page.vsk", "/"],
-          ["app/about/page.vsk", "/about"],
-          ["app/blog/page.vsk", "/blog"],
-          ["app/blog/[slug]/page.vsk", "/blog/:slug"],
-          ["app/shop/[id]/page.vsk", "/shop/:id"],
-        ],
-      },
-      { kind: "h2", text: "Dynamic segments & params" },
-      {
-        kind: "tabs",
-        tabs: [
-          {
-            label: "statement mode",
-            filename: "app/flights/[id]/page.vsk",
-            code: `component FlightDetail() {
-  const { id } = useParams();
-  <p>Flight {id}</p>
-}`,
-          },
-          {
-            label: "expression mode",
-            filename: "app/flights/[id]/page.vsk",
-            code: `component FlightDetail() {
-  const { id } = useParams();
-  return <p>Flight {id}</p>;
-}`,
-          },
-        ],
-      },
-      { kind: "h2", text: "Navigation components" },
-      {
-        kind: "code",
-        filename: "app/components/Nav.vsk",
-        code: `<Link href="/about">About</Link>
-<NavLink href="/shop" activeClass="font-bold text-accent">Shop</NavLink>
-<Redirect to="/login" />`,
-      },
-      {
-        kind: "list",
-        items: [
-          "`Link` — client-side navigation, no full page reload; prefetches on hover by default.",
-          "`NavLink` — like Link plus `activeClass` when the current URL matches.",
-          "`Redirect` — server-side redirect (302 by default); the `redirect(url, status?)` function works in server code too.",
-        ],
-      },
-      { kind: "h2", text: "Hooks" },
-      {
-        kind: "table",
-        head: ["Hook", "Purpose"],
-        rows: [
-          ["useRouter()", "router.push(path), router.back(), router.refresh()"],
-          ["useNavigate()", "navigate('/dashboard')"],
-          ["useParams()", "Route parameters for the current page"],
-          ["usePathname()", "Current pathname, e.g. /blog/my-post"],
-          ["useSearchParams()", "URLSearchParams wrapper"],
-        ],
-      },
-      { kind: "h2", text: "Server-side redirects" },
-      {
-        kind: "list",
-        items: [
-          "`redirect(url, status?)` — 302 default.",
-          "`permanentRedirect(url, status?)` — 308 default.",
-          "`notFound()` — throws NotFoundError, renders not-found.vsk.",
-        ],
-      },
-    ],
-  },
-  {
-    slug: "data-fetching",
-    title: "Data Fetching",
-    description:
-      "useFetch for SSR-aware fetching, createResource for reactive async data, useFetch.stream for progressive loading, and SSR handoff.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk provides `useFetch` for SSR-aware data fetching, `createResource` for reactive async data, and `useFetch.stream` for progressive loading.",
-      },
-      { kind: "h2", text: "useFetch" },
-      {
-        kind: "tabs",
-        tabs: [
-          {
-            label: "statement mode",
-            filename: "app/components/PostList.vsk",
-            code: `component PostList() {
-  const posts = useFetch('/api/posts');
-
-  if (posts.loading) return <p>Loading...</p>;
-  if (posts.error) return <p>Error: {posts.error.message}</p>;
-
-  <ul>
-    for (const post of posts.data) {
-      <li>{post.title}</li>
-    }
-  </ul>
-}`,
-          },
-          {
-            label: "expression mode",
-            filename: "app/components/PostList.vsk",
-            code: `component PostList() {
-  const posts = useFetch('/api/posts');
-
-  if (posts.loading) return <p>Loading...</p>;
-  if (posts.error) return <p>Error: {posts.error.message}</p>;
-
-  return (
-    <ul>
-      {posts.data.map((post) => (
-        <li>{post.title}</li>
-      ))}
-    </ul>
-  );
-}`,
-          },
-        ],
-      },
-      {
-        kind: "p",
-        text: "Auto-imported in components. SSR-fetched on the server, client-reused after hydration. It returns a `Resource<T>` implementing `PromiseLike<T>` with `loading`, `error`, `data`, `refresh()` and `abort()`.",
-      },
-      { kind: "h2", text: "Options & static methods" },
-      {
-        kind: "list",
-        items: [
-          "Options: key, staleTime, keepPreviousData, retry, retryDelay, timeout, enabled, dedupe, into (write into a tracked cell), headers.",
-          "Static methods: `useFetch.json<T>`, `useFetch.text`, `useFetch.arrayBuffer`.",
-          "`useFetch.stream('/api/...', { into: content })` streams text chunks into a tracked cell — progressive rendering.",
-        ],
-      },
-      { kind: "h2", text: "createResource" },
-      {
-        kind: "tabs",
-        tabs: [
-          {
-            label: "statement mode",
-            filename: "app/components/UserProfile.vsk",
-            code: `component UserProfile(props: { userId: string }) {
-  const user = createResource(
-    async () => {
-      const res = await fetch(\`/api/users/\${props.userId}\`);
-      return res.json();
-    },
-    { key: \`user-\${props.userId}\` }
-  );
-
-  if (user.loading) return <Skeleton />;
-  <p>{user.data.name}</p>
-}`,
-          },
-          {
-            label: "expression mode",
-            filename: "app/components/UserProfile.vsk",
-            code: `component UserProfile(props: { userId: string }) {
-  const user = createResource(
-    async () => {
-      const res = await fetch(\`/api/users/\${props.userId}\`);
-      return res.json();
-    },
-    { key: \`user-\${props.userId}\` }
-  );
-
-  if (user.loading) return <Skeleton />;
-  return <p>{user.data.name}</p>;
-}`,
-          },
-        ],
-      },
-      { kind: "h2", text: "SSR data handoff" },
-      {
-        kind: "p",
-        text: "For data fetched in server code that needs to reach the client, `setSsrData('user', value)` (server-only) stores data for client hydration; on the client, `useFetch` with a matching key reads the SSR handoff instead of re-fetching.",
-      },
-    ],
-  },
-  {
     slug: "hydration",
     title: "Hydration",
     description:
@@ -1396,333 +1140,6 @@ throw new VeskError({
       {
         kind: "p",
         text: "Automated hydration uses `hydrateViewport` by default; `createHydrateWalker(container, markerList?)` walks from markers or from the container, and `reactiveProps(props)` makes server-rendered prop values reactive on the client.",
-      },
-    ],
-  },
-  {
-    slug: "forms",
-    title: "Forms & Validation",
-    description:
-      "The Form/Field components, validation rules, and server actions with defineAction.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk provides `<Form>` and `<Field>` components with built-in client-side validation and server action integration.",
-      },
-      { kind: "h2", text: "Form component" },
-      {
-        kind: "tabs",
-        tabs: [
-          {
-            label: "statement mode",
-            filename: "app/components/SignupForm.vsk",
-            code: `import { Form, Field, required, email, minLength } from '@vesk/runtime';
-
-component SignupForm() {
-  <Form onSubmit={(data) => console.log(data)} action="/api/signup" method="POST">
-    <Field name="name" label="Name" rules={[required('Name is required')]} />
-    <Field name="email" label="Email" rules={[required(), email('Invalid email')]} />
-    <Field name="password" label="Password" rules={[minLength(8, 'Min 8 chars')]} />
-    <button type="submit">Sign up</button>
-  </Form>
-}`,
-          },
-          {
-            label: "expression mode",
-            filename: "app/components/SignupForm.vsk",
-            code: `import { Form, Field, required, email, minLength } from '@vesk/runtime';
-
-component SignupForm() {
-  return (
-    <Form onSubmit={(data) => console.log(data)} action="/api/signup" method="POST">
-      <Field name="name" label="Name" rules={[required('Name is required')]} />
-      <Field name="email" label="Email" rules={[required(), email('Invalid email')]} />
-      <Field name="password" label="Password" rules={[minLength(8, 'Min 8 chars')]} />
-      <button type="submit">Sign up</button>
-    </Form>
-  );
-}`,
-          },
-        ],
-      },
-      { kind: "h2", text: "Validation rules" },
-      {
-        kind: "list",
-        items: [
-          "`required(msg?)`, `email(msg?)`, `minLength(n, msg?)`, `maxLength(n, msg?)`, `pattern(re, msg?)`, `custom(fn, msg?)`.",
-          "All auto-imported from `@vesk/runtime`. Rules run in order; first failure wins.",
-          "`errorClass` on a Field is added when validation fails.",
-        ],
-      },
-      { kind: "h2", text: "Server actions" },
-      {
-        kind: "code",
-        filename: "app/actions/signup.ts",
-        code: `import { defineAction, required, email } from '@vesk/runtime';
-
-const signup = defineAction({
-  input: {
-    name: required('Name required'),
-    email: [required(), email()],
-    password: minLength(8, 'Min 8 characters'),
-  },
-  async execute(input, ctx) {
-    const user = await createUser(input);
-    ctx.redirect('/dashboard');
-    return { user };
-  },
-});`,
-      },
-      {
-        kind: "p",
-        text: "`validateActionInput(actionDef, inputData)` returns issues; `issuesToFieldMap(issues)` maps them to per-field messages like `{ email: 'Invalid email' }`.",
-      },
-    ],
-  },
-  {
-    slug: "api-routes",
-    title: "API Routes",
-    description:
-      "Server-side endpoints under app/api/: conventions, method handlers, dynamic segments, and VeskResponse.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "API routes provide server-side endpoints for data. They live under `app/api/` and export HTTP method handlers.",
-      },
-      { kind: "h2", text: "Route conventions" },
-      {
-        kind: "table",
-        head: ["File path", "URL"],
-        rows: [
-          ["app/api/posts/route.ts", "/api/posts"],
-          ["app/api/hello/route.ts", "/api/hello"],
-          ["app/api/users/[id]/route.ts", "/api/users/:id"],
-        ],
-      },
-      { kind: "h2", text: "Defining handlers" },
-      {
-        kind: "code",
-        filename: "app/api/posts/route.ts",
-        code: `export async function GET(request: Request) {
-  const url = new URL(request.url);
-  const limit = Number(url.searchParams.get('limit')) || 10;
-  const posts = await db.query('SELECT * FROM posts LIMIT $1', [limit]);
-  return Response.json(posts);
-}
-
-export async function POST(request: Request) {
-  const body = await request.json();
-  const post = await db.insert('posts', body);
-  return Response.json(post, { status: 201 });
-}`,
-      },
-      {
-        kind: "list",
-        items: [
-          "Export named functions per HTTP method: `GET`, `POST`, `PUT`, `PATCH`, `DELETE`.",
-          "Dynamic segments arrive in the second argument: `GET(request, { params }: { params: { id: string } })`.",
-          "Return `Response.json`, `Response.redirect`, `new Response(text, ...)`, or the fluent `VeskResponse.json(...).setCookie(...).build()`.",
-        ],
-      },
-      { kind: "h2", text: "Server APIs in routes" },
-      {
-        kind: "code",
-        filename: "app/api/session/route.ts",
-        code: `import { cookies, headers, locals } from '@vesk/runtime';
-
-export async function GET() {
-  const token = cookies().get('session');
-  const user = locals().user;
-  return Response.json({ user, token });
-}`,
-      },
-    ],
-  },
-  {
-    slug: "middleware",
-    title: "Middleware",
-    description:
-      "The onion model, the MiddlewareContext, and examples for logging, auth, CORS and rate limiting.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk middleware runs in an onion model — each layer wraps the next, enabling pre/post processing of requests.",
-      },
-      {
-        kind: "code",
-        filename: "app/middleware.ts",
-        code: `import type { MiddlewareContext } from '@vesk/types';
-
-export default async function middleware(ctx: MiddlewareContext) {
-  const start = Date.now();
-
-  await ctx.next(); // run the next middleware/page
-
-  const duration = Date.now() - start;
-  ctx.setHeader('X-Response-Time', \`\${duration}ms\`);
-}`,
-      },
-      { kind: "h2", text: "MiddlewareContext" },
-      {
-        kind: "table",
-        head: ["Member", "Description"],
-        rows: [
-          ["request / response", "The incoming VeskRequest / response being built"],
-          ["next()", "Continue the chain"],
-          ["set(key, value) / get(key)", "Per-request data store"],
-          ["setHeader(name, value)", "Set a response header"],
-          ["redirect(url, status?)", "Short-circuit with a redirect"],
-          ["rewrite(url)", "Internally rewrite the URL"],
-        ],
-      },
-      { kind: "h2", text: "Examples" },
-      {
-        kind: "code",
-        filename: "app/middleware.ts",
-        code: `export default async function auth(ctx: MiddlewareContext) {
-  const token = ctx.request.cookies.get('token');
-  if (ctx.request.url.startsWith('/admin') && !token) {
-    ctx.redirect('/login', 302);
-    return;
-  }
-  await ctx.next();
-}`,
-      },
-      {
-        kind: "p",
-        text: "Security headers can be applied in middleware via `applyRequestSecurity(ctx.request, ctx.response)`; `cors({ origin, methods, credentials })` is available from `@vesk/runtime`.",
-      },
-    ],
-  },
-  {
-    slug: "isr",
-    title: "Incremental Static Regeneration",
-    description:
-      "Page-, component- and data-level ISR with stale-while-revalidate, plus targeted invalidation by path, tag or component.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "ISR lets you render pages and components as static HTML while keeping them up-to-date with time-based revalidation.",
-      },
-      { kind: "h2", text: "Page-level ISR" },
-      {
-        kind: "code",
-        filename: "app/page.vsk",
-        code: `import { pageIsr } from '@vesk/runtime';
-
-export async function Loader() {
-  return pageIsr(
-    'homepage',
-    async () => {
-      const data = await fetchData();
-      return { html: renderHome(data) };
-    },
-    { tags: ['home'], revalidate: 60 }
-  );
-}`,
-      },
-      { kind: "h2", text: "Data-level ISR" },
-      {
-        kind: "code",
-        filename: "app/loaders/products.ts",
-        code: `import { isr } from '@vesk/runtime';
-
-const { data, stale } = await isr(
-  'product-list',
-  async () => {
-    const res = await fetch('https://api.store.com/products');
-    return res.json();
-  },
-  { tags: ['products'], revalidate: 300 }
-);`,
-      },
-      { kind: "h2", text: "Revalidation" },
-      {
-        kind: "table",
-        head: ["Function", "Purpose"],
-        rows: [
-          ["revalidatePath('/products')", "Invalidate by path"],
-          ["revalidateTag('products')", "Invalidate by tag"],
-          ["revalidateComponent('sidebar')", "Revalidate a component's ISR entry"],
-          ["clearIsrCache()", "Clear all ISR caches"],
-        ],
-      },
-      {
-        kind: "note",
-        tone: "info",
-        text: "On the first request the fetcher runs and the result is cached; after revalidate seconds, the next request serves the stale version while regenerating in the background (stale-while-revalidate).",
-      },
-    ],
-  },
-  {
-    slug: "server-apis",
-    title: "Server APIs",
-    description:
-      "cookies, headers, locals, useParams/useBody/useRequest, VeskRequest, VeskResponse, ServerResponse, CORS and server events.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk provides server-side APIs for request handling, cookies, headers, response building, and middleware. All are auto-imported in server-side code (pages, actions, middleware).",
-      },
-      { kind: "h2", text: "Request context" },
-      {
-        kind: "list",
-        items: [
-          "`cookies()` — CookieStore with get(name), getAll(), toString().",
-          "`headers()` — get('accept') etc.",
-          "`locals()` — per-request data shared between middleware and pages.",
-          "`useParams()` — route parameters; `useBody()` — parsed JSON, form data or text; `useRequest()` — the VeskRequest.",
-        ],
-      },
-      { kind: "h2", text: "VeskResponse (fluent)" },
-      {
-        kind: "code",
-        filename: "app/api/hello/route.ts",
-        code: `import { VeskResponse } from '@vesk/runtime';
-
-VeskResponse.json({ message: 'hello' })
-  .setStatus(201)
-  .setCookie('token', 'abc', { httpOnly: true, maxAge: 3600 })
-  .cache(60)
-  .cors({ origin: '*' })
-  .build();`,
-      },
-      {
-        kind: "list",
-        items: [
-          "Static methods: `VeskResponse.json`, `.redirect`, `.html`, `.stream`; plus `ServerResponse.json/.redirect/.rewrite/.next`.",
-          "Cookie options: httpOnly, secure, sameSite, maxAge, path.",
-          "Security helpers: `setCsp({ defaultSrc: [\"'self'\"] })`, `setSecurityHeader`, `noCache()`.",
-          "Cookie signing: `signCookie('session', value)` / `unsignCookie('session', signed)`.",
-        ],
-      },
-      { kind: "h2", text: "Server events" },
-      {
-        kind: "code",
-        filename: "app/_events.ts",
-        code: `import type { ServerEventContext } from '@vesk/types';
-
-export async function onStart(ctx: ServerEventContext) {
-  await ctx.set('db', await createDb());
-}
-
-export async function onRequest(ctx: ServerEventContext) {
-  ctx.set('lastVisit', Date.now());
-}
-
-export async function onStop(ctx: ServerEventContext) {
-  const db = ctx.get('db') as Db;
-  await db?.close();
-}`,
-      },
-      {
-        kind: "p",
-        text: "The private `_events.ts` file runs onStart (once before the server listens — lazily per isolate on edge), onRequest (every app request, request-scoped context), and onStop (graceful shutdown / dev HMR reload). `ctx.set`/`ctx.get` mirror setServerContext/getServerContext.",
       },
     ],
   },
@@ -1784,74 +1201,6 @@ export async function onStop(ctx: ServerEventContext) {
         kind: "note",
         tone: "info",
         text: "`vesk seo` runs the SEO audit against app/ (RouteOutput checks); pass `--strict` to make audit errors fail the build or exit non-zero.",
-      },
-    ],
-  },
-  {
-    slug: "network",
-    title: "Network State",
-    description:
-      "Reactive browser network state: getNetworkState and watchNetwork.",
-    group: "Runtime",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk provides reactive browser network state tracking.",
-      },
-      { kind: "h2", text: "getNetworkState" },
-      {
-        kind: "code",
-        filename: "app/lib/net.ts",
-        code: `import { getNetworkState } from '@vesk/runtime';
-
-const state = getNetworkState();
-console.log(state.online);        // true | false
-console.log(state.effectiveType); // '4g' | '3g' | '2g' | 'slow-2g' | 'unknown'
-console.log(state.downlink);      // Mbps | null
-console.log(state.rtt);           // ms | null
-console.log(state.saveData);      // boolean`,
-      },
-      { kind: "h2", text: "watchNetwork" },
-      {
-        kind: "tabs",
-        tabs: [
-          {
-            label: "statement mode",
-            filename: "app/components/NetworkStatus.vsk",
-            code: `component NetworkStatus() {
-  let &[online] = track(navigator.onLine);
-
-  watchNetwork((state) => {
-    online = state.online;
-  });
-
-  <p class={online ? 'text-green-600' : 'text-red-600'}>
-    {online ? 'Online' : 'Offline'}
-  </p>
-}`,
-          },
-          {
-            label: "expression mode",
-            filename: "app/components/NetworkStatus.vsk",
-            code: `component NetworkStatus() {
-  let &[online] = track(navigator.onLine);
-
-  watchNetwork((state) => {
-    online = state.online;
-  });
-
-  return (
-    <p class={online ? 'text-green-600' : 'text-red-600'}>
-      {online ? 'Online' : 'Offline'}
-    </p>
-  );
-}`,
-          },
-        ],
-      },
-      {
-        kind: "p",
-        text: "`watchNetwork(callback)` subscribes to network changes and returns an unsubscribe function.",
       },
     ],
   },
@@ -2201,173 +1550,6 @@ update([]);            // clear the list`,
     ],
   },
   {
-    slug: "native",
-    title: "Vesk Native",
-    description:
-      "Compile the same .vsk component tree into idiomatic Kotlin with Compose and Material 3 — real views, real platform APIs, no WebView.",
-    group: "Native",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk Native is not a web view. `@vesk/native-compiler` (v0.1.x) walks the same IR the web compiler produces and emits readable Kotlin source using Jetpack Compose with Material 3 defaults.",
-      },
-      { kind: "h2", text: "Same source, Kotlin output" },
-      {
-        kind: "tabs",
-        tabs: [
-          {
-            label: "Source",
-            filename: "About.vsk",
-            code: `export component About {
-  <div class="max-w-3xl mx-auto px-4 py-14">
-    <h1 class="text-3xl font-semibold text-ink">About Vesk</h1>
-    <p class="text-muted">Some text here.</p>
-  </div>
-}`,
-          },
-          {
-            label: "Kotlin output",
-            filename: "About.kt",
-            code: `@Composable
-fun About(content: @Composable () -> Unit = {}) {
-  Column(
-    modifier = Modifier.widthIn(max = 768.dp).padding(horizontal = 16.dp).padding(vertical = 56.dp),
-  ) {
-    Text(
-      text = "About Vesk",
-      modifier = Modifier.fillMaxWidth(),
-      style = TextStyle(fontSize = 30.sp, lineHeight = 36.sp, fontWeight = FontWeight.SemiBold),
-    )
-    Text(
-      text = "Some text here.",
-      modifier = Modifier.fillMaxWidth(),
-    )
-  }
-}`,
-          },
-        ],
-      },
-      { kind: "h2", text: "Compiler surface" },
-      {
-        kind: "list",
-        items: [
-          "`compileVsk(source, options)` and `compileVskResult(source, filename, options)` → `{ kt, errors, notes, libraryIds }`.",
-          "CompileOptions include packageName, componentNames, customClasses, image/media resources, module registries and more.",
-          "Kotlin output is @Composable functions you can read, review and step through in a debugger.",
-        ],
-      },
-      { kind: "h2", text: "Device capabilities" },
-      {
-        kind: "list",
-        items: [
-          "Device APIs: camera, location, biometrics, notifications, permissions — declared in code and mapped to Android permission requests.",
-          "Tangible elements: `<camera />`, `<battery-status />`, `<qr-scanner />`, `<contacts />`.",
-          "Platform interactions: draggable, ondrop, DRAG_FLAG_GLOBAL gesture support.",
-          "Material 3 default theming with real platform views.",
-        ],
-      },
-    ],
-  },
-  {
-    slug: "cli",
-    title: "CLI Commands",
-    description:
-      "The full vesk CLI: dev, build, start, typecheck, seo, init — plus config loading, dev server behaviors and _events.ts.",
-    group: "Tooling",
-    blocks: [
-      {
-        kind: "p",
-        text: "The `vesk` CLI orchestrates the compiler, adapter, and runtime. Scaffolding is separate: `npx create-vesk@latest <project-name>`.",
-      },
-      { kind: "h2", text: "Commands" },
-      {
-        kind: "table",
-        head: ["Command", "Flags", "Behavior"],
-        rows: [
-          ["vesk dev", "-p / --port (default 3000)", "HMR dev server on app/; exits with a create-vesk hint when app/ is missing"],
-          ["vesk build", "--platform <name> --target <node|edge> --seo --strict --skip-split", "Builds app/ into .vesk/; platform auto-detected from CI env, defaults to node; --strict fails on SEO errors; --skip-split disables route code splitting"],
-          ["vesk start", "-p / --port (default 3000)", "Production server serving .vesk/"],
-          ["vesk typecheck", "--no-strict", "Typechecks .vsk/.ts in app/ (strict by default; exits non-zero on errors)"],
-          ["vesk seo", "--strict", "Runs runSeoAudit(appDir); exits non-zero with --strict when errors exist"],
-          ["vesk init", "—", "Creates src/global.css (Tailwind entrypoint) if missing"],
-          ["vesk --help / -h", "—", "Prints usage; exits 0 with --help, 1 with no args"],
-        ],
-      },
-      { kind: "h2", text: "Config loading" },
-      {
-        kind: "list",
-        items: [
-          "`loadConfig(projectDir)` reads vesk.config.js then vesk.config.ts.",
-          ".ts configs are transpiled inline, stripped of `@vesk/compiler` imports, prefixed with the injected helpers, written to .vesk/config.tmp.js, imported, then deleted.",
-          "`.env` then `.env.local` load first — KEY=VAL lines, quotes stripped, existing process.env keys never overridden.",
-          "The result is validated by validateConfig and passed through preset(...) for security defaults.",
-        ],
-      },
-      { kind: "h2", text: "Dev server behaviors" },
-      {
-        kind: "list",
-        items: [
-          "Ensures packages are built; watches app/ and public/ and recompiles affected routes.",
-          "Serves /api/* routes, middleware chains, and server actions.",
-          "X-Vesk-Data: 1 requests render the page data phase as JSON; server errors during data requests return { error } with status 500.",
-          "HMR over WebSocket pushes { type: 'reload' | 'hmr', path }.",
-        ],
-      },
-    ],
-  },
-  {
-    slug: "plugin-api",
-    title: "Plugin API",
-    description:
-      "The VeskPlugin shape, definePlugin, registering plugins in config, and how @vesk/plugin-tailwind integrates.",
-    group: "Tooling",
-    blocks: [
-      {
-        kind: "p",
-        text: "Vesk plugins extend the build pipeline and dev server. There is no Vite adapter — `vesk dev` / `vesk build` are the entry points, and plugins hook into those pipelines directly.",
-      },
-      { kind: "h2", text: "Plugin shape" },
-      {
-        kind: "code",
-        filename: "vesk.config.ts",
-        code: `import { defineConfig, definePlugin } from '@vesk/compiler';
-import { tailwindcss } from '@vesk/plugin-tailwind';
-
-export default defineConfig({
-  plugins: [
-    tailwindcss({ entry: './src/app.css' }),
-    definePlugin({
-      name: 'my-plugin',
-      onBuildEnd: async () => console.log('build done'),
-    }),
-  ],
-});`,
-      },
-      { kind: "h2", text: "Hooks" },
-      {
-        kind: "table",
-        head: ["Hook", "When"],
-        rows: [
-          ["onStart(ctx) / onStop(ctx)", "Server boot / graceful shutdown or dev reload (ServerEventContext)"],
-          ["onRequest(ctx)", "Every app request (MiddlewareContext)"],
-          ["onCSS(content, filePath)", "Transform CSS output"],
-          ["onTransformJS(code, filePath)", "Transform a compiled JS chunk"],
-          ["onBuildStart / onBuildEnd", "Build lifecycle"],
-          ["onHead(headHtml) / onHtml(html)", "Post-process rendered head / HTML"],
-          ["onFileWatch(filePath)", "Custom HMR watches"],
-        ],
-      },
-      {
-        kind: "list",
-        items: [
-          "`name` is required; a plugin with no recognized hook and no `provides` is rejected by validateConfig.",
-          "`definePlugin(plugin)` validates the object shape at definition time.",
-          "@vesk/plugin-tailwind scans .vsk/.js/.ts/.jsx/.tsx for class=\"...\" attributes to build the purge list, then compiles src/global.css into one static/global.css and integrates with HMR.",
-        ],
-      },
-    ],
-  },
-  {
     slug: "lsp",
     title: "Language Server",
     description:
@@ -2434,7 +1616,7 @@ export default defineConfig({
         ],
       },
     ],
-  },
+  }
 ];
 
 const extendedPages: DocPage[] = [
@@ -2448,11 +1630,58 @@ const extendedPages: DocPage[] = [
   ...nativePages,
 ];
 
-for (const page of extendedPages) {
-  const i = docPages.findIndex((p) => p.slug === page.slug);
-  if (i >= 0) docPages[i] = page;
-  else docPages.push(page);
-}
+const extendedBySlug = new Map(extendedPages.map((p) => [p.slug, p]));
+
+const docSlugOrder = [
+  "getting-started",
+  "components",
+  "track-declarations",
+  "reactivity",
+  "expression-mode",
+  "statement-mode",
+  "client-boundary",
+  "styles",
+  "markdown",
+  "config",
+  "not-in-the-grammar",
+  "pipeline",
+  "ir-format",
+  "static-codegen",
+  "client-reachability",
+  "errors",
+  "routing",
+  "data-fetching",
+  "hydration",
+  "forms",
+  "api-routes",
+  "middleware",
+  "isr",
+  "server-apis",
+  "seo",
+  "network",
+  "bindings",
+  "built-in-components",
+  "headless",
+  "reactive-core",
+  "reconcile",
+  "deployment",
+  "native",
+  "cli",
+  "plugin-api",
+  "lsp",
+  "prettier",
+];
+
+export const docPages: DocPage[] = [
+  ...docSlugOrder.map((slug) => {
+    const replacement = extendedBySlug.get(slug);
+    if (replacement) return replacement;
+    const base = basePages.find((p) => p.slug === slug);
+    if (base) return base;
+    throw new Error(`doc slug missing: ${slug}`);
+  }),
+  ...extendedPages.filter((p) => !(docSlugOrder as readonly string[]).includes(p.slug)),
+];
 
 export const docSlugs = docPages.map((p) => p.slug);
 
