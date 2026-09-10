@@ -817,6 +817,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
     let cssDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const watchDirs = [appDirPath];
     if (existsSync(srcDir)) watchDirs.push(srcDir);
+    const libDir = join(projectDir, 'lib');
+    if (existsSync(libDir)) watchDirs.push(libDir);
     for (const watchDir of watchDirs) {
       watch(watchDir, { recursive: true }, (eventType, filename) => {
         if (!filename) return;
@@ -859,6 +861,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
               updateSourceMapping();
               const changedComponents = sourceToComponents.get(fullPath) || [];
               const treeChanged = prevTree !== stripAnnots(routeTree);
+              const isOutsideApp = !fullPath.startsWith(appDirPath + '/') && fullPath !== appDirPath;
 
               // CSS rescan runs concurrently with the JS build (a .vsk edit
               // cannot change src/global.css) so the hot-swap broadcast is
@@ -869,7 +872,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
               let hotEditedSource: string | null = null;
               let hotActualName: string | null = null;
               try {
-                if (treeChanged) {
+                if (treeChanged || isOutsideApp) {
                   await buildClientBundle();
                   await bundleRuntime();
                 } else {
