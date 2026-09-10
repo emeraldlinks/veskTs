@@ -1364,16 +1364,30 @@ throw new VeskError({
     blocks: [
       {
         kind: "p",
-        text: "Vesk provides headless render helpers for conditional rendering, list rendering, and pattern matching. These are composable building blocks — no markup, no styling. All auto-imported from `@vesk/runtime`.",
+        text:
+          "Vesk provides headless render helpers for conditional rendering, list rendering, and pattern matching. These are composable building blocks — no markup, no styling.",
+      },
+      {
+        kind: "note",
+        tone: "info",
+        text:
+          "Unlike `effect`, `derived`, `track` and the rest of the runtime surface, `Show`, `For`, `Switch` and `Match` are **not** auto-imported. Import them explicitly: `import { Show, For, Switch, Match } from '@vesk/runtime';`.",
       },
       { kind: "h2", text: "Show" },
+      {
+        kind: "p",
+        text:
+          "`Show` renders its children when `when` is truthy, otherwise its `fallback`. It is the composable, expression-position answer to `if` — useful inside a `return (...)`, inside `{...}` interpolation, or wherever you need a conditional that is itself just a value. The `fallback` is a string, an element, or omitted (`null`).",
+      },
       {
         kind: "tabs",
         tabs: [
           {
             label: "statement mode",
             filename: "app/components/Greeting.vsk",
-            code: `component Greeting(props: { name?: string }) {
+            code: `import { Show } from '@vesk/runtime';
+
+component Greeting(props: { name?: string }) {
   <Show when={props.name} fallback="Hello, stranger">
     <p>Hello, {props.name}</p>
   </Show>
@@ -1382,7 +1396,9 @@ throw new VeskError({
           {
             label: "expression mode",
             filename: "app/components/Greeting.vsk",
-            code: `component Greeting(props: { name?: string }) {
+            code: `import { Show } from '@vesk/runtime';
+
+component Greeting(props: { name?: string }) {
   return (
     <Show when={props.name} fallback="Hello, stranger">
       <p>Hello, {props.name}</p>
@@ -1392,30 +1408,132 @@ throw new VeskError({
           },
         ],
       },
-      { kind: "h2", text: "For" },
+      { kind: "h2", text: "When to use Show vs. a plain if" },
       {
-        kind: "code",
-        filename: "app/components/TodoList.vsk",
-        code: `<For each={props.items} fallback={<p>No items</p>}>
-  {(item, index) => <li>{index}: {item}</li>}
-</For>`,
+        kind: "p",
+        text:
+          "In statement position the headless helpers and the native control flow often achieve the same result, and you should pick whichever reads more naturally. The compiler lowers statement-mode `if`, `switch`, `for` and `while` directly to reactive IR, so they are always available — no import required.",
+      },
+      {
+        kind: "list",
+        items: [
+          "`if (cond) return <p>Loading</p>` — guard-clause early return at the top of a body. This is idiomatic for `useFetch` loading/error guards and needs no helper.",
+          "`{show ? <A/> : <B/>}` — a plain ternary in interpolation when both branches are simple.",
+          "`<Show when={cond}>...</Show>` — prefer when the branch content is large, when you want a rich name (e.g. `<Show when={auth.user}>`), or when you are working in a purely expression-position context like a `map` callback.",
+          "`<Switch><Match when=.../>...</Switch>` — prefer when there are three or more mutually exclusive branches; it stays flat where a nested ternary would indent.",
+        ],
       },
       {
         kind: "p",
-        text: "The `For` component uses keyed reconciliation — the compiler generates DOM updates that add, remove and reorder elements without re-rendering the whole list. In statement mode you can use `for...of` with `; key` clauses directly.",
+        text:
+          "A one-to-one `Show`/`Switch` map is cheat-sheeted below. Both forms compile to the same rendering; choose the reading that matches the surrounding code.",
+      },
+      {
+        kind: "table",
+        head: ["Goal", "Statement-mode (native)", "Expression-mode helper"],
+        rows: [
+          ["conditional", "`if (cond) return <A/>;` or `if (cond) { <A/> }`", "`<Show when={cond}><A/></Show>`"],
+          ["multi-way", "`switch (x) { case 'a': return <A/>; default: return <B/>; }`", "`<Switch><Match when={x==='a'}><A/></Match>...`"],
+        ],
+      },
+      { kind: "h2", text: "For" },
+      {
+        kind: "p",
+        text:
+          "`For` takes an `each` list and a `children` render function `(item, index) => vnode`. In Vesk you should use the native `for...of` loop with a `; key` clause instead: it compiles to keyed reconciliation with far less ceremony and reads like plain JavaScript.",
+      },
+      {
+        kind: "tabs",
+        tabs: [
+          {
+            label: "statement mode",
+            filename: "app/components/TodoList.vsk",
+            code: `import { For } from '@vesk/runtime';
+
+interface Todo { id: number; text: string }
+
+component TodoList(props: { items: Todo[] }) {
+  if (props.items.length === 0) return <p>No items</p>;
+  <ul>
+    for (const todo of props.items; key todo.id) {
+      <li>{todo.text}</li>
+    }
+  </ul>
+}`,
+          },
+          {
+            label: "expression mode",
+            filename: "app/components/TodoList.vsk",
+            code: `import { For } from '@vesk/runtime';
+
+interface Todo { id: number; text: string }
+
+component TodoList(props: { items: Todo[] }) {
+  return (
+    <ul>
+      {props.items.map((todo) => <li key={todo.id}>{todo.text}</li>)}
+    </ul>
+  );
+}`,
+          },
+        ],
+      },
+      {
+        kind: "note",
+        tone: "warn",
+        text:
+          "`<For>` uses `props.children` as a render function, but JSX render-function children (a `{(item, index) => ...}` arrow directly inside the tag) do **not** compile in `.vsk`. Prefer the statement-mode `for...of ; key` loop, or `.map` with a `key` prop in expression mode. The `; key` clause you see in the statement-mode example is a Vesk extension and is covered on the List Rendering page.",
       },
       { kind: "h2", text: "Switch / Match" },
       {
-        kind: "code",
-        filename: "app/components/StatusBadge.vsk",
-        code: `<Switch>
-  <Match when={props.status === 'active'}>
-    <span class="bg-green-100 text-green-800">Active</span>
-  </Match>
-  <Match fallback>
-    <span class="bg-gray-100 text-gray-800">Unknown</span>
-  </Match>
-</Switch>`,
+        kind: "p",
+        text:
+          "`<Switch>` returns the first child that renders non-empty; `<Match when=...>` renders its children only when `when` is truthy, and a `<Match fallback>` matches the default arm. This is the expression-position analogue of a `switch` with `default`, useful when a ternary would nest.",
+      },
+      {
+        kind: "tabs",
+        tabs: [
+          {
+            label: "statement mode",
+            filename: "app/components/StatusBadge.vsk",
+            code: `import { Switch, Match } from '@vesk/runtime';
+
+component StatusBadge(props: { status: string }) {
+  <Switch>
+    <Match when={props.status === 'active'}>
+      <span class="bg-green-100 text-green-800">Active</span>
+    </Match>
+    <Match when={props.status === 'off'}>
+      <span class="bg-gray-100 text-gray-800">Off</span>
+    </Match>
+    <Match fallback>
+      <span class="bg-gray-100 text-gray-800">Unknown</span>
+    </Match>
+  </Switch>
+}`,
+          },
+          {
+            label: "expression mode",
+            filename: "app/components/StatusBadge.vsk",
+            code: `import { Switch, Match } from '@vesk/runtime';
+
+component StatusBadge(props: { status: string }) {
+  return (
+    <Switch>
+      <Match when={props.status === 'active'}>
+        <span class="bg-green-100 text-green-800">Active</span>
+      </Match>
+      <Match when={props.status === 'off'}>
+        <span class="bg-gray-100 text-gray-800">Off</span>
+      </Match>
+      <Match fallback>
+        <span class="bg-gray-100 text-gray-800">Unknown</span>
+      </Match>
+    </Switch>
+  );
+}`,
+          },
+        ],
       },
     ],
   },

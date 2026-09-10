@@ -42,6 +42,20 @@ function isWhitespaceChar(ch: string): boolean {
   return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v' || ch === '\u00a0' || ch === '\ufeff';
 }
 
+function offsetToLineCol(source: string, offset: number): { line: number; column: number } {
+  let line = 1;
+  let column = 1;
+  for (let i = 0; i < offset && i < source.length; i++) {
+    if (source.charCodeAt(i) === 10) {
+      line++;
+      column = 1;
+    } else {
+      column++;
+    }
+  }
+  return { line, column };
+}
+
 /**
  * Scans the source and blanks `; key <expr>` / `; index <ident>` clauses
  * found in `for (...)` headers, returning the rewritten code (same length
@@ -179,6 +193,24 @@ export function preprocessForClauses(source: string): { code: string; annotation
               while (k < end && isWhitespaceChar(source[k])) k++;
               const expr = source.slice(k, end).trim();
               if (expr) {
+                if (expr[0] === ':') {
+                  // `; key : <expr>` / `; key: <expr>` (colon form) is not valid
+                  // Vesk: the clause is `; key <expr>`, and passing the colon
+                  // through used to emit a broken reconciliation key.
+                  const { line, column } = offsetToLineCol(source, start);
+                  throw new VeskError(
+                    `Invalid \`; key\` clause — write the key expression after \`key\` without a colon: \`key ${expr.slice(1).trim()}\`.`,
+                    {
+                      line,
+                      column,
+                      code: codeFrame(source, line, column),
+                      nextSteps: [
+                        'Use `; key <expr>` (no colon), e.g. `for (const item of items; key item.id)`.',
+                        'For the iteration index use `; index <name>`, e.g. `for (const item of items; key item.id; index i)`.',
+                      ],
+                    },
+                  );
+                }
                 keyRange = [k, start + clause.length];
                 clauseCode = ' '.repeat(clause.length);
               }

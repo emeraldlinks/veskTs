@@ -109,6 +109,95 @@ component PostList() {
         text:
           "`staleTime` only affects the client cache: after a successful fetch the payload is kept in `globalThis.__vsk_fetch_cache` and reused without a network request while `Date.now() - fetchedAt < staleTime`. It never affects server rendering.",
       },
+      { kind: "h2", text: "into: writing the payload into a tracked cell" },
+      {
+        kind: "p",
+        text:
+          "Give `useFetch` an `into` target and the payload is written into a tracked cell via `set()` the moment it lands — no `await resource`, no `.data` lookups. The cell is the single source of truth: `loading` and `error` still read from the returned `Resource`, but the payload renders straight from the cell, so any code that reads the cell (a loop, a `derived`, another component passed the cell) stays in sync automatically.",
+      },
+      {
+        kind: "p",
+        text:
+          "The target is the second member of a TrackDecl. `const &[posts, postsCell] = track<Post[]>([]);` gives you `posts` (the auto-tracked binding you read and write directly) plus `postsCell`, the raw `Tracked<Post[]>` that `into` expects. The cell keeps its initial value until the first success, so initialize it to the empty list to avoid a null-check.",
+      },
+      {
+        kind: "tabs",
+        tabs: [
+          {
+            label: "statement mode",
+            filename: "app/components/PostList.vsk",
+            code: `interface Post {
+  id: number;
+  title: string;
+}
+
+component PostList() {
+  const &[posts, postsCell] = track<Post[]>([]);
+  const res = useFetch<Post[]>('/api/posts', {
+    key: 'posts',
+    into: postsCell,
+    staleTime: 60_000,
+  });
+
+  if (res.loading && posts.length === 0) return <p>Loading...</p>;
+  if (res.error) return <p>{(res.error as Error).message}</p>;
+
+  <div>
+    <button onclick={() => res.refresh()}>Refresh</button>
+    <ul>
+      for (const post of posts) {
+        <li>{post.title}</li>
+      }
+    </ul>
+  </div>
+}`,
+          },
+          {
+            label: "expression mode",
+            filename: "app/components/PostList.vsk",
+            code: `interface Post {
+  id: number;
+  title: string;
+}
+
+component PostList() {
+  const &[posts, postsCell] = track<Post[]>([]);
+  const res = useFetch<Post[]>('/api/posts', {
+    key: 'posts',
+    into: postsCell,
+    staleTime: 60_000,
+  });
+
+  if (res.loading && posts.length === 0) return <p>Loading...</p>;
+  if (res.error) return <p>{(res.error as Error).message}</p>;
+
+  return (
+    <div>
+      <button onclick={() => res.refresh()}>Refresh</button>
+      <ul>
+        {posts.map((post) => <li>{post.title}</li>)}
+      </ul>
+    </div>
+  );
+}`,
+          },
+        ],
+      },
+      {
+        kind: "list",
+        items: [
+          "`res.loading`/`res.error` describe the load; the payload lives in `posts`, so reads like `posts.length` and `{posts.map(...)}` are reactive on the cell.",
+          "`res.refresh()` re-runs the fetcher and lands the fresh payload into the same cell; `res.abort()` cancels the in-flight request.",
+          "The cell is written on both server and client, so the `<ul>` renders from the same value during SSR and after hydration.",
+          "The cell survives the resource's lifecycle — pass it to a child component or read it from a `derived` and it reflects the latest payload without plumbing the `Resource` around.",
+        ],
+      },
+      {
+        kind: "note",
+        tone: "info",
+        text:
+          "Because the payload is written into the cell rather than read through the `Resource`, the component can also write to `posts` directly (e.g. an optimistic delete before a `refresh()`); the next settle overwrites the cell with fresh data.",
+      },
       { kind: "h2", text: "Options" },
       {
         kind: "p",

@@ -1268,6 +1268,41 @@ describe('For-of key/index clauses and #empty blocks', () => {
 		const ast = parse(s);
 		expect(ast.__vskAnnotations).toBeFalsy();
 	});
+
+	it('rejects `; key: <expr>` colon form with a helpful error', () => {
+		try {
+			parse(`component App {
+				for (const todo of todos; key: todo.id) {
+					<li>{todo.text}</li>
+				}
+			}`);
+			throw new Error('expected VeskError for colon key clause');
+		} catch (e) {
+			expect(e.name).toBe('VeskError');
+			if (!e.message.includes('Invalid `; key` clause')) {
+				throw new Error(`expected "Invalid ; key clause" in message, got: ${e.message}`);
+			}
+			if (!e.message.includes('key todo.id')) {
+				throw new Error(`expected suggestion "key todo.id" in message, got: ${e.message}`);
+			}
+		}
+	});
+
+	it('rejects `; key : <expr>` (space before colon) form', () => {
+		try {
+			parse(`component App {
+				for (const todo of todos; key : todo.id) {
+					<li>{todo.text}</li>
+				}
+			}`);
+			throw new Error('expected VeskError for spaced colon key clause');
+		} catch (e) {
+			expect(e.name).toBe('VeskError');
+			if (!e.message.includes('Invalid `; key` clause')) {
+				throw new Error(`expected "Invalid ; key clause" in message, got: ${e.message}`);
+			}
+		}
+	});
 });
 
 // ============================================================
