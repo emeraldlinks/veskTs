@@ -28,6 +28,11 @@ const INTRINSIC_TAGS = [
   'ProfileSchema',
   'SoftwareSchema',
   'Script',
+  'Show',
+  'For',
+  'Switch',
+  'Match',
+  'Md',
 ];
 
 function escapeRegex(str: string): string {

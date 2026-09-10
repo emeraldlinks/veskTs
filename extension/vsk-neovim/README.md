@@ -17,14 +17,17 @@ Vesk language support for Neovim — full syntax highlighting and LSP integratio
 -- From the vesk monorepo (development)
 {
   dir = "/path/to/vesk/extension/vsk-neovim",
-  build = "node scripts/build-lsp.js",
+  build = "node scripts/build-lsp.cjs",
   opts = {},
 }
 
--- Standalone (when cloned directly)
+-- Standalone (installed with the curl-bash installer, see below):
+--   curl -fsSL https://raw.githubusercontent.com/emeraldlinks/veskTs/main/scripts/install.sh | bash
+-- This clones the extension into ~/.local/share/vesk and wires it up for
+-- Neovim (pack/start) or Vim (runtime files). For a manual clone, use:
 {
-  url = "https://github.com/vesk/vesk.nvim",
-  build = "node scripts/build-lsp.js",
+  dir = "~/.local/share/vesk/extension/vsk-neovim",
+  build = "node scripts/build-lsp.cjs",
   opts = {},
 }
 ```
@@ -40,7 +43,10 @@ Plug '/path/to/vesk/extension/vsk-neovim'
 ```lua
 require("vesk").setup({
   -- Optional: point to a custom LSP server path
-  cmd = { "node", "/custom/path/to/index.mjs" },
+  lsp_cmd = "/custom/path/to/index.mjs",   -- spawns: node <path> --stdio
+
+  -- Or fully control the command (must include --stdio):
+  -- cmd = { "node", "/custom/path/to/index.mjs", "--stdio" },
 
   -- LSP client capabilities (merged with defaults)
   capabilities = {},

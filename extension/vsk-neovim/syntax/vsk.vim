@@ -88,6 +88,8 @@ syntax keyword vskIntrinsic redirect permanentRedirect notFound
 syntax keyword vskIntrinsic useRouter useNavigate useParams usePathname useSearchParams useFetch
 syntax keyword vskIntrinsic Link NavLink Outlet Form Field
 syntax keyword vskIntrinsic Image JsonLd Portal Head Experiment
+syntax keyword vskIntrinsic Show For Switch Match Md
+syntax keyword vskIntrinsic defineAction getAction clearActions
 syntax keyword vskIntrinsic required email minLength maxLength pattern custom
 
 " ── Reactive declarations &[...] ────────────────────────────────
@@ -125,9 +127,10 @@ syntax match vskCSSImportant /!\s*important/ contained
 syntax region vskHeadBlock matchgroup=vskHeadTag start=/<[Hh][Ee][Aa][Dd][^>]*>/ end=/<\/[Hh][Ee][Aa][Dd]>/ keepend
       \ contains=vskJSXTag,vskJSXCompTag,vskStringDouble,vskStringSingle
 
-" ── Server/Client blocks ────────────────────────────────────────
+" ── Server/Client/Empty blocks ──────────────────────────────────
 syntax region vskServerBlock matchgroup=vskBlockTag start="{#server}" end="{\/server}" transparent
 syntax region vskClientBlock matchgroup=vskBlockTag start="{#client}" end="{\/client}" transparent
+syntax region vskEmptyBlock matchgroup=vskBlockTag start="{#empty}" end="{\/empty}" transparent
 
 " ── Function calls / property access ────────────────────────────
 syntax match vskFunctionCall /\<[A-Za-z_$][\w$]*\ze(/

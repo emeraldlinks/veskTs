@@ -42,6 +42,14 @@ export const VESK_INTRINSICS: { name: string; kind: CompletionItemKind; detail: 
   { name: 'redirect', kind: CompletionItemKind.Function, detail: 'Redirect to another route', docs: 'redirect("/path") — throws a redirect.', signature: 'redirect(path: string): never' },
   { name: 'permanentRedirect', kind: CompletionItemKind.Function, detail: 'Permanent redirect (301)', docs: 'permanentRedirect("/path") — throws a permanent redirect.', signature: 'permanentRedirect(path: string): never' },
   { name: 'notFound', kind: CompletionItemKind.Function, detail: 'Throw 404', docs: 'notFound() — throws a not-found response.', signature: 'notFound(): never' },
+  { name: 'Show', kind: CompletionItemKind.Class, detail: 'Conditional rendering', docs: '<Show when={condition}> — renders children when condition is truthy.', signature: 'Show(props: { when: boolean | (() => boolean); fallback?: unknown; children?: unknown })' },
+  { name: 'For', kind: CompletionItemKind.Class, detail: 'List rendering', docs: '<For each={items}> — keyed list rendering with reconciliation.', signature: 'For<T>(props: { each: T[]; by?: keyof T; children: (item: T, index: number) => unknown })' },
+  { name: 'Switch', kind: CompletionItemKind.Class, detail: 'Switch/match rendering', docs: '<Switch> with <Match> children — like a JS switch statement for JSX.', signature: 'Switch(props: { fallback?: unknown; children?: unknown })' },
+  { name: 'Match', kind: CompletionItemKind.Class, detail: 'Match case for Switch', docs: '<Match when={value}> — a case inside a <Switch>.', signature: 'Match(props: { when: unknown; children?: unknown })' },
+  { name: 'Md', kind: CompletionItemKind.Class, detail: 'Markdown renderer', docs: '<Md>{content}</Md> — renders Markdown content as HTML.', signature: 'Md(props: { children: string })' },
+  { name: 'defineAction', kind: CompletionItemKind.Function, detail: 'Define a server action', docs: 'defineAction({ name, handler }) — registers a server-side form action.', signature: 'defineAction<T>(action: { name: string; handler: (request: VeskRequest) => Promise<T> | T })' },
+  { name: 'getAction', kind: CompletionItemKind.Function, detail: 'Get a registered action', docs: 'getAction(name) — retrieves a registered server action by name.', signature: 'getAction(name: string): Function | undefined' },
+  { name: 'clearActions', kind: CompletionItemKind.Function, detail: 'Clear all registered actions', docs: 'clearActions() — removes all registered server actions.', signature: 'clearActions(): void' },
 ];
 
 // ── Tailwind CSS classes (comprehensive subset) ────────────────

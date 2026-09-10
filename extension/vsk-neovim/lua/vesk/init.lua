@@ -37,7 +37,7 @@ local function find_lsp_server()
   }
   for _, p in ipairs(candidates) do
     if vim.fn.filereadable(p) == 1 then
-      return { "node", p }
+      return { "node", p, "--stdio" }
     end
   end
   vim.notify(
@@ -51,7 +51,9 @@ end
 
 function M.setup(opts)
   opts = opts or {}
-  local lsp_cmd = opts.cmd or (opts.lsp_cmd and { "node", opts.lsp_cmd }) or find_lsp_server()
+  local lsp_cmd = opts.cmd
+    or (opts.lsp_cmd and { "node", opts.lsp_cmd, "--stdio" })
+    or find_lsp_server()
 
   vim.api.nvim_create_autocmd("FileType", {
     pattern = "vsk",
@@ -65,6 +67,30 @@ function M.setup(opts)
         capabilities = opts.capabilities
           or (vim.lsp.protocol.make_client_capabilities and vim.lsp.protocol.make_client_capabilities()),
         settings = opts.settings or {},
+      })
+
+      -- The vesk server only computes diagnostics on textDocument/didChange
+      -- (Volar pushes publishDiagnostics after a change, not on didOpen), and
+      -- Neovim never sends a didChange for a just-opened buffer. Send one
+      -- synthetic no-op change once the client attaches so errors/squiggles
+      -- appear immediately instead of after the first keystroke.
+      vim.api.nvim_create_autocmd("LspAttach", {
+        buffer = args.buf,
+        once = true,
+        callback = function(attach)
+          local client = vim.lsp.get_client_by_id(attach.data.client_id)
+          if not client or client.name ~= "vesk" then return end
+          -- Wait for the client to finish initialize before kicking it.
+          vim.defer_fn(function()
+            local version = vim.api.nvim_buf_get_changedtick(args.buf)
+            vim.lsp.buf_notify(args.buf, "textDocument/didChange", {
+              textDocument = { uri = vim.uri_from_bufnr(args.buf), version = version },
+              contentChanges = {
+                { range = { start = { 0, 0 }, ["end"] = { 0, 0 } }, text = "" },
+              },
+            })
+          end, 500)
+        end,
       })
     end,
   })

@@ -14,6 +14,32 @@ npm install
 npm run dev
 ```
 
+## Editor Support
+
+`.vsk` files get full language features (diagnostics, completion, hover,
+definition, rename) via the vesk language server.
+
+### Neovim
+
+<details>
+<summary>Install (curl | bash)</summary>
+
+```sh
+bash <(curl -fsSL https://raw.githubusercontent.com/emeraldlinks/veskTs/main/scripts/install.sh)
+```
+
+Installs the plugin to `pack/vesk/start/vesk.nvim`, wires up your `vimrc`
+with `require('vesk').setup {}`, and enables the LSP client for `.vsk`
+buffers. Re-run the same command to update. Set `EDITOR=vim` (and remove
+the Neovim-specific config) to target classic Vim instead.
+</details>
+
+### VS Code
+
+Install `vesk-vscode-*.vsix` from the repo's
+[`extension/vsk-vscode/`](extension/vsk-vscode) directory (packaged via
+`node scripts/package-vsix.js`).
+
 ## Documentation
 
 - [docu/](docu/) — language, compiler, runtime, and CLI reference

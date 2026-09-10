@@ -17,5 +17,5 @@ end
 
 -- Matchit support for block matching
 if vim.fn.exists("b:match_words") == 0 then
-  vim.b.match_words = [[<style>:</style>,<head>:</head>,{#server}:{/server},{#client}:{/client},<:>]]
+  vim.b.match_words = [[<style>:</style>,<head>:</head>,{#server}:{/server},{#client}:{/client},{#empty}:{/empty},<:>]]
 end

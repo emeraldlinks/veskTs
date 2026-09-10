@@ -158,6 +158,14 @@
           "end": "\\{\\/client\\}",
           "endCaptures": { "0": { "name": "keyword.control.client-block.vsk" } },
           "patterns": [{ "include": "source.vsk" }]
+        },
+        {
+          "name": "meta.block.empty.vsk",
+          "begin": "\\{#empty\\}",
+          "beginCaptures": { "0": { "name": "keyword.control.empty-block.vsk" } },
+          "end": "\\{\\/empty\\}",
+          "endCaptures": { "0": { "name": "keyword.control.empty-block.vsk" } },
+          "patterns": [{ "include": "source.vsk" }]
         }
       ]
     },

@@ -125,19 +125,31 @@ async function main() {
     textDocument: { uri, version: 2 },
     contentChanges: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: '' }],
   });
-  await new Promise(r => setTimeout(r, 8000));
+  // The bundled server inlines TypeScript and builds its first program lazily
+  // (initialize + lib injection can exceed 10s on cold start), so diagnostics
+  // arrive on their own schedule. Poll for the expected diagnostic instead of
+  // sleeping a fixed amount — the old 8s sleep failed on slow machines.
+  const diagDeadline = Date.now() + 45000;
+  while (Date.now() < diagDeadline) {
+    if (diagnostics.some(d => d.message.includes("Cannot find name 'undefinedVar'"))) {
+      break;
+    }
+    await new Promise(r => setTimeout(r, 500));
+  }
+  // Keep the capture: a trailing publish (e.g. transient empty) must not clobber it.
+  const diagSnapshot = [...diagnostics];
 
   // 2. diagnostics
   console.log('diagnostics received:', diagnostics.length, diagnostics.map(d => d.message).join(' | '));
-  const undef = diagnostics.filter(d => d.message.includes("Cannot find name 'undefinedVar'"));
+  const undef = diagSnapshot.filter(d => d.message.includes("Cannot find name 'undefinedVar'"));
   assert(undef.length === 1, `diagnostics flag undefinedVar (${undef.length})`);
-  const noUnknownComp = diagnostics.filter(d => d.message.includes('Unknown component') && d.message.includes('Card'));
+  const noUnknownComp = diagSnapshot.filter(d => d.message.includes('Unknown component') && d.message.includes('Card'));
   assert(noUnknownComp.length === 0, 'Card component not flagged as unknown');
-  const unusedTrack = diagnostics.filter(d => d.message.includes("Unused import: 'track'"));
+  const unusedTrack = diagSnapshot.filter(d => d.message.includes("Unused import: 'track'"));
   assert(unusedTrack.length === 0, `used import 'track' not flagged unused (${unusedTrack.length})`);
   // jsxImportSource must NOT be defaulted by the LSP — TS would hunt for
   // '@vesk/runtime/jsx-runtime' module types that don't exist (TS2875).
-  const jsxRuntimeErr = diagnostics.filter(d => d.message.includes('jsx-runtime'));
+  const jsxRuntimeErr = diagSnapshot.filter(d => d.message.includes('jsx-runtime'));
   assert(jsxRuntimeErr.length === 0, `no jsx-runtime module error (${jsxRuntimeErr.map(d => d.message).join('; ')})`);
 
   // 2b. intrinsic-element attributes are typed via AMBIENT IntrinsicElements

@@ -22,6 +22,7 @@ import require$$7 from 'tls';
 import require$$9 from 'zlib';
 import * as fs2 from 'fs/promises';
 import fs2__default from 'fs/promises';
+import 'node:module';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import require$$6 from 'inspector';
 import { createRequire, builtinModules } from 'module';
@@ -91235,12 +91236,12 @@ var xhtml_default = {
 // src/extentions/jsx/index.ts
 var hexNumber = /^[\da-fA-F]+$/;
 var decimalNumber = /^\d+$/;
-function getQualifiedJSXName(object) {
+function getQualifiedJSXName$1(object) {
   if (!object) return object;
   if (object.type === "JSXIdentifier") return object.name;
   if (object.type === "JSXNamespacedName") return object.namespace.name + ":" + object.name.name;
   if (object.type === "JSXMemberExpression")
-    return getQualifiedJSXName(object.object) + "." + getQualifiedJSXName(object.property);
+    return getQualifiedJSXName$1(object.object) + "." + getQualifiedJSXName$1(object.property);
 }
 function generateJsxParser(acorn, acornTypeScript, Parser, jsxOptions) {
   const tt = acorn.tokTypes;
@@ -91505,10 +91506,10 @@ function generateJsxParser(acorn, acornTypeScript, Parser, jsxOptions) {
               this.unexpected();
           }
         }
-        if (getQualifiedJSXName(closingElement.name) !== getQualifiedJSXName(openingElement.name)) {
+        if (getQualifiedJSXName$1(closingElement.name) !== getQualifiedJSXName$1(openingElement.name)) {
           this.raise(
             closingElement.start,
-            "Expected corresponding JSX closing tag for <" + getQualifiedJSXName(openingElement.name) + ">"
+            "Expected corresponding JSX closing tag for <" + getQualifiedJSXName$1(openingElement.name) + ">"
           );
         }
       }
@@ -95699,6 +95700,18 @@ function isIdentStartCode$1(code) {
 function isIdentCharCode$1(code) {
     return isIdentStartCode$1(code) || (code >= 48 && code <= 57);
 }
+function getQualifiedJSXName(object) {
+    if (!object)
+        return object;
+    if (object.type === 'JSXIdentifier')
+        return object.name;
+    if (object.type === 'JSXNamespacedName')
+        return object.namespace.name + ':' + object.name.name;
+    if (object.type === 'JSXMemberExpression') {
+        return getQualifiedJSXName(object.object) + '.' + getQualifiedJSXName(object.property);
+    }
+    return null;
+}
 function looksLikeGenericArrowAt(input, pos) {
     let i = pos + 1;
     while (i < input.length && isWsChar(input.charCodeAt(i)))
@@ -95816,6 +95829,9 @@ function VeskParserPlugin(config = {}) {
             #closeTagName = null;
             #jsxStartsStatement = false;
             #inTSTypeDecl = false;
+            #pendingChildStatement = false;
+            /** per-statement context-stack depths (LIFO — child statements may nest) */
+            #jsxChildDepthStack = [];
             constructor(options, input) {
                 super(options, input);
             }
@@ -95823,19 +95839,320 @@ function VeskParserPlugin(config = {}) {
                 const ctx = this.curContext();
                 return ctx && (ctx.token === '{' || ctx.token === 'function');
             }
+            #isJsxChildrenContext() {
+                const ctx = this.curContext();
+                return !!ctx && ctx.token === '<tag>...</tag>';
+            }
+            /**
+             * Determines whether the text starting at `this.pos` opens a
+             * statement-mode control-flow header (`if (`, `for (`, `while (`,
+             * `switch (`, `try {`, `do {`) among JSX children. Scans chars only —
+             * the paren body must balance and be followed by a `{` block.
+             */
+            #scansChildStatement() {
+                const input = this.input;
+                let i = this.pos;
+                while (i < input.length && isWsChar(input.charCodeAt(i)))
+                    i++;
+                if (i >= input.length || !isIdentStartCode$1(input.charCodeAt(i)))
+                    return false;
+                const wordStart = i;
+                while (i < input.length && isIdentCharCode$1(input.charCodeAt(i)))
+                    i++;
+                const word = input.slice(wordStart, i);
+                // Declaration statements (`const`/`let`/`var …;`) are also valid
+                // statement-mode element children. Recognise them by a `=` of
+                // assignment plus either a top-level `;` or a newline at depth 0
+                // (ASI-style). Bail out (stay text) when a closing JSX tag `</` is
+                // seen before a terminator: a real element-child statement never
+                // contains its parent's closing tag, while prose text like
+                // `<p>const value = 5 apples</p>` does.
+                if (word === 'const' || word === 'let' || word === 'var') {
+                    let depth = 0;
+                    let seenAssign = false;
+                    let q = i;
+                    while (q < input.length) {
+                        const c = input.charCodeAt(q);
+                        if (c === 34 || c === 39 || c === 96) { // " ' `
+                            const quote = c;
+                            let tplDepth = 0;
+                            q++;
+                            while (q < input.length) {
+                                const ch = input.charCodeAt(q);
+                                if (ch === 92) {
+                                    q += 2;
+                                    continue;
+                                }
+                                if (quote === 96 && ch === 36 && input.charCodeAt(q + 1) === 123) {
+                                    tplDepth++;
+                                    q += 2;
+                                    continue;
+                                }
+                                if (quote === 96 && ch === 125 && tplDepth > 0) {
+                                    tplDepth--;
+                                    q++;
+                                    continue;
+                                }
+                                if (ch === quote && tplDepth === 0) {
+                                    q++;
+                                    break;
+                                }
+                                q++;
+                            }
+                            continue;
+                        }
+                        if (c === 60 && input.charCodeAt(q + 1) === 47)
+                            return false; // '</' -> it's JSX text, not a statement
+                        if (c === 40 || c === 91 || c === 123)
+                            depth++;
+                        else if (c === 41 || c === 93 || c === 125)
+                            depth--;
+                        else if (c === 61 && depth === 0) { // '='
+                            const n2 = input.charCodeAt(q + 1);
+                            const n1 = q > 0 ? input.charCodeAt(q - 1) : 0;
+                            if (n2 !== 61 && n2 !== 62 && n1 !== 33 && n1 !== 60 && n1 !== 61)
+                                seenAssign = true; // not ==, =>, !=, <=, >=
+                        }
+                        else if (c === 59 && depth === 0)
+                            return true; // ';'
+                        else if ((c === 10 || c === 13) && depth === 0 && seenAssign)
+                            return true; // ASI at end of line
+                        q++;
+                    }
+                    return false;
+                }
+                // Bare expression statements (`console.log(x)`, `alert('hi')`,
+                // `doSomething(args)`) are also valid statement-mode element children.
+                // They are ambiguous with prose, so only treat them as code when they
+                // read like a standalone line of code — not a sentence:
+                //   * an identifier call chain (`console.log`, `foo?.bar`) with NO
+                //     whitespace before the `(` (prose writes `word (`, code writes
+                //     `word(`),
+                //   * a balanced `(...)` call,
+                //   * then a terminator — a top-level `;` or ASI newline — with no
+                //     bare word after the `)` before it (`doSomething(x) then more`
+                //     is prose; `doSomething(x)` on its own line is code).
+                // Bail out (stay text) when a closing JSX tag `</` is seen first, as
+                // a real child statement never contains its parent's closing tag.
+                if (isIdentStartCode$1(input.charCodeAt(wordStart))) {
+                    let q = i; // position just after the first identifier
+                    // member chain: `.foo` / `?.bar`, no surrounding whitespace
+                    while (q < input.length) {
+                        const c = input.charCodeAt(q);
+                        if (c === 46 /* . */) {
+                            q++;
+                        }
+                        else if (c === 63 /* ? */ && input.charCodeAt(q + 1) === 46) {
+                            q += 2;
+                        }
+                        else
+                            break;
+                        if (q >= input.length || !isIdentStartCode$1(input.charCodeAt(q)))
+                            return false;
+                        q++;
+                        while (q < input.length && isIdentCharCode$1(input.charCodeAt(q)))
+                            q++;
+                    }
+                    // must be a call: `(` with no whitespace before it
+                    if (input.charCodeAt(q) === 40 /* ( */) {
+                        let depth = 0;
+                        let callClosed = false;
+                        let s = q;
+                        while (s < input.length) {
+                            const c = input.charCodeAt(s);
+                            if (c === 34 || c === 39 || c === 96) { // " ' `
+                                const quote = c;
+                                let tplDepth = 0;
+                                s++;
+                                while (s < input.length) {
+                                    const ch = input.charCodeAt(s);
+                                    if (ch === 92) {
+                                        s += 2;
+                                        continue;
+                                    }
+                                    if (quote === 96 && ch === 36 && input.charCodeAt(s + 1) === 123) {
+                                        tplDepth++;
+                                        s += 2;
+                                        continue;
+                                    }
+                                    if (quote === 96 && ch === 125 && tplDepth > 0) {
+                                        tplDepth--;
+                                        s++;
+                                        continue;
+                                    }
+                                    if (ch === quote && tplDepth === 0) {
+                                        s++;
+                                        break;
+                                    }
+                                    s++;
+                                }
+                                continue;
+                            }
+                            if (c === 60 && input.charCodeAt(s + 1) === 47)
+                                return false; // '</'
+                            if (c === 40 || c === 91 || c === 123)
+                                depth++;
+                            else if (c === 41 || c === 93 || c === 125) {
+                                depth--;
+                                if (c === 41 && depth === 0) {
+                                    callClosed = true;
+                                    s++;
+                                    break;
+                                }
+                            }
+                            s++;
+                        }
+                        if (!callClosed)
+                            return false;
+                        // After the call, walk forward treating each character in turn so
+                        // we can tell "standalone statement ending in `;` / newline" from
+                        // "trailing prose on the same line". Chained member calls
+                        // (`.foo(...)`) and paren-groups are consumed; a bare word on the
+                        // same line before a newline/`;` means the child is a sentence.
+                        let d = 0;
+                        for (;;) {
+                            if (s >= input.length)
+                                return false;
+                            const c = input.charCodeAt(s);
+                            if (c === 60 && input.charCodeAt(s + 1) === 47)
+                                return false; // '</' -> prose
+                            if (c === 34 || c === 39 || c === 96) { // " ' `
+                                const quote = c;
+                                let tplDepth = 0;
+                                s++;
+                                while (s < input.length) {
+                                    const ch = input.charCodeAt(s);
+                                    if (ch === 92) {
+                                        s += 2;
+                                        continue;
+                                    }
+                                    if (quote === 96 && ch === 36 && input.charCodeAt(s + 1) === 123) {
+                                        tplDepth++;
+                                        s += 2;
+                                        continue;
+                                    }
+                                    if (quote === 96 && ch === 125 && tplDepth > 0) {
+                                        tplDepth--;
+                                        s++;
+                                        continue;
+                                    }
+                                    if (ch === quote && tplDepth === 0) {
+                                        s++;
+                                        break;
+                                    }
+                                    s++;
+                                }
+                                continue;
+                            }
+                            if (c === 40 || c === 91 || c === 123)
+                                d++;
+                            else if (c === 41 || c === 93 || c === 125)
+                                d--;
+                            else if (c === 59 && d === 0)
+                                return true; // ';' -> statement
+                            else if ((c === 10 || c === 13) && d === 0)
+                                return true; // ASI newline -> standalone
+                            else if (c === 46) { // member access `.foo`; may lead to another call
+                                s++;
+                                while (s < input.length && isIdentCharCode$1(input.charCodeAt(s)))
+                                    s++;
+                                continue;
+                            }
+                            else if (isIdentCharCode$1(c) || isIdentStartCode$1(c))
+                                return false; // bare word -> prose
+                            s++;
+                        }
+                    }
+                }
+                if (word !== 'if' && word !== 'for' && word !== 'while' && word !== 'switch' && word !== 'try' && word !== 'do')
+                    return false;
+                let p = i;
+                while (p < input.length && isWsChar(input.charCodeAt(p)))
+                    p++;
+                if (word === 'try' || word === 'do') {
+                    return input.charCodeAt(p) === 123; // '{'
+                }
+                if (input.charCodeAt(p) !== 40)
+                    return false; // '('
+                let depth = 1;
+                let q = p + 1;
+                while (q < input.length) {
+                    const c = input.charCodeAt(q);
+                    if (c === 34 || c === 39 || c === 96) {
+                        const quote = c;
+                        q++;
+                        while (q < input.length) {
+                            const ch = input.charCodeAt(q);
+                            if (ch === 92) {
+                                q += 2;
+                                continue;
+                            }
+                            if (ch === quote) {
+                                q++;
+                                break;
+                            }
+                            q++;
+                        }
+                        continue;
+                    }
+                    if (c === 40 || c === 91 || c === 123)
+                        depth++;
+                    else if (c === 41 || c === 93 || c === 125) {
+                        depth--;
+                        if (c === 41 && depth === 0)
+                            break;
+                    }
+                    q++;
+                }
+                if (q >= input.length)
+                    return false;
+                let r = q + 1;
+                while (r < input.length && isWsChar(input.charCodeAt(r)))
+                    r++;
+                return input.charCodeAt(r) === 123; // '{'
+            }
             readToken(code) {
+                if (this.#componentDepth > 0 && this.#isJsxChildrenContext() && this.#scansChildStatement()) {
+                    this.#pendingChildStatement = true;
+                    this.#jsxChildDepthStack.push(this.context.length);
+                    this.context.push(types$2.b_stat);
+                    if (isWsChar(code)) {
+                        this.skipSpace();
+                        this.start = this.pos;
+                        if (this.options.locations && typeof this.curPosition === 'function') {
+                            this.startLoc = this.curPosition();
+                        }
+                    }
+                    return super.readToken(this.input.codePointAt(this.pos));
+                }
                 if (this.#componentDepth > 0 && code === 60 && this.#isBlockContext()) {
                     const next = this.input.charCodeAt(this.pos + 1);
-                    if (next === 47 || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
-                        const startsNewStatement = this.hasPrecedingLineBreak();
-                        const inType = this.inType;
-                        const forceJsx = () => {
-                            const savedExprAllowed = this.exprAllowed;
-                            this.exprAllowed = true;
-                            const result = super.readToken(code);
-                            this.exprAllowed = savedExprAllowed;
-                            return result;
-                        };
+                    const startsNewStatement = this.hasPrecedingLineBreak();
+                    const inType = this.inType;
+                    const forceJsx = () => {
+                        const savedExprAllowed = this.exprAllowed;
+                        this.exprAllowed = true;
+                        const result = super.readToken(code);
+                        this.exprAllowed = savedExprAllowed;
+                        return result;
+                    };
+                    const prev = this.type;
+                    const canEndExpr = prev === tt.name || prev === tt.num || prev === tt.string || prev === tt.regexp ||
+                        prev === tt.bracketR || prev === tt.backQuote || prev === tt.template ||
+                        prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
+                        prev === tt._null || prev === tt.jsxTagEnd;
+                    // A bare `<>` fragment opening a statement (rather than a
+                    // relational/type token) is JSX. It is only safe to force when it
+                    // follows a line break — e.g. a semicolon-less declaration such as
+                    // `const &[x] = track(...)` in statement mode, where plain
+                    // tokenisation emits a `<`/`>` pair. No expression can end in `<>`,
+                    // so a line break alone is sufficient to disambiguate.
+                    const fragmentStart = !inType && next === 62 && startsNewStatement;
+                    if (next === 47 || fragmentStart || (next >= 65 && next <= 90) || (next >= 97 && next <= 122)) {
+                        if (fragmentStart) {
+                            this.#jsxStartsStatement = true;
+                            return forceJsx();
+                        }
                         if (inType) {
                             if (startsNewStatement) {
                                 if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
@@ -95848,11 +96165,6 @@ function VeskParserPlugin(config = {}) {
                             }
                         }
                         else {
-                            const prev = this.type;
-                            const canEndExpr = prev === tt.name || prev === tt.num || prev === tt.string || prev === tt.regexp ||
-                                prev === tt.bracketR || prev === tt.backQuote || prev === tt.template ||
-                                prev === tt._this || prev === tt._super || prev === tt._true || prev === tt._false ||
-                                prev === tt._null || prev === tt.jsxTagEnd;
                             if (!canEndExpr || startsNewStatement) {
                                 if (looksLikeGenericArrowAt(this.input, this.pos) || looksLikeTypeAssertionAt(this.input, this.pos)) {
                                     this.#jsxStartsStatement = false;
@@ -96165,7 +96477,67 @@ function VeskParserPlugin(config = {}) {
                 if (prefix.startsWith('<style') && isStyleBoundary(prefix.charCodeAt(6))) {
                     return this.parseStyleElement(startPos, startLoc);
                 }
-                return super.jsx_parseElementAt(startPos, startLoc);
+                return this.#parseElementWithStatements(startPos, startLoc);
+            }
+            /**
+             * Parses an entire JSX element (or fragment) starting after `<`,
+             * mirroring the vendored acorn-jsx `jsx_parseElementAt` with an added
+             * statement-mode branch: when `#pendingChildStatement` is set (a
+             * control-flow header like `if (…) {` appeared where JSX children
+             * expect text), a real statement is parsed into the children array.
+             */
+            #parseElementWithStatements(startPos, startLoc) {
+                const node = this.startNodeAt(startPos, startLoc);
+                const children = [];
+                const openingElement = this.jsx_parseOpeningElementAt(startPos, startLoc);
+                let closingElement = null;
+                if (!openingElement.selfClosing) {
+                    contents: for (;;) {
+                        if (this.#pendingChildStatement) {
+                            this.#pendingChildStatement = false;
+                            const stmt = this.parseStatement(null);
+                            children.push(stmt);
+                            // Restore the JSX-children tokenizer and re-lex the trailing
+                            // token (lexed under the temporary b_stat context) as a JSX child.
+                            this.context.length = this.#jsxChildDepthStack.pop() ?? this.context.length;
+                            this.exprAllowed = true;
+                            this.pos = this.start;
+                            this.next();
+                            continue;
+                        }
+                        switch (this.type) {
+                            case tstt?.jsxTagStart:
+                                startPos = this.start;
+                                startLoc = this.startLoc;
+                                this.next();
+                                if (this.eat(tt.slash)) {
+                                    closingElement = this.jsx_parseClosingElementAt(startPos, startLoc);
+                                    break contents;
+                                }
+                                children.push(this.jsx_parseElementAt(startPos, startLoc));
+                                break;
+                            case tstt?.jsxText:
+                                children.push(this.parseExprAtom());
+                                break;
+                            case tt.braceL:
+                                children.push(this.jsx_parseExpressionContainer());
+                                break;
+                            default:
+                                this.unexpected();
+                        }
+                    }
+                    if (getQualifiedJSXName(closingElement.name) !== getQualifiedJSXName(openingElement.name)) {
+                        this.raise(closingElement.start, "Expected corresponding JSX closing tag for <" + getQualifiedJSXName(openingElement.name) + ">");
+                    }
+                }
+                const fragmentOrElement = openingElement.name ? "Element" : "Fragment";
+                node["opening" + fragmentOrElement] = openingElement;
+                node["closing" + fragmentOrElement] = closingElement;
+                node.children = children;
+                if (this.type === tt.relational && this.value === "<") {
+                    this.raise(this.start, "Adjacent JSX elements must be wrapped in an enclosing tag");
+                }
+                return this.finishNode(node, "JSX" + fragmentOrElement);
             }
             jsx_parseOpeningElementAt(startPos, startLoc) {
                 // Manual implementation that treats HTML void elements as
@@ -96479,11 +96851,262 @@ function htmlTagEnd(html, lt) {
     return -1;
 }
 
+function levenshtein(a, b) {
+    const an = a.length;
+    const bn = b.length;
+    const matrix = [];
+    for (let i = 0; i <= bn; i++)
+        matrix[i] = [i];
+    for (let j = 0; j <= an; j++)
+        matrix[0][j] = j;
+    for (let i = 1; i <= bn; i++) {
+        for (let j = 1; j <= an; j++) {
+            if (b[i - 1] === a[j - 1]) {
+                matrix[i][j] = matrix[i - 1][j - 1];
+            }
+            else {
+                matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, matrix[i][j - 1] + 1, matrix[i - 1][j] + 1);
+            }
+        }
+    }
+    return matrix[bn][an];
+}
+function didYouMean(name, candidates, maxDistance = 3) {
+    let best = null;
+    let bestDist = Infinity;
+    for (const c of candidates) {
+        const dist = levenshtein(name.toLowerCase(), c.toLowerCase());
+        if (dist < bestDist && dist <= maxDistance) {
+            best = c;
+            bestDist = dist;
+        }
+    }
+    return best;
+}
+function codeFrame(source, line, column, before = 5, after = 5) {
+    if (line <= 0)
+        return '';
+    const lines = source.split('\n');
+    const start = Math.max(1, line - before);
+    const end = Math.min(lines.length, line + after);
+    const width = String(end).length;
+    let out = '';
+    for (let i = start; i <= end; i++) {
+        const text = lines[i - 1] ?? '';
+        const ln = String(i).padStart(width, ' ');
+        out += `${ln} | ${text}\n`;
+        if (i === line) {
+            const pointerCol = Math.max(0, column - 1);
+            const prefix = ' '.repeat(width) + ' | ';
+            out += prefix + ' '.repeat(pointerCol) + '^\n';
+        }
+    }
+    return out.trimEnd();
+}
+const VESK_BUILTINS = [
+    'useFetch', 'useRouter', 'useParams', 'usePathname', 'useSearchParams',
+    'useNavigate', 'useHead', 'useTitle',
+    'Form', 'Field', 'Link', 'NavLink', 'Outlet',
+    'Image', 'Portal',
+    'Experiment',
+    'LoadingIndicator', 'useLoadingIndicator',
+    'required', 'email', 'minLength', 'maxLength', 'pattern', 'custom',
+    'track', 'get', 'set', 'derived', 'effect', 'batch', 'untrack',
+    'cookies', 'headers', 'locals',
+    'VeskResponse', 'VeskRequest', 'ServerRequest', 'ServerResponse',
+    'redirect', 'permanentRedirect', 'notFound',
+];
+class VeskError extends Error {
+    name;
+    file;
+    line;
+    column;
+    suggestions;
+    nextSteps;
+    tip;
+    code;
+    constructor(message, opts = {}) {
+        super(message);
+        this.name = 'VeskError';
+        this.file = opts.file || '';
+        this.line = opts.line || 0;
+        this.column = opts.column || 0;
+        this.suggestions = opts.suggestions || [];
+        this.nextSteps = opts.nextSteps || [];
+        this.tip = opts.tip || '';
+        if (opts.code !== undefined)
+            this.code = opts.code;
+    }
+    static notFound(name, candidates = [], context = {}) {
+        const allCandidates = [...new Set([...candidates, ...VESK_BUILTINS])];
+        const suggestion = didYouMean(name, allCandidates);
+        const isBuiltin = VESK_BUILTINS.includes(name);
+        const msg = suggestion
+            ? `"${name}" is not defined. Did you mean "${suggestion}"?`
+            : `"${name}" is not defined.`;
+        const nextSteps = [];
+        if (suggestion && suggestion !== name) {
+            nextSteps.push(`Replace "${name}" with "${suggestion}".`);
+        }
+        if (isBuiltin) {
+            nextSteps.push(`"${name}" is a Vesk built-in — it is auto-imported when you use it as a component tag (<${name}>) or call it as a function (${name}()). If you are using it in an unusual way, add an explicit import: import { ${name} } from "@vesk/runtime".`);
+        }
+        else {
+            nextSteps.push('Check that the name is spelled correctly, imported, or declared in this file.');
+            if (suggestion && suggestion !== name) {
+                nextSteps.push(`If you meant "${suggestion}", fix the spelling.`);
+            }
+        }
+        return new VeskError(msg, {
+            ...context,
+            suggestions: [name, ...allCandidates.slice(0, 8)],
+            nextSteps,
+            tip: isBuiltin
+                ? `"${name}" is a Vesk built-in. Use it directly — no manual import needed.`
+                : '',
+        });
+    }
+    static classDecl(context = {}) {
+        return new VeskError('class declarations are not supported inside Vesk components.', {
+            ...context,
+            suggestions: [
+                'Use a plain object: const obj = { ... };',
+                'Use a factory function: function create() { return { ... }; }',
+                'Import from an external module: import { Klass } from "./lib.js";',
+            ],
+            nextSteps: [
+                'Replace the class with a plain object, factory function, or import from a .ts/.js file.',
+                'Vesk components compile to reactive blocks — classes cannot participate in signal tracking.',
+            ],
+            tip: 'Use plain objects for data and factory functions for constructors inside .vsk files.',
+        });
+    }
+    static serverBlockInClient(compName, context = {}) {
+        return new VeskError(`{#server} block found in client island "${compName}". Client islands render on both server and client, so {#server} blocks have no effect.`, {
+            ...context,
+            suggestions: [
+                `Remove the {#server} block from "${compName}".`,
+                `Or remove the \`client\` keyword from "${compName}" declaration.`,
+            ],
+            nextSteps: [
+                `Remove {#server}...{/server} from component "${compName}".`,
+                `Or change \`component ${compName} client\` to \`component ${compName}\` (no client), then wrap interactive parts in {#client} blocks.`,
+            ],
+            tip: 'A `client` component renders everywhere — {#server} would never execute. Either drop `client` or drop the {#server} block.',
+        });
+    }
+    static clientBlockInServer(compName, context = {}) {
+        return new VeskError(`{#client} block found in component "${compName}", but this component is not a client island. {#client} blocks are only allowed inside components declared with the \`client\` keyword.`, {
+            ...context,
+            suggestions: [
+                `Add \`client\`: \`component ${compName} client { ... }\``,
+                `Or remove the {#client}...{/client} block.`,
+            ],
+            nextSteps: [
+                `Add the \`client\` keyword: \`component ${compName} client { ... }\``,
+                `Or remove the {#client} block if the content can be server-rendered.`,
+            ],
+            tip: '{#client} blocks mark interactive content that needs JavaScript. Without `client`, the component is server-only and {#client} blocks are meaningless.',
+        });
+    }
+    static componentNotFound(name, available = [], context = {}) {
+        return VeskError.notFound(name, available, {
+            ...context,
+            tip: `Components in Vesk must be declared with the \`component\` keyword. If "${name}" is defined in another file, import it: \`import { ${name} } from "./path";\``,
+        });
+    }
+    static configError(msg, validOptions = [], context = {}) {
+        return new VeskError(msg, {
+            ...context,
+            suggestions: validOptions.length ? [`Valid options: ${validOptions.join(', ')}`] : [],
+            nextSteps: [
+                'Check your vesk.config file for typos.',
+                ...(validOptions.length ? [`Use one of: ${validOptions.join(', ')}`] : []),
+            ],
+        });
+    }
+    static asyncChildInSyncParent(parentName, childName, context = {}) {
+        return new VeskError(`Component "${parentName}" renders "<${childName} />", but "<${childName} />" is async and "${parentName}" is not declared async.`, {
+            ...context,
+            suggestions: [
+                `Declare the parent async: \`async component ${parentName} ...\``,
+            ],
+            nextSteps: [
+                `Change \`component ${parentName} ...\` to \`async component ${parentName} ...\`.`,
+                `Every component that renders "<${childName} />" (directly or transitively) must itself be \`async component\`.`,
+                `Layouts are exempt — a layout that renders {props.children} does not need \`async\`.`,
+            ],
+            tip: `A component that renders an async component must itself be async so the renderer can await it before serializing the HTML. Async components also include components that call \`useFetch\`.`,
+        });
+    }
+    toString() {
+        let out = `[vesk] ${this.message}`;
+        if (this.file) {
+            out += `\n  File: ${this.file}`;
+            if (this.line) {
+                out += `:${this.line}`;
+                if (this.column)
+                    out += `:${this.column}`;
+            }
+            if (this.line && this.column)
+                out += ` (line ${this.line}, column ${this.column})`;
+            else if (this.line)
+                out += ` (line ${this.line})`;
+        }
+        else if (this.line) {
+            out += `\n  at line ${this.line}${this.column ? `, column ${this.column}` : ''}`;
+        }
+        if (this.code)
+            out += `\n\n${this.code}`;
+        if (this.suggestions.length) {
+            out += '\n\n  Suggestions:';
+            for (const s of this.suggestions.slice(0, 4))
+                out += `\n    • ${s}`;
+        }
+        if (this.nextSteps.length) {
+            out += '\n\n  Next steps:';
+            for (const s of this.nextSteps.slice(0, 4))
+                out += `\n    • ${s}`;
+        }
+        if (this.tip)
+            out += `\n\n  Tip: ${this.tip}`;
+        return out;
+    }
+    toJSON() {
+        return {
+            name: this.name,
+            message: this.message,
+            file: this.file,
+            line: this.line,
+            column: this.column,
+            code: this.code,
+            suggestions: this.suggestions,
+            nextSteps: this.nextSteps,
+            tip: this.tip,
+            stack: this.stack,
+        };
+    }
+}
+
 function isIdentChar(code) {
     return ((code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36);
 }
 function isWhitespaceChar(ch) {
     return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v' || ch === '\u00a0' || ch === '\ufeff';
+}
+function offsetToLineCol(source, offset) {
+    let line = 1;
+    let column = 1;
+    for (let i = 0; i < offset && i < source.length; i++) {
+        if (source.charCodeAt(i) === 10) {
+            line++;
+            column = 1;
+        }
+        else {
+            column++;
+        }
+    }
+    return { line, column };
 }
 /**
  * Scans the source and blanks `; key <expr>` / `; index <ident>` clauses
@@ -96657,6 +97280,21 @@ function preprocessForClauses(source) {
                                 k++;
                             const expr = source.slice(k, end).trim();
                             if (expr) {
+                                if (expr[0] === ':') {
+                                    // `; key : <expr>` / `; key: <expr>` (colon form) is not valid
+                                    // Vesk: the clause is `; key <expr>`, and passing the colon
+                                    // through used to emit a broken reconciliation key.
+                                    const { line, column } = offsetToLineCol(source, start);
+                                    throw new VeskError(`Invalid \`; key\` clause — write the key expression after \`key\` without a colon: \`key ${expr.slice(1).trim()}\`.`, {
+                                        line,
+                                        column,
+                                        code: codeFrame(source, line, column),
+                                        nextSteps: [
+                                            'Use `; key <expr>` (no colon), e.g. `for (const item of items; key item.id)`.',
+                                            'For the iteration index use `; index <name>`, e.g. `for (const item of items; key item.id; index i)`.',
+                                        ],
+                                    });
+                                }
                                 keyRange = [k, start + clause.length];
                                 clauseCode = ' '.repeat(clause.length);
                             }
@@ -96705,17 +97343,51 @@ function createBaseParser() {
 function parse$1(source, options = {}) {
     const ParserClass = createBaseParser();
     const { code, annotations } = preprocessForClauses(source);
-    const ast = ParserClass.parse(code, {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-        locations: true,
-        ranges: true,
-        ...(options.filename ? { sourceFilename: options.filename } : {}),
-    });
-    if (annotations.length > 0) {
-        ast.__vskAnnotations = annotations;
+    try {
+        const ast = ParserClass.parse(code, {
+            ecmaVersion: 'latest',
+            sourceType: 'module',
+            locations: true,
+            ranges: true,
+            ...(options.filename ? { sourceFilename: options.filename } : {}),
+        });
+        if (annotations.length > 0) {
+            ast.__vskAnnotations = annotations;
+        }
+        return ast;
     }
-    return ast;
+    catch (e) {
+        const err = e;
+        // Acorn's SyntaxError already contains "(line:column)" in message and loc
+        let line = 0;
+        let column = 0;
+        if (err.loc && typeof err.loc.line === 'number') {
+            line = err.loc.line;
+            column = (err.loc.column ?? 0) + 1;
+        }
+        else {
+            const m = err.message.match(/\((\d+):(\d+)\)/);
+            if (m) {
+                line = parseInt(m[1], 10);
+                column = parseInt(m[2], 10) + 1;
+            }
+        }
+        const filename = options.filename || '';
+        const cleanMessage = err.message.replace(/\s*\(\d+:\d+\)\s*$/, '');
+        const frame = line > 0 ? codeFrame(source, line, column, 5, 5) : '';
+        const hint = filename ? ` in ${filename}` : '';
+        throw new VeskError(`${cleanMessage}${hint}`, {
+            file: filename,
+            line,
+            column,
+            code: frame,
+            nextSteps: [
+                'Check the line indicated by the ^ marker for missing brackets, quotes, or JSX syntax.',
+                'If you wrote literal { or } inside JSX text, escape them as {\'{\'} and {\'}\'} or use &lbrace; &rbrace;.',
+                'Ensure all JSX tags are properly closed and component names start with an uppercase letter.',
+            ],
+        });
+    }
 }
 
 // src/vlq.ts
@@ -97685,6 +98357,10 @@ class _VeskResponse extends ServerResponse {
             ...init,
             headers: { 'Content-Type': 'text/html; charset=utf-8', ...init?.headers },
         });
+    }
+    /** Chunked streaming response over a `ReadableStream` body (SSE, file streams, …). */
+    static stream(readable, init) {
+        return new _VeskResponse(readable, init);
     }
 }
 new Proxy(_VeskResponse, {
@@ -296218,21 +296894,21 @@ function emitJSXElement(g, source, el, opts) {
     }
     if (op.selfClosing)
         return;
-    emitJSXChildren(g, source, el.children ?? []);
+    emitJSXChildren(g, source, el.children ?? [], opts);
     if (el.closingElement) {
         g.add(source.slice(el.closingElement.start, el.closingElement.end), el.closingElement.start, el.closingElement.end);
     }
 }
 function emitJSXExprBody(g, source, expr, opts) {
     if (expr.type === 'JSXElement')
-        return emitJSXElement(g, source, expr);
+        return emitJSXElement(g, source, expr, opts);
     if (expr.type === 'JSXFragment')
-        return emitJSXFragment(g, source, expr);
+        return emitJSXFragment(g, source, expr, opts);
     g.add(source.slice(expr.start, expr.end), expr.start, expr.end);
 }
 function emitJSXFragment(g, source, frag, opts) {
     g.addRaw('<>');
-    emitJSXChildren(g, source, frag.children ?? []);
+    emitJSXChildren(g, source, frag.children ?? [], opts);
     g.addRaw('</>');
 }
 /**
@@ -296327,7 +297003,7 @@ function emitJSXChildren(g, source, children, opts) {
                         emptyContainer && emptyContainer.type === 'JSXExpressionContainer' &&
                         emptyContainer.expression.type !== 'JSXEmptyExpression') {
                         consumed = 4;
-                        emptyEmit = () => emitJSXExprBody(g, source, emptyContainer.expression);
+                        emptyEmit = () => emitJSXExprBody(g, source, emptyContainer.expression, opts);
                     }
                     let matched = false;
                     if (nextChild.type === 'JSXExpressionContainer') {
@@ -296337,13 +297013,13 @@ function emitJSXChildren(g, source, children, opts) {
                             i++;
                             continue;
                         }
-                        matched = emitForClauseMap(g, source, child, text, map, clauseStartCollapsed, () => emitJSXExprBody(g, source, exprNode), emptyEmit);
+                        matched = emitForClauseMap(g, source, child, text, map, clauseStartCollapsed, () => emitJSXExprBody(g, source, exprNode, opts), emptyEmit);
                     }
                     else if (nextChild.type === 'JSXFragment') {
-                        matched = emitForClauseMap(g, source, child, text, map, clauseStartCollapsed, () => emitJSXFragment(g, source, nextChild), emptyEmit);
+                        matched = emitForClauseMap(g, source, child, text, map, clauseStartCollapsed, () => emitJSXFragment(g, source, nextChild, opts), emptyEmit);
                     }
                     else {
-                        matched = emitForClauseMap(g, source, child, text, map, clauseStartCollapsed, () => emitJSXElement(g, source, nextChild), emptyEmit);
+                        matched = emitForClauseMap(g, source, child, text, map, clauseStartCollapsed, () => emitJSXElement(g, source, nextChild, opts), emptyEmit);
                     }
                     if (matched) {
                         i += consumed;
@@ -296379,11 +297055,23 @@ function emitJSXChildren(g, source, children, opts) {
                 i++;
                 continue;
             }
-            emitJSXElement(g, source, child);
+            emitJSXElement(g, source, child, opts);
             i++;
         }
         else if (child.type === 'JSXFragment') {
-            emitJSXFragment(g, source, child);
+            emitJSXFragment(g, source, child, opts);
+            i++;
+        }
+        else if (child.type === 'IfStatement' || child.type === 'ForOfStatement' ||
+            child.type === 'ForStatement' || child.type === 'ForInStatement' ||
+            child.type === 'WhileStatement' || child.type === 'DoWhileStatement' ||
+            child.type === 'SwitchStatement' || child.type === 'TryStatement' ||
+            child.type === 'VariableDeclaration' || child.type === 'ExpressionStatement') {
+            // Statement-mode control flow nested among JSX children: TSX has no
+            // statement children, so wrap each in an IIFE expression container.
+            g.addRaw('{(() => { ');
+            emitBody(g, source, [child], '', opts);
+            g.addRaw(' })()}');
             i++;
         }
         else {
@@ -296515,13 +297203,13 @@ function emitStatement(g, source, stmt, indent, isLast, opts) {
                 return;
             }
             g.add(indent);
-            emitJSXElement(g, source, stmt);
+            emitJSXElement(g, source, stmt, opts);
             if (!isLast)
                 g.addRaw(';');
             return;
         case 'JSXFragment':
             g.add(indent);
-            emitJSXFragment(g, source, stmt);
+            emitJSXFragment(g, source, stmt, opts);
             if (!isLast)
                 g.addRaw(';');
             return;
@@ -296663,9 +297351,9 @@ function emitReturn(g, source, stmt, opts) {
     }
     emitChunkMapped(g, source, stmt.start + 6, arg.start);
     if (arg.type === 'JSXElement')
-        emitJSXElement(g, source, arg);
+        emitJSXElement(g, source, arg, opts);
     else if (arg.type === 'JSXFragment')
-        emitJSXFragment(g, source, arg);
+        emitJSXFragment(g, source, arg, opts);
     else
         emitChunkMapped(g, source, arg.start, arg.end);
     emitChunkMapped(g, source, arg.end, stmt.end);
@@ -296691,7 +297379,7 @@ function emitExpressionBody(g, source, coreStart, coreEnd, stmts, opts) {
             emitTrackDeclStatement(g, source, stmt, '', true, opts);
         }
         else if (stmt.type === 'ReturnStatement') {
-            emitReturn(g, source, stmt);
+            emitReturn(g, source, stmt, opts);
         }
         else {
             emitChunkMapped(g, source, stmt.start, stmt.end);
@@ -297255,6 +297943,11 @@ declare function useFetch<T = unknown>(
   urlOrFn: string | (() => Promise<T>),
   options?: VeskUseFetchOptions<T>,
 ): VeskResource<T>;
+declare namespace useFetch {
+  function text<T = string>(url: string, options?: Omit<VeskUseFetchOptions<T>, 'body'>): VeskResource<T>;
+  function json<T = unknown>(url: string, options?: Omit<VeskUseFetchOptions<T>, 'body'>): VeskResource<T>;
+  function arrayBuffer<T = ArrayBuffer>(url: string, options?: Omit<VeskUseFetchOptions<T>, 'body'>): VeskResource<T>;
+}
 declare function useRouter(): unknown;
 declare function useParams(): Record<string, string>;
 declare function usePathname(): string;
@@ -298219,6 +298912,14 @@ var nodeExports = requireNode$2();
     { name: 'redirect', kind: nodeExports.CompletionItemKind.Function, detail: 'Redirect to another route', docs: 'redirect("/path") — throws a redirect.', signature: 'redirect(path: string): never' },
     { name: 'permanentRedirect', kind: nodeExports.CompletionItemKind.Function, detail: 'Permanent redirect (301)', docs: 'permanentRedirect("/path") — throws a permanent redirect.', signature: 'permanentRedirect(path: string): never' },
     { name: 'notFound', kind: nodeExports.CompletionItemKind.Function, detail: 'Throw 404', docs: 'notFound() — throws a not-found response.', signature: 'notFound(): never' },
+    { name: 'Show', kind: nodeExports.CompletionItemKind.Class, detail: 'Conditional rendering', docs: '<Show when={condition}> — renders children when condition is truthy.', signature: 'Show(props: { when: boolean | (() => boolean); fallback?: unknown; children?: unknown })' },
+    { name: 'For', kind: nodeExports.CompletionItemKind.Class, detail: 'List rendering', docs: '<For each={items}> — keyed list rendering with reconciliation.', signature: 'For<T>(props: { each: T[]; by?: keyof T; children: (item: T, index: number) => unknown })' },
+    { name: 'Switch', kind: nodeExports.CompletionItemKind.Class, detail: 'Switch/match rendering', docs: '<Switch> with <Match> children — like a JS switch statement for JSX.', signature: 'Switch(props: { fallback?: unknown; children?: unknown })' },
+    { name: 'Match', kind: nodeExports.CompletionItemKind.Class, detail: 'Match case for Switch', docs: '<Match when={value}> — a case inside a <Switch>.', signature: 'Match(props: { when: unknown; children?: unknown })' },
+    { name: 'Md', kind: nodeExports.CompletionItemKind.Class, detail: 'Markdown renderer', docs: '<Md>{content}</Md> — renders Markdown content as HTML.', signature: 'Md(props: { children: string })' },
+    { name: 'defineAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Define a server action', docs: 'defineAction({ name, handler }) — registers a server-side form action.', signature: 'defineAction<T>(action: { name: string; handler: (request: VeskRequest) => Promise<T> | T })' },
+    { name: 'getAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Get a registered action', docs: 'getAction(name) — retrieves a registered server action by name.', signature: 'getAction(name: string): Function | undefined' },
+    { name: 'clearActions', kind: nodeExports.CompletionItemKind.Function, detail: 'Clear all registered actions', docs: 'clearActions() — removes all registered server actions.', signature: 'clearActions(): void' },
 ];
 // ── HTML elements ──────────────────────────────────────────────
 const HTML_ELEMENTS = [
@@ -298473,6 +299174,11 @@ const INTRINSIC_TAGS = [
     'ProfileSchema',
     'SoftwareSchema',
     'Script',
+    'Show',
+    'For',
+    'Switch',
+    'Match',
+    'Md',
 ];
 function escapeRegex(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
