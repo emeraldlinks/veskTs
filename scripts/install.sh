@@ -91,25 +91,53 @@ if [[ "$EDITOR_CHOICE" == nvim ]]; then
     fi
     INIT_LUA="$CFGDIR/init.lua"
     INIT_VIM="$CFGDIR/init.vim"
-    if [[ ! -f "$INIT_LUA" && ! -f "$INIT_VIM" ]]; then
-      mkdir -p "$CFGDIR"
-      touch "$INIT_LUA"
-    fi
 
     MARKER='-- [[vesk]]'
     ENDMARKER='-- [[/vesk]]'
-    BLOCK="$MARKER
-require('vesk').setup {}
-$ENDMARKER"
+    # packadd (not a bare require): the user config is sourced before nvim
+    # auto-loads pack/*/start (and LazyVim never runs packloadall), so the
+    # plugin dir must be put on the runtimepath explicitly or the require
+    # throws "module 'vesk' not found" and aborts the editor bootstrap.
+    # The block is idempotent: re-running the installer rewrites any previous
+    # (older, bare-require) block into the canonical packadd form.
+    block_file=""
+    if [[ -f "$INIT_LUA" ]]; then block_file="$INIT_LUA"; fi
+    if [[ -z "$block_file" && -f "$INIT_VIM" ]]; then block_file="$INIT_VIM"; fi
+    if [[ -z "$block_file" ]]; then
+      mkdir -p "$CFGDIR"
+      touch "$INIT_LUA"
+      block_file="$INIT_LUA"
+    fi
 
-    if [[ -f "$INIT_LUA" ]] && ! grep -qF -- "$MARKER" "$INIT_LUA"; then
-      printf '\n%s\n' "$BLOCK" >> "$INIT_LUA"
-      log "Added require('vesk').setup {} to $INIT_LUA"
-    elif [[ -f "$INIT_VIM" ]] && ! grep -qF -- "$MARKER" "$INIT_VIM"; then
-      printf '\n%s\n' "$MARKER" 'lua require("vesk").setup {}' "$ENDMARKER" >> "$INIT_VIM"
-      log "Added require(\"vesk\").setup {} to $INIT_VIM"
+    if grep -qF -- "$MARKER" "$block_file"; then
+      if [[ "$block_file" == "$INIT_LUA" ]]; then
+        awk -v m="$MARKER" -v e="$ENDMARKER" '
+          $0==m && !done { print m; print "vim.opt.rtp:append(vim.fn.stdpath(\047data\047) .. \047/site/pack/vesk/start/vesk.nvim\047)"; print "require(\047vesk\047).setup {}"; print e; done=1; skip=1; next }
+          $0==e && skip { skip=0; next }
+          skip { next }
+          { print }
+        ' "$block_file" > "$block_file.tmp" && mv "$block_file.tmp" "$block_file"
+        log "Updated vesk setup block in $block_file"
+      else
+        awk -v m="$MARKER" -v e="$ENDMARKER" '
+          $0==m && !done { print "\" " m; print "let s:veskrtp = stdpath(\047data\047) .. \047/site/pack/vesk/start/vesk.nvim\047"; print "if isdirectory(s:veskrtp)"; print "  execute \047set runtimepath+=\047 . s:veskrtp"; print "endif"; print "lua require(\"vesk\").setup {}"; print "\" " e; done=1; skip=1; next }
+          $0==e && skip { skip=0; next }
+          skip { next }
+          { print }
+        ' "$block_file" > "$block_file.tmp" && mv "$block_file.tmp" "$block_file"
+        log "Updated vesk setup block in $block_file"
+      fi
+    elif [[ "$block_file" == "$INIT_LUA" ]]; then
+      printf '\n%s\n' "$MARKER" \
+        "vim.opt.rtp:append(vim.fn.stdpath('data') .. '/site/pack/vesk/start/vesk.nvim')" \
+        "require('vesk').setup {}" "$ENDMARKER" >> "$block_file"
+      log "Added vesk setup block to $block_file"
     else
-      log "Config already wired up — nothing to add."
+      printf '\n%s\n' "\" $MARKER" \
+        "let s:veskrtp = stdpath('data') .. '/site/pack/vesk/start/vesk.nvim'" \
+        "if isdirectory(s:veskrtp)" "  execute 'set runtimepath+=' . s:veskrtp" "endif" \
+        'lua require("vesk").setup {}' "\" $ENDMARKER" >> "$block_file"
+      log "Added vesk setup block to $block_file"
     fi
   fi
 
