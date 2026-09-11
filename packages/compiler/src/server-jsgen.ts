@@ -441,8 +441,18 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
   return lines.join('\n');
 }
 
-export function buildComponentMap(irRoot: IRRoot, useSharedScope: boolean): Map<string, Function> {
-  const map = new Map<string, Function>();
+export interface ComponentMapEntry {
+  name: string;
+  source: string;
+  isAsync: boolean;
+}
+
+/**
+ * Builds the compiled body source for every component in an IR root. Used by
+ * both `buildComponentMap` (live functions) and `precompile.ts` (AOT SSR plans
+ * that reconstruct the same functions at function-bundle load time).
+ */
+export function buildComponentEntries(irRoot: IRRoot): ComponentMapEntry[] {
   const runtimeNames = extractRuntimeNames(irRoot.imports);
   const localValueNames = localValueImportNames(irRoot.imports);
   const topNames = extractTopLevelNames(irRoot.topLevelCode);
@@ -458,6 +468,7 @@ export function buildComponentMap(irRoot: IRRoot, useSharedScope: boolean): Map<
   const allNames = [...new Set([...runtimeNames, ...topNames, ...extraNames, ...localValueNames])];
   const scopeDecl = allNames.length > 0 ? `const { ${allNames.join(', ')} } = __vesk;\n` : '';
   setVskImportedNames(importedNames);
+  const entries: ComponentMapEntry[] = [];
   for (const comp of irRoot.components) {
     const bodyCode = generateFunctionBody(comp, importedNames);
     const paramInit = buildParamInit(comp.paramNames);
@@ -465,14 +476,22 @@ export function buildComponentMap(irRoot: IRRoot, useSharedScope: boolean): Map<
       ? `console.error('[SSR-CALL]', ${JSON.stringify(comp.name)}, props ? JSON.stringify(props) : String(props));\n`
       : '';
     const code = `${scopeDecl}${paramInit}${diag}\n${bodyCode}`;
-    let fn: Function;
-    if (comp.isAsync || comp.ssrAwait) {
-      fn = new Function('props', '__registry', '__vesk', `return (async () => {\n${code}\n})()`);
-    } else {
-      fn = new Function('props', '__registry', '__vesk', code);
-    }
-    map.set(comp.name, fn);
+    entries.push({ name: comp.name, source: code, isAsync: comp.isAsync || comp.ssrAwait });
   }
   setVskImportedNames(null);
+  return entries;
+}
+
+export function buildComponentMap(irRoot: IRRoot, useSharedScope: boolean): Map<string, Function> {
+  const map = new Map<string, Function>();
+  for (const entry of buildComponentEntries(irRoot)) {
+    let fn: Function;
+    if (entry.isAsync) {
+      fn = new Function('props', '__registry', '__vesk', `return (async () => {\n${entry.source}\n})()`);
+    } else {
+      fn = new Function('props', '__registry', '__vesk', entry.source);
+    }
+    map.set(entry.name, fn);
+  }
   return map;
 }

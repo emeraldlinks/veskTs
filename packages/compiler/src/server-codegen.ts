@@ -55,7 +55,18 @@ export {
   irNodeToJS,
   generateFunctionBody,
   buildComponentMap,
+  buildComponentEntries,
 } from '@vesk/compiler/src/server-jsgen';
+
+export {
+  irToJSON,
+  irFromJSON,
+  hydratePrecompile,
+} from '@vesk/compiler/src/precompile-runtime';
+
+export {
+  precompileFile,
+} from '@vesk/compiler/src/precompile';
 
 export {
   compileFile,

@@ -62,15 +62,18 @@ function runFor(node, ancestorLayouts) {
     { sourceDir: 'app/docs/[slug]', fullPath: '/docs/[slug]', layout: null },
     [appRoot, { sourceDir: 'app/docs', layoutCompName: 'DocsLayout' }],
   );
-  assert(code.includes('_layoutSrcList'), 'dynamic page emits a layout list');
-  assert((code.match(/_layoutSrcList = \[/g) || []).length === 1, 'single layout list declared');
-  assert(code.includes('app/layout.vsk') && code.includes('app/docs/layout.vsk'), 'chain declares root then docs layout');
-  const rootIdx = code.indexOf('app/layout.vsk');
-  const docsIdx = code.indexOf('app/docs/layout.vsk');
-  assert(rootIdx !== -1 && docsIdx !== -1 && rootIdx < docsIdx, 'root layout precedes docs layout in source list');
-  assert(code.includes('for (let _i = _layoutSrcList.length - 1; _i > 0; _i--)'), 'server wraps page with inner layout first');
-  assert(code.includes('for (let _i = _layoutSrcList.length - 1; _i >= 0; _i--)'), 'data path collects head top-down');
-  assert(code.includes('renderFullPage(_layoutSrcList[0], _layoutCompList[0]'), 'outermost layout drives renderFullPage');
+  assert(!code.includes('compileFile('), 'AOT: no runtime compile left in the function');
+  assert(!code.includes('_pageSrc') && !code.includes('_layoutSrc'), 'AOT: no embedded .vsk source/paths');
+  assert(code.includes('hydratePrecompile('), 'page/layout plans hydrate at load via hydratePrecompile');
+  assert(code.includes('_layoutCompList'), 'dynamic page emits a layout list');
+  assert((code.match(/_layoutCompList = \[/g) || []).length === 1, 'single layout list declared');
+  assert(code.includes('"Layout", "DocsLayout"'), 'chain declares root then docs layout comps');
+  const rootIdx = code.indexOf('"Layout"');
+  const docsIdx = code.indexOf('"DocsLayout"');
+  assert(rootIdx !== -1 && docsIdx !== -1 && rootIdx < docsIdx, 'root layout precedes docs layout in comp list');
+  assert(code.includes('for (let _i = _layoutCompList.length - 1; _i > 0; _i--)'), 'server wraps page with inner layout first');
+  assert(code.includes('for (let _i = _layoutCompList.length - 1; _i >= 0; _i--)'), 'data path collects head top-down');
+  assert(code.includes("renderFullPage('', _layoutCompList[0]"), 'outermost layout drives renderFullPage');
   assert(!code.includes('const _layoutSrc = '), 'no stale single-layout binding remains');
   assert(!code.includes('const _layoutComp = '), 'no stale single-layout comp binding remains');
 }
@@ -80,11 +83,12 @@ function runFor(node, ancestorLayouts) {
     { sourceDir: 'app/docs', fullPath: '/docs', layout: 'DocsLayout' },
     [appRoot],
   );
-  assert(code.includes('app/layout.vsk') && code.includes('app/docs/layout.vsk'), 'own layout chained after ancestor');
-  const rootIdx = code.indexOf('app/layout.vsk');
-  const docsIdx = code.indexOf('app/docs/layout.vsk');
+  assert(code.includes('"Layout", "DocsLayout"'), 'own layout chained after ancestor');
+  const rootIdx = code.indexOf('"Layout"');
+  const docsIdx = code.indexOf('"DocsLayout"');
   assert(rootIdx !== -1 && docsIdx !== -1 && rootIdx < docsIdx, 'root layout precedes own docs layout');
-  assert(code.includes('renderFullPage(_layoutSrcList[0], _layoutCompList[0]'), 'own nested layout composes over root');
+  assert(code.includes("renderFullPage('', _layoutCompList[0]"), 'own nested layout composes over root');
+  assert(!code.includes('compileFile('), 'AOT: no runtime compile left in the function');
 }
 
 { // root page with NO ancestor layout — unchanged page-only stream path
@@ -92,8 +96,9 @@ function runFor(node, ancestorLayouts) {
     { sourceDir: 'app', fullPath: '/', layout: null },
     [],
   );
-  assert(!code.includes('_layoutSrcList'), 'root page without layout keeps stream path');
-  assert(code.includes('renderPageStream(_src, _comp'), 'page-only render uses renderPageStream');
+  assert(!code.includes('_layoutCompList'), 'root page without layout keeps stream path');
+  assert(code.includes("renderPageStream('', _comp"), 'page-only render uses renderPageStream');
+  assert(!code.includes('compileFile('), 'AOT: no runtime compile left in the function');
 }
 
 rmSync(appDir, { recursive: true, force: true });

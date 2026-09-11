@@ -4,6 +4,53 @@
 
 **Current phase:** pure-TS pipeline (haul parked)
 
+**Completed (serverless SSR is AOT — no request-time compile):** `vesk build` now
+*precompiles* every SSR function. `generateSsrFunction` embeds a JSON
+`PrecompileFilePlan` per page/layout/error/component instead of raw `.vsk` source +
+build-machine absolute paths; at function load `hydratePrecompile(plan)` rebuilds
+the exact `CompileFileResult` (components, `__vesk` scope, module closures) with
+zero source, zero disk, zero syntax work — killing the `<empty>/**` 500s on
+Vercel (`/` imported 14 relative `./components/*.vsk`, `/docs` and `/docs/[slug]`
+imported `../../src/content/docs` + `lucide-vesk` + `@vesk/runtime/router`, and the
+old functions called `compileFile` at request time from absolute paths that don't
+exist on the platform).
+
+1. **`precompile.ts` (new):** build-time mirror of `compileFileInternal` — MD
+   inlining, parse, `generateIR`, `buildComponentEntries` under
+   `setVskHydrate(true)`, `transformTopLevelForActions('server')` (action ids
+   baked), and a full **module bundle** (`collectModuleBundle`): every relative
+   import is TS-stripped → `esmToCjs` and embedded as `{ key, code, dir, deps }`
+   so closures (e.g. `titleFor` closing over `TITLES`) survive via re-evaluation,
+   `require()`/`import()` specifiers and `.json` included; `.vsk` imports recurse
+   into `subFiles` plans (dedup via `seenImportFiles`).
+2. **`precompile-runtime.ts` (new, `node:fs`-free):** `irToJSON`/`irFromJSON`
+   (`__vskIrType` tags, 21 IR classes + ESTree revive) and `hydratePrecompile`:
+   module shim eval (require → sibling bundled key, fallback
+   `createRequire(join(m.dir,'__vesk__.js'))` for bare/builtins, `module.exports`
+   reassignment detection, cycles via pre-seeded partial exports), scope merge,
+   `evalTopLevelCode`, component rebuild via `new Function` with `__veskScope`.
+3. **`module-imports.ts`:** `collectModuleSpecifiers` (AST walk), `esmToCjs`,
+   `BundledModuleData`/`ModuleBindingData` types, `isCompilerOwnedTarget`/
+   `isValueLessTarget` filters (runtime/`.vsk`/CSS/md skipped exactly like the
+   runtime loader).
+4. **Adapter:** `ssr-function.ts` rewritten (plans via `precompilePlan` +
+   `hydrateInvoke`, `renderPage('', …,{cached})` everywhere, `__registerActions`
+   is a no-op — actions register during plan hydration), `runtime-bundle.ts`
+   exports `hydratePrecompile`, tests updated to assert the AOT invariants.
+5. **Verified:** build→serve probe (layout + error + sub-`.vsk` component + local
+   TS module with closure + `defineAction` POST + `x-vesk-data` + dynamic
+   `:slug` param + percent-decoding) returns 200 with all content; no
+   `compileFile(`/`sourcePath` in any emitted function. Unit: compiler
+   server-codegen 145, integration 126, adapter ssr-function 19, plugin-head 8,
+   tree-shake 19, hmr 39, typecheck clean. Full suite 2437 passed / 2 failed
+   (code-split + hydration — puppeteer cannot find
+   `/data/data/com.termux/files/usr/bin/chromium-browser` in this container, env
+   not code). HMR untouched (dev-only regenerate still compiles locally).
+   **Remaining:** bump to 0.2.23, bump `vesk-doc`, verify `/`, `/docs`,
+   `/docs/[slug]`, `/about` on Vercel.
+
+**Completed (true build-time AOT SSR — kills Vercel `/` and `/docs` 500s):** generated SSR functions no longer embed `.vsk` source or build-machine paths and never call `compileFile`/resolve modules at request time. `build()` precompiles every page/layout/error/registry component via the new `precompileFile` (compiler `precompile.ts`): full IR serialization (`irToJSON`/`irFromJSON`, `__vskIrType` class/set tags, 21 IR classes), server component sources (`buildComponentEntries` under `setVskHydrate(true)`, identical to old request-time hydrate mode), actions top-level with stable ids baked (`transformTopLevelForActions(…,'server')`), and a JSON module bundle (`collectModuleBundle`/`collectModuleBundled`: TS-strip → filter type-only → `esmToCjs`, `__veskMod{N}` keys, closures preserved by re-evaluation, `.json` verbatim, bare/node_modules fallback to `createRequire`). Request-time `hydratePrecompile(plan)` (compiler `precompile-runtime.ts`, no `node:fs`) rebuilds `CompileFileResult` at module load: runtime imports from runtime.js (`setRuntimeModule`), module shim eval + binding merge into `__vesk`, `evalTopLevelCode`, recursive sub-file plans for imported `.vsk` components, scoped component rebuild with `__veskScope`. Generated functions embed the plan JSON against `../runtime.js` (`hydratePrecompile` added to the bundle), layout/page/error plans hydrate in try/catch, all `renderPage*/renderFullPage` calls pass `''` source with `cached:` precompiled results, `__registerActions` is a no-op (actions self-register during hydrate `evalTopLevelCode`). HMR's dev regenerate path keeps source-embedding + `compileFile` (dev has disk; runtime.js still exports both). Verified end-to-end with a build→serve probe (no test-app): root SSR with layout + sub-component + local module closure (`titleFor`/`count`), action `defineAction` registration + `handleAction` POST round-trip, `x-vesk-data` JSON, dynamic `posts/[slug]` params, error page. Tests: ssr-function.test.ts 19 (AOT asserts: no `compileFile`/`sourcePath`, plans hydrate, layout order), plugin-head 8, compiler server-codegen 145, integration 126, adapter tree-shake 19, hmr 39, typecheck clean; full unit suite 2437 passed / 2 failed (code-split + hydration browser E2E — missing CHROMIUM_PATH binary only). Next: bump packages to 0.2.23, update vesk-doc deps, rebuild + verify `/`, `/docs`, `/docs/[slug]`, `/about` on Vercel.
+
 **Completed (hydration framework fixes: stray `<!--if-->` markers + Link attrs on reactive re-run + effect orphaning):** E2E via linkedom (`vue`-free, real compiler dist) against an if-gated `Link` region exposed two framework bugs now fixed in `@vesk/runtime`:
 
 1. **Standalone hydrators orphaned effects.** `hydrate()`, `hydrateViewport`, `hydrateIdle`, `hydrateOnInteraction`, `hydrateInitial` invoked `componentFn()` with `active_block === null`, so effects created during hydration pushed `null` into `queued_root_blocks` and never flushed (production only worked because `router.ts` used a private `runInBlockWindow`). `hydrate.ts` now wraps every `componentFn` call in a `runInHydrateBlock` helper (saves `scope()`, creates `root(() => {})`, sets active block, restores). Root cause: `schedule_update` (ripple-runtime.ts:686) walks an empty parent chain when unrooted.

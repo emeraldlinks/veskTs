@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
+import { walk } from 'zimmerframe';
 import { parse } from '@vesk/compiler/src/parser';
 import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement } from '@vesk/compiler/src/strip-ts';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
@@ -79,7 +80,7 @@ function cacheModule(p: string, val: CachedModule): void {
 const depStack: Set<string>[] = [];
 
 /** True when the import target is owned by the framework (never SSR-loaded). */
-function isCompilerOwnedTarget(target: string): boolean {
+export function isCompilerOwnedTarget(target: string): boolean {
   if (target === '@vesk/runtime' || target === '@vesk/reactivity') return true;
   for (const prefix of RUNTIME_PREFIXES) {
     if (target.startsWith(prefix)) return true;
@@ -88,7 +89,7 @@ function isCompilerOwnedTarget(target: string): boolean {
 }
 
 /** True when the target carries no value into the SSR scope. */
-function isValueLessTarget(target: string): boolean {
+export function isValueLessTarget(target: string): boolean {
   return (
     target.endsWith('.vsk') ||
     target.endsWith('.css') ||
@@ -311,7 +312,7 @@ function depsFresh(cachedVal: CachedModule): boolean {
   return true;
 }
 
-function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
+export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
   let raw: string;
   try {
     raw = readFileSync(absPath, 'utf-8');
@@ -931,4 +932,164 @@ export function esmToCjs(body: Array<{ type: string } & Record<string, unknown>>
     }
   }
   return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// AOT: build-time bundling of the modules a `.vsk` file imports.
+//
+// Produces a self-contained, JSON-safe description of a module and its whole
+// relative-import closure. The runtime side (`precompile-runtime.ts`) re-runs
+// each module's transformed CJS body behind a require shim that routes
+// relative specifiers to sibling bundled modules, so closures (a module
+// exporting an arrow that captures module-scope data) survive the trip —
+// they can never be captured by `Function.prototype.toString()`.
+// ---------------------------------------------------------------------------
+
+export interface BundledModuleData {
+  /** Synthetic loader key (e.g. `__veskMod0`), referenced by deps/bindings. */
+  key: string;
+  /** ESM->CJS rewritten body (or raw CJS / JSON `module.exports` body). */
+  code: string;
+  /** Directory the module lived in at build time (require fallback anchor). */
+  dir: string;
+  /** Relative specifier (as written) -> sibling module key. */
+  deps: Record<string, string>;
+}
+
+export interface ModuleBindingData {
+  /** Local binding name used inside the `.vsk` file. */
+  local: string;
+  /** Module key this binding resolves to. */
+  key: string;
+  /** `default` | `*` | named export. */
+  kind: string;
+}
+
+function isRelativeSpec(spec: string): boolean {
+  return spec.startsWith('./') || spec.startsWith('../');
+}
+
+function stringLiteralValue(node: unknown): string | null {
+  const n = node as { type?: string; value?: unknown } | null | undefined;
+  if (n && (n.type === 'Literal' || n.type === 'StringLiteral') && typeof n.value === 'string') {
+    return n.value;
+  }
+  return null;
+}
+
+/**
+ * Extracts the module specifiers a module body reaches for through import/
+ * export sources, `require(...)` calls and `import(...)` expressions.
+ * Type-only import/export statements contribute nothing here.
+ */
+function collectModuleSpecifiers(ast: any): Set<string> {
+  const specs = new Set<string>();
+  walk(ast, null, {
+    ImportDeclaration(node: Record<string, unknown>) {
+      if (node.importKind === 'type') return;
+      const v = stringLiteralValue(node.source);
+      if (v) specs.add(v);
+    },
+    ExportNamedDeclaration(node: Record<string, unknown>) {
+      if ((node.exportKind === 'type') || !node.source) return;
+      const v = stringLiteralValue(node.source);
+      if (v) specs.add(v);
+    },
+    ExportAllDeclaration(node: Record<string, unknown>) {
+      if (node.exportKind === 'type') return;
+      const v = stringLiteralValue(node.source);
+      if (v) specs.add(v);
+    },
+    CallExpression(node: Record<string, unknown>) {
+      const callee = node.callee as { type?: string; name?: string } | null | undefined;
+      if (!callee || callee.type !== 'Identifier' || callee.name !== 'require') return;
+      const args = (node.arguments || []) as unknown[];
+      const v = stringLiteralValue(args[0]);
+      if (v) specs.add(v);
+    },
+    ImportExpression(node: Record<string, unknown>) {
+      const v = stringLiteralValue(node.source);
+      if (v) specs.add(v);
+    },
+  });
+  return specs;
+}
+
+export type ModuleCollector = {
+  keysByAbs: Map<string, string>;
+  modules: BundledModuleData[];
+};
+
+/**
+ * Bundles one module file (plus its relative closure) into `collector`.
+ * Returns the synthetic key loaded modules use to reference it.
+ */
+export function collectModuleBundled(absPath: string, collector: ModuleCollector): string {
+  const existing = collector.keysByAbs.get(absPath);
+  if (existing) return existing;
+  const key = `__veskMod${collector.keysByAbs.size}`;
+  collector.keysByAbs.set(absPath, key);
+  const dir = dirname(absPath);
+
+  if (absPath.endsWith('.json')) {
+    let raw = '';
+    try {
+      raw = readFileSync(absPath, 'utf-8');
+    } catch (err) {
+      raw = '{}';
+    }
+    collector.modules.push({ key, code: `module.exports = ${raw};`, dir, deps: {} });
+    return key;
+  }
+
+  const src = readSsrSource(absPath);
+  if (!src || !src.ast) {
+    const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
+    collector.modules.push({ key, code: raw, dir, deps: {} });
+    return key;
+  }
+
+  let stripped = src.ast;
+  if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
+  stripped.body = (stripped.body || []).filter((n: unknown) => (n ? !isTypeOnlyStatement(n) : false));
+
+  const deps: Record<string, string> = {};
+  for (const spec of collectModuleSpecifiers(src.ast)) {
+    if (!isRelativeSpec(spec)) continue;
+    const depPath = resolveSsrModule(spec, dir);
+    if (!depPath) continue;
+    deps[spec] = collectModuleBundled(depPath, collector);
+  }
+
+  collector.modules.push({ key, code: esmToCjs(stripped.body as Array<{ type: string }>), dir, deps });
+  return key;
+}
+
+/**
+ * Builds the module bundle + local-binding list for a set of import lines
+ * (a `.vsk` file's `imports`). Framework-owned, `.vsk`, `.css` and markdown
+ * targets are skipped exactly as `applyLocalModuleImports` skips them, so the
+ * hydrate-time scope matches today's runtime module loader.
+ */
+export function collectModuleBundle(
+  importStrs: string[],
+  fromDir: string | undefined,
+  collector: ModuleCollector
+): ModuleBindingData[] {
+  const bindings: ModuleBindingData[] = [];
+  if (!fromDir) return bindings;
+  for (const imp of importStrs) {
+    const target = importModuleTarget(imp);
+    if (!target || isCompilerOwnedTarget(target) || isValueLessTarget(target)) continue;
+    const resolved = resolveSsrModule(target, fromDir);
+    if (!resolved) {
+      // Keep render behavior identical to the runtime loader (warn + skip).
+      continue;
+    }
+    const key = collectModuleBundled(resolved, collector);
+    for (const pair of importBindingPairs(imp)) {
+      bindings.push({ local: pair.local, key, kind: pair.imported });
+    }
+  }
+  return bindings;
 }

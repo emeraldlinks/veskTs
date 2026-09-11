@@ -28,7 +28,10 @@ async function main() {
     const publicDir = resolve(root, 'test-app', 'public');
 
     console.error('Building...');
-    await build(appDir, { outDir, publicDir, codeSplit: true });
+    const configMod = await import(resolve(root, 'test-app/vesk.config.ts'));
+    const config = configMod.default || {};
+    const plugins = config.plugins || [];
+    await build(appDir, { outDir, publicDir, codeSplit: true, plugins });
     httpServer = await startProdServer(outDir, { port: PORT });
     await new Promise(r => setTimeout(r, 1000));
   }

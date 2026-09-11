@@ -1,15 +1,8 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
-import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
+import { resolveComponentName, precompileFile } from '@vesk/compiler/src/server-codegen';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
-
-function escapeSource(src: string): string {
-  return src
-    .replace(/\\/g, '\\\\')
-    .replace(/`/g, '\\`')
-    .replace(/\$/g, '\\$');
-}
 
 // Finds the nearest error.vsk walking up from the route's own directory to the
 // app root, mirroring the router's findErrorComponent chain semantics.
@@ -33,6 +26,21 @@ function routeName(segments: string[]): string {
 
 function extractCompName(src: string): string | null {
   return resolveComponentName(src);
+}
+
+/**
+ * Precompiles a `.vsk` file at BUILD time into a `PrecompileFilePlan` and
+ * returns it as a JSON object literal. True AOT: no source is embedded, no
+ * compile happens in the deployed function — `hydratePrecompile` rebuilds the
+ * render result at module load from this JSON alone.
+ */
+function precompilePlan(entryPath: string): string {
+  const src = readFileSync(entryPath, 'utf-8');
+  return JSON.stringify(precompileFile(src, entryPath));
+}
+
+function hydrateInvoke(planExpr: string): string {
+  return `(() => { try { return hydratePrecompile(${planExpr}); } catch { return null; } })()`;
 }
 
 function buildParamExtraction(node: RouteNode, urlParts: string[]): string[] {
@@ -101,45 +109,39 @@ export function generateSsrFunction(
     ...(routeNode.layout ? [{ sourceDir: routeNode.sourceDir, layoutCompName: routeNode.layout }] : []),
   ];
 
-  const layoutDecls: { src: string; comp: string; path: string; compiled: string }[] = [];
+  const layoutDecls: { comp: string; plan: string; compiled: string }[] = [];
   for (const entry of layoutStack) {
     const entryPath = resolve(appDir, entry.sourceDir, 'layout.vsk');
     const entrySrc = readFileSync(entryPath, 'utf-8');
     const entryComp = extractCompName(entrySrc) || 'Layout';
-    const escaped = escapeSource(entrySrc);
+    const plan = precompilePlan(entryPath);
     layoutDecls.push({
-      src: `\`${escaped}\``,
       comp: JSON.stringify(entryComp),
-      path: JSON.stringify(entryPath),
-      compiled: `(() => { try { setVskHydrate(true); return compileFile(\`${escaped}\`, { sourcePath: ${JSON.stringify(entryPath)} }); } catch { return null; } finally { setVskHydrate(false); } })()`,
+      plan,
+      compiled: hydrateInvoke(plan),
     });
   }
 
-  const pageSrc = readFileSync(pagePath, 'utf-8');
-  const pageComp = extractCompName(pageSrc) || 'Page';
+  const pagePlan = precompilePlan(pagePath);
+  const pageComp = extractCompName(readFileSync(pagePath, 'utf-8')) || 'Page';
 
   const errorPath = resolveErrorFile(routeNode.sourceDir, appDir);
   const errorSrc = errorPath ? readFileSync(errorPath, 'utf-8') : null;
   const errorComp = errorPath ? (extractCompName(errorSrc as string) || 'Error') : null;
   const errorVars = errorPath
-    ? `const _errorSrc = \`${escapeSource(errorSrc as string)}\`;\nconst _errorComp = ${JSON.stringify(errorComp)};\nconst _errorPath = ${JSON.stringify(errorPath)};\nconst _errorCompiled = (() => { try { setVskHydrate(true); return compileFile(_errorSrc, { sourcePath: _errorPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`
-    : 'const _errorSrc = null;\nconst _errorComp = null;\nconst _errorPath = null;\nconst _errorCompiled = null;\n';
+    ? `const _errorComp = ${JSON.stringify(errorComp)};\nconst _errorCompiled = ${hydrateInvoke(precompilePlan(errorPath))};\n`
+    : 'const _errorComp = null;\nconst _errorCompiled = null;\n';
 
   let src = '';
   if (layoutDecls.length > 0) {
-    src = `const _pageSrc = \`${escapeSource(pageSrc)}\`;\n`;
-    src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _pagePath = ${JSON.stringify(pagePath)};\n`;
-    src += `const _pageCompiled = (() => { try { setVskHydrate(true); return compileFile(_pageSrc, { sourcePath: _pagePath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
-    src += `const _layoutSrcList = [\n${layoutDecls.map((d) => '  ' + d.src + ',').join('\n')}\n];\n`;
+    src = `const _pageComp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _pageCompiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })();\n`;
     src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
-    src += `const _layoutPathList = [${layoutDecls.map((d) => d.path).join(', ')}];\n`;
     src += `const _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n];\n`;
     src += errorVars;
   } else {
-    src = `const _src = \`${escapeSource(pageSrc)}\`;\nconst _comp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _srcPath = ${JSON.stringify(pagePath)};\n`;
-    src += `const _srcCompiled = (() => { try { setVskHydrate(true); return compileFile(_src, { sourcePath: _srcPath }); } catch { return null; } finally { setVskHydrate(false); } })();\n`;
+    src = `const _comp = ${JSON.stringify(pageComp)};\n`;
+    src += `const _compiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })();\n`;
     src += errorVars;
   }
 
@@ -154,12 +156,11 @@ export function generateSsrFunction(
   const compRegEntries: string[] = [];
   const compMap = componentMap || new Map();
   for (const [compName, compPath] of compMap) {
-    const compSrc = readFileSync(compPath, 'utf-8');
-    const escapedSrc = escapeSource(compSrc);
-    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const _compiled = (() => { try { setVskHydrate(true); return compileFile(_src, { sourcePath: ${JSON.stringify(compPath)} }); } catch { return null; } finally { setVskHydrate(false); } })();\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, cached: _compiled, sourcePath: ${JSON.stringify(compPath)} });\n    return result.body;\n  })`);
+    const plan = precompilePlan(compPath);
+    compRegEntries.push(`  (() => {\n    const _compiled = (() => { try { return hydratePrecompile(${plan}); } catch { return null; } })();\n    registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });\n  })();`);
   }
   if (compRegEntries.length > 0) {
-    registryCode = `const __componentRegistry = new Map();\n{\n${compRegEntries.join('\n')}\n}\n`;
+    registryCode = 'const __componentRegistry = new Map();\n{\n' + compRegEntries.join('\n') + '\n}\n';
   } else {
     registryCode = 'const __componentRegistry = new Map();\n';
   }
@@ -168,9 +169,9 @@ export function generateSsrFunction(
   if (layoutDecls.length > 0) {
     htmlFnCode = [
       'async function __renderErrorBody(props) {',
-      '  if (!_errorSrc) throw props.error || new Error("Internal Server Error");',
+      '  if (!_errorComp) throw props.error || new Error("Internal Server Error");',
       '  try {',
-      '    const result = await renderPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled, sourcePath: _errorPath });',
+      '    const result = await renderPage(\'\', _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled });',
       '    return result.body;',
       '  } catch {',
       '    return \'<h1>500 \\u2014 Internal Server Error</h1>\';',
@@ -183,7 +184,7 @@ export function generateSsrFunction(
       '  let caughtError = null;',
       "  const __expose = process.env.NODE_ENV !== 'production';",
       '  try {',
-      '    page = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled, sourcePath: _pagePath });',
+      '    page = await renderPage(\'\', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled });',
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    caughtError = err;',
@@ -193,12 +194,12 @@ export function generateSsrFunction(
       '  }',
       '  let _body = (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : \'Internal Server Error\') : \'\') + \'-->\' : \'\') + page.body;',
       '  let _head = page.head || \'\';',
-      '  for (let _i = _layoutSrcList.length - 1; _i > 0; _i--) {',
-      '    const _inner = await renderPage(_layoutSrcList[_i], _layoutCompList[_i], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i], sourcePath: _layoutPathList[_i] });',
+      '  for (let _i = _layoutCompList.length - 1; _i > 0; _i--) {',
+      "    const _inner = await renderPage('', _layoutCompList[_i], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i] });",
       '    _body = _inner.body;',
       '    if (_inner.head) _head = _inner.head + _head;',
       '  }',
-      '  const html = await renderFullPage(_layoutSrcList[0], _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]' + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: _head, sourcePath: _layoutPathList[0] });',
+      "  const html = await renderFullPage('', _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ", pageHead: _head });",
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',
@@ -207,19 +208,19 @@ export function generateSsrFunction(
   } else {
     htmlFnCode = [
       'async function __renderErrorFullPage(params, requestUrl, err) {',
-      '  if (!_errorSrc) throw err;',
+      '  if (!_errorComp) throw err;',
       "  const __expose = process.env.NODE_ENV !== 'production';",
       "  const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
       "  const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "  const props = { params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' };",
-      '  return renderFullPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
+      "  return renderFullPage('', _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled" + bakedOptions + clientScriptOption + dataScriptOption + " });",
       '}',
       '',
       'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
       '  let stream;',
       '  try {',
-      '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ', sourcePath: _srcPath });',
+      "    stream = renderPageStream('', _comp, { params }, __componentRegistry, { hydrate: true, cached: _compiled" + bakedOptions + clientScriptOption + dataScriptOption + ' });',
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    const html = await __renderErrorFullPage(params, requestUrl, err);',
@@ -255,15 +256,15 @@ export function generateSsrFunction(
       "  if (request.headers.get('x-vesk-data') === '1') {",
       '    let dataPage;',
       '    try {',
-      '      dataPage = await renderPage(_pageSrc, _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled, sourcePath: _pagePath });',
+      "      dataPage = await renderPage('', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled });",
       '    } catch (err) {',
       '      if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
       `      return new Response(JSON.stringify({ error: ${exposeErr} ? message : 'Internal Server Error' }), { status: 500, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });`,
       '    }',
       '    let _dataHead = dataPage.head || \'\';',
-      '    for (let _i = _layoutSrcList.length - 1; _i >= 0; _i--) {',
-      '      const _dl = await renderPage(_layoutSrcList[_i], _layoutCompList[_i], { params, children: \'\' }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i], sourcePath: _layoutPathList[_i] });',
+      '    for (let _i = _layoutCompList.length - 1; _i >= 0; _i--) {',
+      "      const _dl = await renderPage('', _layoutCompList[_i], { params, children: '' }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i] });",
       '      _dataHead = (_dl.head || \'\') + _dataHead;',
       '    }',
       "    return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: _dataHead }), {",
@@ -277,7 +278,7 @@ export function generateSsrFunction(
       "  if (request.headers.get('x-vesk-data') === '1') {",
       '    let dataPage;',
       '    try {',
-      '      dataPage = await renderPage(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled, sourcePath: _srcPath });',
+      "      dataPage = await renderPage('', _comp, { params }, __componentRegistry, { hydrate: true, cached: _compiled });",
       '    } catch (err) {',
       '      if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '      const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
@@ -334,27 +335,16 @@ export function generateSsrFunction(
     ].join('\n');
   }
 
-  let registerActionsCode: string;
-  if (layoutDecls.length > 0) {
-    registerActionsCode = [
-      'async function __registerActions() {',
-      '  if (__actionsRegistered) return;',
-      '  __actionsRegistered = true;',
-      '  for (let _i = 0; _i < _layoutSrcList.length; _i++) compileFile(_layoutSrcList[_i], { sourcePath: _layoutPathList[_i] });',
-      '  compileFile(_pageSrc, { sourcePath: _pagePath });',
-      '}',
-      '',
-    ].join('\n');
-  } else {
-    registerActionsCode = [
-      'async function __registerActions() {',
-      '  if (__actionsRegistered) return;',
-      '  __actionsRegistered = true;',
-      '  compileFile(_src, { sourcePath: _srcPath });',
-      '}',
-      '',
-    ].join('\n');
-  }
+  // Actions are registered while each plan hydrates (its actions-transformed
+  // top-level code runs `defineAction` during `hydratePrecompile`), so the
+  // request-time registration pass is a no-op.
+  const registerActionsCode = [
+    'async function __registerActions() {',
+    '  if (__actionsRegistered) return;',
+    '  __actionsRegistered = true;',
+    '}',
+    '',
+  ].join('\n');
 
   const actionCode = [
     'export async function handleAction(request, id) {',
@@ -438,7 +428,7 @@ export function generateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

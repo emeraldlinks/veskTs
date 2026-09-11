@@ -145,7 +145,7 @@ for (const dir of testDirs) {
 }
 
 // Run standalone tests/production-hydration-test.mjs (now in tests/)
-const prodHydrationPath = resolve(root, 'tests', 'tests/production-hydration-test.mjs')
+const prodHydrationPath = resolve(root, 'tests', 'production-hydration-test.mjs')
 if (existsSync(prodHydrationPath)) {
   totalFiles++
   process.stdout.write('tests/production-hydration-test.mjs ... ')
@@ -175,7 +175,7 @@ if (existsSync(prodHydrationPath)) {
 }
 
 // Run standalone tests/edge-test.mjs (now in tests/; after prod hydration — edge build overwrites .vesk)
-const edgeTestPath = resolve(root, 'tests', 'tests/edge-test.mjs')
+const edgeTestPath = resolve(root, 'tests', 'edge-test.mjs')
 if (existsSync(edgeTestPath)) {
   totalFiles++
   process.stdout.write('tests/edge-test.mjs ... ')
