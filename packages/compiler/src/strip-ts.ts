@@ -22,12 +22,34 @@ const TS_NODE_TYPES = new Set([
   'TSParameterProperty',
 ]);
 
+/** True when a node is a type-only import/export (`import type`, `export type`). */
+export function isTypeOnlyImportExport(node: any): boolean {
+  if (!node) return false;
+  if (node.type === 'ImportDeclaration') return node.importKind === 'type';
+  if (node.type === 'ExportNamedDeclaration' || node.type === 'ExportAllDeclaration') {
+    return node.exportKind === 'type';
+  }
+  return false;
+}
+
+/** True when a specifier is type-only inside a mixed import/export. */
+function isTypeOnlySpecifier(node: any): boolean {
+  if (!node) return false;
+  if (node.importKind === 'type') return true;
+  if (node.exportKind === 'type') return true;
+  return false;
+}
+
 /** True when the AST contains any TypeScript-only node. */
 export function hasTsSyntax(ast: any): boolean {
   let found = false;
   walk(ast, null, {
     _(node: any, context: any) {
       if (TS_NODE_TYPES.has(node.type)) {
+        found = true;
+        return;
+      }
+      if (isTypeOnlyImportExport(node) || isTypeOnlySpecifier(node)) {
         found = true;
         return;
       }
@@ -51,7 +73,11 @@ const TYPE_ONLY_STATEMENTS = new Set([
 export function isTypeOnlyStatement(node: any): boolean {
   if (!node) return true;
   if (node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration') {
+    if (node.exportKind === 'type') return true;
     return !!node.declaration && isTypeOnlyStatement(node.declaration);
+  }
+  if (node.type === 'ImportDeclaration' || node.type === 'ExportAllDeclaration') {
+    return isTypeOnlyImportExport(node);
   }
   return TYPE_ONLY_STATEMENTS.has(node.type);
 }
@@ -64,6 +90,8 @@ export function isTypeOnlyStatement(node: any): boolean {
  * - type arguments on call/new expressions and type parameter declarations
  * - whole type-only statements (interfaces, type aliases, declare/abstract
  *   members), replaced by null entries
+ * - type-only imports/exports (`import type`, `export type { ... }`, and
+ *   inline `type` specifiers inside mixed import/export statements)
  *
  * Returns a new tree (zimmerframe walks are immutable); callers must use the
  * return value.
@@ -111,6 +139,28 @@ export function stripTsTypes(ast: any): any {
     },
     PropertyDefinition(node: any, context: any) {
       if (node.typeAnnotation) node.typeAnnotation = null;
+      return context.next();
+    },
+    ImportDeclaration(node: any, context: any) {
+      if (isTypeOnlyImportExport(node)) return null;
+      if (Array.isArray(node.specifiers)) {
+        const kept = node.specifiers.filter((s: any) => !isTypeOnlySpecifier(s));
+        if (kept.length === 0) return null;
+        node.specifiers = kept;
+      }
+      return context.next();
+    },
+    ExportNamedDeclaration(node: any, context: any) {
+      if (isTypeOnlyImportExport(node)) return null;
+      if (Array.isArray(node.specifiers)) {
+        const kept = node.specifiers.filter((s: any) => !isTypeOnlySpecifier(s));
+        if (kept.length === 0 && node.declaration == null) return null;
+        node.specifiers = kept;
+      }
+      return context.next();
+    },
+    ExportAllDeclaration(node: any, context: any) {
+      if (isTypeOnlyImportExport(node)) return null;
       return context.next();
     },
     TSInterfaceDeclaration(node: any) {
