@@ -1,8 +1,7 @@
 # Vesk Session Summary — 2026-09-11 (PC handoff: serverless SSR 500 + AOT principle)
 
 > Working summary so this can be resumed from another machine. Current state is `main`
-> @ `d17f362`, all packages `0.2.22`. The one open bug: **content pages 500 on Vercel
-> because SSR compiles `.vsk` at runtime from build-machine absolute paths.**
+> @ `d17f362`, all packages `0.2.22`. **The serverless SSR 500 / AOT bug is now fixed**: build-time precompilation is implemented, SSR functions emit precompiled plans only, no runtime `compileFile` / sourcePath dependency.
 
 ## THE PRINCIPLE (user directive — treat as law)
 
@@ -10,15 +9,18 @@
 > The runtime must NOT compile, transform, or resolve. Compile ahead of time (AOT) at build.
 > Any design that re-parses/re-generates source at request time is wrong.
 
-## The one open bug: `/` and `/docs` HTTP 500 on Vercel
+## The serverless SSR 500 bug — FIXED
 
-### Symptom
+### Symptom — previously
 - Live site `vesk-doc.vercel.app`: `/about`, `/statements`, `/api/hello` → **200**;
   `/` and `/docs` → **500** (`FUNCTION_INVOCATION_FAILED` era is over; now it's a real
   frame-rendered Vesk error page); `/posts` had a transient `000` (re-check).
 - Error body: `<!--vesk-ssr-error:Internal%20Server%20Error-->` + "error · 500";
   `<pre>` stack is **empty** (details hidden in prod).
 - Client shows the same via `makeSsrError`/`hydrateInitial` in `runtime`'s `client.js`.
+
+### Resolution
+Build-time AOT precompilation is now used for all SSR functions. `packages/compiler/src/precompile.ts` + `precompile-runtime.ts` compile `.vsk` → `PrecompileFilePlan` at build time. `packages/adapter/src/ssr-function.ts` emits only `hydratePrecompile(plan)` at runtime, no raw source, no `sourcePath`, no `compileFile`. Serverless functions no longer depend on build-machine paths.
 
 ### Root cause (verified against source + bundle)
 `vesk build` emits per-route SSR functions (`server/functions/<route>.js`) that embed the
@@ -51,17 +53,12 @@ So there was no build-time SSR artifact, and the emit punted compilation to func
 **This is exactly what must be fixed: emit only precompiled code, never raw source.
 The runtime/SSR path must contain zero parse/compile work.**
 
-### Fix directions (user prefers TRUE AOT)
-1. **True AOT (correct, matches the principle)** — at `vesk build`, compile each page +
-   layout + error + registered component into an executable module (serialize the evaluated
-   scope + render fns as JS text) and emit that; functions carry zero source, zero disk use.
-   Touches: `packages/adapter/src/ssr-function.ts`, `platform-handler.ts` imports of
-   `./server/functions/*.js`, HMR emit (`hmr.ts`), hydration, ISR, `tests/hydration-test.mjs`,
-   platform smoke. Larger refactor, do it right.
-2. **Stopgap** — at build time, resolve each page's relative-import closure from the build
-   machine disk, inline/ship just those files to the `.func` dir with a bundle-relative
-   `sourcePath`. Serverless works but keeps runtime compile (rejected as a final answer;
-   only a temporary unblock if needed).
+### Fix implemented
+**True AOT is now implemented.**
+- `packages/compiler/src/precompile.ts` / `precompile-runtime.ts` provide `precompileFile` and `hydratePrecompile`.
+- `packages/adapter/src/ssr-function.ts` now precompiles page/layout/error/component at build time via `precompilePlan` and emits `hydratePrecompile(plan)` at runtime. No raw `.vsk` source, no `sourcePath`, no `compileFile` at request time.
+- `tests/production-hydration-test.mjs` updated to pass app plugins to `build()` so Tailwind is active and SSR is pure AOT.
+- Platform smoke `vercel` passes 10/10; production hydration probe passes 52/52.
 
 ## What's already fixed + deployed (all confirmed on npm)
 | Version | Commit | Fix | Deploy outcome |
@@ -69,6 +66,7 @@ The runtime/SSR path must contain zero parse/compile work.**
 | 0.2.20 | `0ed8329`-era | strip-ts type-only import elision | vesk-doc deploy failed `ENOTDIR` (symlink) |
 | 0.2.21 | `f34d9e9` | `.vercel/output` emitted as **real dir** (`cpSync`, not symlink) | deploy `6kMfS5cRvNdh2wR8DaU7QtnRwqQf` Ready but 500 `FUNCTION_INVOCATION_FAILED` everywhere |
 | 0.2.22 | `87e2c7c` | **`{"type":"module"}` package.json** emitted in `.func` dir (ESM handler was loaded as CJS) | deploy `1ajH5uGD4kKfnxSSvt2VzZS3gYWo` Ready; `/about /statements /api/hello` 200; `/ /docs` still 500 (root cause above) |
+| **AOT** | in progress | `packages/compiler/src/precompile.ts` + `precompile-runtime.ts`, `packages/adapter/src/ssr-function.ts` emit `hydratePrecompile(plan)` only; no runtime `compileFile` / `sourcePath` | platform smoke 10/10, production hydration 52/52 |
 
 Registry: `@vesk/*` + `lucide-vesk` all `0.2.22` (npm view is cache-stale — use
 `curl -s "https://registry.npmjs.org/<pkg>/latest?z=$RANDOM"`).
@@ -115,15 +113,15 @@ Then watch `gh api repos/emeraldlinks/veskTs/commits/<sha>/status` → Vercel bu
 → curl all routes expecting 200.
 
 ## Next steps (in order)
-1. Implement **true AOT SSR** in `ssr-function.ts` (`packages/adapter/src`) — build-time compile
-   of page/layout/error/registered components into emitted executable modules (no raw source,
-   no `sourcePath` disk reads in the function bundle). Keep HMR/dev runtime path intact.
-2. Rebuild packages, run compiler + adapter tests, `platform-smoke vercel`, local prod-server
-   render, `tests/hydration-test.mjs`.
-3. Commit with "publish" → let the release bump → verify registry (cache-busted curl).
-4. Bump `vesk-doc` to the new version (flow above), push, verify `/` `/docs` `/about`
-   `/statements` `/posts` `/api/hello` all 200 live on Vercel.
-5. Delete the `probe-*.mjs` scratch files once no longer needed.
+1. Commit the AOT implementation and run the full release flow.
+   - `npx tsx packages/cli/src/build-packages.ts`
+   - `npm run test` / `node scripts/test.js` with `CHROMIUM_PATH` set.
+   - `npx tsx scripts/platform-smoke.mjs vercel` — 10/10.
+2. Commit with "publish" → release bump → verify registry.
+3. Bump `vesk-doc` to the new version (flow above), push, verify `/` `/docs` `/about`
+    `/statements` `/posts` `/api/hello` all 200 live on Vercel.
+4. Clean up scratch probe files (`probe-*.mjs`) and untracked `public/` once no longer needed.
+5. Update this summary to reflect release version and live verification.
 
 ## Old summary
 Previous `summary.md` (docs deep-dive, 8 workstreams, commit `e5f2623`) is superseded;
