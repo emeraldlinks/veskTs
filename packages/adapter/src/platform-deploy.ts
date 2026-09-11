@@ -83,6 +83,11 @@ export async function emitPlatformOutput(platform: Platform, ctx: DeployContext)
     mkdirSync(funcDir, { recursive: true });
     if (shell.functionConfig) {
       writeFileSync(resolve(funcDir, '.vc-config.json'), JSON.stringify(shell.functionConfig, null, 2), 'utf-8');
+      // The Build Output API loader keys module format off the nearest
+      // package.json `type` field. Without a `type: module` marker the ESM
+      // handler bundle is treated as CommonJS and every invocation fails to
+      // load (Vercel: FUNCTION_INVOCATION_FAILED).
+      writeFileSync(resolve(funcDir, 'package.json'), JSON.stringify({ type: 'module' }, null, 2) + '\n', 'utf-8');
     }
     handlerRel = `${shell.functionFile.dir}/${shell.functionFile.file}`;
     await bundlePlatformHandler({ entry, outfile: resolve(funcDir, shell.functionFile.file), nodeBuiltins: shell.nodeBuiltins });
