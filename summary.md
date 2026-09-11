@@ -1,82 +1,131 @@
-# Vesk Session Summary — 2026-09-10 (PC handoff, docs deep-dive COMPLETE)
+# Vesk Session Summary — 2026-09-11 (PC handoff: serverless SSR 500 + AOT principle)
 
-> Working summary so this work can be resumed from another machine (PC). Everything below is
-> verified against actual source; **never trust the deleted vesk-web guides.**
+> Working summary so this can be resumed from another machine. Current state is `main`
+> @ `d17f362`, all packages `0.2.22`. The one open bug: **content pages 500 on Vercel
+> because SSR compiles `.vsk` at runtime from build-machine absolute paths.**
 
-## The ask (verbatim intent)
-1. Make `vesk-doc` well depth-documented (real docs, not stubs).
-2. **No errors** — every `.vsk` snippet must compile; every claimed API must exist in source.
-3. **Don't skip vesk-native** — document everything in it (routing, libraries, CLI, device APIs, everything).
-4. Spawn **8 parallel subagents** to handle all tasks at once.
-5. Recover deleted `vesk-web` doc/guide **only if verifiably accurate** — otherwise remove it.
-6. **Don't assume anything, don't skip anything** in the docs.
-7. Document **`vesk` CLI** AND **`vesk-native` CLI** in the docs.
-8. Write summary to `summary.md` (overwrite), commit, push — so work continues on another PC.
+## THE PRINCIPLE (user directive — treat as law)
 
-## STATUS: ALL EIGHT WORKSTREAMS COMPLETE, COMMITTED, PUSHED
+> **"Move every task as far as possible / stretchable to the compiler."**
+> The runtime must NOT compile, transform, or resolve. Compile ahead of time (AOT) at build.
+> Any design that re-parses/re-generates source at request time is wrong.
 
-- `d029693` — **8-agent docs deep-dive merged** (9 files, +3951 lines): depth-documented
-  `data-fetching`, `network`, `middleware`, `routing`, `server-apis`, `api-routes`, `isr`,
-  `forms`, `config`, `plugin-api`, `cli`, `native`. typecheck + build green. All 115 site
-  `.vsk` blocks compile (statement + expression modes) via compileFile probe.
-- `fef4364` — session summary + 8-agent plan.
-- `4d70ec6` — deleted `vesk-web` (105 files) — its guides were wrong.
-- `1816984` — runtime llms.txt `^0.1.0` → `^0.2.16`.
-- `a9c8f18` — 22 docs.ts page tab-conversions, CodeShowcase ssr.html tab, 7 llms.txt bumps, CLI reference.
+## The one open bug: `/` and `/docs` HTTP 500 on Vercel
 
-### What each workstream fixed (wrong/fabricated API → real)
-| Page | Old claim (WRONG) | Real (from source) |
-|---|---|---|
-| `middleware` | `ctx.next()/setHeader/redirect/rewrite` methods | `fn(ctx, next)`, `next(rewrite?)`; short-circuit by returning a `Response`; `MiddlewareContext = {request,params,url,locals,cookies,set,get}` (no response obj) |
-| `native` | fabricated `@vesk/native-compiler` 2-arg `compileVsk` | REAL packages `@vesk/native`, `@vesk/native-compiler`, `@vesk/native-cli`, `navigation-native` (v0.1.10); `compileVsk(source, filename, options)`; `CompileResult {kt, errors, notes, libraryIds, vskTargets, jsTsTargets, npmTargets}`; CLI, API_PERMISSIONS, device APIs from `/tmp/vesk-native` |
-| `routing` | `<Redirect to="/login" />` JSX component | `Redirect` is an `Error` subclass (`throw redirect(url, status)`); layouts via `props.children`; added createRouter/createFileRouter/defineRoute/buildRouteTree/matchRoute, guards, prefetch, catch-all, loading/error/not-found/offline pages |
-| `data-fetching` | `createResource(fn, { key })` | `createResource(fn, key?, into?, options?)`; `mutate(key, data?)` only from `@vesk/runtime/src/resource` (not barrel); HttpError/TimeoutError same path |
-| `server-apis` | `setCsp({ defaultSrc })}` object; "all auto-imported" | `setCsp("default-src 'self'")` string; only `useParams` auto-imported — rest from `@vesk/runtime/server` |
-| `config` | `preset('strict')/preset('minimal')` | `preset('production') / preset('development')` only |
-| `plugin-api` | `import { tailwindcss } from '@vesk/plugin-tailwind'` | default export `import tailwindcss from ...` |
-| `cli` | HMR `{type:'reload'|'hmr', path}` | real messages `compiling/update/reload/error/css-update` + `nonce`; watches app/ + src/; verified platform list `node|vercel|netlify|cloudflare|deno|aws|edge|coxmos`; typecheck/init behaviors |
-| `api-routes` | sync `{ params: {id} }` destructure | params arrive as a Promise: `const { id } = await ctx.params` |
-| `isr` | thin | added componentIsr/isrConfigToRevalidate, `export const revalidate`/`isrTags`, `${comp:key}` tag indexing |
-| `forms` | — | Form/Field onSubmit/onError/onSuccess real signatures |
+### Symptom
+- Live site `vesk-doc.vercel.app`: `/about`, `/statements`, `/api/hello` → **200**;
+  `/` and `/docs` → **500** (`FUNCTION_INVOCATION_FAILED` era is over; now it's a real
+  frame-rendered Vesk error page); `/posts` had a transient `000` (re-check).
+- Error body: `<!--vesk-ssr-error:Internal%20Server%20Error-->` + "error · 500";
+  `<pre>` stack is **empty** (details hidden in prod).
+- Client shows the same via `makeSsrError`/`hydrateInitial` in `runtime`'s `client.js`.
 
-## Verified facts (do NOT re-derive)
-- All `@vesk/*` packages = `0.2.16`; CLI binary = `@vesk/vesk-cli`.
-- `vesk-doc` typecheck/build: `cd vesk-doc && npm run typecheck` (`tsc --noEmit`) / `npm run build` (`vesk build`).
-  **NOTE: `vesk build` re-packs `vesk-doc/tarballs/*.tgz` to a fresh CI timestamp and updates
-  package.json/package-lock.json `file:` refs — restore those before committing non-doc work:
-  `git checkout -- vesk-doc/package.json vesk-doc/package-lock.json vesk-doc/tarballs/` and
-  delete the new-`*-<ts>.tgz` files.**
-- vesk-web's guides are WRONG (Svelte-style `{#if}` that doesn't compile in Vesk). Document from source.
-- `Redirect`/`permanentRedirect`/`notFound` are `Error` subclasses/throw-functions, never JSX components.
-- Runtime barrel split: client & server barrels export `createResource/setSsrData/clearSsrData/resolveSsrResources/useFetch`; `mutate/HttpError/TimeoutError` are NOT in barrels — import from `@vesk/runtime/src/resource` (same as the runtime's own tests).
+### Root cause (verified against source + bundle)
+`vesk build` emits per-route SSR functions (`server/functions/<route>.js`) that embed the
+**raw `.vsk` page source** plus a top-level IIFE that **recompiles at function-load time**:
 
-## Current docs architecture
-- `vesk-doc/src/content/docs.ts` defines `Block`/`DocPage`/`docGroups`/`docPages` (inline pages).
-- The 8 deep-dive modules live in `vesk-doc/src/content/docs-*.ts`, each exporting `pages` —
-  `docs.ts` imports them and MERGES into `docPages` by slug (replace in place or append).
-- **docPages is now built position-preserving:** `basePages` (the 25 un-reworked pages inline)
-  + `extendedPages` (the 12 module pages) merged through `docSlugOrder` (explicit slug list,
-  original sidebar order). No stale inline copies remain — the 12 reworked slugs live ONLY in
-  their modules. If a slug is missing from both, it throws at module load.
-- Pages still shallow but "decent" (not reworked): `seo`, `bindings`, `reconcile`,
-  `reactive-core`, `built-in-components`, `headless`, `errors`, `pipeline`, `ir-format`,
-  `static-codegen`, `client-reachability`, `hydration`, `deployment`, `lsp`, `prettier`,
-  `markdown`, `styles`, `gotchas` (not-in-the-grammar), `getting-started`, `components`,
-  `track-declarations`, `reactivity`, `expression-mode`, `statement-mode`, `client-boundary`.
-  They already compile (115/115 site-wide probe) but were **never audited against source** —
-  this is the remaining gap if you want every page API-accurate.
-
-## Repos
-- `/workspaces/veskTs` (PC) / `/root/vesk` (WSL) — monorepo: types, adapter, cli, compiler,
-  create-vesk, plugin-tailwind, prettier-plugin, runtime, lsp. **Docs live here.**
-- `/tmp/vesk-native` (PC clone) / `/root/vesk-native` (WSL) — separate native repo:
-  compiler-native, cli-native, create-native, native, navigation-native (+ 24 ADRs).
-
-## Command cheat-sheet (resume on PC)
-```bash
-cd /workspaces/veskTs
-npx tsx /tmp/vsk-probe.mjs '<vsk-source>' name   # compile-verify inline
-npx tsx /tmp/vsk-probe.mjs @/tmp/file.vsk name   # compile-verify a file
-npx tsx /tmp/verify-vsk.mjs                      # probe ALL .vsk blocks in docs.ts (must be 115/0)
-cd vesk-doc && npm run typecheck && npm run build
+```js
+const _pagePath = "/vercel/path0/vesk-doc/app/docs/page.vsk";           // BUILD-MACHINE ABSOLUTE PATH
+const _pageCompiled = (() => { try { setVskHydrate(true);
+  return compileFile(_pageSrc, { sourcePath: _pagePath });              // RE-COMPILES AT REQUEST TIME
+} catch { return null; } finally { setVskHydrate(false); } })();
 ```
+
+- `renderPage(source, comp, props, registry, { cached: _pageCompiled, sourcePath })` is
+  called per render (package `@vesk/compiler` → `server-codegen`).
+- `compileFile` needs **disk**: `inlineMdImportsFrom(source, sourcePath)` +
+  `collectVskImportPaths` + `readFileSync` of every relative import
+  (`packages/compiler/src/server-render.ts:42-73`).
+- Local `/vercel/path0/...` → the bundle has **34 baked absolute paths** (grep
+  `/root/vesk/vesk-doc` in `vesk-doc/.vercel/output/functions/__index.func/index.js`
+  locally) pointing at anything that doesn't exist in the serverless sandbox.
+- Result: `_pageCompiled = null` for pages with relative content imports → SSR throws →
+  generic 500. Pages with **no relative imports** (`/about`, `/statements`) compile fine → 200.
+- The same bundle renders **all routes 200 locally** (incl. isolated dir, Node 22 & 26)
+  only because this machine still has `/root/vesk/vesk-doc` on disk.
+
+### Why it's compile-at-runtime (the flaw)
+`compileFile` returns `{ ir, componentMap, __vesk }` where `componentMap` is a
+`Map<string, Function>` of **closures over `evalTopLevelCode`'d scope** — not serializable.
+So there was no build-time SSR artifact, and the emit punted compilation to function load.
+**This is exactly what must be fixed: emit only precompiled code, never raw source.
+The runtime/SSR path must contain zero parse/compile work.**
+
+### Fix directions (user prefers TRUE AOT)
+1. **True AOT (correct, matches the principle)** — at `vesk build`, compile each page +
+   layout + error + registered component into an executable module (serialize the evaluated
+   scope + render fns as JS text) and emit that; functions carry zero source, zero disk use.
+   Touches: `packages/adapter/src/ssr-function.ts`, `platform-handler.ts` imports of
+   `./server/functions/*.js`, HMR emit (`hmr.ts`), hydration, ISR, `tests/hydration-test.mjs`,
+   platform smoke. Larger refactor, do it right.
+2. **Stopgap** — at build time, resolve each page's relative-import closure from the build
+   machine disk, inline/ship just those files to the `.func` dir with a bundle-relative
+   `sourcePath`. Serverless works but keeps runtime compile (rejected as a final answer;
+   only a temporary unblock if needed).
+
+## What's already fixed + deployed (all confirmed on npm)
+| Version | Commit | Fix | Deploy outcome |
+|---|---|---|---|
+| 0.2.20 | `0ed8329`-era | strip-ts type-only import elision | vesk-doc deploy failed `ENOTDIR` (symlink) |
+| 0.2.21 | `f34d9e9` | `.vercel/output` emitted as **real dir** (`cpSync`, not symlink) | deploy `6kMfS5cRvNdh2wR8DaU7QtnRwqQf` Ready but 500 `FUNCTION_INVOCATION_FAILED` everywhere |
+| 0.2.22 | `87e2c7c` | **`{"type":"module"}` package.json** emitted in `.func` dir (ESM handler was loaded as CJS) | deploy `1ajH5uGD4kKfnxSSvt2VzZS3gYWo` Ready; `/about /statements /api/hello` 200; `/ /docs` still 500 (root cause above) |
+
+Registry: `@vesk/*` + `lucide-vesk` all `0.2.22` (npm view is cache-stale — use
+`curl -s "https://registry.npmjs.org/<pkg>/latest?z=$RANDOM"`).
+`scripts/platform-smoke.mjs vercel` → 10/10 passed.
+
+## Repo / git state (as of handoff)
+- Branch `main`, HEAD `d17f362 docs: bump vesk-doc to vesk 0.2.22 (ESM type:module marker)`.
+  Parents: `69bec83 release: v0.2.22 [skip ci]`  ← `87e2c7c` (the fix).
+- All workspace packages pinned `0.2.22`: types, adapter, cli, compiler, create-vesk,
+  plugin-pwa, plugin-tailwind, prettier-plugin, runtime, lsp.
+- `vesk-doc/package.json`: `@vesk/{adapter,compiler,plugin-tailwind,runtime,types,vesk-cli}` + `lucide-vesk` all `0.2.22`.
+- **DO NOT COMMIT working-tree junk** (must not be staged):
+  - `M .gitignore`, `M test-app/package.json`, `M test-app/package-lock.json`, `M test-app/vesk.config.ts`
+  - `D test-app/tarballs/vesk-0.2.16-ci.*.tgz` etc. (7 deleted tgz)
+  - `?? probe-*.mjs` (many root-level probe scripts; `probe-vesk-doc.mjs`,
+    `probe-vesk-doc-browse.mjs` used for the bundle repros)
+  - `vesk-doc/.vercel/output/`, `vesk-doc/tarballs/*.tgz` are generated/local — exclude.
+
+## Release / deploy machinery (memorize)
+- `npx tsx packages/cli/src/build-packages.ts` — rebuild package `dist/` after ANY
+  `packages/compiler` or `packages/adapter` source edit (tests resolve dist via exports map).
+  `npx tsx packages/cli/build.ts` — rebuild the CLI bundle (`packages/cli/dist/cli.js`,
+  embeds adapter+compiler). Verify with `grep -c` of a known marker.
+- Release: push to main with **"publish" in the commit message** → GH run → publish job
+  `needs: [verify, platforms]` → auto **patch** bump → npm publish → `release: vX.Y.Z [skip ci]`
+  commit + tag. ~6 min verify + ~2 min publish. Keep `--run-id`/URL for logs.
+- Vercel: project `vesk-docs`, user `emeraldlinks`, team `emeraldlinks-projects`.
+  `vercel ls`, `vercel inspect <deployID> --logs` work; `vercel logs` / events API are
+  plan-gated ("Deployment not found") — don't waste time on runtime logs.
+- Dev/test local: `node tests/hydration-test.mjs` (needs test-app dev server :3000 +
+  `CHROMIUM_PATH`), `npx tsx scripts/platform-smoke.mjs vercel`, run compiler tests
+  individually: `npx tsx packages/compiler/src/<file>.test.ts`.
+
+## vesk-doc bump flow (repeatable)
+```bash
+git stash push -m junk -- test-app .gitignore          # protect junk
+git fetch origin && git rebase origin/main             # pulls release:vX.Y.Z [skip ci] + tag
+git stash pop
+sed -i 's/"0\.2\.22"/"0.2.23"/g' vesk-doc/package.json  # 7 pins
+git add vesk-doc/package.json && git commit -m "docs: bump vesk-doc to vesk 0.2.23 (...)"
+git push                                              # message MUST NOT contain "publish"
+```
+Then watch `gh api repos/emeraldlinks/veskTs/commits/<sha>/status` → Vercel build/deploy
+→ curl all routes expecting 200.
+
+## Next steps (in order)
+1. Implement **true AOT SSR** in `ssr-function.ts` (`packages/adapter/src`) — build-time compile
+   of page/layout/error/registered components into emitted executable modules (no raw source,
+   no `sourcePath` disk reads in the function bundle). Keep HMR/dev runtime path intact.
+2. Rebuild packages, run compiler + adapter tests, `platform-smoke vercel`, local prod-server
+   render, `tests/hydration-test.mjs`.
+3. Commit with "publish" → let the release bump → verify registry (cache-busted curl).
+4. Bump `vesk-doc` to the new version (flow above), push, verify `/` `/docs` `/about`
+   `/statements` `/posts` `/api/hello` all 200 live on Vercel.
+5. Delete the `probe-*.mjs` scratch files once no longer needed.
+
+## Old summary
+Previous `summary.md` (docs deep-dive, 8 workstreams, commit `e5f2623`) is superseded;
+the docs work is complete and pushed. The vesk-web-era "guides" are WRONG — never trust them;
+document from source only.
