@@ -1,0 +1,81 @@
+import { Link } from '@vesk/runtime/router'
+
+component FeaturesPage {
+	<Head>
+		<title>Features — Every primitive you need, nothing you don't | Vesk</title>
+		<meta name="description" content="Vesk features: .vsk components, track reactivity, islands, file & manual routing, SSR, hydration, data fetching, forms, TypeScript, Tailwind, Kotlin native. Compared to Next.js, SvelteKit, Astro, Remix." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>product · features</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">What ships in the box.</h1>
+		<p class="mt-5 max-w-[64ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Vesk is not a UI kit. It's a compiler, a reactivity runtime, a router, a data layer, and a native emitter — integrated so you don't glue them together. Choose the primitives you need; the compiler tree-shakes the rest.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-5 py-3 text-sm no-underline">Quickstart →</Link>
+			<Link href="/comparison" class="btn-outline px-5 py-3 text-sm no-underline">Compare frameworks</Link>
+		</div>
+
+		<div class="mt-14 grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
+			for (const f of [
+				{ icon: "◈", title: ".vsk components", desc: "Single-file component with markup, logic, <style> and islands. Statement or expression mode — same IR.", vs: "vs JSX sprawl in Next/Astro" },
+				{ icon: "◎", title: "track() reactivity", desc: "&[count]=track(0) → auto get/set, derived, effect. No useState/useEffect ceremony.", vs: "vs React hooks & Svelte $:" },
+				{ icon: "⬡", title: "Islands", desc: "Zero-JS by default. Add client only where you need it — {.client} blocks are compile-time.", vs: "vs Next client:all" },
+				{ icon: "◇", title: "File + manual routing", desc: "app/ conventions plus createRouter(defineRoute) — groups, [slug], [...rest], hash, offline.", vs: "vs Next file-only" },
+				{ icon: "▞", title: "SSR + hydration", desc: "Streaming SSR, claim walkers, 4 hydrate strategies (full/viewport/idle/interaction).", vs: "vs React hydrateRoot full-replay" },
+				{ icon: "⟡", title: "Data fetching", desc: "useFetch + Resource, staleTime, dedupe, into cells, HttpError. SSR handoff included.", vs: "vs fetch+useEffect" },
+				{ icon: "⬢", title: "Forms & actions", desc: "Form, Field, defineAction with Zod, CSRF, optimistic mutate.", vs: "vs Next server actions alone" },
+				{ icon: "⬣", title: "TypeScript", desc: ".vsk superset — every TS feature survives codegen and vsk typecheck.", vs: "vs Svelte/Astro extra config" },
+				{ icon: "⬔", title: "Tailwind v4", desc: "@vesk/plugin-tailwind, same utilities on web and Kotlin.", vs: "vs per-framework tailwind hacks" },
+				{ icon: "⬕", title: "Vesk Native", desc: "Same IR → Kotlin + Compose Material 3. No WebView.", vs: "vs React Native bridge" },
+				{ icon: "✦", title: "HMR", desc: "Sub-second, surgical. Only affected route islands re-execute.", vs: "vs full reloads" },
+				{ icon: "⬒", title: "SEO & build", desc: "create-vesk, vesk build, ISR, typed errors, diagnostics.", vs: "vs glue-your-own" },
+			]) {
+				<article class="bg-surface p-5">
+					<div class="font-mono text-[11px] text-accent">{f.icon} — {f.vs}</div>
+					<h3 class="mt-3 font-display text-sm font-semibold tracking-tight">{f.title}</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">{f.desc}</p>
+				</article>
+			}
+		</div>
+
+		<div class="panel mt-10 overflow-hidden">
+			<div class="border-b border-border px-4 py-2"><span class="eyebrow">vs other frameworks — honest comparison</span></div>
+			<div class="overflow-x-auto">
+				<table class="w-full font-mono text-[12px]">
+					<thead class="bg-surface/60 text-[11px] uppercase tracking-[0.14em] text-muted-foreground"><tr><th class="px-4 py-3 text-left font-medium">Pillar</th><th class="px-4 py-3 text-left font-medium">Vesk</th><th class="px-4 py-3 text-left font-medium">Next.js 15</th><th class="px-4 py-3 text-left font-medium">SvelteKit / Astro</th></tr></thead>
+					<tbody class="divide-y divide-border">
+						<tr><td class="px-4 py-3 font-medium">Runtime shipped</td><td class="px-4 py-3">~2 kB router + per-cell updates; static = 0 B</td><td class="px-4 py-3">React + RSC runtime ~80-120 kB</td><td class="px-4 py-3">Svelte runtime ~8-15 kB; Astro partial 0 B but islands are React/Svelte</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Reactivity</td><td class="px-4 py-3">Fine-grained cells — O(1) DOM write per change</td><td class="px-4 py-3">VDOM diff — O(n) re-render</td><td class="px-4 py-3">Svelte fine-grained; Astro none (static)</td></tr>
+						<tr><td class="px-4 py-3 font-medium">SSR model</td><td class="px-4 py-3">String push + claim markers; fully static = no hydrate</td><td class="px-4 py-3">renderToString + hydrateRoot full replay</td><td class="px-4 py-3">Svelte: similar; Qwik: resumable</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Routing</td><td class="px-4 py-3">File + manual (defineRoute, hash, offline)</td><td class="px-4 py-3">File only, extra config for hash</td><td class="px-4 py-3">File only</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Native</td><td class="px-4 py-3">Kotlin IR output — no bridge</td><td class="px-4 py-3">None (Expo separate)</td><td class="px-4 py-3">None</td></tr>
+						<tr><td class="px-4 py-3 font-medium">DX</td><td class="px-4 py-3">One model .vsk, HMR ~90 ms, vesk typecheck</td><td class="px-4 py-3">Next HMR, but client/server split</td><td class="px-4 py-3">Good DX, per-framework</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="border-t border-border bg-surface/40 px-4 py-3 font-mono text-[11px] leading-relaxed text-muted-foreground">Numbers are order-of-magnitude; measure your bundle. Vesk's win is architectural: less to ship because the compiler proves what can be static.</p>
+		</div>
+
+		<div class="mt-10 grid gap-px bg-border sm:grid-cols-3">
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">Next.js → Vesk in 1 day</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground"><code class="bg-surface px-1 py-0.5">npx create-vesk</code>, move <code class="bg-surface px-1 py-0.5">app/</code>, replace <code class="bg-surface px-1 py-0.5">useState</code> with <code class="bg-surface px-1 py-0.5">&[x]=track</code>, delete <code class="bg-surface px-1 py-0.5">useEffect</code> boilerplate. Most pages become static.</p>
+				<Link href="/docs/getting-started" class="mt-4 inline-block font-mono text-[11px] text-accent hover:text-foreground no-underline">Start migration →</Link>
+			</div>
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">SvelteKit → Vesk</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Familiar fine-grained feel, but stereo: web and Kotlin from one IR, file + manual routes, and <code class="bg-surface px-1 py-0.5">useFetch</code> with SSR handoff.</p>
+				<Link href="/comparison" class="mt-4 inline-block font-mono text-[11px] text-accent hover:text-foreground no-underline">See comparison →</Link>
+			</div>
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">Astro → Vesk</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Keep the islands idea, gain a real app framework: routing, data, forms, and native — not just content.</p>
+				<Link href="/docs/routing" class="mt-4 inline-block font-mono text-[11px] text-accent hover:text-foreground no-underline">Routing docs →</Link>
+			</div>
+		</div>
+
+		<div class="mt-12 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-6 py-3 text-sm no-underline">Build with Vesk</Link>
+			<Link href="/native" class="btn-outline px-6 py-3 text-sm no-underline">Explore Vesk Native</Link>
+		</div>
+	</div>
+}

@@ -97,13 +97,36 @@ export function buildErrorPayload(
       : undefined;
 
   let codeframe: Codeframe | undefined;
+  let resolvedAbsPath: string | undefined;
   if (line !== null && line >= 1 && typeof opts.appDir === 'string') {
     let src: string | undefined;
-    try {
-      const absPath = resolve(opts.appDir, file);
-      if (existsSync(absPath)) src = readFileSync(absPath, 'utf-8');
-    } catch {
-      src = undefined;
+    const candidates: string[] = [];
+    // file may be relative to appDir (e.g. "comparison/page.vsk"),
+    // prefixed with "app/" (e.g. "app/comparison/page.vsk"),
+    // absolute, or relative to project root.
+    if (file.startsWith('/')) {
+      candidates.push(file);
+    } else {
+      candidates.push(resolve(opts.appDir, file));
+      if (file.startsWith('app/')) {
+        candidates.push(resolve(opts.appDir, file.slice(4)));
+        candidates.push(resolve(opts.appDir, '..', file));
+      } else {
+        candidates.push(resolve(opts.appDir, '..', file));
+      }
+      // also try file as-is relative to cwd
+      candidates.push(resolve(file));
+    }
+    for (const absPath of candidates) {
+      try {
+        if (existsSync(absPath)) {
+          src = readFileSync(absPath, 'utf-8');
+          resolvedAbsPath = absPath;
+          break;
+        }
+      } catch {
+        /* try next candidate */
+      }
     }
     if (typeof src === 'string' && src.length > 0) {
       const cf = buildCodeframe(src, line, column ?? 1);
@@ -116,9 +139,9 @@ export function buildErrorPayload(
 
   const tipsData = suggestFor(message);
 
-  const filePath = typeof opts.appDir === 'string'
+  const filePath = resolvedAbsPath ?? (typeof opts.appDir === 'string'
     ? resolve(opts.appDir, file)
-    : undefined;
+    : undefined);
 
   // The file header already shows the location; strip the redundant
   // " in <file>" suffix compilers append to messages (e.g. acorn's
@@ -524,10 +547,30 @@ export function createHmrServer(
         }
 
         if (sourceDir !== null) {
-          const routeNode = findRouteForSource(routeTree, sourceDir);
+          // sourceDir from extractSourceDir is relative to appDir (e.g. "community/discussions"),
+          // while routeTree nodes store absolute sourceDir — normalize to absolute for lookup
+          let absSourceDir: string;
+          if (sourceDir === '') {
+            absSourceDir = appDir;
+          } else if (sourceDir.startsWith('app/')) {
+            absSourceDir = resolve(appDir, '..', sourceDir);
+          } else {
+            absSourceDir = resolve(appDir, sourceDir);
+          }
+          const routeNode = findRouteForSource(routeTree, absSourceDir);
           if (routeNode) {
-            const ancestorLayouts = collectAncestorLayouts(routeTree, sourceDir);
+            const ancestorLayouts = collectAncestorLayouts(routeTree, absSourceDir);
             regenerateSsrFunction(routeNode, appDir, devDir, componentMap, { ancestorLayouts: ancestorLayouts || [] });
+          } else if (filename.endsWith('page.vsk') || filename.endsWith('layout.vsk')) {
+            // new route (e.g. freshly created app/community/discussions/page.vsk)
+            // — routeTree is stale, need a full rebuild to pick up the new node
+            // and generate its SSR function with the correct layout chain
+            try {
+              await doFullBuild();
+              broadcast('reload', { reason: `new route: ${filename}`, time: Date.now() - start });
+            } catch (e) {
+              broadcast('error', buildErrorPayload(e, filename, { appDir }));
+            }
           }
         }
 

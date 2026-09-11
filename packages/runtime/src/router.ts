@@ -1979,6 +1979,7 @@ export function buildRouteTree(definitions: RouteNode[]): RouteNode[] {
 			notFound: def.notFound || null,
 			offline: (def as RouteNode & { offline?: Function | string | null }).offline ?? null,
 			network: (def as RouteNode & { network?: Function | string | null }).network ?? null,
+			standalone: (def as any).standalone ? true : undefined,
 			children: ((def.children || []) as RouteNode[]).map(c => {
 				const cParts = (c.path || '').split('/').filter(Boolean);
 				return {
@@ -1991,6 +1992,7 @@ export function buildRouteTree(definitions: RouteNode[]): RouteNode[] {
 					loading: null,
 					error: null,
 					notFound: null,
+					standalone: (c as any).standalone ? true : undefined,
 					segmentCount: cParts.length || 1,
 					children: [],
 				};

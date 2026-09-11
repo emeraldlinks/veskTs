@@ -4,14 +4,31 @@ import { Link } from '@vesk/runtime/router'
 
 export component DocsSidebar(props: { activeSlug?: string; onNavigate?: () => void }) {
 	const &[query] = track("")
-	const q = query.trim().toLowerCase()
-	const match = (t: string) => t.toLowerCase().includes(q)
-	const groups = docGroups
-		.map((group) => ({
-			group,
-			pages: docPages.filter((p) => p.group === group && (!q || match(p.title) || match(p.description))),
-		}))
-		.filter((g) => g.pages.length > 0)
+	const &[q] = derived(() => query.trim().toLowerCase())
+	const &[groups] = derived(() => {
+		const needle = q
+		const match = (t: string) => t.toLowerCase().includes(needle)
+		const pageMatches = (p: typeof docPages[number]) => {
+			if (!needle) return true
+			if (match(p.title) || match(p.description)) return true
+			for (const b of p.blocks as any[]) {
+				if (b.text && typeof b.text === 'string' && match(b.text)) return true
+				if (b.items && Array.isArray(b.items) && b.items.some((s: string) => match(s))) return true
+				if (b.head && Array.isArray(b.head) && b.head.some((s: string) => match(s))) return true
+				if (b.rows && Array.isArray(b.rows) && b.rows.flat().some((s: string) => typeof s === 'string' && match(s))) return true
+				if (b.code && typeof b.code === 'string' && match(b.code)) return true
+				if (b.filename && typeof b.filename === 'string' && match(b.filename)) return true
+				if (b.tabs && Array.isArray(b.tabs) && b.tabs.some((t: any) => match(t.label) || match(t.filename) || match(t.code))) return true
+			}
+			return false
+		}
+		return docGroups
+			.map((group) => ({
+				group,
+				pages: docPages.filter((p) => p.group === group && pageMatches(p)),
+			}))
+			.filter((g) => g.pages.length > 0)
+	})
 
 	<div class="flex h-full flex-col">
 		<div class="relative border-b border-border">

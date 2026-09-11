@@ -13,6 +13,7 @@ export interface RouteNode {
 	network?: Function | string | null;
 	children?: RouteNode[];
 	segmentCount?: number;
+	standalone?: boolean;
 	_matchChain?: RouteNode[];
 	loader?: Function;
 	props?: Record<string, unknown>;
@@ -58,17 +59,24 @@ export function collectLayouts(nodes: RouteNode[], pathParts: string[]): { layou
 			layouts.push(...childLayouts);
 			continue;
 		}
+		// Root node (fullPath '/') always matches as a container; recurse into children.
+		const isRoot = node.fullPath === '/';
+		const matched = isRoot ? true : matchRouteNode(node, pathParts);
+		if ((node as any).standalone && matched && !isRoot) {
+			layouts.length = 0;
+		}
 		if (node.layout) {
 			layouts.push({ layout: node.layout, node });
 		}
-		const len = pathParts.length;
-		const matched = matchRouteNode(node, pathParts);
-		if (matched) {
+		if (matched && !isRoot) {
 			const remaining = pathParts.slice(node.segmentCount != null ? node.segmentCount : 1);
 			if (remaining.length > 0 && (node.children || []).length > 0) {
 				const childLayouts = collectLayouts(node.children || [], remaining);
 				layouts.push(...childLayouts);
 			}
+		} else if (isRoot && (node.children || []).length > 0) {
+			const childLayouts = collectLayouts(node.children || [], pathParts);
+			layouts.push(...childLayouts);
 		}
 	}
 	return layouts;
@@ -125,6 +133,7 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 			const consumeCount = node.isCatchAll ? pathParts.length : segCount;
 			const remaining = pathParts.slice(consumeCount);
 			const isLeaf = remaining.length === 0 || remaining.every(p => p === '');
+			if ((node as any).standalone) result.length = 0;
 			result.push(node);
 			if (isLeaf) {
 				break;

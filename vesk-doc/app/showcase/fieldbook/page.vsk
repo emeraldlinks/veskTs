@@ -1,0 +1,80 @@
+import { Link } from '@vesk/runtime/router'
+
+component Fieldbook {
+	<Head>
+		<title>Fieldbook — Offline-first field notes, 240 ms cold start | Vesk Showcase</title>
+		<meta name="description" content="Fieldbook: offline-first Android app via Vesk Native, Kotlin + Compose, same .vsk IR as web. Cold start 240 ms vs React Native 410 ms." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<Link href="/showcase" class="font-mono text-[12px] text-muted-foreground hover:text-foreground no-underline">← showcase</Link>
+		<p class="eyebrow mt-6 mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>showcase · vesk native · android</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Fieldbook</h1>
+		<p class="mt-4 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Field notes for biologists. Photos, GPS, voice — syncs when back online. Built once in .vsk, runs on the web for planning and on Android for the field.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/native" class="btn-solid px-5 py-3 text-sm no-underline">How Native works →</Link>
+			<Link href="/docs/native" class="btn-outline px-5 py-3 text-sm no-underline">Native docs</Link>
+		</div>
+
+		<div class="mt-10 grid gap-px bg-border sm:grid-cols-3">
+			for (const s of [
+				{ k: "240 ms", v: "cold start", d: "RN equiv 410 ms (same device)" },
+				{ k: "offline", v: "by default", d: "offline.vsk = native offline UI" },
+				{ k: "1 codebase", v: "web + android", d: "~92% code share" },
+			]) {
+				<div class="bg-surface p-5 text-center">
+					<div class="font-display text-lg font-semibold">{s.k}</div>
+					<div class="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-accent">{s.v}</div>
+					<div class="mt-1 font-mono text-[11px] text-muted-foreground">{s.d}</div>
+				</div>
+			}
+		</div>
+
+		<div class="mt-10 panel overflow-hidden">
+			<div class="border-b border-border px-4 py-2"><span class="eyebrow">same IR, different emitter</span></div>
+			<div class="grid gap-px bg-border sm:grid-cols-2">
+				<div class="bg-surface p-5">
+					<h3 class="font-display text-sm font-semibold">Web — DOM</h3>
+					<pre class="mt-3 overflow-auto bg-background p-3 font-mono text-[11px] leading-relaxed"><code>{`component Note(props: { id: string }) {
+  const note = useFetch.json<Note>(\`/api/note/\${props.id}\`)
+  <article>{note.data.title}</article>
+}`}</code></pre>
+					<p class="mt-2 font-mono text-[11px] text-muted-foreground">Emit: <code class="bg-background px-1 py-0.5">document.createElement</code> + per-cell effect.</p>
+				</div>
+				<div class="bg-surface p-5">
+					<h3 class="font-display text-sm font-semibold">Android — Compose</h3>
+					<pre class="mt-3 overflow-auto bg-background p-3 font-mono text-[11px] leading-relaxed"><code>{`// same .vsk IR
+@Composable fun Note(id: String) {
+  val note = useFetchJson<Note>("/api/note/$id")
+  Text(note.data.title)
+}`}</code></pre>
+					<p class="mt-2 font-mono text-[11px] text-muted-foreground">Emit: <code class="bg-background px-1 py-0.5">@Composable</code> + Material 3 — no WebView.</p>
+				</div>
+			</div>
+		</div>
+
+		<div class="mt-8 grid gap-6 lg:grid-cols-2">
+			<div class="panel p-6">
+				<h3 class="font-display text-sm font-semibold">Why Vesk over alternatives?</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">React Native:</strong> bridge + Yoga — camera/GPS plugins each add bridge cost. Vesk: direct Kotlin.</li>
+					<li><strong class="text-foreground">Flutter:</strong> Dart island. Good performance, but 0% web share — two teams.</li>
+					<li><strong class="text-foreground">Tauri/Capacitor:</strong> WebView — offline is a hack, not a first-class <code class="bg-surface px-1 py-0.5">offline.vsk</code>.</li>
+				</ul>
+			</div>
+			<div class="panel p-6">
+				<h3 class="font-display text-sm font-semibold">What shipped</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li>Photos + EXIF → <code class="bg-surface px-1 py-0.5">VeskResponse.json</code> + presigned S3, same handler web/native.</li>
+					<li>GPS → native capability, typed via <code class="bg-surface px-1 py-0.5">@vesk/native</code> shim, mocked on web.</li>
+					<li>Sync → <code class="bg-surface px-1 py-0.5">mutate(noteKey)</code> optimistic, revalidate on reconnect.</li>
+					<li>Same validation: Zod schema shared, <code class="bg-surface px-1 py-0.5">issuesToFieldMap</code> on both.</li>
+				</ul>
+			</div>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/showcase" class="btn-outline px-6 py-3 text-sm no-underline">← all showcases</Link>
+			<Link href="/showcase/signal-docs" class="font-mono text-[11px] text-muted-foreground hover:text-foreground py-3 px-2 no-underline">Next: Signal Docs →</Link>
+		</div>
+	</div>
+}

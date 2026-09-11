@@ -1,0 +1,3 @@
+component Page() {
+	<div>standalone props page</div>
+}

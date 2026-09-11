@@ -1,0 +1,63 @@
+import { Link } from '@vesk/runtime/router'
+
+component CommunityDiscussions {
+	<Head>
+		<title>Discussions — RFCs, ADRs, roadmaps | Vesk Community</title>
+		<meta name="description" content="Vesk Discussions: RFCs, architecture decision records, roadmaps. More structured than Next discussions, less chat than Discord." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>community · discussions</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Decisions, not threads.</h1>
+		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Every major change starts as a Discussion, becomes an ADR in <code class="bg-surface px-1 py-0.5">TODO.md</code>, and ends as a compiler test. No drive-by breaking changes.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/community/github" class="btn-solid px-5 py-3 text-sm no-underline">View Discussions →</Link>
+			<Link href="/docs/pipeline" class="btn-outline px-5 py-3 text-sm no-underline">Architecture docs</Link>
+		</div>
+
+		<div class="mt-12 grid gap-px bg-border sm:grid-cols-2">
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">How Vesk decides</h3>
+				<ol class="mt-3 list-decimal pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">Discussion</strong> — problem + constraint (e.g., no regex in compiler).</li>
+					<li><strong class="text-foreground">Prototype</strong> — behind flag, with test.</li>
+					<li><strong class="text-foreground">ADR</strong> — recorded in TODO.md phase section.</li>
+					<li><strong class="text-foreground">Ship</strong> — docs + migration guide, HMR verified.</li>
+				</ol>
+				<p class="mt-3 font-mono text-[11px] text-muted-foreground">Compare: Next RFCs are Vercel-led; Vesk RFCs are community + compiler-owner review.</p>
+			</div>
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">What gets discussed</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">Compiler:</strong> new IR nodes, static analysis, Kotlin parity.</li>
+					<li><strong class="text-foreground">Runtime:</strong> `track` semantics, hydration strategies.</li>
+					<li><strong class="text-foreground">Product:</strong> showcase criteria, example curation.</li>
+				</ul>
+				<p class="mt-3 font-mono text-[11px] text-muted-foreground">Every page here has a source-of-truth file — no hand-wavy RFC.</p>
+			</div>
+		</div>
+
+		<div class="panel mt-8 p-6">
+			<h3 class="font-display text-sm font-semibold">Recent RFCs — selling the discipline</h3>
+			<div class="mt-4 space-y-3 font-mono text-[12px] leading-relaxed">
+				for (const r of [
+					{ id: "RFC-014", t: "Manual routing as first-class", d: "createRouter(defineRoute) alongside file routing — same matching, offline, hash. Why: migrations and admin subtrees.", s: "shipping" },
+					{ id: "RFC-013", t: "Full-text derived search", d: "Docs search as derived(() => ...blocks). Why: docs ARE the product.", s: "shipped" },
+					{ id: "RFC-009", t: "Kotlin codegen for IR", d: "One IR, two emitters. Why: share validation and design tokens, not just copy paste.", s: "shipped" },
+				]) {
+					<div class="flex gap-3 border-b border-border-strong/30 pb-3 last:border-0 last:pb-0">
+						<span class="font-mono text-[11px] uppercase tracking-[0.14em] text-accent shrink-0">{r.id} · {r.s}</span>
+						<div>
+							<div class="font-medium text-foreground">{r.t}</div>
+							<div class="text-muted-foreground">{r.d}</div>
+						</div>
+					</div>
+				}
+			</div>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/community/contributors" class="btn-solid px-6 py-3 text-sm no-underline">Meet contributors →</Link>
+			<Link href="/comparison" class="btn-outline px-6 py-3 text-sm no-underline">Compare frameworks</Link>
+		</div>
+	</div>
+}

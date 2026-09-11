@@ -1,6 +1,7 @@
 export component DevExperience {
 	const lines = [
 		{ text: "$ npx create-vesk@latest my-app", kind: "cmd" },
+		{ text: "$ npx create-vesk-native@latest my-app", kind: "cmd" },
 		{ text: "    my-app created successfully!", kind: "ok" },
 		{ text: "    cd my-app", kind: "note" },
 		{ text: "    npm install", kind: "note" },

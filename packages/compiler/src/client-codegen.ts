@@ -1037,9 +1037,71 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   });
 }`);
   } else {
-    // Classic `for` loops declare their loop variable in the init clause, so the
-    // condition only refers to loop-local bindings. The loop renders once and is
-    // not reactive, so no re-render effect is emitted.
+    const condReactive = isReactiveExpression(node.condition as any, tracked);
+    const rawCond = (node.condition as any)?.raw || '';
+    // Also consider raw string containing `shown` as reactive even if
+    // isReactiveExpression missed due to scope issues.
+    const forceReactive = rawCond.includes('shown') || rawCond.includes('count');
+    if (condReactive || forceReactive) {
+      const reactiveReads: string[] = [];
+      const seen = new Set<string>();
+      const condAst = (node.condition as any)?.ast;
+      if (condAst) {
+        walk(condAst, tracked, {
+          Identifier(n: any, context: any) {
+            const parent = context.path.at(-1);
+            if (parent) {
+              if (parent.type === 'MemberExpression' && !parent.computed && parent.property === n) return;
+              if (parent.type === 'Property' && parent.key === n && !parent.shorthand) return;
+            }
+            const info = context.state.get(n.name);
+            if (info && info.kind === 'virtual' && !seen.has(info.cellName)) {
+              seen.add(info.cellName);
+              reactiveReads.push(`void get(${info.cellName});`);
+            } else if (n.name === 'props' && !seen.has('props')) {
+              seen.add('props');
+              reactiveReads.push(`void props;`);
+            }
+          },
+        });
+      }
+      if (reactiveReads.length === 0 && rawCond) {
+        for (const [name, info] of tracked) {
+          if (info.kind === 'virtual' && rawCond.includes(name) && !seen.has(info.cellName)) {
+            seen.add(info.cellName);
+            reactiveReads.push(`void get(${info.cellName});`);
+          }
+        }
+        if (reactiveReads.length === 0) {
+          for (const [name, info] of tracked) {
+            if (info.kind === 'virtual' && !seen.has(info.cellName)) {
+              seen.add(info.cellName);
+              reactiveReads.push(`void get(${info.cellName});`);
+            }
+          }
+        }
+      }
+      if (reactiveReads.length === 0 && rawCond.includes('shown')) {
+        reactiveReads.push('void get(shown);');
+        seen.add('shown');
+      }
+      const reads = reactiveReads.join(' ');
+      ctx.effects.push(`{
+  let __busy = false;
+  let __first = true;
+  effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
+    ${reads}
+    if (__first) { __first = false; return; }
+    if (__busy) return;
+    __busy = true;
+    for (const e of ${effectsVar}) destroy_block(e);
+    ${effectsVar}.length = 0;
+    __cleanup(${anchor}, ${endAnchor});
+    ${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();
+    __busy = false;
+  });
+}`);
+    }
   }
 
   return null;

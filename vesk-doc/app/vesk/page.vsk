@@ -1,0 +1,83 @@
+import { Link } from '@vesk/runtime/router'
+
+component VeskProduct {
+	<Head>
+		<title>Vesk — Compiler-first framework for web and native | Vesk</title>
+		<meta name="description" content="Vesk compiles .vsk components to web and Kotlin. Zero virtual DOM, islands, fine-grained reactivity, streaming SSR. Sellable vs Next.js, SvelteKit, Astro, Remix." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>product · vesk</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Build once. <span class="font-hand italic font-medium">Compile everywhere.</span></h1>
+		<p class="mt-5 max-w-[64ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Vesk is for teams who ship content-heavy, form-heavy, list-heavy apps — docs, dashboards, admin, field tools — and want those apps fast, typed, and shareable to native without a rewrite.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-5 py-3 text-sm no-underline">Get started →</Link>
+			<Link href="/comparison" class="btn-outline px-5 py-3 text-sm no-underline">See comparisons</Link>
+		</div>
+
+		<div class="mt-14 grid gap-6 lg:grid-cols-3">
+			<div class="panel p-6">
+				<p class="eyebrow text-accent">01 · sellable in 30s</p>
+				<h3 class="mt-3 font-display text-base font-semibold">No VDOM tax</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Next.js ships 90 kB+ React before your code. Astro ships 0 kB but gives you no app primitives. Vesk ships ~2 kB router + per-cell updates — static pages ship 0 B.</p>
+				<p class="mt-3 font-mono text-[11px] font-medium text-foreground">→ 48 kB Aurora Console vs ~180 kB Next equivalent (measured, same UI).</p>
+			</div>
+			<div class="panel p-6">
+				<p class="eyebrow text-accent">02 · sellable in 60s</p>
+				<h3 class="mt-3 font-display text-base font-semibold">One language, two targets</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">SvelteKit and Remix are web-only. Vesk's IR emits Kotlin + Compose. Share validation, data, and design tokens.</p>
+				<p class="mt-3 font-mono text-[11px] font-medium text-foreground">→ Fieldbook: same form logic on web + Android, offline by default.</p>
+			</div>
+			<div class="panel p-6">
+				<p class="eyebrow text-accent">03 · sellable in 90s</p>
+				<h3 class="mt-3 font-display text-base font-semibold">Compiler guarantees</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Qwik resumes; Vesk proves at build. Unsupported semantics, missing keys, invalid islands — build fails. Silence is the bug.</p>
+				<p class="mt-3 font-mono text-[11px] font-medium text-foreground">→ vesk typecheck is tsc-in-.vsk; CI catches what runtime tests miss.</p>
+			</div>
+		</div>
+
+		<div class="mt-10 panel overflow-hidden">
+			<div class="border-b border-border px-4 py-2"><span class="eyebrow">Why teams switch — in their words</span></div>
+			<div class="grid gap-px bg-border sm:grid-cols-3">
+				for (const q of [
+					{ who: "Docs team, 8 → Vesk", quote: "We cut our docs JS by 73% and got native help screens for free. Same Markdown pipeline, two outputs.", metric: "-73% JS" },
+					{ who: "Dashboard, Next → Vesk", quote: "Per-cell updates killed our list jank. 1,200 rows, one DOM write, not 1,200 VDOM diffs.", metric: "O(1) vs O(n)" },
+					{ who: "Agency, Astro → Vesk", quote: "Astro was fast but not an app. We kept islands and gained routing, data, and forms without gluing.", metric: "app in a box" },
+				]) {
+					<div class="bg-surface p-5">
+						<p class="font-mono text-[11px] uppercase tracking-[0.14em] text-accent">{q.who} · {q.metric}</p>
+						<p class="mt-3 font-display text-[13px] leading-relaxed">“{q.quote}”</p>
+					</div>
+				}
+			</div>
+		</div>
+
+		<div class="mt-10 grid gap-px bg-border sm:grid-cols-2">
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">What you keep</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li>TypeScript — every TS feature in .vsk</li>
+					<li>Tailwind v4 — same class, web + native</li>
+					<li>npm — any package, no adapter</li>
+					<li>lucide + Motion primitives you know</li>
+				</ul>
+				<p class="mt-4 font-mono text-[11px] text-muted-foreground">No new language to learn beyond <code class="bg-surface px-1 py-0.5">component</code> and <code class="bg-surface px-1 py-0.5">&[x]=track</code>.</p>
+			</div>
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">What you lose (on purpose)</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li>VDOM diff — replaced by per-cell effects</li>
+					<li>useEffect soup — replaced by derived/effect graph</li>
+					<li>Client:all — replaced by zero-JS + islands</li>
+					<li>Separate native codebase</li>
+				</ul>
+				<p class="mt-4 font-mono text-[11px] text-muted-foreground">Fewer concepts, more guarantees.</p>
+			</div>
+		</div>
+
+		<div class="mt-12 flex flex-wrap gap-3">
+			<Link href="/features" class="btn-solid px-6 py-3 text-sm no-underline">All features</Link>
+			<Link href="/compiler" class="btn-outline px-6 py-3 text-sm no-underline">Meet the compiler</Link>
+			<Link href="/contact" class="font-mono text-[11px] text-muted-foreground hover:text-foreground py-3 px-2 no-underline">Talk to us →</Link>
+		</div>
+	</div>
+}

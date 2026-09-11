@@ -1,14 +1,14 @@
 const projects = [
-	{ name: "Aurora Console", description: "Operations dashboard for a deployment platform, compiled to the web target.", platform: "Web", tech: "TypeScript · Tailwind", metric: "48 kB shipped" },
-	{ name: "Fieldbook", description: "Offline-first field notes app compiled toward native Kotlin with Material 3.", platform: "Android", tech: "Vesk Native · Kotlin", metric: "cold start 240 ms" },
-	{ name: "Signal Docs", description: "Documentation site sharing the same component library as its native companion.", platform: "Web + Native", tech: "One codebase", metric: "2 targets, 1 model" },
+	{ name: "Aurora Console", slug: "aurora", description: "Operations dashboard for a deployment platform, compiled to the web target.", platform: "Web", tech: "TypeScript · Tailwind", metric: "48 kB shipped", href: "/showcase/aurora" },
+	{ name: "Fieldbook", slug: "fieldbook", description: "Offline-first field notes app compiled toward native Kotlin with Material 3.", platform: "Android", tech: "Vesk Native · Kotlin", metric: "cold start 240 ms", href: "/showcase/fieldbook" },
+	{ name: "Signal Docs", slug: "signal-docs", description: "Documentation site sharing the same component library as its native companion.", platform: "Web + Native", tech: "One codebase", metric: "2 targets, 1 model", href: "/showcase/signal-docs" },
 ]
 
-const community = [
-	["GitHub", "source, issues, RFCs"],
-	["Discord", "build in the open"],
-	["Examples", "starter projects"],
-	["Contributors", "compiler & tooling"],
+const community: [string, string, string][] = [
+	["GitHub", "source, issues, RFCs", "/community/github"],
+	["Discord", "build in the open", "/community/discord"],
+	["Examples", "starter projects", "/examples"],
+	["Contributors", "compiler & tooling", "/community/contributors"],
 ]
 
 export component Showcase {
@@ -37,7 +37,7 @@ export component Showcase {
 								<span>{p.tech}</span>
 								<span class="text-accent">{p.metric}</span>
 							</div>
-							<a href="#showcase" class="mt-3 inline-flex items-center gap-1.5 text-foreground underline decoration-border underline-offset-4 transition-colors group-hover:decoration-accent no-underline">View project <span aria-hidden>→</span></a>
+							<a href={p.href} class="mt-3 inline-flex items-center gap-1.5 text-foreground underline decoration-border underline-offset-4 transition-colors group-hover:decoration-accent no-underline">View project <span aria-hidden>→</span></a>
 						</div>
 					</article>
 				}
@@ -49,7 +49,7 @@ export component Showcase {
 				<p class="eyebrow mb-5">community</p>
 				<div class="grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-4">
 					for (const c of community) {
-						<a href="#showcase" class="group bg-background px-4 py-5 no-underline block">
+						<a href={c[2]} class="group bg-background px-4 py-5 no-underline block">
 							<div class="font-display text-sm font-semibold tracking-tight text-foreground"> {c[0]} <span class="text-muted-foreground transition-colors group-hover:text-accent">→</span></div>
 							<div class="mt-1 font-mono text-[11px] text-muted-foreground">{c[1]}</div>
 						</a>

@@ -25,6 +25,17 @@
     "./src/*": "./dist/*.js",
     "./package.json": "./package.json"
   },
+  "typesVersions": {
+    "*": {
+      "router": ["dist/index-router.d.ts"],
+      "client": ["dist/index-client.d.ts"],
+      "server": ["dist/index-server.d.ts"],
+      "src/*": ["dist/*"],
+      "router/*": ["dist/*"],
+      "client/*": ["dist/*"],
+      "server/*": ["dist/*"]
+    }
+  },
   "dependencies": {
     "@vesk/compiler": "^0.2.22"
   },

@@ -1,0 +1,58 @@
+import { Link } from '@vesk/runtime/router'
+
+component Examples {
+	<Head>
+		<title>Examples — Starter projects for every primitive | Vesk</title>
+		<meta name="description" content="Vesk examples: routing, data fetching, forms, auth, native, Markdown, islands. Clone and run — compare to Next.js, SvelteKit, Remix starters." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>developers · examples</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Start from a working app.</h1>
+		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Every example is a <code class="bg-surface px-1 py-0.5">create-vesk</code> template — <code class="bg-surface px-1 py-0.5">npm install && npm run dev</code> and it works. No glue, no extra config.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-5 py-3 text-sm no-underline">Quickstart →</Link>
+			<a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener" class="btn-outline px-5 py-3 text-sm no-underline">View on GitHub ↗</a>
+		</div>
+
+		<div class="mt-12 grid gap-px bg-border sm:grid-cols-2">
+			for (const ex of [
+				{ title: "Blog + routing", desc: "File routing ([slug], [...rest]), layouts, loading/error. Compare: Next app/ is similar, Vesk adds manual routing & hash.", href: "/blog", tag: "routing" },
+				{ title: "Posts — useFetch", desc: "useFetch with into cells, staleTime, HttpError. Compare: Next fetch caching is implicit, Vesk is explicit.", href: "/posts", tag: "data" },
+				{ title: "Auth forms", desc: "Form + Field + defineAction + Zod. Compare: Remix actions are per-route, Vesk actions are per-component.", href: "/docs/forms", tag: "forms" },
+				{ title: "Docs with search", desc: "This site — full-text derived search, <10 ms. Compare: Next docs often need Algolia.", href: "/docs", tag: "search" },
+				{ title: "Native starter", desc: "Same UI on web + Kotlin. Compare: Expo requires separate app, Flutter Dart rewrite.", href: "/native", tag: "native" },
+				{ title: "Markdown MD", desc: "<Md content>, code copy, GFM, HTML policy. Compare: Astro MD is build-only, Vesk streams live.", href: "/docs/markdown", tag: "md" },
+			]) {
+				<Link href={ex.href} class="group bg-surface p-5 no-underline hover:bg-background block">
+					<div class="flex items-center justify-between gap-3">
+						<span class="eyebrow text-accent">{ex.tag}</span>
+						<span class="font-mono text-[10px] text-muted-foreground group-hover:translate-x-0.5 transition-transform">→</span>
+					</div>
+					<h3 class="mt-3 font-display text-sm font-semibold tracking-tight group-hover:text-accent transition-colors">{ex.title}</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">{ex.desc}</p>
+				</Link>
+			}
+		</div>
+
+		<div class="panel mt-10 overflow-hidden">
+			<div class="border-b border-border px-4 py-2"><span class="eyebrow">why our examples are smaller</span></div>
+			<div class="overflow-x-auto">
+				<table class="w-full font-mono text-[12px]">
+					<thead class="bg-surface/60 text-[11px] uppercase tracking-[0.14em] text-muted-foreground"><tr><th class="px-4 py-3 text-left font-medium">Primitive</th><th class="px-4 py-3 text-left font-medium">Vesk lines</th><th class="px-4 py-3 text-left font-medium">Next / SvelteKit</th></tr></thead>
+					<tbody class="divide-y divide-border">
+						<tr><td class="px-4 py-3">Counter (state + effect)</td><td class="px-4 py-3">3 — let &[c]=track(0)</td><td class="px-4 py-3">~7 — useState + useEffect</td></tr>
+						<tr><td class="px-4 py-3">Data load + SSR</td><td class="px-4 py-3">1 — useFetch('/api/posts')</td><td class="px-4 py-3">4-8 — fetch + loader/getServerSideProps</td></tr>
+						<tr><td class="px-4 py-3">Form validation</td><td class="px-4 py-3">3 — Form + Field + defineAction</td><td class="px-4 py-3">~15-20 — RHF/Zod + handler</td></tr>
+						<tr><td class="px-4 py-3">Zero-JS page</td><td class="px-4 py-3">0 — just markup, compiler proves</td><td class="px-4 py-3">— always ships runtime</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="bg-surface/40 px-4 py-3 font-mono text-[11px] text-muted-foreground">Fewer lines, fewer runtime concepts, less to debug — the compiler carries the weight.</p>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-6 py-3 text-sm no-underline">Start a project</Link>
+			<Link href="/comparison" class="btn-outline px-6 py-3 text-sm no-underline">Compare frameworks</Link>
+		</div>
+	</div>
+}

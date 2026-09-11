@@ -1,0 +1,81 @@
+import { Link } from '@vesk/runtime/router'
+
+component NativePage {
+	<Head>
+		<title>Vesk Native — One codebase, web and Kotlin | Vesk</title>
+		<meta name="description" content="Vesk Native compiles the same .vsk IR to Kotlin + Compose Material 3. No WebView, no bridge tax. Compare to React Native, Flutter, Tauri." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>product · vesk native</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">One model. Two worlds.</h1>
+		<p class="mt-5 max-w-[62ch] font-mono text-[13px] leading-relaxed text-muted-foreground">React Native wraps a JS runtime. Flutter reinvents widgets. Vesk Native reuses your <code class="bg-surface px-1 py-0.5">.vsk</code> IR and emits Kotlin — native activities, Compose UI, Material 3, no WebView, no bridge tax.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/docs/native" class="btn-solid px-5 py-3 text-sm no-underline">Native docs →</Link>
+			<Link href="/showcase/fieldbook" class="btn-outline px-5 py-3 text-sm no-underline">See Fieldbook (Android) →</Link>
+		</div>
+
+		<div class="mt-14 grid gap-6 lg:grid-cols-2">
+			<div class="panel p-6">
+				<h3 class="eyebrow mb-3">target graph</h3>
+				<div class="mx-auto max-w-md font-mono text-[12px]">
+					<div class="mx-auto w-fit border border-foreground px-5 py-2 font-medium">.vsk IR</div>
+					<div class="mx-auto h-6 w-px bg-border"></div>
+					<div class="grid grid-cols-2 gap-4">
+						<div class="border border-border px-3 py-4 text-center"><div class="font-medium">web</div><div class="mt-1 text-[11px] text-muted-foreground">DOM · CSS · ESM</div></div>
+						<div class="border border-accent bg-accent/10 px-3 py-4 text-center"><div class="font-medium">kotlin</div><div class="mt-1 text-[11px] text-muted-foreground">Compose · Material 3</div></div>
+					</div>
+				</div>
+				<p class="mt-5 font-mono text-[11px] leading-relaxed text-muted-foreground">Same component, same track() state, same Tailwind tokens — different emitter. The compiler is the port.</p>
+			</div>
+			<div class="grid gap-px bg-border">
+				<div class="bg-surface p-5">
+					<h3 class="font-display text-sm font-semibold">No WebView</h3>
+					<p class="mt-1.5 font-mono text-[12px] leading-relaxed text-muted-foreground">Tauri/Capacitor wrap a browser. Vesk emits platform primitives — accessibility, text selection, and gestures are native, not emulated.</p>
+				</div>
+				<div class="bg-surface p-5">
+					<h3 class="font-display text-sm font-semibold">No bridge tax</h3>
+					<p class="mt-1.5 font-mono text-[12px] leading-relaxed text-muted-foreground">React Native serializes across a bridge. Vesk compiles directly — fine-grained updates are O(1) on both targets.</p>
+				</div>
+				<div class="bg-surface p-5">
+					<h3 class="font-display text-sm font-semibold">Design fidelity</h3>
+					<p class="mt-1.5 font-mono text-[12px] leading-relaxed text-muted-foreground">Tailwind + lucide-vesk on web become Compose theming + Material 3 on Android — no shadow DOM mismatches.</p>
+				</div>
+			</div>
+		</div>
+
+		<div class="panel mt-10 overflow-hidden">
+			<div class="border-b border-border px-4 py-2"><span class="eyebrow">vs other cross-platform stacks</span></div>
+			<div class="overflow-x-auto">
+				<table class="w-full font-mono text-[12px]">
+					<thead class="bg-surface/60 text-[11px] uppercase tracking-[0.14em] text-muted-foreground"><tr><th class="px-4 py-3 text-left font-medium">Stack</th><th class="px-4 py-3 text-left font-medium">Language</th><th class="px-4 py-3 text-left font-medium">UI</th><th class="px-4 py-3 text-left font-medium">Cost model</th><th class="px-4 py-3 text-left font-medium">Share with web</th></tr></thead>
+					<tbody class="divide-y divide-border">
+						<tr><td class="px-4 py-3 font-medium">Vesk Native</td><td class="px-4 py-3">.vsk / TS → Kotlin</td><td class="px-4 py-3">Compose Material 3</td><td class="px-4 py-3 text-accent">Compile-time; no runtime bridge</td><td class="px-4 py-3">~90% model share</td></tr>
+						<tr><td class="px-4 py-3 font-medium">React Native</td><td class="px-4 py-3">JS/TS</td><td class="px-4 py-3">Native views via bridge</td><td class="px-4 py-3">Bridge + Yoga</td><td class="px-4 py-3">~60-70% (styling diverges)</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Flutter</td><td class="px-4 py-3">Dart</td><td class="px-4 py-3">Custom renderer (Skia)</td><td class="px-4 py-3">Own runtime + GC</td><td class="px-4 py-3">Low — separate codebase</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Tauri / Capacitor</td><td class="px-4 py-3">JS/TS</td><td class="px-4 py-3">WebView</td><td class="px-4 py-3">Full browser per window</td><td class="px-4 py-3">100% web, 0% native feel</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Expo</td><td class="px-4 py-3">JS/TS</td><td class="px-4 py-3">RN + managed bridge</td><td class="px-4 py-3">Bridge + extra abstraction</td><td class="px-4 py-3">Same as RN</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="bg-surface/40 px-4 py-3 font-mono text-[11px] text-muted-foreground">Vesk's pitch is narrow and honest: if your product is content + forms + lists + offline — docs, dashboards, field apps — sharing the IR beats maintaining two apps. For games or highly custom canvases, keep Flutter.</p>
+		</div>
+
+		<div class="mt-10 grid gap-px bg-border sm:grid-cols-2">
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">Fieldbook — offline-first field notes</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Compiled to Kotlin, cold start 240 ms, works offline with the same <code class="bg-surface px-1 py-0.5">useFetch</code> cache + <code class="bg-surface px-1 py-0.5">offline.vsk</code> boundaries as web.</p>
+				<Link href="/showcase/fieldbook" class="mt-4 inline-block font-mono text-[11px] text-accent hover:text-foreground no-underline">Read case study →</Link>
+			</div>
+			<div class="bg-background p-6">
+				<h3 class="font-display text-sm font-semibold">Signal Docs — one library, two targets</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Same component library renders docs on the web and help screens on Android — 2 targets, 1 model, no design drift.</p>
+				<Link href="/showcase/signal-docs" class="mt-4 inline-block font-mono text-[11px] text-accent hover:text-foreground no-underline">Read case study →</Link>
+			</div>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/docs/native" class="btn-solid px-6 py-3 text-sm no-underline">Native guide</Link>
+			<Link href="/comparison" class="btn-outline px-6 py-3 text-sm no-underline">Compare all frameworks</Link>
+		</div>
+	</div>
+}

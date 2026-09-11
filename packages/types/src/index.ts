@@ -27,6 +27,8 @@ export interface RouteNode {
   children: RouteNode[];
   sourceDir: string;
   segmentCount: number;
+  /** When true, this layout does not nest inside parent layouts (opt-out of root layout). */
+  standalone?: boolean;
   /** ISR: seconds after which the cached page may be revalidated. */
   _revalidate?: number;
   _isrTags?: string[];

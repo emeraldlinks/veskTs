@@ -24724,14 +24724,14 @@ class PageBoxMarginBox extends BodyDeclaration {
         return NodeType.PageBoxMarginBox;
     }
 }
-class Expression extends Node$1 {
+let Expression$1 = class Expression extends Node$1 {
     constructor(offset, length) {
         super(offset, length);
     }
     get type() {
         return NodeType.Expression;
     }
-}
+};
 class BinaryExpression extends Node$1 {
     constructor(offset, length) {
         super(offset, length);
@@ -30392,7 +30392,7 @@ let Parser$1 = class Parser {
         return null;
     }
     _parseExpr(stopOnComma = false) {
-        const node = this.create(Expression);
+        const node = this.create(Expression$1);
         if (!node.addChild(this._parseBinaryExpr())) {
             return null;
         }
@@ -31281,7 +31281,7 @@ class CSSCompletion {
                 if (node instanceof Property) {
                     this.getCompletionsForDeclarationProperty(node.getParent(), result);
                 }
-                else if (node instanceof Expression) {
+                else if (node instanceof Expression$1) {
                     if (node.parent instanceof Interpolation) {
                         this.getVariableProposals(null, result);
                     }
@@ -97390,6 +97390,234 @@ function parse$1(source, options = {}) {
     }
 }
 
+class Expression {
+    raw;
+    ast;
+    source;
+    deps;
+    constructor(raw, deps = [], ast = null, source = null) {
+        this.raw = raw;
+        this.deps = deps;
+        this.ast = ast;
+        this.source = source;
+    }
+}
+class IRRoot {
+    components;
+    imports;
+    importedNames;
+    staticProps;
+    loadFn;
+    topLevelCode;
+    constructor(components, imports = [], importedNames = new Set(), staticProps = null, loadFn = null, topLevelCode = []) {
+        this.components = components;
+        this.imports = imports;
+        this.importedNames = importedNames;
+        this.staticProps = staticProps;
+        this.loadFn = loadFn;
+        this.topLevelCode = topLevelCode;
+    }
+}
+class ComponentIR {
+    name;
+    paramNames;
+    propsType;
+    isClient;
+    isAsync;
+    ssrAwait;
+    mode;
+    body;
+    style;
+    exported;
+    defaultExport;
+    constructor(name, paramNames, body, opts = {}) {
+        this.name = name;
+        this.paramNames = paramNames;
+        this.body = body;
+        this.isClient = opts.isClient ?? false;
+        this.isAsync = opts.isAsync ?? false;
+        this.ssrAwait = opts.ssrAwait ?? false;
+        this.mode = opts.mode ?? 'expression';
+        this.style = null;
+        this.exported = opts.exported ?? false;
+        this.defaultExport = opts.defaultExport ?? false;
+        this.propsType = opts.propsType ?? null;
+    }
+}
+class StaticNode {
+    tag;
+    attributes;
+    children;
+    selfClosing;
+    keyExpr;
+    constructor(tag, attributes, children, keyExpr = null) {
+        this.tag = tag;
+        this.attributes = attributes;
+        this.children = children;
+        this.selfClosing = false;
+        this.keyExpr = keyExpr;
+    }
+}
+class TextNode {
+    value;
+    constructor(value) {
+        this.value = value;
+    }
+}
+class DynamicBinding {
+    kind;
+    target;
+    expression;
+    constructor(expression, kind = 'text', target = null) {
+        this.expression = expression;
+        this.kind = kind;
+        this.target = target;
+    }
+}
+class OpaqueDynamicRegion {
+    condition;
+    consequentNodes;
+    alternateNodes;
+    constructor(condition, consequentNodes, alternateNodes = []) {
+        this.condition = condition;
+        this.consequentNodes = consequentNodes;
+        this.alternateNodes = alternateNodes;
+    }
+}
+class MapRegion {
+    expression;
+    itemVariable;
+    indexVariable;
+    bodyTemplate;
+    keyExpr;
+    alternateNodes;
+    constructor(expression, itemVariable, bodyTemplate, keyExpr = null, indexVariable = null, alternateNodes = []) {
+        this.expression = expression;
+        this.itemVariable = itemVariable;
+        this.indexVariable = indexVariable;
+        this.bodyTemplate = bodyTemplate;
+        this.keyExpr = keyExpr;
+        this.alternateNodes = alternateNodes;
+    }
+}
+class ComponentRef {
+    componentName;
+    constructor(componentName) {
+        this.componentName = componentName;
+    }
+}
+class ComponentCall {
+    componentName;
+    props;
+    spreadProps;
+    children;
+    start;
+    /**
+     * Raw JS expression for the component value when the JSX tag is a member
+     * expression (e.g. `<it.icon>` → `it.icon`). Dotted tags can never be HTML
+     * elements or registry names, so codegen must invoke this expression
+     * directly instead of resolving `componentName` through the registry.
+     */
+    calleeExpr;
+    constructor(componentName, props, children = [], spreadProps = [], start = -1, calleeExpr = null) {
+        this.componentName = componentName;
+        this.props = props;
+        this.children = children;
+        this.spreadProps = spreadProps;
+        this.start = start;
+        this.calleeExpr = calleeExpr;
+    }
+}
+class SlotNode {
+    constructor() { }
+}
+class WhileLoop {
+    condition;
+    bodyTemplate;
+    isDoWhile;
+    constructor(condition, bodyTemplate, isDoWhile = false) {
+        this.condition = condition;
+        this.bodyTemplate = bodyTemplate;
+        this.isDoWhile = isDoWhile;
+    }
+}
+class SwitchCase {
+    body;
+    constructor(body) {
+        this.body = body;
+    }
+}
+class SwitchBlock {
+    discriminant;
+    cases;
+    constructor(discriminant, cases) {
+        this.discriminant = discriminant;
+        this.cases = cases;
+    }
+}
+class TryCatch {
+    bodyTemplate;
+    catchBody;
+    catchParamName;
+    constructor(bodyTemplate, catchBody, catchParamName = null) {
+        this.bodyTemplate = bodyTemplate;
+        this.catchBody = catchBody;
+        this.catchParamName = catchParamName;
+    }
+}
+class TrackDecl {
+    name;
+    rawName;
+    init;
+    constructor(name, init, rawName) {
+        this.name = name;
+        this.init = init;
+        this.rawName = rawName || null;
+    }
+}
+class RuntimeStatement {
+    raw;
+    ast;
+    source;
+    constructor(raw, ast = null, source = null) {
+        this.raw = raw;
+        this.ast = ast;
+        this.source = source;
+    }
+}
+class ForLoop {
+    init;
+    condition;
+    update;
+    bodyTemplate;
+    kind;
+    constructor(init, condition, update, bodyTemplate, kind = 'for') {
+        this.init = init;
+        this.condition = condition;
+        this.update = update;
+        this.bodyTemplate = bodyTemplate;
+        this.kind = kind;
+    }
+}
+class ServerBlock {
+    children;
+    constructor(children) {
+        this.children = children;
+    }
+}
+class ClientBlock {
+    children;
+    constructor(children) {
+        this.children = children;
+    }
+}
+class HeadBlock {
+    children;
+    constructor(children) {
+        this.children = children;
+    }
+}
+
 // src/vlq.ts
 var chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 var intToChar = new Uint8Array(64);
@@ -98617,6 +98845,40 @@ if (typeof console !== 'undefined') {
     console.log = function (...args) {
         _origConsoleLog.apply(console, args.map(a => typeof a === 'string' && _redactEnabled ? redactLog(a) : a));
     };
+}
+
+// ---------------------------------------------------------------------------
+// IR serialization.
+// ---------------------------------------------------------------------------
+const IR_CLASSES = [
+    ['Expression', Expression.prototype],
+    ['IRRoot', IRRoot.prototype],
+    ['ComponentIR', ComponentIR.prototype],
+    ['StaticNode', StaticNode.prototype],
+    ['TextNode', TextNode.prototype],
+    ['DynamicBinding', DynamicBinding.prototype],
+    ['OpaqueDynamicRegion', OpaqueDynamicRegion.prototype],
+    ['MapRegion', MapRegion.prototype],
+    ['ComponentRef', ComponentRef.prototype],
+    ['ComponentCall', ComponentCall.prototype],
+    ['SlotNode', SlotNode.prototype],
+    ['WhileLoop', WhileLoop.prototype],
+    ['SwitchCase', SwitchCase.prototype],
+    ['SwitchBlock', SwitchBlock.prototype],
+    ['TryCatch', TryCatch.prototype],
+    ['TrackDecl', TrackDecl.prototype],
+    ['RuntimeStatement', RuntimeStatement.prototype],
+    ['ForLoop', ForLoop.prototype],
+    ['ServerBlock', ServerBlock.prototype],
+    ['ClientBlock', ClientBlock.prototype],
+    ['HeadBlock', HeadBlock.prototype],
+];
+new Map(IR_CLASSES);
+const CLASS_BY_CTOR = new Map();
+for (const [name, proto] of IR_CLASSES) {
+    const ctor = proto.constructor;
+    if (ctor)
+        CLASS_BY_CTOR.set(ctor, name);
 }
 
 new AsyncLocalStorage();
@@ -298278,6 +298540,22 @@ const resolveConfig$1 = (config) => {
     }
     if (options.jsx === undefined) {
         options.jsx = ts$9.JsxEmit.Preserve;
+    }
+    // Exports subpaths like `@vesk/runtime/router` require a modern
+    // moduleResolution. Force `bundler` (the same default `vesk typecheck`
+    // and all `tsconfig.base.json`/`create-vesk` templates use) when the
+    // user's config is missing or is a legacy kind that doesn't understand
+    // `package.json` `exports` (`node`/`classic`).
+    const bundlerRes = ts$9.ModuleResolutionKind.Bundler;
+    const node16Res = ts$9.ModuleResolutionKind.Node16;
+    const nodeNextRes = ts$9.ModuleResolutionKind.NodeNext;
+    const mr = options.moduleResolution;
+    const supportsExports = mr === bundlerRes || mr === node16Res || mr === nodeNextRes;
+    if (!supportsExports) {
+        options.moduleResolution = bundlerRes;
+    }
+    if (options.module === undefined) {
+        options.module = ts$9.ModuleKind.ESNext;
     }
     // Match `vesk typecheck`: don't auto-include every @types/* package from
     // node_modules (Node typings would flood completion lists with Buffer /

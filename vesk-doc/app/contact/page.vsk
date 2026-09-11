@@ -1,0 +1,55 @@
+import { Link } from '@vesk/runtime/router'
+
+component Contact {
+	<Head>
+		<title>Contact — Talk to the compiler team | Vesk</title>
+		<meta name="description" content="Contact Vesk: GitHub, Discord, office hours. Smaller than Next, more direct than Vercel support — talk to the people who ship the IR." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>company · contact</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Talk to the people who ship it.</h1>
+		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">No sales funnel. File an issue, join Discord, or book office hours. Every page on this site is a commitment — if it says it, the compiler proves it.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/community/discord" class="btn-solid px-5 py-3 text-sm no-underline">Join Discord →</Link>
+			<Link href="/community/github" class="btn-outline px-5 py-3 text-sm no-underline">Open GitHub</Link>
+		</div>
+
+		<div class="mt-12 grid gap-px bg-border sm:grid-cols-2">
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">Fastest path — by channel</h3>
+				<ul class="mt-3 space-y-3 font-mono text-[12px] leading-relaxed">
+					<li class="flex gap-3"><span class="text-accent">→</span><span><strong class="text-foreground">Bug / DX</strong> — <Link href="/community/github" class="text-accent hover:text-foreground no-underline">GitHub issue</Link> with repro. Labeled in &lt;24h.</span></li>
+					<li class="flex gap-3"><span class="text-accent">→</span><span><strong class="text-foreground">Design question</strong> — <Link href="/community/discussions" class="text-accent hover:text-foreground no-underline">Discussions</Link> → RFC if needed.</span></li>
+					<li class="flex gap-3"><span class="text-accent">→</span><span><strong class="text-foreground">Hands-on</strong> — <Link href="/community/discord" class="text-accent hover:text-foreground no-underline">Discord #compiler</Link> — paste IR.</span></li>
+					<li class="flex gap-3"><span class="text-accent">→</span><span><strong class="text-foreground">Commercial</strong> — email via GitHub profile → office hours.</span></li>
+				</ul>
+			</div>
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">What you get — vs other frameworks</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">Next / Vercel:</strong> Enterprise support, but product direction is Vercel-led.</li>
+					<li><strong class="text-foreground">Svelte / Astro:</strong> Open, friendly, but web-only — native is out of scope.</li>
+					<li><strong class="text-foreground">Vesk:</strong> Open, small, compiler-owned. Your question reaches the IR owner, not tier-1.</li>
+				</ul>
+				<p class="mt-3 font-mono text-[11px] text-muted-foreground">Compare: filing a React Native bridge bug vs asking Vesk why <code class="bg-background px-1 py-0.5">offline.vsk</code> maps to Compose offline UI.</p>
+			</div>
+		</div>
+
+		<div class="panel mt-8 p-6">
+			<h3 class="font-display text-sm font-semibold">We sell on facts — try this</h3>
+			<pre class="mt-3 overflow-auto bg-background p-4 font-mono text-[11.5px] leading-relaxed"><code>npx create-vesk@latest my-app
+cd my-app && npm install && npm run dev
+{"// add a 500-row list — watch HMR ~90 ms, then check JS shipped: 0 B for static chrome"}</code></pre>
+			<p class="mt-3 font-mono text-[11px] text-muted-foreground">If the compiler can't prove a subtree static, you'll see a <code class="bg-surface px-1 py-0.5">{"<!--vsk-->"}</code> marker — and you'll know why. No magic.</p>
+			<div class="mt-4 flex flex-wrap gap-3">
+				<Link href="/docs/getting-started" class="btn-solid px-5 py-3 text-sm no-underline">Get started →</Link>
+				<Link href="/comparison" class="btn-outline px-5 py-3 text-sm no-underline">Compare all</Link>
+			</div>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/about" class="btn-outline px-6 py-3 text-sm no-underline">About Vesk →</Link>
+			<Link href="/blog" class="font-mono text-[11px] text-muted-foreground hover:text-foreground py-3 px-2 no-underline">Read blog →</Link>
+		</div>
+	</div>
+}

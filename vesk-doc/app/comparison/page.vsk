@@ -1,0 +1,70 @@
+import { Link } from '@vesk/runtime/router'
+
+component Comparison {
+	<Head>
+		<title>Comparison — Vesk vs Next.js, SvelteKit, Astro, Remix, Qwik | Vesk</title>
+		<meta name="description" content="Honest framework comparison: Vesk vs Next.js, SvelteKit, Astro, Remix, Qwik. Compiler-first, VDOM-free, native Kotlin — where Vesk wins and where it doesn't." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>product · comparison</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Honest comparison.</h1>
+		<p class="mt-5 max-w-[64ch] font-mono text-[13px] leading-relaxed text-muted-foreground">We sell Vesk, but we sell it honestly. Below is where compiler-first wins, where it ties, and where you should choose something else. Measure, don't believe.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-5 py-3 text-sm no-underline">Try Vesk →</Link>
+			<Link href="/features" class="btn-outline px-5 py-3 text-sm no-underline">See features</Link>
+		</div>
+
+		<div class="panel mt-12 overflow-hidden">
+			<div class="border-b border-border px-4 py-2"><span class="eyebrow">head-to-head — where framework choice matters most</span></div>
+			<div class="overflow-x-auto">
+				<table class="w-full font-mono text-[12px]">
+					<thead class="bg-surface/60 text-[11px] uppercase tracking-[0.14em] text-muted-foreground"><tr><th class="px-4 py-3 text-left font-medium">Pillar</th><th class="px-4 py-3 text-left font-medium">Vesk</th><th class="px-4 py-3 text-left font-medium">Next.js 15</th><th class="px-4 py-3 text-left font-medium">SvelteKit</th><th class="px-4 py-3 text-left font-medium">Astro + islands</th><th class="px-4 py-3 text-left font-medium">Qwik / Remix</th></tr></thead>
+					<tbody class="divide-y divide-border">
+						<tr><td class="px-4 py-3 font-medium">Paradigm</td><td class="px-4 py-3 text-accent">Compiler-first, VDOM-free</td><td class="px-4 py-3">React VDOM + RSC</td><td class="px-4 py-3">Compiler-aided, fine-grained</td><td class="px-4 py-3">Static-first, islands opt-in</td><td class="px-4 py-3">Resumable (Qwik) / SSR (Remix)</td></tr>
+						<tr><td class="px-4 py-3 font-medium">JS shipped</td><td class="px-4 py-3">Static 0 B; app ~22-48 kB</td><td class="px-4 py-3">~90-140 kB baseline</td><td class="px-4 py-3">~28-45 kB</td><td class="px-4 py-3">0 B → islands add React/Svelte</td><td class="px-4 py-3">Qwik 0-20 kB; Remix ~40 kB</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Hydration</td><td class="px-4 py-3">Claim walk, static skipped; 4 strategies</td><td class="px-4 py-3">Full hydrateRoot</td><td class="px-4 py-3">Full + runtime</td><td class="px-4 py-3">Islands only</td><td class="px-4 py-3">Qwik resumable; Remix hydrate</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Routing</td><td class="px-4 py-3">File + manual, groups, hash, offline</td><td class="px-4 py-3">File, no manual, no hash</td><td class="px-4 py-3">File, good</td><td class="px-4 py-3">File, simple</td><td class="px-4 py-3">File</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Data</td><td class="px-4 py-3">useFetch Resource, SSR handoff, staleTime</td><td class="px-4 py-3">fetch + RSC, implicit</td><td class="px-4 py-3">load functions</td><td class="px-4 py-3">fetch at build</td><td class="px-4 py-3">loaders</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Native</td><td class="px-4 py-3">Kotlin/Compose from same IR</td><td class="px-4 py-3">None (Expo separate)</td><td class="px-4 py-3">None</td><td class="px-4 py-3">None</td><td class="px-4 py-3">None</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Build error</td><td class="px-4 py-3">Invalid semantics fail build</td><td class="px-4 py-3">Runtime, sometimes silent</td><td class="px-4 py-3">Some compile errors</td><td class="px-4 py-3">Few</td><td class="px-4 py-3">Mixed</td></tr>
+						<tr><td class="px-4 py-3 font-medium">Ecosystem</td><td class="px-4 py-3">npm, Tailwind, lucide — small, growing</td><td class="px-4 py-3">Massive</td><td class="px-4 py-3">Solid</td><td class="px-4 py-3">Huge (framework-agnostic)</td><td class="px-4 py-3">Small (Qwik) / Remix: medium</td></tr>
+					</tbody>
+				</table>
+			</div>
+			<p class="bg-surface/40 px-4 py-3 font-mono text-[11px] text-muted-foreground">We benchmarked on showcase apps (same UI/data) on CI 4 vCPU Node 20 gzip. Re-run on your app — architecture matters more than micro-benchmarks.</p>
+		</div>
+
+		<div class="mt-10 grid gap-px bg-border sm:grid-cols-2">
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">When to choose Vesk — we win</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">Content + forms + lists:</strong> docs, dashboards, admin, field tools — where per-cell updates and zero-JS chrome matter.</li>
+					<li><strong class="text-foreground">Web + native with shared design:</strong> one token set → Tailwind + Compose, not two apps.</li>
+					<li><strong class="text-foreground">You want guarantees:</strong> compile-time proof beats runtime hope.</li>
+				</ul>
+			</div>
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">When not to — be honest</h3>
+				<ul class="mt-3 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">Huge React ecosystem need:</strong> Next's npm reach is unmatched — if you need 10 niche React libs day one, choose Next.</li>
+					<li><strong class="text-foreground">Heavy canvas/WebGL:</strong> Vesk is DOM-first; for games, Flutter/Canvas is better.</li>
+					<li><strong class="text-foreground">Team is React-only:</strong> Vesk asks you to learn <code class="bg-background px-1 py-0.5">component</code> + <code class="bg-background px-1 py-0.5">&[track]</code> — small but real.</li>
+				</ul>
+			</div>
+		</div>
+
+		<div class="mt-10 panel p-6">
+			<h3 class="font-display text-sm font-semibold">The 90-second sell — tailors to your current stack</h3>
+			<div class="mt-4 grid gap-6 sm:grid-cols-3 font-mono text-[12px] leading-relaxed">
+				<div><p class="font-medium text-foreground">You use Next.js</p><p class="mt-1 text-muted-foreground">Keep file routing, lose VDOM tax. Move state to <code class="bg-surface px-1 py-0.5">track</code>, keep data in <code class="bg-surface px-1 py-0.5">useFetch</code> — most pages become static and ship 0 B. Port in a day.</p><Link href="/docs/getting-started" class="mt-3 inline-block text-accent hover:text-foreground no-underline">Migration →</Link></div>
+				<div><p class="font-medium text-foreground">You use SvelteKit</p><p class="mt-1 text-muted-foreground">Stay fine-grained, gain Kotlin target + manual routing + offline boundaries. Same feel, more reach.</p><Link href="/native" class="mt-3 inline-block text-accent hover:text-foreground no-underline">Native →</Link></div>
+				<div><p class="font-medium text-foreground">You use Astro/Qwik</p><p class="mt-1 text-muted-foreground">Keep islands + 0 JS, gain a real framework — routing, data, forms, auth middleware — without gluing.</p><Link href="/features" class="mt-3 inline-block text-accent hover:text-foreground no-underline">Features →</Link></div>
+			</div>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/docs/getting-started" class="btn-solid px-6 py-3 text-sm no-underline">Get started →</Link>
+			<Link href="/showcase" class="btn-outline px-6 py-3 text-sm no-underline">See proof</Link>
+		</div>
+	</div>
+}

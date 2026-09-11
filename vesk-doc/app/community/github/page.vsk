@@ -1,0 +1,44 @@
+import { Link } from '@vesk/runtime/router'
+
+component CommunityGithub {
+	<Head>
+		<title>GitHub — Source, issues, RFCs | Vesk Community</title>
+		<meta name="description" content="Vesk on GitHub: source, issues, RFCs, good first issues. Faster than Next's monorepo triage — discussions become diagnostics." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>community · github</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">GitHub — where Vesk is built.</h1>
+		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Source, issues, RFCs, and <code class="bg-surface px-1 py-0.5">good first issue</code> tags. We treat docs as code — every diagnostic has a page, every page is verified against source.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener" class="btn-solid px-5 py-3 text-sm no-underline">Open GitHub ↗</a>
+			<Link href="/community/contributors" class="btn-outline px-5 py-3 text-sm no-underline">Become a contributor →</Link>
+		</div>
+
+		<div class="mt-12 grid gap-px bg-border sm:grid-cols-2">
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">Why GitHub over Discord-only?</h3>
+				<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">Next/SvelteKit Discord is fast but ephemeral. Vesk keeps decisions on GitHub — RFCs, ADRs, and compiler diagnostics are versioned and searchable. Discord is for chat.</p>
+				<p class="mt-3 font-mono text-[11px] text-muted-foreground">Compare: Next.js 2k+ open issues triaged by bot; Vesk 40 open, human-labeled by area (compiler/runtime/native).</p>
+			</div>
+			<div class="bg-surface p-6">
+				<h3 class="font-display text-sm font-semibold">How we work</h3>
+				<ul class="mt-2 list-disc pl-5 font-mono text-[12px] leading-relaxed text-muted-foreground space-y-1">
+					<li><strong class="text-foreground">RFC → TODO.md</strong> — every feature starts as a living TODO entry, not a tweet.</li>
+					<li><strong class="text-foreground">Diagnostics first</strong> — error codes (V0xxx) with suggested fixes before merge.</li>
+					<li><strong class="text-foreground">Verified docs</strong> — each page checked against <code class="bg-surface px-1 py-0.5">packages/*/src</code>.</li>
+				</ul>
+			</div>
+		</div>
+
+		<div class="panel mt-8 p-6">
+			<h3 class="font-display text-sm font-semibold">Good first issues — try the compiler</h3>
+			<p class="mt-2 font-mono text-[12px] leading-relaxed text-muted-foreground">No Rust, no WASM — pure TypeScript. <code class="bg-surface px-1 py-0.5">packages/compiler/src/ir.ts</code> and <code class="bg-surface px-1 py-0.5">client-codegen.ts</code> are approachable. Start with a <code class="bg-surface px-1 py-0.5">good first issue</code> and run <code class="bg-surface px-1 py-0.5">npx tsx packages/cli/src/build-packages.ts</code> after edits.</p>
+			<a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener" class="mt-4 inline-block font-mono text-[11px] text-accent hover:text-foreground no-underline">Explore issues →</a>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/community/discussions" class="btn-outline px-6 py-3 text-sm no-underline">Discussions →</Link>
+			<Link href="/community/discord" class="btn-outline px-6 py-3 text-sm no-underline">Discord</Link>
+		</div>
+	</div>
+}

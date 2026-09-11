@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
-import { createHmrServer } from './hmr';
+import { buildErrorPayload, createHmrServer } from './hmr';
 import * as hmrApi from './hmr';
 import type { HmrErrorPayload } from './hmr';
 import { createDevApiRouter } from './dev-api';
@@ -407,6 +407,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   let ssrVersion = Date.now();
   let routeTree: RouteNode[] = [];
   let runtimeBundle = '';
+  let pendingInitialError: HmrErrorPayload | null = null;
 
   interface DevEventsModule {
     executeStart?: (base?: Record<string, unknown>) => Promise<void>;
@@ -441,14 +442,29 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       runtimeBundle = buildRuntimeCode(runtimeDir);
       await reloadEventsMod();
       lastBuild = Date.now();
+      // successful build clears any pending error
+      pendingInitialError = null;
       console.error(`vesk dev: rebuilt in ${Date.now() - start}ms`);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       console.error(`vesk dev: build error: ${message}`);
+      // surface the error to the HMR overlay + devtool Errors panel
+      try {
+        const filename = (e as { filename?: string; file?: string } | null)?.filename
+          || (e as { filename?: string; file?: string } | null)?.file
+          || 'app';
+        const payload = buildErrorPayload(e, String(filename), { appDir });
+        pendingInitialError = payload;
+        if (hmrSession) {
+          hmrSession.broadcast('error', payload as unknown as Record<string, unknown>);
+        }
+      } catch {
+        /* best-effort */
+      }
     }
   }
 
-await doBuild();
+await doBuild().catch(() => {});
 
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);
@@ -709,6 +725,10 @@ await doBuild();
 
   const hmr = createHmrServer(server, appDir, devDir, componentMap);
   hmrSession = hmr;
+  // replay any build error that happened before the HMR server existed
+  if (pendingInitialError) {
+    hmr.broadcast('error', pendingInitialError as unknown as Record<string, unknown>);
+  }
 
   // ── Console streaming to devtool ────────────────────────────────────────
   // Read `logs` from vesk.config and wire up server-side console interception

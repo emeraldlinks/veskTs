@@ -135,7 +135,7 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	const nodes = buildErrorNodes(payload);
 
 	assert(nodes.file.includes('app/page.vsk:1000:17'), 'file header shows file, line and column');
-	assert(nodes.message === '', 'raw acorn parse message ("Unexpected token") is hidden from the overlay');
+	assert(nodes.message.includes('Unexpected token'), 'raw acorn parse message ("Unexpected token") is surfaced with a Parse error prefix');
 	assert(nodes.codeframe.includes('kf-err'), 'codeframe piece includes the highlighted error line');
 	assert(nodes.lists.includes('&gt; TIPS'), 'TIPS section label rendered (uppercase, > prefix)');
 	assert(nodes.lists.includes('&gt; SUGGESTIONS'), 'SUGGESTIONS section label rendered');
@@ -616,7 +616,7 @@ console.log('\n\u2550\u2550\u2550 Vesk HMR client module tests (DOM-free) \u2550
 	assert(src.includes('--vk-err-bg') && src.includes('--vk-err-fg'), 'source defines a red error palette');
 	assert(src.includes('.kf-err{background:var(--vk-err-bg)'), 'error line highlight uses the red palette, not inverse-video white');
 	assert(src.includes('.kf-caret{color:var(--vk-err-fg)'), 'caret row uses the red-palette foreground');
-	assert(src.includes('isAcornParseMessage') && src.includes("'Unexpected '"), 'source hides raw acorn parse messages from the overlay');
+	assert(src.includes('isAcornParseMessage') && src.includes("'Unexpected '"), 'source surfaces acorn parse messages with a Parse error prefix (codeframe + tips carry detail)');
 	assert(src.includes('renderSearchPluginDetail'), 'source renders a pre-install detail view for npm search results');
 	assert(src.includes('data-search-pkg-open'), 'source wires a details action on npm search results');
 	assert(src.includes('pluginInstalling'), 'source tracks an in-flight plugin install (loading state)');

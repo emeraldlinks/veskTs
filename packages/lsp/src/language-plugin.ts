@@ -37,6 +37,23 @@ export const resolveConfig = <T extends { options?: any }>(
   if (options.jsx === undefined) {
     options.jsx = ts.JsxEmit.Preserve;
   }
+  // Exports subpaths like `@vesk/runtime/router` require a modern
+  // moduleResolution. Force `bundler` (the same default `vesk typecheck`
+  // and all `tsconfig.base.json`/`create-vesk` templates use) when the
+  // user's config is missing or is a legacy kind that doesn't understand
+  // `package.json` `exports` (`node`/`classic`).
+  const bundlerRes = ts.ModuleResolutionKind.Bundler;
+  const node16Res = ts.ModuleResolutionKind.Node16;
+  const nodeNextRes = ts.ModuleResolutionKind.NodeNext;
+  const mr = options.moduleResolution as number | undefined;
+  const supportsExports =
+    mr === bundlerRes || mr === node16Res || mr === nodeNextRes;
+  if (!supportsExports) {
+    options.moduleResolution = bundlerRes;
+  }
+  if (options.module === undefined) {
+    options.module = ts.ModuleKind.ESNext;
+  }
   // Match `vesk typecheck`: don't auto-include every @types/* package from
   // node_modules (Node typings would flood completion lists with Buffer /
   // process / require at JSX positions). Users can still opt in via their

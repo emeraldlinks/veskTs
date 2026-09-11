@@ -123,6 +123,76 @@ export function extractMiddleware(sourcePath: string): string | null {
   }
 }
 
+function isStandaloneLayoutFile(layoutPath: string): boolean {
+  try {
+    if (!existsSync(layoutPath)) return false;
+    const src = readFileSync(layoutPath, 'utf-8');
+    // Fast path: if the word "standalone" doesn't appear, it's not standalone
+    if (!src.includes('standalone')) return false;
+    try {
+      const ast: any = parse(src, { filename: 'layout.vsk' });
+      for (const stmt of ast.body) {
+        // export const standalone = true  /  export let standalone = true
+        if (stmt.type === 'ExportNamedDeclaration' && stmt.declaration?.type === 'VariableDeclaration') {
+          for (const decl of stmt.declaration.declarations) {
+            if (decl.id?.name === 'standalone' && decl.init?.type === 'Literal' && decl.init.value === true) {
+              return true;
+            }
+            if (decl.id?.name === 'standalone' && decl.init?.type === 'Identifier' && decl.init.name === 'true') {
+              return true;
+            }
+          }
+        }
+        // component Layout(props: { standalone: boolean })  or  { standalone: true }
+        const comp = stmt.type === 'ComponentDeclaration' ? stmt
+          : stmt.type === 'ExportNamedDeclaration' && stmt.declaration?.type === 'ComponentDeclaration' ? stmt.declaration
+          : null;
+        if (comp && comp.params && comp.params.length > 0) {
+          const firstParam: any = comp.params[0];
+          // firstParam may have typeAnnotation: TSTypeAnnotation -> TSTypeLiteral with members
+          const typeNode = firstParam.typeAnnotation?.typeAnnotation || firstParam.typeAnnotation;
+          if (typeNode && typeNode.type === 'TSTypeLiteral' && Array.isArray(typeNode.members)) {
+            for (const mem of typeNode.members) {
+              if (mem.key?.name === 'standalone') return true;
+            }
+          }
+          // Fallback: check raw param text for "standalone" if AST doesn't have it (e.g. no type)
+          if (firstParam.typeAnnotation && String(src.slice(firstParam.start, firstParam.end)).includes('standalone')) {
+            return true;
+          }
+        }
+      }
+    } catch {
+      // Fallback to raw text check if parse fails
+      if (src.includes('standalone') && src.includes('true')) return true;
+    }
+    // Final fallback: check for export standalone pattern in raw text
+    if (src.includes('export') && src.includes('standalone') && src.includes('true')) {
+      // Use token scan to avoid false positives from comments
+      const tokens = tokenizeCode(src);
+      if (tokens) {
+        for (let i = 0; i < tokens.length; i++) {
+          if (tokens[i].value === 'standalone') {
+            // Check if it's exported and assigned true
+            let hasExport = false;
+            for (let j = Math.max(0, i - 3); j < i; j++) {
+              if (tokens[j].value === 'export') { hasExport = true; break; }
+            }
+            if (hasExport) {
+              for (let k = i + 1; k < Math.min(tokens.length, i + 4); k++) {
+                if (tokens[k].value === 'true') return true;
+              }
+            }
+          }
+        }
+      }
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 export function scanRoutes(appDir: string, options: ScanOptions = {}): RouteNode[] {
   if (!existsSync(appDir)) {
     return [];
@@ -225,6 +295,7 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
     ? (parentPath === '/' ? '/' : parentPath + '/') + seg
     : (parentPath || '/');
 
+  const isStandalone = hasLayout ? isStandaloneLayoutFile(join(dir, 'layout.vsk')) : false;
   const node: RouteNode = {
     path: seg,
     fullPath: collapseSlashes(fullPath) || '/',
@@ -242,6 +313,7 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
     children: [],
     sourceDir: dir,
     segmentCount: isGroup || dir === rootDir ? 0 : 1,
+    standalone: isStandalone ? true : undefined,
   };
 
   for (const entry of entries) {
@@ -318,13 +390,15 @@ export function generateRouteManifest(tree: RouteNode[], options: RouteManifestO
     if (node.notFound) parts.push(`notFound: ${node.notFound}`);
     if (node.offline) parts.push(`offline: ${node.offline}`);
     if (node.network) parts.push(`network: ${node.network}`);
+    if ((node as any).standalone) parts.push(`standalone: true`);
     if (node.children.length > 0) {
       const childCodes = node.children.map((c: RouteNode) => genNode(c));
       parts.push(`children: [\n${childCodes.map((c: string) => '\t\t' + c).join(',\n')}\n\t]`);
     }
     const pathStr = JSON.stringify(node.fullPath);
     const groupStr = node.isGroup ? `, isGroup: true` : '';
-    return `{ path: ${pathStr}${groupStr}, ${parts.join(', ')} }`;
+    const standaloneStr = (node as any).standalone ? `, standalone: true` : '';
+    return `{ path: ${pathStr}${groupStr}${standaloneStr}, ${parts.join(', ')} }`;
   }
 
   const nodeCodes = tree.map(n => genNode(n));
@@ -370,11 +444,18 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
     chain.push(rootNode);
   }
 
+  function pushWithStandalone(node: RouteNode) {
+    if ((node as any).standalone) {
+      chain.length = 0;
+    }
+    chain.push(node);
+  }
+
   function matchNodes(nodes: RouteNode[], partIndex: number): boolean {
     for (const node of nodes) {
       if (node.isGroup) {
         if (matchNodes(node.children, partIndex)) {
-          if (node.layout) chain.push(node);
+          if (node.layout) pushWithStandalone(node);
           return true;
         }
         continue;
@@ -385,8 +466,11 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
       }
 
       if (partIndex >= parts.length) {
-        if (node.page) {
-          chain.push(node);
+        // Only match if this node's fullPath exactly equals the requested pathname
+        // (e.g. "/" should only match the root, not the first child with a page)
+        const requestedPath = '/' + parts.join('/');
+        if (node.page && (node.fullPath === requestedPath || (requestedPath === '/' && node.fullPath === '/'))) {
+          pushWithStandalone(node);
           return true;
         }
         continue;
@@ -397,14 +481,18 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
       if (node.isCatchAll) {
         const paramName = node.path.startsWith(':') ? node.path.slice(1) : node.path;
         params[paramName] = parts.slice(partIndex).map(decodeURIComponent).join('/');
-        chain.push(node);
+        pushWithStandalone(node);
         return true;
       }
 
       if (node.isDynamic) {
         const paramName = node.path.startsWith(':') ? node.path.slice(1) : node.path;
         params[paramName] = decodeURIComponent(part);
-        chain.push(node);
+        pushWithStandalone(node);
+        const remainingDynamic = parts.slice(partIndex + 1);
+        if (remainingDynamic.length === 0 && node.page) {
+          return true;
+        }
         if (node.children.length > 0) {
           if (matchNodes(node.children, partIndex + 1)) return true;
         } else if (node.page) {
@@ -416,7 +504,11 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
       }
 
       if (node.path === part) {
-        chain.push(node);
+        pushWithStandalone(node);
+        const remaining = parts.slice(partIndex + 1);
+        if (remaining.length === 0 && node.page) {
+          return true;
+        }
         if (node.children.length > 0) {
           if (matchNodes(node.children, partIndex + 1)) return true;
         } else if (node.page) {

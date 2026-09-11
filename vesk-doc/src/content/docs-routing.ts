@@ -18,12 +18,12 @@ export const pages: {
 		slug: "routing",
 		title: "Routing",
 		description:
-			"File-based routing under app/, dynamic segments and catch-alls, nested layouts, loading/error/not-found/offline pages, Link/NavLink navigation, prefetching, guards, and the programmatic router API.",
+			"Two routing modes — file-based under app/ and manual via createRouter — with dynamic segments and catch-alls, nested layouts, loading/error/not-found/offline pages, Link/NavLink navigation, prefetching, guards, and the low-level router API.",
 		group: "Runtime",
 		blocks: [
 			{
 				kind: "p",
-				text: "Vesk is file-based routing. The structure of your `app/` directory — plus a handful of reserved file names (`page.vsk`, `layout.vsk`, `loading.vsk`, `error.vsk`, `not-found.vsk`, `offline.vsk`, `network.vsk`, `middleware.ts`) — determines every URL in the app. The compiler scans `app/` (`scanRoutes` in `packages/compiler/src/router.ts`) into an in-memory route tree, and the client router builds `Link`/`NavLink` SPA navigations, route-data prefetching and hydration on top of it.",
+				text: "Vesk supports two routing modes that share the same matching, navigation, and data layer. **File-based** (default): the structure of your `app/` directory — plus reserved files (`page.vsk`, `layout.vsk`, `loading.vsk`, `error.vsk`, `not-found.vsk`, `offline.vsk`, `network.vsk`, `middleware.ts`) — determines every URL (the compiler scans `app/` via `scanRoutes` in `packages/compiler/src/router.ts` into a route tree). **Manual**: you build the tree yourself with `createRouter` + `defineRoute`/`buildRouteTree` (or a plain `Record<string, Function>` map) and call `router.start()` — no `app/` scan needed. Both modes use the same `Link`/`NavLink` SPA navigation, `useParams`/`useNavigate`/`useRouter`, guards, redirects, prefetching, and `hash`/`offline` options. This page documents file-based first, then manual.",
 			},
 			{ kind: "h2", text: "Route conventions" },
 			{
@@ -166,6 +166,168 @@ export const pages: {
 				kind: "note",
 				tone: "info",
 				text: "File-based layouts render the page chain through `props.children` — the runtime (`renderMatch` in `packages/runtime/src/router.ts`) passes `{ children, params }` down the layout chain. The `Outlet` component exists in the runtime surface but is not what file-based layouts use; the layout system renders `props.children` directly.",
+			},
+			{ kind: "h2", text: "Manual routing" },
+			{
+				kind: "p",
+				text: "Use manual routing when file conventions are too rigid: custom URL shapes, a non-`app/` host, a test harness, incremental migration, or a pure SPA without a compiler scan. You declare routes in code and start the router yourself. Manual and file-based share identical matching (static / `:param` / `*` catch-all), layout nesting, `Link`/`NavLink` SPA navigation, `useParams`/`useNavigate`/`useRouter`, `beforeEach` guards, `redirect`/`notFound` throws, `prefetch`, `routeDataCache`, `hash`, and `offline`/`network` boundaries — only the tree construction differs (`app/` scan vs `defineRoute`/`buildRouteTree` or a plain map).",
+			},
+			{
+				kind: "list",
+				items: [
+					"`createRouter(routes, options)` — array form via `buildRouteTree([defineRoute(path, config), …])` OR map form `Record<string, Function>` (`'/post/:slug': () => '<h1/>'`, `'/files/...rest'` catch-all). Renders into `options.container` (default `#root`). The compiled file-based app is just `createFileRouter(tree, options)` — same engine plus `middleware` + chunk loading (`ensureChunk`).",
+					"`defineRoute(path, config)` — one route definition: `{ path, page?, layout?, loading?, error?, notFound?, offline?, network?, children? }`. Returns the node for `buildRouteTree`. `path` is absolute (`'/'`, `'/about/:id'`, `'/docs/*'`).",
+					"`buildRouteTree(definitions)` — normalizes `defineRoute` results into a matchable tree (`fullPath`, `segmentCount`, `isDynamic`/`isCatchAll`, `*` → catch-all). Use it when you declare routes as an array.",
+					"`matchRoute(tree, pathname)` — pure matcher for testing/tooling: returns `{ matchChain, params }` or `null`. `buildTreeFromMap(map)` is the internal equivalent for the `Record` form.",
+					"Layouts in manual mode use the same `{ children, params }` contract as file-based (`{props.children}` renders the inner chain). The `Outlet` placeholder component (`<Outlet/>`) is an alternative imperative target for manual mount points — file-based layouts never use it.",
+					"Manual routes are NOT auto-imported: `import { createRouter, defineRoute, buildRouteTree, matchRoute } from '@vesk/runtime/router'` explicitly. File-based hooks (`Link`, `NavLink`, `useParams`, `redirect`, …) remain auto-imported.",
+				],
+			},
+			{
+				kind: "table",
+				head: ["Manual config field", "File-based equivalent", "When it renders"],
+				rows: [
+					["page", "page.vsk", "The route itself (`{ params, ...data }`)"],
+					["layout", "layout.vsk", "Wrapper receiving `{ children, params }`, render `{props.children}`"],
+					["loading", "loading.vsk", "While SPA navigation to the route is in flight (`{ params }`)"],
+					["error", "error.vsk", "When page/layout throws (`{ error, retry, params, statusCode, stack, url, offline, networkState }`)"],
+					["notFound", "not-found.vsk", "Unmatched URL or `notFound()` (`{ params, url }`)"],
+					["offline / network", "offline.vsk / network.vsk", "Connectivity failure (`{ url, params, retry, online, effectiveType, downlink, rtt, saveData }`)"],
+					["children", "subdirectory", "Nested routes under the parent path"],
+				],
+			},
+			{
+				kind: "code",
+				filename: "app/client.ts (manual — array form)",
+				code: `import { createRouter, defineRoute, buildRouteTree } from '@vesk/runtime/router';
+
+const Home = (props: any) => '<h1>Home</h1>';
+const AboutPage = (props: any) => '<p>about</p>';
+const DocsLayout = (props: any) => '<aside>nav</aside><main>' + props.children + '</main>';
+
+const tree = buildRouteTree([
+	defineRoute('/', { page: Home }),
+	defineRoute('/about/:id', { page: AboutPage }),
+	// catch-all uses '*' (file-based '[...rest]' maps to ':rest'):
+	defineRoute('/docs/*', { page: () => '<p>catch-all</p>', layout: DocsLayout }),
+	// nested children — alternative to flat '/blog/:slug/comments':
+	defineRoute('/blog/:slug', {
+		page: () => '<p>post</p>',
+		children: [defineRoute('/review', { page: () => '<p>review</p>' })],
+	}),
+]);
+
+const router = createRouter(tree, {
+	container: document.getElementById('root')!,
+	prefetch: true,
+	hash: false,
+	routeDataCache: 0,
+});
+router.start();`,
+			},
+			{
+				kind: "code",
+				filename: "app/client.ts (manual — map shorthand, no buildRouteTree)",
+				code: `import { createRouter, matchRoute } from '@vesk/runtime/router';
+
+// Keys are patterns: ':param' for dynamic, '...name' for catch-all.
+// The router builds the tree internally with buildTreeFromMap.
+const routes: Record<string, Function> = {
+	'/home': () => '<h1>Home</h1>',
+	'/post/:slug': () => '<h1>Post</h1>',
+	'/files/...rest': () => '<h1>Files</h1>', // catch-all
+};
+
+const router = createRouter(routes, {
+	container: document.getElementById('root')!,
+	hash: true, // route lives in #/path — plain #anchor stays native
+});
+router.start();
+
+// pure matcher — no router needed (testing, tooling):
+const m = matchRoute(router.routeTree, '/post/hello');
+console.log(m!.params.slug); // 'hello'`,
+			},
+			{
+				kind: "tabs",
+				tabs: [
+					{
+						label: "statement mode",
+						filename: "app/manual-pages.vsk (used as page/layout values)",
+						code: `component ManualLayout(props: { children: any }) {
+	<header>Manual site</header>
+	<main>{props.children}</main>
+}
+
+component ManualPost() {
+	const { slug } = useParams();
+	<p>Post {slug}</p>
+}
+
+// in client.ts:
+import { ManualLayout } from './manual-pages.vsk';
+import { ManualPost } from './manual-pages.vsk';
+buildRouteTree([ defineRoute('/post/:slug', { page: ManualPost, layout: ManualLayout }) ]);`,
+					},
+					{
+						label: "expression mode",
+						filename: "app/manual-pages.vsk (used as page/layout values)",
+						code: `component ManualLayout(props: { children: any }) {
+	return (<div><header>Manual site</header><main>{props.children}</main></div>);
+}
+
+component ManualPost() {
+	const { slug } = useParams();
+	return <p>Post {slug}</p>;
+}
+
+// in client.ts:
+import { ManualLayout } from './manual-pages.vsk';
+import { ManualPost } from './manual-pages.vsk';
+buildRouteTree([ defineRoute('/post/:slug', { page: ManualPost, layout: ManualLayout }) ]);`,
+					},
+				],
+			},
+			{
+				kind: "tabs",
+				tabs: [
+					{
+						label: "statement mode",
+						filename: "app/client.ts (manual — Outlet alternative)",
+						code: `import { createRouter, buildRouteTree, defineRoute, Outlet } from '@vesk/runtime/router';
+
+component AppShell() {
+	<nav><Link href="/">Home</Link> <Link href="/about">About</Link></nav>
+	<Outlet />
+}
+
+const tree = buildRouteTree([
+	defineRoute('/', { layout: AppShell, page: () => '<p>home</p>' }),
+	defineRoute('/about', { layout: AppShell, page: () => '<p>about</p>' }),
+]);
+createRouter(tree, { container: document.getElementById('root')! }).start();`,
+					},
+					{
+						label: "expression mode",
+						filename: "app/client.ts (manual — Outlet alternative)",
+						code: `import { createRouter, buildRouteTree, defineRoute, Outlet } from '@vesk/runtime/router';
+
+component AppShell() {
+	return (<div><nav><Link href="/">Home</Link></nav><Outlet /></div>);
+}
+
+const tree = buildRouteTree([
+	defineRoute('/', { layout: AppShell, page: () => '<p>home</p>' }),
+	defineRoute('/about', { layout: AppShell, page: () => '<p>about</p>' }),
+]);
+createRouter(tree, { container: document.getElementById('root')! }).start();`,
+					},
+				],
+			},
+			{
+				kind: "note",
+				tone: "info",
+				text: "Manual and file-based can coexist: keep most routes file-based (`createFileRouter` from the generated tree) and mount a manual `createRouter` subtree on a prefix (e.g. `/admin/*`) by giving its catch-all node `layout`/`page` from manual definitions. Shared `useRouter()`/`useNavigate()` work across the prefix boundary; guards (`beforeEach`) and `hash` are per-router.",
 			},
 			{ kind: "h2", text: "Loading, error, not-found & offline pages" },
 			{
@@ -581,28 +743,31 @@ export const pages: {
 					},
 				],
 			},
-			{ kind: "h2", text: "Programmatic router API" },
+			{ kind: "h2", text: "Router API reference" },
 			{
 				kind: "p",
-				text: "Beyond the file-based convention, the runtime exposes lower-level builders for the route tree and two router factories. All of them live in `@vesk/runtime/router` and are NOT auto-imported — import them explicitly. (The `Link`, `NavLink`, `Outlet` components and the `useRouter`/`useNavigate`/`useParams`/`usePathname`/`useSearchParams`/`redirect`/`permanentRedirect`/`notFound` hooks are auto-imported by the compiler.)",
+				text: "Low-level reference for the builders used by both modes above. For a guided walk-through see **Manual routing** above. All builders live in `@vesk/runtime/router` and are NOT auto-imported — import them explicitly. (`Link`, `NavLink`, `Outlet` and `useRouter`/`useNavigate`/`useParams`/`usePathname`/`useSearchParams`/`redirect`/`permanentRedirect`/`notFound` remain auto-imported.)",
 			},
 			{
-				kind: "list",
-				items: [
-					"`createRouter(routes, options)` — builds a router from an array of `RouteNode`s or a `Record<string, Function>` path→loader map, rendering into `options.container` (default `#root`).",
-					"`createFileRouter(routeTree, options)` — the factory the compiled app uses: takes the route tree scanned from `app/` and adds middleware and lazy chunk loading (`ensureChunk`) on top.",
-					"`defineRoute(path, config)` — one lazy route definition; returns `{ path, ...config }`.",
-					"`buildRouteTree(definitions)` — normalizes an array of `defineRoute` results into a matchable tree (dynamic `:param`, catch-all `*`, `segmentCount`, `fullPath`).",
-					"`matchRoute(tree, pathname)` — pure matcher; returns `{ matchChain, params }` or `null`.",
+				kind: "table",
+				head: ["Export", "Signature", "Description"],
+				rows: [
+					["createRouter(routes, opts)", "routes: RouteNode[] | Record<string, Function>", "Array form via buildRouteTree OR map form (':param', '...rest'); renders into opts.container (default #root)"],
+					["createFileRouter(tree, opts)", "tree: RouteNode[] (from scanRoutes)", "File-based factory the compiled app uses: adds middleware + ensureChunk lazy loading"],
+					["defineRoute(path, config)", "path: string, config: { page?, layout?, loading?, error?, notFound?, offline?, network?, children? }", "One route definition; returns { path, ...config } for buildRouteTree"],
+					["buildRouteTree(defs)", "defs: RouteNode[] (defineRoute results)", "Normalizes to matchable tree (fullPath, segmentCount, isDynamic/isCatchAll for ':'/'*')"],
+					["matchRoute(tree, pathname)", "tree: RouteNode[], pathname: string", "Pure matcher → { matchChain, params } | null; buildTreeFromMap is the internal map equivalent"],
+					["ensureChunk(url)", "url: string", "Loads a per-route chunk script once; used internally by createFileRouter"],
 				],
 			},
 			{
 				kind: "code",
-				filename: "app/client.ts",
+				filename: "app/client.ts (file-based entry, for reference)",
 				code: `import { createFileRouter } from '@vesk/runtime/router';
-import routes from './routes.generated';
+import routes from './routes.generated'; // scanRoutes output, bundled by compiler
 
 const router = createFileRouter(routes, {
+	container: document.getElementById('root')!,
 	hydrate: 'viewport',
 	prefetch: true,
 });
@@ -610,51 +775,11 @@ router.start();`,
 			},
 			{
 				kind: "p",
-				text: "Router options shared by both factories: `container`, `prefetch` (default `true`), `viewTransitions` (default `false`; wraps SPA swaps in `document.startViewTransition`), `hydrate` (`'full' | 'viewport' | 'idle' | 'interaction'`), `routeDataCache` (route-data freshness TTL in ms, default `0`), `hash` (route in `#/path` instead of the pathname), and `offline` (a fallback offline component or HTML string). `createFileRouter` additionally accepts `middleware` and a custom `render`.",
+				text: "Router options shared by both factories: `container`, `prefetch` (default `true`), `viewTransitions` (default `false`; wraps SPA swaps in `document.startViewTransition`), `hydrate` (`'full' | 'viewport' | 'idle' | 'interaction'`), `routeDataCache` (freshness TTL in ms, default `0` = always refetch), `hash` (route in `#/path` instead of pathname; `Link` renders `#/path`), and `offline` (fallback component or HTML string). `createFileRouter` additionally accepts `middleware` and a custom `render`. See `packages/runtime/src/router.ts:64` (RouterOptions) and `packages/runtime/src/router-match.ts:164` (RouteNode).",
 			},
 			{
 				kind: "code",
-				filename: "app/client.ts",
-				code: `import { createRouter, defineRoute, buildRouteTree } from '@vesk/runtime/router';
-
-const Home = () => '<h1>Home</h1>';
-
-const tree = buildRouteTree([
-	defineRoute('/', { page: Home }),
-	defineRoute('/about/:id', { page: () => '<p>about</p>' }),
-	defineRoute('/docs/*', { page: () => '<p>catch-all</p>' }),
-]);
-
-const router = createRouter(tree, {
-	container: document.getElementById('root')!,
-	prefetch: true,
-});
-router.start();`,
-			},
-			{
-				kind: "p",
-				text: "Passing a plain map to `createRouter` skips `buildRouteTree`: keys are patterns, `:param` marks dynamic segments, `...name` marks a catch-all, and the router builds the tree with `buildTreeFromMap`. The `hash: true` option reads/writes the route in the URL fragment.",
-			},
-			{
-				kind: "code",
-				filename: "app/client.ts",
-				code: `import { createRouter, matchRoute } from '@vesk/runtime/router';
-
-const routes: Record<string, Function> = {
-	'/home': () => '<h1>Home</h1>',
-	'/post/:slug': () => '<h1>Post</h1>',
-	'/files/...rest': () => '<h1>Files</h1>',
-};
-
-const router = createRouter(routes, { hash: true });
-router.start();
-
-const match = matchRoute(router.routeTree, '/post/hello');
-console.log(match!.params.slug);`,
-			},
-			{
-				kind: "code",
-				filename: "app/router-utils.ts",
+				filename: "app/router-utils.ts (standalone matcher, testing/tooling)",
 				code: `import { matchRoute, buildRouteTree, defineRoute } from '@vesk/runtime/router';
 
 const tree = buildRouteTree([
@@ -664,7 +789,7 @@ const tree = buildRouteTree([
 ]);
 
 const m = matchRoute(tree, '/blog/intro-to-vesk/comments');
-console.log(m?.params.slug);`,
+console.log(m?.params.slug); // 'intro-to-vesk'`,
 			},
 			{
 				kind: "note",

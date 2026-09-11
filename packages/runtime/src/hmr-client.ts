@@ -155,9 +155,9 @@ function section(title: string, items: string[]): string {
 }
 
 /**
- * Acorn's raw parse messages ("Unexpected token", "Parse error", …) carry no
- * actionable detail on their own — the codeframe points at the exact spot and
- * the tips/next-steps explain the fix. Hide the jargon from the overlay.
+ * Acorn's raw parse messages ("Unexpected token", "Parse error", …) are terse
+ * but still useful when paired with the codeframe. Keep them visible; the
+ * codeframe + tips/next-steps carry the actionable detail.
  */
 export function isAcornParseMessage(message: string): boolean {
 	return message === 'Parse error' || message === 'SyntaxError' || message.startsWith('Unexpected ');
@@ -175,7 +175,9 @@ export function buildErrorNodes(payload: HmrErrorPayload): ErrorNodes {
 		if (payload.column != null) file += ':' + payload.column;
 	}
 	const rawMessage = payload.message || 'Unknown error';
-	const message = isAcornParseMessage(rawMessage) ? '' : rawMessage;
+	// surface the raw message even for terse acorn errors — the codeframe
+	// + tips add context, but the token itself is still useful
+	const message = isAcornParseMessage(rawMessage) ? `Parse error — ${rawMessage}` : rawMessage;
 
 	let lists = '';
 	if (payload.tips && payload.tips.length) lists += section('TIPS', payload.tips);
@@ -2175,7 +2177,13 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 		lastError = payload;
 		lastErrorSource = 'ws';
 		showOverlay(payload);
-		logEvent('error', undefined);
+		// surface in Log tab as well — Log previously only got "error" with no message
+		const loc = payload.file + (payload.line != null ? ':' + payload.line + (payload.column != null ? ':' + payload.column : '') : '');
+		const msg = loc + ' — ' + (payload.message || 'unknown error');
+		log.push({ type: 'error', message: msg, level: 'error', ts: Date.now() });
+		if (log.length > 200) log.shift();
+		// also ensure console gets a useful line when devtools are not open
+		try { console.error('[vesk] ' + msg); } catch {}
 		renderPanel();
 	}
 

@@ -1,0 +1,6 @@
+component Layout(props: { children: any, standalone: boolean }) {
+	<div class="standalone-props bg-blue-500 p-4">
+		<p>standalone via props</p>
+		{props.children}
+	</div>
+}

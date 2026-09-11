@@ -1,0 +1,7 @@
+export const standalone = true
+component StandaloneLayout(props: { children: any }) {
+	<div class="standalone-layout bg-red-500 p-4">
+		<p>standalone layout (no root)</p>
+		{props.children}
+	</div>
+}

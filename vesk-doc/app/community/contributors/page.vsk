@@ -1,0 +1,65 @@
+import { Link } from '@vesk/runtime/router'
+
+component Contributors {
+	<Head>
+		<title>Contributors — Compiler & tooling | Vesk Community</title>
+		<meta name="description" content="Vesk contributors: compiler, runtime, native, docs. Small, senior, review-heavy — contrast to Next.js scale." />
+	</Head>
+	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
+		<p class="eyebrow mb-5 flex items-center gap-2"><span class="text-accent">·</span><span>community · contributors</span></p>
+		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">Built by people who read the IR.</h1>
+		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Vesk is small and review-heavy. Every PR touches the compiler test matrix — 95 parser, 145 server codegen, 145 hydration. Docs are verified against source.</p>
+		<div class="mt-8 flex flex-wrap gap-3">
+			<Link href="/community/github" class="btn-solid px-5 py-3 text-sm no-underline">See GitHub →</Link>
+			<Link href="/community/discussions" class="btn-outline px-5 py-3 text-sm no-underline">Read RFCs</Link>
+		</div>
+
+		<div class="mt-12 grid gap-px bg-border sm:grid-cols-2 lg:grid-cols-3">
+			for (const p of [
+				{ role: "Compiler owner", area: "parser · IR · codegen", focus: "No regex, pure TS pipeline. Every TS feature in .vsk." },
+				{ role: "Runtime owner", area: "reactivity · hydration", focus: "Fine-grained, claim walkers, viewport/idle strategies." },
+				{ role: "Native owner", area: "Kotlin emitter", focus: "IR → Compose, shared validation." },
+				{ role: "DX owner", area: "HMR · LSP · CLI", focus: "90 ms HMR, Volar, vesk typecheck." },
+				{ role: "Docs owner", area: "content · search", focus: "Full-text derived search, verified docs." },
+				{ role: "Community", area: "examples · showcase", focus: "Aurora/Fieldbook case studies." },
+			]) {
+				<div class="bg-surface p-5">
+					<div class="font-mono text-[11px] uppercase tracking-[0.14em] text-accent">{p.area}</div>
+					<h3 class="mt-2 font-display text-sm font-semibold">{p.role}</h3>
+					<p class="mt-1.5 font-mono text-[11.5px] leading-relaxed text-muted-foreground">{p.focus}</p>
+				</div>
+			}
+		</div>
+
+		<div class="panel mt-8 p-6">
+			<h3 class="font-display text-sm font-semibold">How to contribute — and why it sells</h3>
+			<div class="mt-4 grid gap-6 sm:grid-cols-2 font-mono text-[12px] leading-relaxed">
+				<div>
+					<p class="font-medium text-foreground">Vs Next.js — scale</p>
+					<ul class="mt-2 list-disc pl-5 text-muted-foreground space-y-1">
+						<li>Next: 3k contributors, bot triage, slow review.</li>
+						<li>Vesk: ~12 active, human review, commit-level feedback.</li>
+						<li>Your PR is read by the parser author, not a bot.</li>
+					</ul>
+				</div>
+				<div>
+					<p class="font-medium text-foreground">Vs Svelte/Astro — depth</p>
+					<ul class="mt-2 list-disc pl-5 text-muted-foreground space-y-1">
+						<li>Astro: content-first, runtime thin.</li>
+						<li>Svelte: runtime-first, compiler helps.</li>
+						<li>Vesk: compiler-is-the-product — IR shared to Kotlin.</li>
+					</ul>
+				</div>
+			</div>
+			<div class="mt-6 flex flex-wrap gap-3">
+				<a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener" class="btn-solid px-5 py-3 text-sm no-underline">Good first issues ↗</a>
+				<Link href="/docs/pipeline" class="btn-outline px-5 py-3 text-sm no-underline">Start with compiler docs</Link>
+			</div>
+		</div>
+
+		<div class="mt-10 flex flex-wrap gap-3">
+			<Link href="/contact" class="btn-solid px-6 py-3 text-sm no-underline">Contact →</Link>
+			<Link href="/comparison" class="font-mono text-[11px] text-muted-foreground hover:text-foreground py-3 px-2 no-underline">Compare all →</Link>
+		</div>
+	</div>
+}
