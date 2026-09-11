@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync, rmSync, symlinkSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, cpSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { generatePlatformHandlerSource, bundlePlatformHandler, type PlatformBuildContext } from '@vesk/adapter/src/platform-handler';
 import { ensureCleanDir, writePlatformStatic, writePrerenderedStatic, listStaticDir, mimeFor } from '@vesk/adapter/src/platform-output';
@@ -40,8 +40,9 @@ interface Shell {
  * (Coxmos, Deno Deploy) share the exact same shell.
  *
  * Every artifact is written under `.vesk/<platform>/`; Vercel additionally gets
- * a gitignored `.vercel/output` symlink because the Build Output API is keyed on
- * that literal directory.
+ * a gitignored `.vercel/output` mirror because the Build Output API is keyed on
+ * that literal directory (and its runner rmdirs it — so it is a real directory,
+ * not a symlink).
  */
 export async function emitPlatformOutput(platform: Platform, ctx: DeployContext): Promise<string | null> {
   if (platform === 'node') return null;
@@ -110,10 +111,13 @@ export async function emitPlatformOutput(platform: Platform, ctx: DeployContext)
 
   if (platform === 'vercel') {
     const vercelDir = resolve(projectRoot, '.vercel');
-    mkdirSync(vercelDir, { recursive: true });
-    const linkPath = resolve(vercelDir, 'output');
-    rmSync(linkPath, { recursive: true, force: true });
-    symlinkSync(relative(dirname(linkPath), outRoot), linkPath, 'dir');
+    const outputPath = resolve(vercelDir, 'output');
+    // The Vercel build runner keys the Build Output API on the literal
+    // `.vercel/output` directory and rmdir()s it after ingesting. A symlink
+    // breaks that (rmdir on a symlink → ENOTDIR), so mirror the artifact root
+    // into a real directory. `.vesk/vercel` stays the canonical artifact tree.
+    rmSync(outputPath, { recursive: true, force: true });
+    cpSync(outRoot, outputPath, { recursive: true });
   }
 
   rmSync(entry, { force: true });
