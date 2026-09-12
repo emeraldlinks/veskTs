@@ -196,6 +196,33 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 9: Standalone chunk is self-contained ──
+  // A standalone layout resets the match chain, so the index chunk never
+  // loads. A shared component (Badge) that the root layout ALSO imports must
+  // still be registered by the standalone chunk itself — otherwise first
+  // render throws `__components.Badge is not a function`.
+  console.log('\n=== TEST 9: Standalone chunk self-containment ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto(BASE + '/standalonedep', { waitUntil: 'networkidle0' });
+
+    const badgeText = await page.evaluate(() =>
+      document.querySelector('.shared-badge')?.textContent?.trim() || ''
+    );
+    const badgeRegistered = await page.evaluate(() =>
+      typeof (globalThis.__components || {})['Badge'] === 'function' &&
+      typeof (globalThis.__hydrators || {})['Badge'] === 'function'
+    );
+
+    await assert(errors.length === 0, 'Zero JS errors on /standalonedep (' + errors.join(', ') + ')');
+    await assert(badgeText === 'Shared Badge', 'Shared component rendered from standalone chunk');
+    await assert(badgeRegistered, 'Shared component registered by standalone chunk');
+    await page.close();
+  }
+
   console.log(`\n=== Results: ${passed} passed, ${failed} failed, ${passed + failed} total ===`);
   if (failed > 0) process.exit(1);
   console.log('All code-split tests passed!');

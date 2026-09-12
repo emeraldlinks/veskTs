@@ -1,11 +1,12 @@
 import { Menu, X } from 'lucide-vesk'
+import { Link } from '@vesk/runtime/router'
 
 const links = [
-	{ label: "compiler", href: "#compiler" },
-	{ label: "native", href: "#native" },
-	{ label: "features", href: "#features" },
-	{ label: "docs", href: "#docs" },
-	{ label: "showcase", href: "#showcase" },
+	{ label: "compiler", href: "/compiler" },
+	{ label: "native", href: "/native" },
+	{ label: "features", href: "/features" },
+	{ label: "docs", href: "/docs" },
+	{ label: "showcase", href: "/showcase" },
 ]
 
 export component Nav {
@@ -13,16 +14,16 @@ export component Nav {
 
 	<header class="sticky top-0 z-40 border-b border-border bg-background/90 backdrop-blur-md">
 		<div class="mx-auto flex w-full max-w-6xl items-center justify-between px-5 py-3 sm:px-8">
-			<a href="#top" class="flex items-center gap-2 no-underline">
+			<Link href="/" class="flex items-center gap-2 no-underline">
 				<span class="grid size-6 place-items-center bg-foreground font-display text-[11px] font-bold text-background">V</span>
 				<span class="font-display text-sm font-semibold tracking-tight text-foreground">vesk</span>
 				<span class="hidden font-mono text-[10px] uppercase tracking-[0.2em] text-muted-foreground sm:inline">compiler-first</span>
-			</a>
+			</Link>
 			<nav class="hidden items-center gap-6 font-mono text-[11px] text-muted-foreground md:flex">
 				for (const l of links) {
-					<a href={l.href} class="transition-colors hover:text-foreground no-underline text-muted-foreground">{l.label}</a>
+					<Link href={l.href} class="transition-colors hover:text-foreground no-underline text-muted-foreground">{l.label}</Link>
 				}
-				<a href="#get-started" class="btn-solid px-3 py-1.5 text-[11px] no-underline">Get Started</a>
+				<Link href="/docs/getting-started" class="btn-solid px-3 py-1.5 text-[11px] no-underline">Get Started</Link>
 			</nav>
 			<button
 				type="button"
@@ -40,17 +41,17 @@ export component Nav {
 		if (open) {
 			<nav class="border-t border-border bg-background px-5 py-3 font-mono text-[12px] md:hidden">
 				for (const l of links) {
-					<a
+					<Link
 						href={l.href}
 						onClick={() => open = false}
 						class="block border-b border-border/60 py-2.5 text-muted-foreground no-underline"
-					>{l.label}</a>
+					>{l.label}</Link>
 				}
-				<a
-					href="#get-started"
+				<Link
+					href="/docs/getting-started"
 					onClick={() => open = false}
 					class="btn-solid mt-3 w-full px-3 py-2.5 text-[12px] no-underline"
-				>Get Started</a>
+				>Get Started</Link>
 			</nav>
 		}
 	</header>

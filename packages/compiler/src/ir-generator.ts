@@ -1124,6 +1124,20 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       }
     }
 
+    // `export const standalone = true` / `export let standalone = true` is a
+    // compile-time routing directive (isStandaloneLayoutFile), not runtime
+    // code — drop it so it never reaches emitted JS (client chunks are
+    // IIFE-wrapped where a bare `export` is a syntax error).
+    if (node.type === 'ExportNamedDeclaration' && node.declaration) {
+      const decl = node.declaration;
+      if (decl.type === 'VariableDeclaration') {
+        const declName = decl.declarations[0]?.id?.name;
+        if (declName === 'standalone') {
+          continue;
+        }
+      }
+    }
+
     let inner = node;
     let exported = false;
     let defaultExport = false;

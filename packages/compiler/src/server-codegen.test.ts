@@ -505,6 +505,36 @@ describe('Statement Mode Server Rendering', () => {
 		`, 'App', { todos: [{ id: 1, text: 'A' }, { id: 2, text: 'B' }] });
 		expect(html).toBe('<li>A</li><li>B</li>');
 	});
+	it('hydrate SSR stamps data-vsk-key and markers on keyed items', () => {
+		const html = render(`
+			component App(props: { items: { id: number, name: string }[] }) {
+				return <ul>{props.items.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;
+			}
+		`, 'App', { items: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] }, new Map(), { hydrate: true });
+		expect(html).toBe('<!--vsk--><ul><!--vsk--><li data-vsk-key="1">A</li><!--vsk--><li data-vsk-key="2">B</li></ul>');
+	});
+	it('hydrate SSR stamps data-vsk-key on statement-mode keyed for-of roots', () => {
+		const html = render(`
+			component App(props: { todos: { id: number, text: string }[] }) {
+				<ul>
+					for (const todo of props.todos; key todo.id) {
+						<li>{todo.text}</li>
+					}
+				</ul>
+			}
+		`, 'App', { todos: [{ id: 7, text: 'X' }] }, new Map(), { hydrate: true });
+		expect(html).toBe('<!--vsk--><ul><!--vsk--><li data-vsk-key="7">X</li></ul>');
+	});
+	it('non-hydrate SSR emits no markers or data-vsk-key', () => {
+		const html = render(`
+			component App(props: { items: { id: number, name: string }[] }) {
+				return <ul>{props.items.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;
+			}
+		`, 'App', { items: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] });
+		expect(html).toBe('<ul><li>A</li><li>B</li></ul>');
+		expect(html.includes('<!--vsk-->')).toBe(false);
+		expect(html.includes('data-vsk-key')).toBe(false);
+	});
 	it('renders empty block for empty list', () => {
 		const html = render(`
 			component App(props: { todos: { id: number, text: string }[] }) {
@@ -1380,6 +1410,51 @@ describe('Sub-Component Static Extraction', () => {
 		expect(html).toContain('<!--vsk--><span>3</span>');
 		// The static <article>/<section>/<p> chain has NO markers
 		expect(html).toContain('<article><section><p>Deep</p></section></article>');
+	});
+
+});
+
+// ============================================================
+// Hydrate component-boundary wrapper is layout-inert
+// ============================================================
+describe('Hydrate component-call wrapper', () => {
+
+	it('expression mode: boundary wrapper carries display:contents', () => {
+		const html = render(`
+			component Nav { return <header class="sticky top-0">Hi</header>; }
+			component App { return <Nav />; }
+		`, 'App', {}, new Map(), { hydrate: true });
+		// The component root that the hydration walker adopts must not confine
+		// sticky/height/inset-relative children to the component's own bounds,
+		// or SSR layout diverges from the client (which appends into the parent).
+		expect(html).toBe('<!--vsk--><div style="display:contents"><header class="sticky top-0">Hi</header></div>');
+	});
+
+	it('statement mode: bare JSX child gets the same layout-inert wrapper', () => {
+		const html = render(`
+			component Nav { <header class="sticky top-0">Hi</header> }
+			component App { <Nav /> }
+		`, 'App', {}, new Map(), { hydrate: true });
+		expect(html).toBe('<!--vsk--><div style="display:contents"><header class="sticky top-0">Hi</header></div>');
+	});
+
+	it('fragment roots stay inside one shared wrapper (display:contents keeps them claimable)', () => {
+		const html = render(`
+			component Split { <header>Top</header> <nav>Nav</nav> }
+			component App { <Split /> }
+		`, 'App', {}, new Map(), { hydrate: true });
+		// Both roots must share a single container so subWalker(rootEl).contains
+		// covers markers under every root — but that container is layout-inert.
+		expect(html).toBe('<!--vsk--><div style="display:contents"><header>Top</header><nav>Nav</nav></div>');
+	});
+
+	it('non-hydrate mode emits no wrapper element', () => {
+		const html = render(`
+			component Nav { return <header class="sticky top-0">Hi</header>; }
+			component App { return <Nav />; }
+		`, 'App', {}, new Map(), { hydrate: false });
+		expect(html).toBe('<header class="sticky top-0">Hi</header>');
+		expect(html).not.toContain('display:contents');
 	});
 
 });

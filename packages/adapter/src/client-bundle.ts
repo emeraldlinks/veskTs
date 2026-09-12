@@ -486,7 +486,7 @@ export async function generateClientBundle(
 ): Promise<ClientBundleResult> {
   const runtimeDir = findRuntimeSrc(appDir);
 
-  const seen = new Set<string>();
+  let seen = new Set<string>();
   const chunks: ChunkEntry[] = [];
   const runtimeImportNames = new Set<string>();
   const cache = options?.cache;
@@ -667,6 +667,14 @@ export async function generateClientBundle(
 
     function walkSplit(nodes: RouteNode[], _chain: RouteNode[]): void {
       for (const node of nodes) {
+        // Each chunk must be self-contained: reset the compile dedupe so a
+        // shared .vsk component (e.g. a site-wide Footer imported by the root
+        // layout) is emitted into every chunk that references it. With a
+        // single global `seen`, the first chunk to import a component owns it
+        // and later chunks reference `__components["X"]` without registering
+        // it — which breaks standalone layouts, whose match chain drops the
+        // index chunk at runtime.
+        seen = new Set<string>();
         const chunkCode: string[] = [];
         const chunkImports = new ChunkImports();
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
@@ -716,6 +724,7 @@ export async function generateClientBundle(
     const sharedCode: string[] = [];
     const sharedImports = new ChunkImports();
     const compMap = componentMap || new Map();
+    seen = new Set<string>();
     for (const [compName, compPath] of compMap) {
       compileFile(compPath, compName, sharedCode, sharedImports);
     }

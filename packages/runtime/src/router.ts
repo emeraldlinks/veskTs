@@ -91,6 +91,7 @@ interface RouterOptions {
 
 const loadedChunks = new Set<string>();
 const failedChunks = new Map<string, Error>();
+const inFlightChunks = new Map<string, Promise<void>>();
 
 function chunkLoadError(chunkUrl: string): Error | undefined {
 	return failedChunks.get(chunkUrl);
@@ -98,26 +99,50 @@ function chunkLoadError(chunkUrl: string): Error | undefined {
 
 function ensureChunk(chunkUrl: string): Promise<void> {
 	if (!chunkUrl || loadedChunks.has(chunkUrl)) return Promise.resolve();
-	loadedChunks.add(chunkUrl);
+	const inFlight = inFlightChunks.get(chunkUrl);
+	if (inFlight) return inFlight;
 	if (typeof document === 'undefined' || typeof document.createElement !== 'function') {
 		return Promise.resolve();
 	}
-	return new Promise<void>((resolve, reject) => {
+	const promise = new Promise<void>((resolve, reject) => {
 		const s = document.createElement('script');
 		s.src = chunkUrl;
+		let settled = false;
+		const fail = (err: Error) => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			inFlightChunks.delete(chunkUrl);
+			failedChunks.set(chunkUrl, err);
+			reject(err);
+		};
 		s.onload = () => {
+			if (settled) return;
+			settled = true;
+			clearTimeout(timer);
+			loadedChunks.add(chunkUrl);
+			inFlightChunks.delete(chunkUrl);
 			failedChunks.delete(chunkUrl);
 			resolve();
 		};
 		s.onerror = () => {
-			loadedChunks.delete(chunkUrl);
-			const err = new Error(`Failed to load chunk: ${chunkUrl}`);
-			failedChunks.set(chunkUrl, err);
-			reject(err);
+			fail(new Error(`Failed to load chunk: ${chunkUrl}`));
 		};
+		const timer = setTimeout(() => {
+			fail(new Error(`Timed out loading chunk: ${chunkUrl}`));
+		}, CHUNK_LOAD_TIMEOUT_MS);
 		document.head.appendChild(s);
 	});
+	inFlightChunks.set(chunkUrl, promise);
+	return promise;
 }
+
+// A chunk script that never fires load/error (dev server slow to respond,
+// throttled connection) must not strand the navigation forever — the URL is
+// already updated before chunks load, so a silent stall would leave the new
+// URL showing the old page. After this timeout the load rejects and the
+// navigation renders its error fallback instead.
+const CHUNK_LOAD_TIMEOUT_MS = 10000;
 
 /** Loads pending chunks without letting a single failed chunk abort the flow. */
 function loadChunksQuietly(urls: string[]): Promise<void> {
@@ -136,11 +161,20 @@ function navDebug(...parts: unknown[]): void {
 
 function hasPendingChunks(nodes: RouteNode[]): string[] {
 	const urls: string[] = [];
-	function walk(n: RouteNode) {
-		if (n._chunk && !loadedChunks.has(n._chunk as string)) urls.push(n._chunk as string);
-		if (n.children) n.children.forEach(walk);
+	const seen = new Set<string>();
+	// Only the chunks backing this navigation's match chain (layouts + page
+	// node) are needed. Recursing into a node's children would pull in every
+	// sibling route's chunk — e.g. one nav from the root layout would inject
+	// all 27 page bundles — stalling the navigation while unrelated chunks
+	// load and marking routes that never loaded as "pending".
+	for (const n of nodes) {
+		if (n._chunk && !seen.has(n._chunk as string)) {
+			seen.add(n._chunk as string);
+			if (!loadedChunks.has(n._chunk as string)) {
+				urls.push(n._chunk as string);
+			}
+		}
 	}
-	nodes.forEach(walk);
 	return urls;
 }
 
@@ -1860,6 +1894,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 							router.navigate((e as Redirect).url, { replace: true });
 							return;
 						}
+						handleNavFailure(e);
 					}
 				}
 

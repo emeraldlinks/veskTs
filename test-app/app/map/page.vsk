@@ -13,6 +13,9 @@ const users: User[] = [
 const numbers: number[] = [1, 2, 3, 4, 5]
 
 component MapDemo {
+	let &[rkItems] = track([10, 20, 30])
+	let &[rkNext] = track(40)
+
 	<Head>
 		<title>Map — inline .map() in JSX</title>
 	</Head>
@@ -32,6 +35,16 @@ component MapDemo {
 	<h2 class="text-xl font-semibold mt-6 mb-2">map with keys</h2>
 	<div class="flex gap-2">
 		{numbers.map(n => <span key={n} class="bg-blue-600 text-white text-sm px-3 py-1 rounded-full">{n}</span>)}
+	</div>
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">reactive keyed map (claim-by-key)</h2>
+	<div class="flex gap-2 mb-2">
+		<button class="rounded bg-gray-200 px-3 py-1 text-sm" onclick={() => { rkItems = [...rkItems, rkNext]; rkNext = rkNext + 1 }}>Add</button>
+		<button class="rounded bg-gray-200 px-3 py-1 text-sm" onclick={() => { if (rkItems.length > 0) rkItems = rkItems.slice(0, -1) }}>Remove last</button>
+		<button class="rounded bg-gray-200 px-3 py-1 text-sm" onclick={() => { if (rkItems.length > 0) rkItems = [...rkItems].reverse() }}>Reverse</button>
+	</div>
+	<div id="rk-list" class="flex gap-2">
+		{rkItems.map(n => <span key={n} class="rk-chip bg-green-600 text-white text-sm px-3 py-1 rounded-full">{n}</span>)}
 	</div>
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">chained map + filter</h2>

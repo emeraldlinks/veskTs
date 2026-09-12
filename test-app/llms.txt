@@ -27,6 +27,7 @@
 | `/empty` | `app/empty/page.vsk` | page |
 | `/actions` | `app/actions/page.vsk` | page |
 | `/comp-test` | `app/comp-test/page.vsk` | page |
+| `/standalonedep` | `app/standalonedep/page.vsk` | page (standalone layout imports shared `components/Badge.vsk`) |
 | `/typed` | `app/typed/page.vsk` | page |
 | `/not-found` | `app/not-found.vsk` | global not-found |
 | `/error` | `app/error.vsk` | global error boundary |
@@ -44,7 +45,7 @@
 | `/store/not-found` | `app/store/not-found.vsk` | route-level not-found |
 | `/store/error` | `app/store/error.vsk` | route-level error boundary |
 
-Layouts: `app/layout.vsk` (root), `app/store/layout.vsk` (per-segment `/store` layout).
+Layouts: `app/layout.vsk` (root — NOT applied to standalone routes), `app/standalonedep/layout.vsk` (standalone), `app/store/layout.vsk` (per-segment `/store` layout). Shared components: `app/components/Badge.vsk`, imported by `/comp-test` and the `/standalonedep` standalone layout.
 Server events file: `app/_events.ts` (writes `serverLocals()`/`setServerContext` store).
 
 Middleware: `app/middleware.ts` (root), `app/admin/middleware.ts`, `app/blog/middleware.ts`.

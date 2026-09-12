@@ -1,0 +1,4 @@
+component LobbyDeep {
+	<h1 class="text-3xl font-bold mb-4">Lobby Deep</h1>
+	<p class="text-gray-600">Nested under the standalone lobby layout.</p>
+}

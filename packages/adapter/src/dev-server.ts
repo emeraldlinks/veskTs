@@ -670,9 +670,15 @@ await doBuild().catch(() => {});
         const handlerPath = resolve(devDir, ssrRoute.function);
         if (existsSync(handlerPath)) {
           try {
+            const t0 = process.hrtime.bigint();
+            const tImport0 = process.hrtime.bigint();
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
+            const tImport1 = process.hrtime.bigint();
             const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
+            const tHandle1 = process.hrtime.bigint();
+            const body = await response.text();
+            const tText1 = process.hrtime.bigint();
             const body = await response.text();
 
             const headers = Object.fromEntries(response.headers);
@@ -683,6 +689,7 @@ await doBuild().catch(() => {});
             }
             res.writeHead(response.status, headers);
             res.end(finalBody);
+            console.error(`[vdtime] ${url.pathname} ssrVersion=${ssrVersion} total=${Number(tHandle1 - t0) / 1e6 | 0}ms import=${Number(tImport1 - tImport0) / 1e6 | 0}ms handle=${Number(tHandle1 - tImport1) / 1e6 | 0}ms text=${Number(tText1 - tHandle1) / 1e6 | 0}ms`);
           } catch (e) {
             res.writeHead(500, { 'Content-Type': 'text/html' });
             res.end('<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>');

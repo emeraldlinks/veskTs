@@ -360,6 +360,75 @@ describe('Client Codegen — wipe-style component children (Link/NavLink)', () =
 
 });
 
+describe('Client Codegen — layout slot scoping & claimed-sibling appends', () => {
+
+	// A layout slot in hydrate mode must pass the SHARED walker to the children
+	// function. Old behavior scoped a subWalker to the enclosing element, which
+	// eagerly bulk-advanced the marker cursor past ANY remaining markers inside
+	// it — including those of sibling components rendered after the slot (e.g. a
+	// global Footer). Those siblings then claimed fresh (duplicate) elements
+	// while the SSR copies stayed orphaned.
+	bothModes('slot passes shared walker to children function', `
+		component Layout(props) {
+			return <main><div>{props.children}</div></main>;
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('props.children(__hydrate)');
+			expect(code).not.toContain('props.children(__hydrate.subWalker');
+		} else {
+			expect(code).not.toContain('props.children(__hydrate)');
+		}
+	});
+
+	bothModes('statement-mode slot passes shared walker to children function', `
+		component Layout(props) {
+			<main><div>{props.children}</div></main>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('props.children(__hydrate)');
+			expect(code).not.toContain('props.children(__hydrate.subWalker');
+		} else {
+			expect(code).not.toContain('props.children(__hydrate)');
+		}
+	});
+
+	// Claimed static children already sit in their SSR position. appendChild
+	// would move them to the end of the parent, reordering the document.
+	// Hydrate mode must guard the append; normal mode must stay plain.
+	bothModes('hydrate appends of claimed static children are guarded', `
+		component Layout(props) {
+			<main><aside class="a">x</aside><div>{props.children}</div></main>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('parentNode !== $n');
+			expect(code).toContain('appendChild');
+		} else {
+			expect(code).not.toContain('parentNode !== $n');
+		}
+	});
+
+	// Component-call siblings rendered around a slot (a layout with a nav and a
+	// footer) return already-mounted claimed roots. The layout root must not
+	// move them.
+	bothModes('hydrate appends of component-call siblings are guarded', `
+		component Header() { return <header>h</header>; }
+		component Footer() { return <footer>f</footer>; }
+		component Layout(props) {
+			<div class="root"><Header /><main>{props.children}</main><Footer /></div>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('parentNode !== $n');
+		} else {
+			expect(code).not.toContain('parentNode !== $n');
+		}
+	});
+
+});
+
 describe('Client Codegen — Event Handlers', () => {
 
 	// Expression mode
@@ -734,6 +803,39 @@ describe('Client Codegen — Islands & Zero-JS Detection', () => {
 	});
 });
 
+describe('Client Codegen — Standalone layout directive', () => {
+
+	// `export const standalone = true` is a compile-time routing directive for
+	// the file router (isStandaloneLayoutFile). It must be consumed and dropped
+	// from emitted JS — client chunks are IIFE-wrapped, so a bare `export` is a
+	// syntax error that breaks hydration of the whole bundle.
+	bothModes('const standalone directive is dropped from client output', `
+		const Markup = () => null;
+		export const standalone = true
+		component Layout client { return <div>L</div> }
+	`, (code) => {
+		expect(code).not.toContain('export const standalone');
+		expect(code).not.toContain('standalone = true');
+		expect(code).toContain('__components["Layout"]');
+	});
+
+	bothModes('let standalone directive is dropped from client output', `
+		export let standalone = true
+		component Layout client { return <div>L</div> }
+	`, (code) => {
+		expect(code).not.toContain('export let standalone');
+		expect(code).not.toContain('standalone = true');
+	});
+
+	bothModes('non-standalone const export still passes through', `
+		export const keep = 42
+		component Layout client { return <div>L</div> }
+	`, (code, mode) => {
+		expect(code).toContain('keep');
+		expect(code).toContain('__components["Layout"]');
+	});
+});
+
 describe('Client Codegen — Sub-Component Static Extraction', () => {
 
 	// In hydrate mode, fully static elements emit zero DOM ops
@@ -869,6 +971,32 @@ describe('Keyed .map() reconciliation', () => {
 		} catch (e) {
 			throw new Error(`Syntax error: ${e.message}\n\n${code}`);
 		}
+	});
+
+	it('[normal] keyed map rebuilds via reconcile, not claim-by-key', () => {
+		const code = compileClient(`
+			component App(props: { items: { id: number, name: string }[] }) {
+				return <ul>{props.items.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;
+			}
+		`, null, { forceClient: true });
+		if (!code.includes('reconcile(')) throw new Error('Expected reconcile() for normal keyed map:\n' + code.slice(0, 400));
+		if (code.includes('reconcileHydrated') || code.includes('__hydrate.nextElement'))
+			throw new Error('normal mode must not use claim-by-key hydration codegen:\n' + code.slice(0, 400));
+	});
+
+	it('[hydrate] keyed map claims by key instead of rebuilding', () => {
+		const code = compileClient(`
+			component App(props: { items: { id: number, name: string }[] }) {
+				return <ul>{props.items.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;
+			}
+		`, null, { hydrate: true, forceClient: true });
+		if (!code.includes('reconcileHydrated(')) throw new Error('Expected reconcileHydrated() in hydrate mode:\n' + code.slice(0, 500));
+		if (!code.includes('__root || __hydrate.nextElement("li")'))
+			throw new Error("Expected claimed root `__root || __hydrate.nextElement(\"li\")` in hydrate renderItem:\n" + code.slice(0, 1200));
+		if (!/\(item, __e, __r, __root\) =>/.test(code))
+			throw new Error('Expected 4-arg renderItem (item, __e, __r, __root) with claimable root:\n' + code.slice(0, 1200));
+		if (!code.includes('__root.nextSibling'))
+			throw new Error('Expected claimed item to insert after __root.nextSibling:\n' + code.slice(0, 1200));
 	});
 });
 

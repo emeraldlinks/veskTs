@@ -34,9 +34,11 @@ write('error.vsk', `component Error(props: { error: string }) { return <h1>{prop
 write('docs/layout.vsk', `component DocsLayout(props: { children?: any }) { return <aside class="docs">{props.children}</aside>; }`);
 write('docs/page.vsk', `component DocsPage() { return <div>Docs Index</div>; }`);
 write('docs/[slug]/page.vsk', `component DocPage() { return <article>Doc Body</article>; }`);
+write('store/layout.vsk', `export const standalone = true;\ncomponent StoreLayout(props: { children?: any }) { return <div class="store">{props.children}</div>; }`);
+write('store/page.vsk', `component StorePage() { return <div>Store Home</div>; }`);
 // sourceDir is relative to the app root — generateSsrFunction resolves
 // `resolve(appDir, sourceDir, ...)`, so files live under appRoot/app.
-for (const f of ['layout.vsk', 'page.vsk', 'error.vsk', 'docs/layout.vsk', 'docs/page.vsk', 'docs/[slug]/page.vsk']) {
+for (const f of ['layout.vsk', 'page.vsk', 'error.vsk', 'docs/layout.vsk', 'docs/page.vsk', 'docs/[slug]/page.vsk', 'store/layout.vsk', 'store/page.vsk']) {
   const from = join(appDir, f);
   const dest = join(appDir, 'app', f);
   mkdirSync(join(appDir, 'app', ...f.split('/').slice(0, -1)), { recursive: true });
@@ -99,6 +101,31 @@ function runFor(node, ancestorLayouts) {
   assert(!code.includes('_layoutCompList'), 'root page without layout keeps stream path');
   assert(code.includes("renderPageStream('', _comp"), 'page-only render uses renderPageStream');
   assert(!code.includes('compileFile('), 'AOT: no runtime compile left in the function');
+}
+
+{ // standalone layout — ancestor chain is cleared, only own layout in the list
+  const code = runFor(
+    { sourceDir: 'app/store', fullPath: '/store', layout: 'StoreLayout' },
+    [],
+  );
+  assert(code.includes('_layoutCompList'), 'standalone route still emits a layout list');
+  assert(code.includes('"StoreLayout"'), 'layout list contains only the standalone layout');
+  assert(!code.includes('"Layout"'), 'root layout is NOT included for standalone routes');
+  const layoutIdx = code.indexOf('"StoreLayout"');
+  assert(layoutIdx !== -1, 'StoreLayout is present');
+  assert(code.includes("renderFullPage('', _layoutCompList[0]"), 'standalone layout drives renderFullPage');
+  assert(!code.includes('compileFile('), 'AOT: no runtime compile left in the function');
+}
+
+{ // standalone layout with ancestor passed (edge case: caller forgot to clear) —
+  // still only uses what's in the list, but the scenario validates the SSR fn
+  // respects whatever ancestorLayouts the caller provides.
+  // When standalone clears ancestors upstream, ancestorLayouts is [].
+  const code = runFor(
+    { sourceDir: 'app/store', fullPath: '/store', layout: 'StoreLayout' },
+    [{ sourceDir: 'app', layoutCompName: 'Layout' }],
+  );
+  assert(code.includes('"Layout", "StoreLayout"'), 'SSR fn uses whatever ancestors are passed (caller responsibility)');
 }
 
 rmSync(appDir, { recursive: true, force: true });

@@ -188,9 +188,13 @@ function collectAncestorLayouts(routeTree: RouteNode[], sourceDir: string, chain
   for (const node of routeTree) {
     if (node.sourceDir === sourceDir) return chain;
     if (node.children) {
+      // Standalone layouts drop the ancestor chain — they replace the
+      // root layout nesting for all descendants.
+      const isStandalone = (node as { standalone?: boolean }).standalone === true;
+      const base = isStandalone ? [] : chain;
       const nextChain = node.layout
-        ? [...chain, { sourceDir: node.sourceDir, layoutCompName: node.layout }]
-        : chain;
+        ? [...base, { sourceDir: node.sourceDir, layoutCompName: node.layout }]
+        : base;
       const found = collectAncestorLayouts(node.children, sourceDir, nextChain);
       if (found) return found;
     }

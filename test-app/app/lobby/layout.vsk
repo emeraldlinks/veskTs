@@ -1,0 +1,10 @@
+export const standalone = true
+
+component LobbyLayout(props: { children: any }) {
+	<header class="lobby-header">
+		Standalone lobby chrome
+	</header>
+	<main class="lobby-main">
+		{props.children}
+	</main>
+}

@@ -1,0 +1,4 @@
+component StandaloneDep {
+	<h1>Standalone Dep</h1>
+	<p>Renders inside a standalone layout that imports a shared component.</p>
+}

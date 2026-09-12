@@ -308,7 +308,11 @@ export function Link(
 			: '';
 	}
 	if (typeof document === 'undefined') {
-		return `<a ${attrs}>${childStr}</a>`;
+		// The marker makes the anchor claimable: hydrated call sites run
+		// `nextElement('a')` inside the component's boundary walker, and
+		// without a marker the claim lands on the next sibling's marker,
+		// eats it, and cascades into fresh-node fallback.
+		return `<!--vsk--><a ${attrs}>${childStr}</a>`;
 	}
 	const a = document.createElement('a');
 	applyLinkDom(a, props, href);

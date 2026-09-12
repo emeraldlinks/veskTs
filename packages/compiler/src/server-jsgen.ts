@@ -16,6 +16,22 @@ import {
 } from '@vesk/compiler/src/server-utils';
 import { localValueImportNames } from '@vesk/compiler/src/module-imports';
 
+// Hydrate-mode component-boundary wrapper. Each server-rendered component call
+// is preceded by a `<!--vsk-->` marker and a single container element: the
+// hydration walker adopts that element as the component root
+// (`walker.nextElement()`) and scopes interior claims via
+// `subWalker(rootEl).contains(...)`, so fragment components with multiple root
+// siblings need one shared container here.
+//
+// The container MUST NOT be a layout box. The client renderer has no such box
+// — component nodes are appended straight into the parent — so a block wrapper
+// that collapses to the component's own height confines every child that
+// depends on the parent layout: `position: sticky`, `h-full`/`min-h-screen`,
+// inset/percent offsets, flex/grid stretch. `display: contents` keeps the DOM
+// node for claiming while suppressing its box, making SSR layout identical to
+// the client's for every property, not just sticky.
+const HYDRATE_COMPONENT_WRAPPER = '<!--vsk--><div style="display:contents">';
+
 export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isAsync: boolean = false, tracked?: Map<string, TrackedInfo>): string {
   importedNames = importedNames || __vskImportedNames;
   if (node instanceof StaticNode) return staticNodeToJS(node, isAsync, tracked);
@@ -207,6 +223,12 @@ function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, T
   const lines: string[] = [];
   const arr = exprJSX(node.expression, tracked);
   const item = node.itemVariable;
+  // In hydration SSR, stamp each keyed item root with `data-vsk-key` so the
+  // client can claim items by key instead of rebuilding them. The binding is
+  // injected into a shadow copy of the item root at codegen time — it flows
+  // through the existing dynamic-attribute machinery (which also forces a
+  // claim marker on otherwise-static roots).
+  const bodyForItem: IRNode[] = __vskHydrate && node.keyExpr ? keyedItemTemplate(node) : node.bodyTemplate;
 
   const hasAlternate = node.alternateNodes.length > 0;
   const arrVar = hasAlternate ? `__a${nextVskId()}` : null;
@@ -228,7 +250,7 @@ function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, T
     lines.push('let __i = 0;');
     lines.push(`for (const ${item} of ${loopArr}) {`);
     lines.push(indent(`const ${node.indexVariable} = __i;`));
-    for (const n of node.bodyTemplate) {
+    for (const n of bodyForItem) {
       const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
@@ -236,7 +258,7 @@ function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, T
     lines.push(`}`);
   } else {
     lines.push(`for (const ${item} of ${loopArr}) {`);
-    for (const n of node.bodyTemplate) {
+    for (const n of bodyForItem) {
       const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
@@ -247,6 +269,26 @@ function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, T
     lines.push(`}`);
   }
   return lines.join('\n');
+}
+
+/**
+ * Returns a per-item body where the item root element (the first top-level
+ * StaticNode) carries an injected `data-vsk-key` dynamic attribute matching
+ * the map's `keyExpr`. Only the common case — an element as the item root —
+ * is supported; other root shapes (conditionals/components) render without a
+ * key and degrade to fresh rendering, exactly as before.
+ */
+function keyedItemTemplate(node: MapRegion): IRNode[] {
+  if (!node.keyExpr) return node.bodyTemplate;
+  const template = node.bodyTemplate;
+  const idx = template.findIndex((n) => n instanceof StaticNode);
+  if (idx === -1) return template;
+  const root = template[idx] as StaticNode;
+  const copy = new StaticNode(root.tag, root.attributes, [...root.children, new DynamicBinding(node.keyExpr, 'attribute', 'data-vsk-key')], root.keyExpr);
+  copy.selfClosing = root.selfClosing;
+  const out = template.slice();
+  out[idx] = copy;
+  return out;
 }
 
 function whileLoopToJS(node: WhileLoop, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
@@ -381,7 +423,9 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   lines.push(`const ${calleeVar} = ${callee};`);
   const callExpr = `${awaitKw}${calleeVar}(${propsObj}, __registry, (${calleeVar}.__veskScope || __vesk))`;
   if (__vskHydrate) {
-    lines.push(`__out.push('<!--vsk--><div>' + (${callExpr} || '') + '</div>');`);
+    // Wrapper purpose documented at HYDRATE_COMPONENT_WRAPPER; it must never
+    // become a layout box (see the constant's comment for why).
+    lines.push(`__out.push(${JSON.stringify(HYDRATE_COMPONENT_WRAPPER)} + (${callExpr} || '') + '</div>');`);
   } else {
     lines.push(`__out.push(${callExpr} || '');`);
   }

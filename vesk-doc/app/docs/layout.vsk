@@ -1,24 +1,30 @@
-import type { Component } from '@vesk/types';
-import { DocsHeader } from '../components/docs/DocsHeader.vsk'
-import { DocsSidebar } from '../components/docs/DocsSidebar.vsk'
+import {Component} from "@vesk/types"
+import {DocsHeader} from "../components/docs/DocsHeader.vsk"
+import {DocsSidebar} from "../components/docs/DocsSidebar.vsk"
+import {Footer} from "../components/Footer.vsk"
 
 interface DocsLayoutProps {
-	children?: Component
-	params?: { slug?: string }
+  children?: Component
+  params?: {
+    slug?: string
+  }
 }
 
-component DocsLayout(props: DocsLayoutProps) {
-	<div class="min-h-screen bg-background text-foreground">
-		<DocsHeader activeSlug={props.params?.slug} />
+export const standalone = true
+component DocsLayout(props) {
+  <div class="min-h-screen bg-background text-foreground">
+    <DocsHeader activeSlug={props.params?.slug} />
 
-		<div class="mx-auto flex w-full max-w-7xl">
-			<aside class="sticky top-[53px] hidden h-[calc(100vh-53px)] w-64 shrink-0 border-r border-border lg:block overflow-y-auto">
-				<DocsSidebar activeSlug={props.params?.slug} />
-			</aside>
+    <div class="mx-auto flex w-full max-w-7xl">
+      <aside
+        class="sticky top-[56px] hidden h-[calc(100vh-56px)] w-64 shrink-0 border-r border-border lg:block overflow-y-auto"
+      >
+        <DocsSidebar activeSlug={props.params?.slug} />
+      </aside>
 
-			<main class="min-w-0 flex-1">
-				{props.children}
-			</main>
-		</div>
-	</div>
+      <main class="min-w-0 flex-1">{props.children}</main>
+    </div>
+    <Footer />
+  </div>
 }
+

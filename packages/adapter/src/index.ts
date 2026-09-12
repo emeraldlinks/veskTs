@@ -246,9 +246,13 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   const actionMap: Record<string, string> = {};
   function walk(nodes: RouteNode[], ancestorLayouts: AncestorLayout[] = []): void {
     for (const node of nodes) {
-      const childAncestorLayouts = node.layout
-        ? [...ancestorLayouts, { sourceDir: node.sourceDir, layoutCompName: node.layout }]
-        : ancestorLayouts;
+      // Standalone layouts drop the entire ancestor chain — they replace
+      // the root layout nesting, so only their own layout (if any) remains.
+      const isStandalone = (node as { standalone?: boolean }).standalone === true;
+      let childAncestorLayouts = isStandalone ? [] : ancestorLayouts;
+      if (node.layout) {
+        childAncestorLayouts = [...childAncestorLayouts, { sourceDir: node.sourceDir, layoutCompName: node.layout }];
+      }
 
       if (node.page) {
         const mwChain = collectMiddlewareChain(routeTree, node.fullPath, appDir);
@@ -257,7 +261,10 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
           const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));
           mwCode = compileMiddlewareCode(mwSources);
         }
-        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra });
+        // For standalone routes the layout chain is cleared — only the
+        // standalone node's own layout (if any) applies, no root ancestors.
+        const ssrAncestorLayouts = isStandalone ? [] : ancestorLayouts;
+        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra });
         writeFileSync(funcPath, funcCode, 'utf-8');
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (existsSync(pagePath)) {
@@ -267,7 +274,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
             const layoutSrc = readFileSync(resolve(appDir, node.sourceDir, 'layout.vsk'), 'utf-8');
             actionIds.push(...collectActionIds(layoutSrc));
           }
-          for (const a of ancestorLayouts) {
+          for (const a of ssrAncestorLayouts) {
             const ancestorSrc = readFileSync(resolve(appDir, a.sourceDir, 'layout.vsk'), 'utf-8');
             actionIds.push(...collectActionIds(ancestorSrc));
           }

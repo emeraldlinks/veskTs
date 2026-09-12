@@ -290,6 +290,9 @@ class Ctx {
   hydrate = false;
   inTryBody = false;
   claimStatic = false;
+  // While set, the next StaticNode claimed in hydrate mode uses `__root` (the
+  // item element already claimed by key) instead of walking for a new element.
+  rootClaim = false;
   walker = '__hydrate';
   asyncComps = new Set<string>();
   isAsyncScope = false;
@@ -364,7 +367,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     if (ctx.hydrate) {
       ctx.push(`if (props.children !== undefined && props.children !== null) {`);
       ctx.push(`  if (typeof props.children === 'function') {`);
-      ctx.push(`    const __child = props.children(${ctx.walker}.subWalker(${parentVar}));`);
+      ctx.push(`    const __child = props.children(${ctx.walker});`);
       ctx.push(`    if (__child && typeof __child.then === 'function') __pendingChild = __child.then(() => $root);`);
       ctx.push(`  } else {`);
       ctx.push(`    ${parentVar}.appendChild(props.children);`);
@@ -396,7 +399,12 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     const claim = ctx.claimStatic;
     ctx.claimStatic = false;
     if (!claim && isStaticIR(node.children)) return null;
-    ctx.push(`const ${el} = ${ctx.walker}.nextElement(${JSON.stringify(node.tag)});`);
+    const rootClaim = ctx.rootClaim;
+    ctx.rootClaim = false;
+    const claimedExpr = rootClaim
+      ? `__root || ${ctx.walker}.nextElement(${JSON.stringify(node.tag)})`
+      : `${ctx.walker}.nextElement(${JSON.stringify(node.tag)})`;
+    ctx.push(`const ${el} = ${claimedExpr};`);
   } else {
     ctx.push(`const ${el} = document.createElement(${JSON.stringify(node.tag)});`);
   }
@@ -422,7 +430,13 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
 
   for (const child of children) {
     const childVar = emitNode(ctx, child, tracked, effectsVar, el);
-    if (childVar) ctx.push(`${el}.appendChild(${childVar});`);
+    if (childVar) {
+      if (ctx.hydrate) {
+        ctx.push(`if (${childVar}.parentNode !== ${el}) { if (!${el} || ${childVar}.parentNode == null || !${el}.contains(${childVar})) ${el}.appendChild(${childVar}); }`);
+      } else {
+        ctx.push(`${el}.appendChild(${childVar});`);
+      }
+    }
   }
 
   for (const attr of dynAttrs) {
@@ -1189,6 +1203,9 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   const effOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
   const keyed = !!node.keyExpr;
   const hyd = ctx.hydrate && !keyed;
+  // Keyed maps claim their SSR items by key (claim-by-key) so existing DOM is
+  // adopted and wired instead of being rebuilt (which left SSR phantoms behind).
+  const hydKeyed = ctx.hydrate && keyed;
   const parent = parentVar || '$root';
   // A re-render effect is only valid when the map iterates a tracked/reactive
   // source. Iterating a static collection (module const, top-level array) or a
@@ -1198,13 +1215,13 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
   const reactiveSource = isReactiveExpression(node.expression as any, tracked);
 
   ctx.push(`const ${anchor} = document.createComment('map');`);
-  if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
+  if (!hyd && !hydKeyed) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('map-end');`);
 
   const renderItem = ctx.n();
   const indexParam = node.indexVariable ? ', __i' : '';
-  ctx.push(`const ${renderItem} = ${ctx.isAsyncScope ? 'async ' : ''}(${itemVar}${indexParam}, __e, __r${hyd ? ', __cl' : ''}) => {`);
+  ctx.push(`const ${renderItem} = ${ctx.isAsyncScope ? 'async ' : ''}(${itemVar}${indexParam}, __e, __r${hyd ? ', __cl' : ''}${hydKeyed ? ', __root' : ''}) => {`);
   ctx.push(indent(`__r = __r || ${endAnchor};`));
   if (node.indexVariable) ctx.push(indent(`const ${node.indexVariable} = __i;`));
   if (hyd) {
@@ -1218,27 +1235,42 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     ctx.push(indent(`const __it = document.createDocumentFragment();`));
   }
+  if (hydKeyed) ctx.rootClaim = true;
   for (const n of node.bodyTemplate) {
     const v = emitNode(ctx, n, tracked, '__e', hyd ? undefined : '__it');
     if (v) {
-      if (hyd) ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, __r);`));
-      else ctx.push(indent(`__it.appendChild(${v});`));
+      if (hyd) {
+        ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, __r);`));
+      } else if (hydKeyed) {
+        // Claimed items keep their SSR nodes in place (they were adopted by the
+        // walker); only client-only nodes are inserted, right after the item
+        // root or at the region end for fully-fresh items.
+        ctx.push(indent(`if (__root != null) { if (${v}.parentNode == null) __p.insertBefore(${v}, __root.nextSibling); } else __it.appendChild(${v});`));
+      } else {
+        ctx.push(indent(`__it.appendChild(${v});`));
+      }
     }
   }
-  if (!hyd) ctx.push(indent(`__p.insertBefore(__it, __r);`));
+  if (hydKeyed) ctx.rootClaim = false;
+  if (!hyd) ctx.push(indent(`if (__it.childNodes.length > 0) __p.insertBefore(__it, __r);`));
   ctx.push(`};`);
 
   let emptyRenderName: string | null = null;
   if (node.alternateNodes.length > 0) {
     emptyRenderName = ctx.n();
-    const emptySig = hyd
-      ? (ctx.isAsyncScope ? 'async (__cl) => {' : '(__cl) => {')
-      : (ctx.isAsyncScope ? 'async () => {' : '() => {');
+    const emptySig = !hyd
+      ? (ctx.isAsyncScope ? 'async () => {' : '() => {')
+      : (ctx.isAsyncScope ? 'async (__cl) => {' : '(__cl) => {');
     ctx.push(`const ${emptyRenderName} = ${emptySig}`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const frag = ctx.n();
     if (!hyd) ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
     const savedClaim = ctx.claimStatic;
+    const savedHydrate = ctx.hydrate;
+    // A keyed map hydrating with no matching SSR items renders its empty
+    // fallback fresh — the SSR item ghosts get reported by the canary instead
+    // of being adopted positionally as the fallback (which would be wrong DOM).
+    if (hydKeyed) ctx.hydrate = false;
     for (const n of node.alternateNodes) {
       ctx.claimStatic = true;
       const v = emitNode(ctx, n, tracked, effectsVar, hyd ? undefined : frag);
@@ -1248,11 +1280,12 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
       }
     }
     ctx.claimStatic = savedClaim;
-    if (!hyd) ctx.push(indent(`__p.insertBefore(${frag}, ${endAnchor});`));
+    ctx.hydrate = savedHydrate;
+    if (!hyd) ctx.push(indent(`if (${frag}.childNodes.length > 0) __p.insertBefore(${frag}, ${endAnchor});`));
     ctx.push(`};`);
   }
 
-  if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
+  if (!hyd && !hydKeyed) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
   const hasItems = ctx.n();
   ctx.push(`const ${hasItems} = () => { const __l = ${arrExpr}; return __l != null && __l.length > 0; };`);
@@ -1262,7 +1295,15 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, p
     const reconciler = ctx.n();
     const initList = ctx.n();
     ctx.push(`let ${reconciler} = () => {};`);
-    ctx.push(`const ${initList} = () => { ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}, __i, __e) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'})); };`);
+    if (hydKeyed) {
+      // claim-by-key hydration: `reconcileHydrated` attaches the region anchors
+      // inside `parent` (pre-attach, `anchor.parentNode` is null) and peeks all
+      // keys before claim-by-key consumes the walker, so server-rendered items
+      // are adopted and wired in place instead of being rebuilt.
+      ctx.push(`const ${initList} = () => { ${reconciler} = reconcileHydrated(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}, __i, __e, __root) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'}, null, __root), __hydrate, ${parent}); };`);
+    } else {
+      ctx.push(`const ${initList} = () => { ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${itemVar} => ${keyExpr}, (${itemVar}, __i, __e) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'})); };`);
+    }
 
     if (emptyRenderName) {
       const isEmptyVar = ctx.n();
@@ -1678,6 +1719,7 @@ function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?
     )) runtimeNames.push(name);
   }
   if (ir.components.some(c => hasKeyedMap(c.body))) runtimeNames.push('reconcile');
+  if (options.hydrate && ir.components.some(c => hasKeyedMap(c.body))) runtimeNames.push('reconcileHydrated');
   if (options.hydrate) {
     const hydrateNames = ['hydrate', 'hydrateViewport', 'hydrateIdle', 'hydrateOnInteraction', 'needsHydration', 'createHydrateWalker', 'collectVskMarkers', 'reactiveProps'];
     for (const name of hydrateNames) {

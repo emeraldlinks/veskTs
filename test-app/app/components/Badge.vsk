@@ -1,0 +1,3 @@
+component Badge {
+	<span class="shared-badge">Shared Badge</span>
+}

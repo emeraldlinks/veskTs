@@ -1,0 +1,15 @@
+import { Badge } from '../components/Badge.vsk'
+
+export const standalone = true
+
+component StandaloneDepLayout(props: { children: any }) {
+	<header class="standalone-header">
+		Standalone chrome — no root layout
+	</header>
+	<main class="standalone-main">
+		{props.children}
+	</main>
+	<footer>
+		<Badge />
+	</footer>
+}

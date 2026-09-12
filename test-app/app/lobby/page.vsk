@@ -1,0 +1,7 @@
+import { Link } from '@vesk/runtime/router';
+
+component Lobby {
+	<h1 class="text-3xl font-bold mb-4">Lobby</h1>
+	<p class="text-gray-600 mb-6">This route renders inside a standalone layout — no root chrome.</p>
+	<p><Link href="/lobby/deep" class="text-blue-600 underline">deep link</Link></p>
+}

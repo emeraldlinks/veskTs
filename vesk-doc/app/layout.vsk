@@ -1,4 +1,6 @@
 import type { Component } from '@vesk/types';
+import { Nav } from './components/Nav.vsk'
+import { Footer } from './components/Footer.vsk'
 
 interface LayoutProps {
 	children?: Component
@@ -14,6 +16,8 @@ component Layout(props: LayoutProps) {
 		<link rel="icon" href="/favicon.svg" />
 	</Head>
 	<div class="min-h-screen bg-background text-foreground antialiased">
+		<Nav />
 		{props.children}
+		<Footer />
 	</div>
 }

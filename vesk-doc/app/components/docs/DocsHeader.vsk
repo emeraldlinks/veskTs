@@ -29,10 +29,8 @@ export component DocsHeader(props: { activeSlug?: string }) {
 			</div>
 		</header>
 		if (open) {
-			<div class="border-b border-border bg-background lg:hidden">
-				<div class="max-h-[70vh] overflow-y-auto">
-					<DocsSidebar activeSlug={props.activeSlug} onNavigate={() => { open = false }} />
-				</div>
+			<div class="sticky top-[56px] z-40 max-h-[calc(100vh-56px)] overflow-y-auto border-b border-border bg-background lg:hidden">
+				<DocsSidebar activeSlug={props.activeSlug} onNavigate={() => { open = false }} />
 			</div>
 		}
 	</>

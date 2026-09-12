@@ -1,4 +1,4 @@
-import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter } from '@vesk/runtime/src/router';
+import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute } from '@vesk/runtime/src/router';
 import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating } from '@vesk/runtime/src/router-components';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
@@ -283,6 +283,17 @@ test('NavLink creates anchor with active state', () => {
 	const a = NavLink({ href: '/', activeClass: 'is-active' });
 	expect(a.tagName).toBe('A');
 	expect(a.classList.contains('is-active')).toBe(true);
+});
+
+test('Link SSR emits a claim marker before the anchor', () => {
+	const saved = globalThis.document;
+	try {
+		delete globalThis.document;
+		const out = Link({ href: '/docs/x', class: 'nav', children: '<span>go</span>' });
+		expect(out).toBe('<!--vsk--><a href="/docs/x" class="nav"><span>go</span></a>');
+	} finally {
+		globalThis.document = saved;
+	}
 });
 
 test('Link hydrate adopts SSR anchor without duplicating children', () => {
@@ -1718,6 +1729,101 @@ test('back/forward popstate + hashchange dedupe to a single navigation', () => {
 	for (const fn of pop2) fn();
 	expect(renders2).toBe(2);
 	expect(router2.route.pathname).toBe('/about');
+});
+
+// ── Standalone layouts ─────────────────────────────────────────
+test('matchRoute drops ancestor layouts for standalone routes', () => {
+	const store = {
+		path: 'store', fullPath: '/store', segmentCount: 1, standalone: true,
+		layout: () => document.createTextNode('StoreLayout'),
+		isDynamic: false, isCatchAll: false, isGroup: false,
+		children: [],
+	};
+	const detail = {
+		path: 'detail', fullPath: '/store/detail', segmentCount: 1,
+		page: () => document.createTextNode('Detail'),
+		isDynamic: false, isCatchAll: false, isGroup: false,
+		children: [],
+	};
+	store.children = [detail];
+	const tree = [
+		{
+			path: '', fullPath: '/', segmentCount: 0,
+			layout: () => document.createTextNode('RootLayout'),
+			isDynamic: false, isCatchAll: false, isGroup: false,
+			children: [store],
+		},
+	];
+	const match = matchRoute(tree, '/store/detail');
+	expect(match).not.toBeNull();
+	const root = tree[0];
+	expect(match.matchChain.includes(root)).toBe(false);
+	expect(match.matchChain.some(n => n.standalone)).toBe(true);
+	expect(match.matchChain[match.matchChain.length - 1].page).toBeTruthy();
+	// The standalone layout render-root is the standalone node itself.
+	expect(match.matchChain[0].layout).toBeTruthy();
+	expect(match.matchChain[0].fullPath).toBe('/store');
+});
+
+test('matchRoute keeps the full ancestor chain for non-standalone routes', () => {
+	const docs = {
+		path: 'docs', fullPath: '/docs', segmentCount: 1,
+		layout: () => document.createTextNode('DocsLayout'),
+		isDynamic: false, isCatchAll: false, isGroup: false,
+		children: [],
+	};
+	const guide = {
+		path: 'guide', fullPath: '/docs/guide', segmentCount: 1,
+		page: () => document.createTextNode('Guide'),
+		isDynamic: false, isCatchAll: false, isGroup: false,
+		children: [],
+	};
+	docs.children = [guide];
+	const tree = [
+		{
+			path: '', fullPath: '/', segmentCount: 0,
+			layout: () => document.createTextNode('RootLayout'),
+			isDynamic: false, isCatchAll: false, isGroup: false,
+			children: [docs],
+		},
+	];
+	const match = matchRoute(tree, '/docs/guide');
+	expect(match).not.toBeNull();
+	const root = tree[0];
+	expect(match.matchChain.includes(root)).toBe(true);
+	const layouts = match.matchChain.filter(n => n.layout);
+	expect(layouts.length).toBe(2);
+});
+
+test('createRouter renders a standalone route without the root layout', () => {
+	let rootRendered = false;
+	const storeRendered = [];
+	const detail = {
+		path: 'detail', fullPath: '/store/detail', segmentCount: 1,
+		page: () => { const d = document.createElement('div'); d.textContent = 'Detail'; return d; },
+		isDynamic: false, isCatchAll: false, isGroup: false,
+		children: [],
+	};
+	const store = {
+		path: 'store', fullPath: '/store', segmentCount: 1, standalone: true,
+		layout: () => { storeRendered.push(1); return document.createElement('main'); },
+		isDynamic: false, isCatchAll: false, isGroup: false,
+		children: [detail],
+	};
+	const tree = [
+		{
+			path: '', fullPath: '/', segmentCount: 0,
+			layout: () => { rootRendered = true; return document.createElement('main'); },
+			isDynamic: false, isCatchAll: false, isGroup: false,
+			children: [store],
+		},
+	];
+	const container = document.createElement('div');
+	const router = createRouter(tree, { container });
+	router.navigate('/store/detail', { replace: true });
+	expect(storeRendered.length).toBeGreaterThanOrEqual(1);
+	// Root layout must never run for a standalone route.
+	expect(rootRendered).toBe(false);
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

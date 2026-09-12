@@ -202,6 +202,54 @@ test('generates unique component names', () => {
 	cleanup(tmp);
 });
 
+test('flags standalone layout via export const standalone = true', () => {
+	const tmp = createFixture({
+		'app/layout.vsk': '',
+		'app/page.vsk': '',
+		'app/store/layout.vsk': 'export const standalone = true;\ncomponent StoreLayout(props: { children?: any }) { return props.children; }',
+		'app/store/page.vsk': '',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	expect(!!tree[0].standalone).toBe(false);
+	const store = tree[0].children.find(c => c.path === 'store');
+	expect(store).toBeTruthy();
+	expect(store.standalone).toBe(true);
+	cleanup(tmp);
+});
+
+test('matches URL under a standalone layout without ancestor chain', () => {
+	const tmp = createFixture({
+		'app/layout.vsk': '',
+		'app/page.vsk': '',
+		'app/store/layout.vsk': 'export const standalone = true;\ncomponent StoreLayout(props: { children?: any }) { return props.children; }',
+		'app/store/items/page.vsk': '',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const match = matchUrl(tree, '/store/items');
+	expect(match).not.toBeNull();
+	const chain = match.nodes;
+	expect(chain.some(n => n.standalone)).toBe(true);
+	// The root layout node must NOT be part of the standalone chain.
+	const rootNode = tree[0];
+	expect(chain.includes(rootNode)).toBe(false);
+	expect(chain[chain.length - 1].page).toBeTruthy();
+	cleanup(tmp);
+});
+
+test('keeps ancestor chain for non-standalone routes', () => {
+	const tmp = createFixture({
+		'app/layout.vsk': '',
+		'app/page.vsk': '',
+		'app/blog/page.vsk': '',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const match = matchUrl(tree, '/blog');
+	expect(match).not.toBeNull();
+	const rootNode = tree[0];
+	expect(match.nodes.includes(rootNode)).toBe(true);
+	cleanup(tmp);
+});
+
 console.log('\nRoute matching\n');
 
 test('matches root path', () => {
