@@ -10,7 +10,7 @@ component CommunityGithub {
 		<h1 class="font-display text-4xl font-semibold tracking-tight sm:text-5xl">GitHub — where Vesk is built.</h1>
 		<p class="mt-5 max-w-[60ch] font-mono text-[13px] leading-relaxed text-muted-foreground">Source, issues, RFCs, and <code class="bg-surface px-1 py-0.5">good first issue</code> tags. We treat docs as code — every diagnostic has a page, every page is verified against source.</p>
 		<div class="mt-8 flex flex-wrap gap-3">
-			<a href="https://github.com/anomalyco/opencode" target="_blank" rel="noopener" class="btn-solid px-5 py-3 text-sm no-underline">Open GitHub ↗</a>
+			<a href="https://github.com/emeraldlinks/veskTs" target="_blank" rel="noopener" class="btn-solid px-5 py-3 text-sm no-underline">Open GitHub ↗</a>
 			<Link href="/community/contributors" class="btn-outline px-5 py-3 text-sm no-underline">Become a contributor →</Link>
 		</div>
 

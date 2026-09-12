@@ -33,8 +33,10 @@ export component Docs {
 						<span class="eyebrow text-paper-muted">docs / contents</span>
 					</div>
 					<ul class="font-mono text-[12.5px] m-0 p-0 list-none">
-						for (let i = 0; i < docPages.length; i++) {
+						const docp = docPages.slice(0, 5)
+						for (let i = 0; i < docp.length; i++) {
 							const item = docPages[i]
+								
 							<li class="border-b border-paper-foreground/12 last:border-b-0">
 								<Link href={"/docs/" + item.slug} class="flex items-center justify-between px-3 py-2.5 text-paper-foreground/80 transition-colors hover:bg-paper-foreground/5 hover:text-paper-foreground no-underline">
 									<span>{item.title}</span>
