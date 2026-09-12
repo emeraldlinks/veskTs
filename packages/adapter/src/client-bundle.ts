@@ -9,7 +9,7 @@ import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-code
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
-import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts } from '@vesk/adapter/src/types';
+import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts, ClientBundleChunkSpec, ClientBundleFileEntry } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -228,13 +228,15 @@ function demoteExports(code: string): string {
   return code;
 }
 
-function hasChunkImports(code: string): boolean {
-  try {
-    const ast = parse(code) as { body?: Array<unknown> };
-    return (ast.body ?? []).some((n) => (n as { type?: string }).type === 'ImportDeclaration');
-  } catch {
-    return false;
-  }
+/**
+ * Parse-free stand-in for the per-chunk `import` scan: a chunk carries live
+ * `import` statements iff its deduped head rendered non-empty, or its import
+ * merge aborted (in which case some file bodies retain their raw imports for
+ * esbuild to bundle). Equivalent to parsing the assembled chunk code, without
+ * the ~50-100KB acorn parse per chunk on every dev rebuild.
+ */
+function chunkHasImports(headLen: number, mergeAborted: boolean): boolean {
+  return headLen > 0 || mergeAborted;
 }
 
 interface ChunkSpecifier {
@@ -266,8 +268,8 @@ function resolveImportSource(src: string, filePath: string): string {
  * each file's component AND hydrator both keep their imports verbatim. So the
  * same named binding frequently appears multiple times in one chunk — once per
  * (file, comp|hyd) pair, plus once per extra file. acorn's `parse()` rejects
- * that with `Identifier has already been declared`, so `hasChunkImports` used
- * to silently return false and esbuild — which rejects the same duplicates —
+ * that with `Identifier has already been declared`, so a naive `import` scan
+ * used to silently pass and esbuild — which rejects the same duplicates —
  * never ran; the chunk shipped with raw `import` statements inside its
  * classic-script IIFE and hydration died with `SyntaxError: Cannot use import
  * statement outside a module`.
@@ -295,7 +297,7 @@ class ChunkImports {
   }
 
   /** Folds one file's imports into the merged set and returns the code with its imports stripped. */
-  add(code: string, filePath: string): string {
+  add(code: string, filePath: string, specSink?: ClientBundleChunkSpec[]): string {
     if (!code || this.aborted) return code;
     let ast: unknown;
     try {
@@ -313,27 +315,21 @@ class ChunkImports {
       const src = node.source?.value;
       if (typeof src !== 'string') continue;
       const resolved = resolveImportSource(src, filePath);
-      let group = this.bySource.get(resolved);
-      if (!group) {
-        group = { named: new Map() };
-        this.bySource.set(resolved, group);
-      }
       for (const spec of node.specifiers ?? []) {
         const s = spec as { type?: string; local?: { name?: string }; imported?: { name?: string } };
         const local = s.local?.name;
         if (typeof local !== 'string') return this.fail(`nameless specifier from '${resolved}' in ${filePath}`, code);
         if (s.type === 'ImportDefaultSpecifier') {
-          if (group.default && group.default.local !== local) return this.fail(`conflicting default imports from '${resolved}' in ${filePath}`, code);
-          group.default = { kind: 'default', local };
+          if (!this.foldSpec(resolved, 'default', local, undefined, filePath, code)) return code;
+          specSink?.push({ source: resolved, kind: 'default', local });
         } else if (s.type === 'ImportNamespaceSpecifier') {
-          if (group.namespace && group.namespace.local !== local) return this.fail(`conflicting namespace imports from '${resolved}' in ${filePath}`, code);
-          group.namespace = { kind: 'namespace', local };
+          if (!this.foldSpec(resolved, 'namespace', local, undefined, filePath, code)) return code;
+          specSink?.push({ source: resolved, kind: 'namespace', local });
         } else if (s.type === 'ImportSpecifier') {
           const imported = s.imported?.name;
           if (typeof imported !== 'string') return this.fail(`nameless named-import from '${resolved}' in ${filePath}`, code);
-          const existing = group.named.get(imported);
-          if (existing && existing.local !== local) return this.fail(`'${imported}' from '${resolved}' bound to both '${existing.local}' and '${local}' in ${filePath}`, code);
-          group.named.set(imported, { kind: 'named', local, imported });
+          if (!this.foldSpec(resolved, 'named', local, imported, filePath, code)) return code;
+          specSink?.push({ source: resolved, kind: 'named', local, imported });
         }
       }
       let cut = node.end;
@@ -342,6 +338,32 @@ class ChunkImports {
     }
     if (ranges.length === 0) return code;
     return removeRanges(code, ranges);
+  }
+
+  /**
+   * Shared single-spec fold used by both the fresh compile path and the
+   * parse-free warm replay. Returns false (and aborts the merge) on a
+   * conflicting binding — same shape as the pre-refactor inline logic.
+   */
+  foldSpec(source: string, kind: 'default' | 'namespace' | 'named', local: string, imported: string | undefined, filePath: string, code: string): boolean {
+    let group = this.bySource.get(source);
+    if (!group) {
+      group = { named: new Map() };
+      this.bySource.set(source, group);
+    }
+    if (kind === 'default') {
+      if (group.default && group.default.local !== local) { this.fail(`conflicting default imports from '${source}' in ${filePath}`, code); return false; }
+      group.default = { kind: 'default', local };
+    } else if (kind === 'namespace') {
+      if (group.namespace && group.namespace.local !== local) { this.fail(`conflicting namespace imports from '${source}' in ${filePath}`, code); return false; }
+      group.namespace = { kind: 'namespace', local };
+    } else {
+      if (typeof imported !== 'string') { this.fail(`nameless named-import from '${source}' in ${filePath}`, code); return false; }
+      const existing = group.named.get(imported);
+      if (existing && existing.local !== local) { this.fail(`'${imported}' from '${source}' bound to both '${existing.local}' and '${local}' in ${filePath}`, code); return false; }
+      group.named.set(imported, { kind: 'named', local, imported });
+    }
+    return true;
   }
 
   /** True when every file parsed and merged cleanly (no conflict, no parse abort). */
@@ -383,6 +405,17 @@ function removeRanges(code: string, ranges: Array<[number, number]>): string {
     out = out.slice(0, start) + out.slice(end);
   }
   return out.trim();
+}
+
+/**
+ * Historical cache replay: re-parse a cached entry's import-carrying codes
+ * and re-fold them into the chunk accumulator. Used only on rare fold aborts
+ * and old-style cache entries — the parse-free fast path is the norm.
+ */
+function fallbackReplay(cached: ClientBundleFileEntry, filePath: string, imports: ChunkImports): string {
+  const comp = cached.compCode ? imports.add(cached.compCode, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+  const hyd = cached.hydCode ? imports.add(cached.hydCode, filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+  return [comp, hyd].filter(Boolean).join('\n');
 }
 
 /**
@@ -573,9 +606,28 @@ export async function generateClientBundle(
       // file carry the same import twice (joint parse would abort the merge).
       // Mirror the fresh path exactly: strip, rename the hydrator registry,
       // trim — otherwise warm output drifts from cold output.
-      const cachedComp = cached.compCode ? imports.add(cached.compCode, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-      const cachedHyd = cached.hydCode ? imports.add(cached.hydCode, filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
-      const cachedFileCode = [cachedComp, cachedHyd].filter(Boolean).join('\n');
+      let cachedFileCode = '';
+      if (cached.compBody !== undefined) {
+        // Parse-free warm replay: the body/scoped strings and the folded
+        // import specifiers were computed once at fresh-compile time, so this
+        // hit costs zero parses (the hot path paid ~5 acorn parses per cached
+        // file per chunk before — ~4k parses per edit on the test app).
+        let aborted = false;
+        for (const s of cached.importSpecs ?? []) {
+          if (!imports.foldSpec(s.source, s.kind, s.local, s.imported, filePath, cached.compCode)) { aborted = true; break; }
+        }
+        if (aborted) {
+          // Rare fold conflict — fall back to the historical parse path so
+          // the merge-abort semantics (and `ok` reporting) stay identical.
+          cachedFileCode = fallbackReplay(cached, filePath, imports);
+        } else if (cached.scoped) {
+          output.push(cached.scoped);
+        }
+      } else {
+        // Old-style entry (e.g. populated before the parse-free fields were
+        // introduced): historical replay.
+        cachedFileCode = fallbackReplay(cached, filePath, imports);
+      }
       if (cachedFileCode.trim()) output.push(scopeFileContribution(cachedFileCode));
       for (const n of cached.runtimeNames) runtimeImportNames.add(n);
       if (cached.actualName && resolvedName !== null && cached.actualName !== resolvedName) {
@@ -600,10 +652,14 @@ export async function generateClientBundle(
     const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null, filePath);
     // Cache keeps the import-carrying codes so a warm build can re-fold them
     // into its own fresh accumulator; the emitted codes are import-stripped.
+    // The bodies/specs/scoped artifacts are cached too so warm replay never
+    // re-parses (see the `compBody !== undefined` fast path above).
     const compWithImports = rawComp ? stripExports(stripVskImports(stripRuntimeImport(rawComp))) : '';
     const hydWithImports = rawHyd ? stripExports(stripVskImports(stripRuntimeImport(rawHyd))) : '';
-    const compCode = compWithImports ? imports.add(compWithImports, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-    const hydCode = hydWithImports ? imports.add(hydWithImports, filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const compSpecs: ClientBundleChunkSpec[] = [];
+    const hydSpecs: ClientBundleChunkSpec[] = [];
+    const compCode = compWithImports ? imports.add(compWithImports, filePath, compSpecs).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const hydCode = hydWithImports ? imports.add(hydWithImports, filePath, hydSpecs).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
     if (rawComp) collectRuntimeImports(rawComp);
     if (rawHyd) collectRuntimeImports(rawHyd);
 
@@ -619,7 +675,8 @@ export async function generateClientBundle(
     // Comp and hyd contributions of one file share its top-level bindings,
     // so they are scoped together in a single block (see replay path above).
     const fileCode = [compCode, hydCode].filter(Boolean).join('\n');
-    if (fileCode.trim()) output.push(scopeFileContribution(fileCode));
+    const scopedContribution = fileCode.trim() ? scopeFileContribution(fileCode) : '';
+    if (scopedContribution) output.push(scopedContribution);
     if (actualName && resolvedName !== null && actualName !== resolvedName) {
       output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
       output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
@@ -635,6 +692,10 @@ export async function generateClientBundle(
         actualName,
         runtimeNames: [...runtimeImportNames].filter((n) => !namesBefore.has(n)),
         imports: importedPaths,
+        compBody: compCode,
+        hydBody: hydCode,
+        scoped: scopedContribution,
+        importSpecs: [...compSpecs, ...hydSpecs],
       });
     }
   }
@@ -663,7 +724,7 @@ export async function generateClientBundle(
   }
 
   if (codeSplit) {
-    const chunkEntries: Array<{ name: string; code: string; node: RouteNode }> = [];
+    const chunkEntries: Array<{ name: string; code: string; node: RouteNode; imports: boolean }> = [];
 
     function walkSplit(nodes: RouteNode[], _chain: RouteNode[]): void {
       for (const node of nodes) {
@@ -714,7 +775,7 @@ export async function generateClientBundle(
           if (!chunkImports.ok) console.error('[vesk] chunk import merge aborted for', chunkName + ':', chunkImports.reason);
           const head = chunkImports.render();
           const code = (head ? head + '\n\n' : '') + chunkCode.join('\n\n');
-          chunkEntries.push({ name: chunkName, code, node });
+          chunkEntries.push({ name: chunkName, code, node, imports: chunkHasImports(head.length, !chunkImports.ok) });
         }
         walkSplit(node.children || [], [..._chain, node]);
       }
@@ -732,7 +793,7 @@ export async function generateClientBundle(
       if (!sharedImports.ok) console.error('[vesk] chunk import merge aborted for shared.js:', sharedImports.reason);
       const head = sharedImports.render();
       const code = (head ? head + '\n\n' : '') + sharedCode.join('\n\n');
-      chunkEntries.push({ name: 'shared.js', code, node: null as unknown as RouteNode });
+      chunkEntries.push({ name: 'shared.js', code, node: null as unknown as RouteNode, imports: chunkHasImports(head.length, !sharedImports.ok) });
     }
 
     const chunkIIFE = (body: string): string =>
@@ -741,7 +802,7 @@ export async function generateClientBundle(
     for (const entry of chunkEntries) {
       if (!entry.code.trim()) continue;
       let finalCode: string;
-      if (hasChunkImports(entry.code)) {
+      if (entry.imports) {
         // Bundle the chunk through esbuild so every remaining import (npm
         // packages like lucide-vesk and rewritten relative `.ts` value
         // modules) is inlined into the IIFE — a classic script cannot carry

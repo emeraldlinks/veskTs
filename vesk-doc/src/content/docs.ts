@@ -32,6 +32,18 @@ import { pages as configPluginPages } from "./docs-config-plugin";
 import { pages as apiRoutesPages } from "./docs-api-routes";
 import { pages as cliPages } from "./docs-cli";
 import { pages as nativePages } from "./docs-native";
+import { pages as nativeGettingStartedPages } from "./docs-native-getting-started";
+import { pages as nativeRoutingPages } from "./docs-native-routing";
+import { pages as nativeConfigPages } from "./docs-native-config";
+import { pages as nativeApisPages } from "./docs-native-apis";
+import { pages as nativeCommandsPages } from "./docs-native-commands";
+import { pages as nativeLibrariesPages } from "./docs-native-libraries";
+import { pages as nativeDevPages } from "./docs-native-dev";
+import { pages as nativeBundlingPages } from "./docs-native-bundling";
+import { pages as nativeComponentsPages } from "./docs-native-components";
+import { pages as nativeMotionPages } from "./docs-native-motion";
+import { pages as nativeWebApisPages } from "./docs-native-web-apis";
+import { pages as nativeCompilerPages } from "./docs-native-compiler";
 
 const basePages: DocPage[] = [
   {
@@ -1767,6 +1779,18 @@ const extendedPages: DocPage[] = [
   ...apiRoutesPages,
   ...cliPages,
   ...nativePages,
+  ...nativeGettingStartedPages,
+  ...nativeRoutingPages,
+  ...nativeConfigPages,
+  ...nativeApisPages,
+  ...nativeCommandsPages,
+  ...nativeLibrariesPages,
+  ...nativeDevPages,
+  ...nativeBundlingPages,
+  ...nativeComponentsPages,
+  ...nativeMotionPages,
+  ...nativeWebApisPages,
+  ...nativeCompilerPages,
 ];
 
 const extendedBySlug = new Map(extendedPages.map((p) => [p.slug, p]));
@@ -1805,6 +1829,18 @@ const docSlugOrder = [
   "reconcile",
   "deployment",
   "native",
+  "native-getting-started",
+  "native-routing",
+  "native-config",
+  "native-apis",
+  "native-web-apis",
+  "native-components",
+  "native-motion",
+  "native-libraries",
+  "native-dev",
+  "native-bundling",
+  "native-compiler",
+  "native-commands",
   "cli",
   "plugin-api",
   "lsp",

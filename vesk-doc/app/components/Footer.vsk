@@ -1,81 +1,101 @@
-const columns: { title: string; links: { label: string; href: string; external?: boolean }[] }[] = [
-	{
-		title: "Product",
-		links: [
-			{ label: "Vesk", href: "/vesk" },
-			{ label: "Vesk Native", href: "/native" },
-			{ label: "Compiler", href: "/compiler" },
-			{ label: "Features", href: "/features" },
-			{ label: "Showcase", href: "/showcase" },
-		],
-	},
-	{
-		title: "Developers",
-		links: [
-			{ label: "Documentation", href: "/docs" },
-			{ label: "Getting Started", href: "/docs/getting-started" },
-			{ label: "Examples", href: "/examples" },
-			{ label: "API", href: "/api-docs" },
-			{ label: "GitHub", href: "/community/github" },
-		],
-	},
-	{
-		title: "Community",
-		links: [
-			{ label: "GitHub", href: "/community/github" },
-			{ label: "Discord", href: "/community/discord" },
-			{ label: "Discussions", href: "/community/discussions" },
-			{ label: "Contributors", href: "/community/contributors" },
-		],
-	},
-	{
-		title: "Company",
-		links: [
-			{ label: "About", href: "/about" },
-			{ label: "Blog", href: "/blog" },
-			{ label: "Contact", href: "/contact" },
-		],
-	},
+const columns = [
+  {
+    title: "Product",
+    links: [
+      { label: "Vesk", href: "/vesk" },
+      { label: "Vesk Native", href: "/native" },
+      { label: "Compiler", href: "/compiler" },
+      { label: "Features", href: "/features" },
+      { label: "Showcase", href: "/showcase" },
+    ],
+   },
+  {
+    title: "Developers",
+    links: [
+      { label: "Documentation", href: "/docs" },
+      { label: "Getting Started", href: "/docs/getting-started" },
+      { label: "Examples", href: "/examples" },
+      { label: "API", href: "/api-docs" },
+      { label: "GitHub", href: "/community/github" },
+    ],
+   },
+  {
+    title: "Community",
+    links: [
+      { label: "GitHub", href: "/community/github" },
+      { label: "Discord", href: "/community/discord" },
+      { label: "Discussions", href: "/community/discussions" },
+      { label: "Contributors", href: "/community/contributors" },
+    ],
+   },
+  {
+    title: "Company",
+    links: [
+      { label: "About", href: "/about" },
+      { label: "Blog", href: "/blog" },
+      { label: "Contact", href: "/contact" },
+    ],
+   },
 ]
 
 export component Footer {
-	<footer class="bg-background">
-		<div class="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
-			<div class="grid gap-10 lg:grid-cols-[1.2fr_2fr]">
-				<div>
-					<div class="flex items-center gap-2">
-						<span class="grid size-6 place-items-center bg-foreground font-display text-[11px] font-bold text-background">V</span>
-						<span class="font-display text-sm font-semibold tracking-tight">vesk</span>
-					</div>
-					<p class="mt-4 max-w-[34ch] font-mono text-[11.5px] leading-relaxed text-muted-foreground">
-						A unified, compiler-driven way to build modern applications. Vesk is an open, experimental developer platform under active development.
-					</p>
-				</div>
+  <footer class="bg-background">
+    <div class="mx-auto w-full max-w-6xl px-5 py-12 sm:px-8 sm:py-16">
+      <div class="grid gap-10 lg:grid-cols-[1.2fr_2fr]">
+        <div>
+          <div class="flex items-center gap-2">
+            <span
+              class="grid size-6 place-items-center bg-foreground font-display text-[11px] font-bold text-background"
+            >
+              V
+            </span>
+            <span class="font-display text-sm font-semibold tracking-tight">vesk</span>
+          </div>
+          <p
+            class="mt-4 max-w-[34ch] font-mono text-[11.5px] leading-relaxed text-muted-foreground"
+          >
+            A unified, compiler-driven way to build modern applications. Vesk is an open, experimental developer platform under active development.
+          </p>
+        </div>
 
-				<div class="grid grid-cols-2 gap-8 sm:grid-cols-4">
-					for (const col of columns) {
-						<div>
-							<p class="eyebrow mb-3">{col.title}</p>
-							<ul class="font-mono text-[12px] list-none m-0 p-0">
-								for (const link of col.links) {
-									<li>
-										if (link.external) {
-											<Link href={link.href} target="_blank" rel="noopener" class="block py-1 text-muted-foreground transition-colors hover:text-foreground no-underline">{link.label} <span class="text-[10px]">↗</span></Link>
-										} else {
-											<Link href={link.href} class="block py-1 text-muted-foreground transition-colors hover:text-foreground no-underline">{link.label}</Link>
-										}
-									</li>
-								}
-							</ul>
-						</div>
-					}
-				</div>
-			</div>
+        <div class="grid grid-cols-2 gap-8 sm:grid-cols-4">
+          for (const col of columns) {
+            <div>
+              <p class="eyebrow mb-3">{col.title}</p>
+              <ul class="font-mono text-[12px] list-none m-0 p-0">
+                for (const link of col.links) {
+                  <li>
+                    if (link.external) {
+                      <Link
+                        href={link.href}
+                        target="_blank"
+                        rel="noopener"
+                        class="block py-1 text-muted-foreground transition-colors hover:text-foreground no-underline"
+                      >
+                        {link.label}
+                        <span class="text-[10px]">↗</span>
+                      </Link>
+                    } else {
+                      <Link
+                        href={link.href}
+                        class="block py-1 text-muted-foreground transition-colors hover:text-foreground no-underline"
+                      >{link.label}</Link>
+                    }
+                  </li>
+                }
+              </ul>
+            </div>
+          }
+        </div>
+      </div>
 
-			<div class="mt-12 flex flex-col gap-2 border-t border-border pt-5 font-mono text-[11px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-				<span>© 2026 Vesk · a compiler-first application framework</span>
-				<span>compiler v0.2.16</span>
-			</div>
-		</div>
-	</footer>
+      <div
+        class="mt-12 flex flex-col gap-2 border-t border-border pt-5 font-mono text-[11px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between"
+      >
+        <span>© 2026 Vesk · a compiler-first application framework</span>
+        <span>compiler v0.2.16</span>
+        <p>Joseph Christopher (emeraldlinks)</p>
+      </div>
+    </div>
+  </footer>
 }

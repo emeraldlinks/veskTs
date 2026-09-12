@@ -333,15 +333,39 @@ export interface ApiFunctionOptions {
   middlewareCode?: string | null;
 }
 
+/**
+ * One folded import specifier extracted from a compiled file's contribution
+ * (see `ChunkImports` in `@vesk/adapter/src/client-bundle`). Stored on the
+ * cache entry so a warm rebuild can re-fold a file's imports into a fresh
+ * chunk accumulator without re-parsing its code.
+ */
+export interface ClientBundleChunkSpec {
+  /** Resolved import source (relative `.ts`/`.vsk` specifiers are absolute paths). */
+  source: string;
+  kind: 'default' | 'namespace' | 'named';
+  local: string;
+  imported?: string;
+}
+
 export interface ClientBundleFileEntry {
   mtimeMs: number;
   size: number;
+  /** Import-carrying comp code (imports are folded into the chunk head on replay). */
   compCode: string;
+  /** Import-carrying hyd code. */
   hydCode: string;
   actualName: string | null;
   runtimeNames: string[];
   /** Absolute paths of this file's .vsk imports, in emission order. */
   imports: string[];
+  /** Import-stripped comp body (post `ChunkImports.add`) — warm replay is parse-free. */
+  compBody?: string;
+  /** Import-stripped hyd body, `__hydrators` registry rename applied. */
+  hydBody?: string;
+  /** Final `scopeFileContribution` output for this file (comp+hyd joined). */
+  scoped?: string;
+  /** Folded import specifiers of comp+hyd, in emission order (comp first). */
+  importSpecs?: ClientBundleChunkSpec[];
 }
 
 export interface ClientBundleCache {

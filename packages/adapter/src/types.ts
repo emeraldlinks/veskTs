@@ -22,6 +22,7 @@ export type {
   ApiFunctionOptions,
   ClientBundleOptions,
   ClientBundleFileEntry,
+  ClientBundleChunkSpec,
   ClientBundleCache,
   ChunkEntry,
   ClientBundleResult,
