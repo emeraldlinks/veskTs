@@ -1427,7 +1427,7 @@ describe('Hydrate component-call wrapper', () => {
 		// The component root that the hydration walker adopts must not confine
 		// sticky/height/inset-relative children to the component's own bounds,
 		// or SSR layout diverges from the client (which appends into the parent).
-		expect(html).toBe('<!--vsk--><div style="display:contents"><header class="sticky top-0">Hi</header></div>');
+		expect(html).toBe('<!--vsk--><span style="display:contents"><header class="sticky top-0">Hi</header></span>');
 	});
 
 	it('statement mode: bare JSX child gets the same layout-inert wrapper', () => {
@@ -1435,7 +1435,7 @@ describe('Hydrate component-call wrapper', () => {
 			component Nav { <header class="sticky top-0">Hi</header> }
 			component App { <Nav /> }
 		`, 'App', {}, new Map(), { hydrate: true });
-		expect(html).toBe('<!--vsk--><div style="display:contents"><header class="sticky top-0">Hi</header></div>');
+		expect(html).toBe('<!--vsk--><span style="display:contents"><header class="sticky top-0">Hi</header></span>');
 	});
 
 	it('fragment roots stay inside one shared wrapper (display:contents keeps them claimable)', () => {
@@ -1445,7 +1445,27 @@ describe('Hydrate component-call wrapper', () => {
 		`, 'App', {}, new Map(), { hydrate: true });
 		// Both roots must share a single container so subWalker(rootEl).contains
 		// covers markers under every root — but that container is layout-inert.
-		expect(html).toBe('<!--vsk--><div style="display:contents"><header>Top</header><nav>Nav</nav></div>');
+		expect(html).toBe('<!--vsk--><span style="display:contents"><header>Top</header><nav>Nav</nav></span>');
+	});
+
+	it('component inside a <p> keeps the wrapper inside the paragraph (span, not div)', () => {
+		const html = render(`
+			component Linkish { <a href="/docs" class="hover:text-foreground no-underline text-muted-foreground">docs</a> }
+			component App {
+				<p class="eyebrow mb-4 flex items-center gap-2">
+					<Linkish />
+					<span aria-hidden>/</span>
+					<span>Language</span>
+				</p>
+			}
+		`, 'App', {}, new Map(), { hydrate: true });
+		// A `<div>` wrapper inside a `<p>` is invalid HTML: the parser implicitly
+		// closes the `<p>` at the `<div>`, hoisting the link out of the paragraph
+		// and leaving its claim marker stranded in the now-empty `<p>` — every
+		// later hydration claim then tag-shifts and the SSR content is wiped.
+		// The wrapper must be a `<span>`, which is phrasing content (legal inside
+		// a `<p>`) and never triggers an implicit close during SSR-body parsing.
+		expect(html).toBe('<!--vsk--><p class="eyebrow mb-4 flex items-center gap-2"><!--vsk--><span style="display:contents"><a href="/docs" class="hover:text-foreground no-underline text-muted-foreground">docs</a></span><span aria-hidden>/</span><span>Language</span></p>');
 	});
 
 	it('non-hydrate mode emits no wrapper element', () => {

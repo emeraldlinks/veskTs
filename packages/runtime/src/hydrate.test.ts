@@ -274,13 +274,54 @@ describe('createHydrateWalker', () => {
 
     const walker = createHydrateWalker(root);
     const a = walker.nextElement('a');
-    // No matching SSR element: consume exactly THIS marker and return a fresh,
-    // detached element rather than hunting (and destroying) the siblings.
+    // No matching SSR element: back off without consuming the marker and
+    // return a fresh, detached element rather than hunting (and destroying)
+    // the siblings.
     expect(a.tagName).toBe('A');
     expect(a.parentNode).toBe(null);
-    // The sibling marker the old hunt would have eaten must still be claimable.
+    // The mismatched marker and SSR element stay intact for their real owner.
+    expect(root.contains(m1)).toBe(true);
+    expect(s1.textContent).toBe('one');
+    expect(root.contains(m2)).toBe(true);
+    expect(s2.textContent).toBe('two');
+    // The next claim that genuinely wants that element adopts it in place.
     const claimed = walker.nextElement('span');
-    expect(claimed).toBe(s2);
+    expect(claimed).toBe(s1);
+    expect(root.contains(m1)).toBe(false);
+    cleanupDocument();
+  });
+
+  it('mismatched nested-layout claim no longer steals the page marker (store/widget empty h1)', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const mH = document.createComment('vsk');
+    const h1 = document.createElement('h1');
+    h1.appendChild(document.createTextNode('Item: widget'));
+    const mP = document.createComment('vsk');
+    const p = document.createElement('p');
+    p.appendChild(document.createTextNode('id: 1'));
+    root.appendChild(mH); root.appendChild(h1);
+    root.appendChild(mP); root.appendChild(p);
+
+    const walker = createHydrateWalker(root);
+    // Layout header claim (conditional span): SSR rendered the FALSE branch so
+    // no marker exists; this claim lands on the page h1's marker. It must NOT
+    // consume it — the page h1 claim still owns it.
+    const span = walker.nextElement('span');
+    expect(span.tagName).toBe('SPAN');
+    expect(span.parentNode).toBe(null);
+    expect(root.contains(mH)).toBe(true);
+    expect(h1.textContent).toBe('Item: widget');
+    // Page h1 claim adopts the real SSR h1 in place (text remounted by the
+    // compiled hydrator) instead of appending a stray duplicate to #root.
+    const h1Claim = walker.nextElement('h1');
+    expect(h1Claim).toBe(h1);
+    expect(root.contains(mH)).toBe(false);
+    const pClaim = walker.nextElement('p');
+    expect(pClaim).toBe(p);
+    // Every marker claimed: nothing left for the canary to flag.
+    const leftover = (root.childNodes).filter((n) => n.nodeType === 8);
+    expect(leftover.length).toBe(0);
     cleanupDocument();
   });
 

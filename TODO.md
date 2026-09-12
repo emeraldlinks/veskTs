@@ -4,6 +4,13 @@
 
 **Current phase:** pure-TS pipeline (haul parked)
 
+**Done this session — `tests/hydration-test.mjs` back to 360/360 + vesk-doc 11/11:**
+- [x] **§3 hydration wrapper fix** — `server-jsgen.ts` emits `<!--vsk--><span style="display:contents">` wrappers (closing tag matched); compiler server-codegen regression test added.
+- [x] **NavLink hydrate claim fix** — `router-components.ts` `__isHydrating` claimed the inner `<!--vsk--><a>` via the walker with `hydrate.root.querySelector('a')` fallback; router.test.ts +1 (77 total).
+- [x] **Walker tag-mismatch marker-preservation fix (the `/store/widget` empty h1)** — `hydrate.ts` `adoptElement` removed the marker + stripped/stamped the SSR element *before* checking the requested tag; `nextElement` advanced the cursor before the check. Root cause: `test-app/app/store/layout.vsk`'s conditional `{props.params?.item ? <span>…</span> : null}` SSR-emits its marker only in the TRUE branch, so a stale live SSR (layout got `params` without `item`) desynced claims: the layout's TRUE-branch span claim stole the page's `<h1>` marker, stripping SSR text and emptying the claimed h1 while a fresh h1 drifted into `#root`. Now a tag-mismatch leaves marker + element fully intact and backs off **without advancing the cursor**, so the element's real owner (the page's `<h1>`) still claims it; `hydrate.test.ts` +1 regression test (29 total), typecheck clean.
+- [x] **Sequencing note for the repo's twin apps** — test-app + vesk-doc run the pinned CI tarballs, NOT workspace `dist`: after any runtime fix, `node scripts/refresh-testapp-deps.mjs <app>` + server restart is required for `_vesk/runtime.js` (comments are stripped from the served bundle, so grep the stripped *logic*, not comments).
+- [x] **Green:** `tests/hydration-test.mjs` **360/360** (store/widget h1 = "Item: widget", all markers claimed, no strays) and `vesk-doc-hydration-test.mjs` **11/11** (fixed a test-harness bug: `assert(location.href.includes('/docs'))` ran in Node where `location` is undefined → `await page.url()`).
+
 **Completed (serverless SSR is AOT — no request-time compile):** `vesk build` now
 *precompiles* every SSR function. `generateSsrFunction` embeds a JSON
 `PrecompileFilePlan` per page/layout/error/component instead of raw `.vsk` source +

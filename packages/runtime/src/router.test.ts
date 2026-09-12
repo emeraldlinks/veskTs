@@ -1,5 +1,6 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute } from '@vesk/runtime/src/router';
 import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating } from '@vesk/runtime/src/router-components';
+import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
 let passed = 0;
@@ -84,6 +85,7 @@ function makeEl(tag) {
 		tagName: tag.toUpperCase(),
 		nodeType: 1,
 		children,
+		get childNodes() { return children; },
 		attributes: attrs,
 		className: '',
 		get textContent() { return computeTextContent(this); },
@@ -142,7 +144,35 @@ function setupMockDom() {
 		getElementById() { return null; },
 		createElement(tag) { return makeEl(tag); },
 		createTextNode(text) { return { nodeType: 3, textContent: String(text), data: String(text) }; },
-		createComment(text) { return { nodeType: 8, textContent: String(text), nodeValue: String(text), data: String(text) }; },
+		createComment(text) {
+			const c = { nodeType: 8, textContent: String(text), nodeValue: String(text), data: String(text), parentNode: null };
+			c.remove = function () {
+				if (c.parentNode && c.parentNode.children) {
+					const idx = c.parentNode.children.indexOf(c);
+					if (idx > -1) c.parentNode.children.splice(idx, 1);
+				}
+				c.parentNode = null;
+			};
+			Object.defineProperty(c, 'nextElementSibling', {
+				get() {
+					if (!c.parentNode || !c.parentNode.children) return null;
+					const idx = c.parentNode.children.indexOf(c);
+					for (let i = idx + 1; i < c.parentNode.children.length; i++) {
+						const n = c.parentNode.children[i];
+						if (n.nodeType === 1) return n;
+					}
+					return null;
+				},
+			});
+			Object.defineProperty(c, 'nextSibling', {
+				get() {
+					if (!c.parentNode || !c.parentNode.children) return null;
+					const idx = c.parentNode.children.indexOf(c);
+					return c.parentNode.children[idx + 1] || null;
+				},
+			});
+			return c;
+		},
 		createDocumentFragment() { const f = { nodeType: 11, children: [], appendChild(c) { this.children.push(c); if (c) c.parentNode = this; } }; return f; },
 		createTreeWalker(root, whatToShow) {
 			const nodes = [];
@@ -345,6 +375,34 @@ test('NavLink hydrate adopts SSR anchor without duplicating children', () => {
 	} finally {
 		setIsHydrating(false);
 		document.querySelector = () => null;
+	}
+});
+
+test('NavLink hydrate consumes its walker claim marker (no leftover markers)', () => {
+	// SSR shape for a nav loop item: <span> <!--vsk--> <a>Home</a> </span>.
+	// The layout passes the item's subWalker to NavLink; the claim must
+	// consume (remove) the inner `<!--vsk-->` marker or it stays unclaimed.
+	const span = document.createElement('span');
+	const marker = document.createComment('vsk');
+	const a = document.createElement('a');
+	span.appendChild(marker);
+	span.appendChild(a);
+	const container = document.createElement('div');
+	container.appendChild(span);
+	const walker = createHydrateWalker(container, [marker]);
+	const frag = document.createDocumentFragment();
+	frag.appendChild(document.createTextNode('Home'));
+	setIsHydrating(true);
+	try {
+		const out = NavLink({ href: '/', class: 'nav', children: frag }, undefined, walker);
+		expect(walker.done()).toBe(true);
+		expect(span.children.length).toBe(1);
+		expect(out.nodeType).toBe(11);
+		expect(a.parentNode).toBe(span);
+		expect(a.textContent).toBe('Home');
+		expect(a.className).toBe('nav');
+	} finally {
+		setIsHydrating(false);
 	}
 });
 

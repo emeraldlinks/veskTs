@@ -117,7 +117,7 @@ async function main() {
         if (h1) break;
         await new Promise(r => setTimeout(r, 100));
       }
-      assert(location.href.includes('/docs'), 'URL at /docs');
+      assert((await page.url()).includes('/docs'), 'URL at /docs');
       assert(h1.length > 0, 'docs page rendered h1: ' + h1);
       const chunks = await page.evaluate(() =>
         Array.from(document.querySelectorAll('script[src*="page-"]')).map(s => s.getAttribute('src').split('/').pop()));

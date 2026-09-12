@@ -196,14 +196,20 @@ export function collectVskMarkers(container: HTMLElement): Comment[] {
 
 function adoptElement(marker: Comment, tag?: string): Element | null {
 	const el = marker.nextElementSibling;
-	marker.remove();
-	if (el) {
-		stripDirectTextNodes(el);
-		stampClaimed(el);
-		if (tag && el.tagName.toLowerCase() !== tag) return null;
-		return el;
+	if (!el) {
+		marker.remove();
+		return null;
 	}
-	return null;
+	// Tag mismatch: leave the marker and the SSR element fully intact so the
+	// element's real owner can claim it. Consuming it here would strip the SSR
+	// text and stamp a claim on a node this claim does not own, drifting every
+	// later claim into fresh-node fallback (the empty `/store/widget` h1
+	// defect: the layout's missing conditional span claim stole the h1 marker).
+	if (tag && el.tagName.toLowerCase() !== tag) return null;
+	marker.remove();
+	stripDirectTextNodes(el);
+	stampClaimed(el);
+	return el;
 }
 
 class WalkerEngine implements HydrateWalker {
@@ -222,17 +228,30 @@ class WalkerEngine implements HydrateWalker {
 
 	nextElement(tag?: string): Element {
 		while (this.idx < this.markers.length) {
-			const tm = this.markers[this.idx++];
-			if (tm.state === 'claimed') continue;
+			const tm = this.markers[this.idx];
+			if (tm.state === 'claimed') {
+				this.idx++;
+				continue;
+			}
 			const el = tm.comment.nextElementSibling as Element | null;
+			if (tag && el && el.tagName.toLowerCase() !== tag) {
+				// SSR rendered a different tag than this claim wants. Leave the
+				// marker AND the element untouched and back off without moving
+				// the cursor: the element's real owner may still claim it, and
+				// consuming it here would strip its SSR text, stamp a claim on
+				// a node this render does not own, and drift every later claim
+				// into fresh-node fallback (the empty `/store/widget` h1).
+				break;
+			}
+			this.idx++;
 			const adopted = adoptElement(tm.comment, tag);
 			if (adopted === null) {
-				// SSR rendered a different node here (or none). Consume exactly
-				// this marker and fall out to a fresh element instead of hunting
-				// through the remaining markers: a hunt drains markers later
-				// claims still need, so one divergence cascades every following
-				// claim into fresh-node fallback and its elements drift into the
-				// walker's outer fallback root.
+				// SSR rendered no element after this marker. Fall out to a
+				// fresh element instead of hunting through the remaining
+				// markers: a hunt drains markers later claims still need, so
+				// one divergence cascades every following claim into fresh-node
+				// fallback and its elements drift into the walker's outer
+				// fallback root.
 				tm.state = 'claimed';
 				break;
 			}

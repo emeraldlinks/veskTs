@@ -356,7 +356,18 @@ export function NavLink(
 		return Link(props, registry, hydrate);
 	}
 	if (__isHydrating) {
-		const a = document.querySelector(`a[href="${props.href}"]`) as HTMLAnchorElement;
+		let a: HTMLAnchorElement | null = null;
+		if (hydrate && hydrate.nextElement) {
+			// Walk the claim marker like Link does: this consumes (removes) the
+			// SSR `<!--vsk-->` marker so no leftovers survive the hydration pass.
+			a = hydrate.nextElement('a') as HTMLAnchorElement;
+			if (a && !a.parentNode && hydrate.root) {
+				const existing = hydrate.root.querySelector('a');
+				if (existing) a = existing as HTMLAnchorElement;
+			}
+		} else {
+			a = document.querySelector(`a[href="${props.href}"]`) as HTMLAnchorElement;
+		}
 		if (a) {
 			applyLinkDom(a, props, props.href);
 			if (props.children != null) {
@@ -383,7 +394,8 @@ export function NavLink(
 				a.classList.add(props.activeClass || 'active');
 				if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
 			}
-			return document.createDocumentFragment();
+			const claimed = a.parentNode !== null;
+			return claimed ? document.createDocumentFragment() : a;
 		}
 	}
 	const a = Link(props, registry, hydrate) as HTMLAnchorElement;

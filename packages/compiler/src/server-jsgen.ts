@@ -30,7 +30,16 @@ import { localValueImportNames } from '@vesk/compiler/src/module-imports';
 // inset/percent offsets, flex/grid stretch. `display: contents` keeps the DOM
 // node for claiming while suppressing its box, making SSR layout identical to
 // the client's for every property, not just sticky.
-const HYDRATE_COMPONENT_WRAPPER = '<!--vsk--><div style="display:contents">';
+//
+// The wrapper tag must be `<span>`, not `<div>`. The HTML parser implicitly
+// closes an open `<p>` on a flow-content start tag like `<div>`, so a `<div>`
+// wrapper inside a `<p>` (a component called inside a paragraph, e.g. a `Link`
+// in an eyebrow row) is hoisted out of the paragraph, stranding its `<!--vsk-->`
+// marker in the now-empty `<p>` → `nextElementSibling` is null → the hydration
+// claim misses and every later claim tag-shifts, wiping the SSR content. `<span>`
+// is phrasing content (legal inside `<p>`) and never triggers an implicit close,
+// while `display: contents` keeps it box-less everywhere a `<div>` would be.
+const HYDRATE_COMPONENT_WRAPPER = '<!--vsk--><span style="display:contents">';
 
 export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isAsync: boolean = false, tracked?: Map<string, TrackedInfo>): string {
   importedNames = importedNames || __vskImportedNames;
@@ -425,7 +434,7 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   if (__vskHydrate) {
     // Wrapper purpose documented at HYDRATE_COMPONENT_WRAPPER; it must never
     // become a layout box (see the constant's comment for why).
-    lines.push(`__out.push(${JSON.stringify(HYDRATE_COMPONENT_WRAPPER)} + (${callExpr} || '') + '</div>');`);
+    lines.push(`__out.push(${JSON.stringify(HYDRATE_COMPONENT_WRAPPER)} + (${callExpr} || '') + '</span>');`);
   } else {
     lines.push(`__out.push(${callExpr} || '');`);
   }

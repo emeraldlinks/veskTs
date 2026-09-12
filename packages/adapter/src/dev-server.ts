@@ -679,7 +679,6 @@ await doBuild().catch(() => {});
             const tHandle1 = process.hrtime.bigint();
             const body = await response.text();
             const tText1 = process.hrtime.bigint();
-            const body = await response.text();
 
             const headers = Object.fromEntries(response.headers);
             const contentType = headers['content-type'] || '';
