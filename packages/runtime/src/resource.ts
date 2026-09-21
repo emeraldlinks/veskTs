@@ -732,17 +732,29 @@ export function useFetch<T = unknown>(
 }
 
 useFetch.text = <T = string>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T> =>
-	useFetch<T>(() => doFetch(resolveFetchUrl(url), buildRequestInit(options ?? {})).then(r => r.text() as Promise<T>), {
+	useFetch<T>(async () => {
+		const res = await doFetch(resolveFetchUrl(url), buildRequestInit(options ?? {}));
+		if (!res.ok) throw new HttpError(res.status, res.statusText);
+		return res.text() as Promise<T>;
+	}, {
 		...options,
 		key: options?.key ?? url,
 	});
 useFetch.json = <T = unknown>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T> =>
-	useFetch<T>(() => doFetch(resolveFetchUrl(url), buildRequestInit(options ?? {})).then(r => r.json() as Promise<T>), {
+	useFetch<T>(async () => {
+		const res = await doFetch(resolveFetchUrl(url), buildRequestInit(options ?? {}));
+		if (!res.ok) throw new HttpError(res.status, res.statusText);
+		return res.json() as Promise<T>;
+	}, {
 		...options,
 		key: options?.key ?? url,
 	});
 useFetch.arrayBuffer = <T = ArrayBuffer>(url: string, options?: Omit<UseFetchOptions<T>, 'body'>): Resource<T> =>
-	useFetch<T>(() => doFetch(resolveFetchUrl(url), buildRequestInit(options ?? {})).then(r => r.arrayBuffer() as Promise<T>), {
+	useFetch<T>(async () => {
+		const res = await doFetch(resolveFetchUrl(url), buildRequestInit(options ?? {}));
+		if (!res.ok) throw new HttpError(res.status, res.statusText);
+		return res.arrayBuffer() as Promise<T>;
+	}, {
 		...options,
 		key: options?.key ?? url,
 	});

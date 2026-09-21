@@ -11,6 +11,6 @@ export component VersionBadge {
 		timeout: 10000,
 		retry: 1,
 	})
-	if (latest.loading || latest.error) return
-	<span>v{latest.data!.version}</span>
+	if (latest.loading || latest.error || !latest.data) return
+	<span>v{latest.data.version}</span>
 }

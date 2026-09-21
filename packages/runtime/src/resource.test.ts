@@ -710,6 +710,28 @@ it('await useFetch() rejects with the settle error when already failed', async (
   mock.restore();
 });
 
+it('useFetch.json rejects with HttpError on non-ok response', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({ error: 'upstream' }, 502));
+  const res = useFetch.json<{ version: string }>('/api/registry');
+  await waitFor(() => res.error !== null);
+  expect(res.error instanceof HttpError).toBe(true);
+  expect((res.error as HttpError).status).toBe(502);
+  expect(res.data).toBe(undefined);
+  mock.restore();
+});
+
+it('useFetch.text rejects with HttpError on non-ok response', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse('denied', 403));
+  const res = useFetch.text('/api/secret');
+  await waitFor(() => res.error !== null);
+  expect(res.error instanceof HttpError).toBe(true);
+  expect((res.error as HttpError).status).toBe(403);
+  expect(res.data).toBe(undefined);
+  mock.restore();
+});
+
 it('exposes sync data/loading/error getters and is not callable', async () => {
   cleanupGlobals();
   const mock = mockFetch(() => jsonResponse({ live: true }));
