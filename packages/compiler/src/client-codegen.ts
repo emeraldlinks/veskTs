@@ -560,7 +560,7 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
           const useProp = PROPERTY_ATTRS[node.tag]?.has(target);
           const eff = useProp
             ? `effect(() => { ${ssrEl}.${target} = ${expr}; })`
-            : `effect(() => { const __v = ${expr}; if (__v != null && __v !== false) ${ssrEl}.setAttribute(${JSON.stringify(target)}, __v === true ? 'true' : String(__v)); })`;
+            : `effect(() => { const __v = ${expr}; if (__v == null || __v === false) ${ssrEl}.removeAttribute(${JSON.stringify(target)}); else ${ssrEl}.setAttribute(${JSON.stringify(target)}, __v === true ? 'true' : String(__v)); })`;
           if (effectsVar) {
             ctx.push(`${effectsVar}.push(${eff});`);
           } else {
@@ -634,7 +634,7 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
         const useProp = PROPERTY_ATTRS[node.tag]?.has(target);
         const eff = useProp
           ? `effect(() => { ${el}.${target} = ${expr}; })`
-          : `effect(() => { const __v = ${expr}; if (__v != null && __v !== false) ${el}.setAttribute(${JSON.stringify(target)}, __v === true ? 'true' : String(__v)); })`;
+          : `effect(() => { const __v = ${expr}; if (__v == null || __v === false) ${el}.removeAttribute(${JSON.stringify(target)}); else ${el}.setAttribute(${JSON.stringify(target)}, __v === true ? 'true' : String(__v)); })`;
         if (effectsVar) {
           ctx.push(`${effectsVar}.push(${eff});`);
         } else {
@@ -937,6 +937,31 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
   return v;
 }
 
+// Hydrate-mode dynamic regions create `anchor`/`endAnchor` comment fences that
+// `__place` attaches when a branch claims SSR content — but a branch with NO SSR
+// content (e.g. a root-level `if (open)` that was falsy at SSR time) falls into
+// `__place`'s tail and appends fences + content to `$root`'s end, drifting the
+// region to the bottom of the whole layout. Anchor the fences at the walker's
+// current SSR slot at build time instead, so later content lands exactly where
+// the region would have been if SSR had rendered it. Only used in hydrate mode;
+// fresh (SPA) renders append fences to `parent` inline.
+//
+// Anchoring is only safe when the region's fallback parent is `$root` itself.
+// Regions nested inside a claimed element (e.g. the `{open ? X : Menu}` ternary
+// inside DocsHeader's `<button>`, or a copy-button icon swap) must keep their
+// fences INSIDE that element so `__place` swaps in place — anchoring them at the
+// walker slot moves their content to the element's following sibling slot, which
+// makes the icon vanish from the button on re-render. `rootLevel` should be
+// `parent === '$root'`.
+function emitHydrateFenceAnchoring(ctx: Ctx, anchor: string, endAnchor: string, rootLevel: boolean): void {
+  if (!ctx.hydrate || !rootLevel) return;
+  ctx.push(`// Anchor region fences to the SSR slot so no-content regions do not fall back to $root's end.`);
+  ctx.push(`if (__hydrate && __hydrate.insertBeforeNextClaim) {`);
+  ctx.push(indent(`__hydrate.insertBeforeNextClaim(${anchor});`));
+  ctx.push(indent(`__hydrate.insertBeforeNextClaim(${endAnchor});`));
+  ctx.push(`}`);
+}
+
 function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string): string | null {
   const anchor = ctx.n();
   const endAnchor = ctx.n();
@@ -948,6 +973,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   if (!ctx.hydrate) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effArr} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('try-end');`);
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
 
   const asyncKw = ctx.isAsyncScope ? 'await ' : '';
 
@@ -1045,6 +1071,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
     ctx.push(`const ${anchor} = document.createComment('if');`);
     ctx.push(`let ${effectsVar} = [];`);
     ctx.push(`const ${endAnchor} = document.createComment('if-end');`);
+    emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
     const asyncKw = ctx.isAsyncScope ? 'await ' : '';
     const fnOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
     const renderNames: string[] = [];
@@ -1132,6 +1159,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('if-end');`);
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
 
   const asyncKw = ctx.isAsyncScope ? 'await ' : '';
   const fnOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
@@ -1230,6 +1258,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('while-end');`);
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
 
   const renderLoop = ctx.n();
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
@@ -1299,6 +1328,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('for-end');`);
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
 
   const renderLoop = ctx.n();
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
@@ -1461,6 +1491,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('switch-end');`);
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
 
   const renderSwitch = ctx.n();
   ctx.push(`const ${renderSwitch} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);

@@ -103,7 +103,8 @@ describe('Client Codegen — DOM Creation', () => {
 		component App(props: { d?: boolean }) { return <button disabled={props.d}>x</button>; }
 	`, (code) => {
 		expect(code).not.toContain('setAttribute("disabled", ""');
-		expect(code).toContain('__v != null && __v !== false');
+		expect(code).toContain('__v == null || __v === false');
+		expect(code).toContain('.removeAttribute("disabled")');
 	});
 
 	// Dynamic attributes must omit undefined/false instead of
@@ -113,7 +114,8 @@ describe('Client Codegen — DOM Creation', () => {
 	`, (code) => {
 		expect(code).not.toContain('setAttribute("disabled", String');
 		if (code.includes('effects')) {
-			expect(code).toContain('__v != null && __v !== false');
+			expect(code).toContain('__v == null || __v === false');
+			expect(code).toContain('.removeAttribute("disabled")');
 		}
 	});
 	bothModes('sets static attributes statement mode', `
@@ -1519,6 +1521,27 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 		});
 
+	// Toggling a boolean expression-valued attribute back to falsy must
+	// REMOVE the attribute, mirroring the SSR serializer (`__attr` omits
+	// null/false). Reproduced in vesk-doc: CommandTabs/DocTabs leave a stale
+	// `aria-pressed="true"` on both tabs after switching because the previous
+	// emission only SET the attribute and never removed it.
+	bothModes('dynamic boolean attribute is removed when toggled back to false', `
+		component App(props: { tabs: string[] }) {
+			const &[sel] = track(0);
+			<div>
+				<button aria-pressed={sel === 0} onClick={() => sel = 1}>a</button>
+				<button aria-pressed={sel === 1} onClick={() => sel = 0}>b</button>
+			</div>
+		}
+	`, (code) => {
+		expect(code).toContain('const __v = get(sel) === 0');
+		expect(code).toContain('.removeAttribute("aria-pressed")');
+		expect(code).toContain('.setAttribute("aria-pressed", __v === true ? \'true\' : String(__v))');
+		expect(code).not.toContain('__v != null && __v !== false');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
 	// A for-of loop over a static collection (module const, member of a loop
 	// variable, or statement-mode local) must NOT emit a top-level re-render
 	// effect: that effect would reference the loop-local variable from the
@@ -1837,6 +1860,65 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		if (mode === 'hydrate') {
 			expect(code).not.toContain('nextElement("p")');
 			expect(code).toContain('__place(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// Hydrate-mode region fences are anchored to the walker's current SSR slot
+	// (`insertBeforeNextClaim`) so a conditional region with NO SSR content mounts
+	// at its source-file position instead of the shared root's end — the vesk-doc
+	// "mobile menu renders at the bottom of the page after a full reload" bug
+	// (DocsHeader's `if (open)` region). Fences must be anchored in BOTH
+	// statement-mode bodies (bare `if`) and expression-mode bodies (`{cond ? …}`).
+	// Anchoring applies ONLY when the region's fallback parent is `$root` — a
+	// region nested inside a claimed element (a ternary inside a `<button>`, a
+	// copy-button icon swap) must keep its fences INSIDE that element so `__place`
+	// swaps the branch in place; anchoring at the walker slot would re-render the
+	// branch outside the element and make the icon disappear on toggles.
+	bothModes('hydrate root-level if anchors fences to the SSR slot', `
+		const open = false;
+		component App() {
+			if (open) { <div class="mobile">menu</div> }
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			// the root-level `if` emits exactly anchor+endAnchor calls
+			expect((code.match(/insertBeforeNextClaim\(/g) || []).length).toBe(2);
+			expect(code).toContain('__place(');
+		} else {
+			expect(code).not.toContain('insertBeforeNextClaim(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('hydrate in-element ternary region stays in-place (no SSR-slot anchoring)', `
+		const open = false;
+		component App() {
+			<button type="button" aria-label={open ? "Close" : "Open"}>{open ? <em>X</em> : <em>M</em>}</button>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			// the in-button region must keep its fences inside the button
+			expect(code).not.toContain('insertBeforeNextClaim(');
+			expect(code).toContain('__place(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	bothModes('hydrate root-level {cond ? … : …} region anchors fences to the SSR slot', `
+		const open = false;
+		component App() {
+			<>
+				<span class="hot">hot</span>
+				{open ? <em>X</em> : <em>M</em>}
+			</>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect((code.match(/insertBeforeNextClaim\(/g) || []).length).toBe(2);
+			expect(code).toContain('__place(');
+		} else {
+			expect(code).not.toContain('insertBeforeNextClaim(');
 		}
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});

@@ -80,6 +80,17 @@ export interface HydrateWalker {
 	 * a keyed list region before anchoring it.
 	 */
 	peekKey?(key: string): Element | null;
+	/**
+	 * Anchor a dynamic-region fence comment at the walker's current SSR slot —
+	 * immediately before the next unconsumed marker — so a conditional region
+	 * with no SSR content mounts at its source-file position instead of being
+	 * appended to the root by `__place`'s fallback (the "renders at the bottom
+	 * of the page" drift). The marker is NOT consumed: it still belongs to its
+	 * owner's following claim. Falls back to the walker root's end when there is
+	 * no live marker (region is the last fragment child). Returns false when no
+	 * host is available (detached subtree).
+	 */
+	insertBeforeNextClaim?(node: Node): boolean;
 }
 
 interface HydrateIdleOptions {
@@ -922,6 +933,25 @@ class WalkerEngine implements HydrateWalker {
 			if (el && el.getAttribute('data-vsk-key') === strKey) return el;
 		}
 		return null;
+	}
+
+	insertBeforeNextClaim(node: Node): boolean {
+		// Find the next marker the positional cursor would consume: exactly the
+		// slot a region occupying this source position would have occupied in
+		// the SSR DOM.
+		let i = this.idx;
+		while (i < this.markers.length && this.markers[i].state === 'claimed') i++;
+		const next = i < this.markers.length ? this.markers[i] : null;
+		const host = next && next.comment.parentNode ? next.comment.parentNode : this.root;
+		if (host === null || host === undefined) return false;
+		try {
+			// Inserting in front of the marker keeps node order = source order;
+			// the marker itself is untouched (the following claim still owns it).
+			host.insertBefore(node, next ? next.comment : null);
+			return true;
+		} catch {
+			return false;
+		}
 	}
 }
 

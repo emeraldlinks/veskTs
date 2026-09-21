@@ -748,6 +748,60 @@ describe('walker marker lifecycle state machine', () => {
 		cleanupDocument();
 	});
 
+	it('insertBeforeNextClaim puts a region fence before the next unconsumed marker', () => {
+		mockDocument();
+		const header = makeNode(1, 'header');
+		const flex = makeNode(1, 'div');
+		const mH = document.createComment('vsk');
+		const mF = document.createComment('vsk');
+		const root = document.createElement('div');
+		root.setAttribute('class', 'min-h-screen');
+		root.appendChild(mH); root.appendChild(header);
+		root.appendChild(mF); root.appendChild(flex);
+		const walker = createHydrateWalker(root, [mH, mF]);
+
+		// The DocsHeader claims `<header>`, then its `if (open)` region builds —
+		// the cursor now points at the flex marker (the region's following
+		// sibling in source order).
+		expect(walker.nextElement('header')).toBe(header);
+		const openAnchor = document.createComment('if');
+		const openEnd = document.createComment('if-end');
+		// Simulate the codegen order: anchor THEN end, nextElement non-consuming.
+		expect(walker.insertBeforeNextClaim(openAnchor)).toBe(true);
+		expect(walker.insertBeforeNextClaim(openEnd)).toBe(true);
+
+		// Both fences sit immediately before the flex marker, NOT at root end.
+		expect(mF.previousSibling).toBe(openEnd);
+		expect(openEnd.previousSibling).toBe(openAnchor);
+		expect(openAnchor.previousSibling).toBe(header);
+		// Element children order stays header-then-flex (comments excluded).
+		expect(Array.from(root.children).indexOf(flex)).toBe(1);
+
+		// The marker must survive for its owner: the next sibling claim still adopts.
+		expect(walker.nextElement('div')).toBe(flex);
+		cleanupDocument();
+	});
+
+	it('insertBeforeNextClaim falls back to the root end when the walker is exhausted', () => {
+		mockDocument();
+		const root = document.createElement('div');
+		const walker = createHydrateWalker(root, []);
+		const a = document.createComment('if');
+		const b = document.createComment('if-end');
+		expect(walker.insertBeforeNextClaim(a)).toBe(true);
+		expect(walker.insertBeforeNextClaim(b)).toBe(true);
+		expect(root.firstChild).toBe(a);
+		expect(root.lastChild).toBe(b);
+		cleanupDocument();
+	});
+
+	it('insertBeforeNextClaim returns false when detached (no root, no markers)', () => {
+		mockDocument();
+		const walker = createHydrateWalker(null, []);
+		expect(walker.insertBeforeNextClaim(document.createComment('if'))).toBe(false);
+		cleanupDocument();
+	});
+
 	it('interior markers are claimed positionally by the item render after the root claim', () => {
 		mockDocument();
 		const li1 = makeNode(1, 'li'); li1.setAttribute('data-vsk-key', '1');
