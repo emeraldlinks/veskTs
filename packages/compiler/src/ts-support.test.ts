@@ -410,6 +410,73 @@ test('actions: untyped defineAction passes through client rewrite without TS cha
   expect(client).notToContain(': string');
 });
 
+test('vskToTsx: entity-escaped JSX text is re-escaped for tsc, never decoded back (statement mode)', () => {
+  const source = `component C {
+  <div>
+    <span>compile errors &gt; runtime bugs</span>
+    <li>Labeled in &lt;24h.</li>
+    <code>&lt;style&gt;</code>
+    <pre>&#123;escaped braces&#125; &amp; ampersand</pre>
+  </div>
+}`;
+  const tsx = vskToTsx(source);
+  expect(tsx).toContain('compile errors &gt; runtime bugs');
+  expect(tsx).notToContain('compile errors > runtime bugs');
+  expect(tsx).toContain('Labeled in &lt;24h.');
+  expect(tsx).toContain('<code>&lt;style&gt;</code>');
+  expect(tsx).toContain('&#123;escaped braces&#125; &amp; ampersand');
+  expect(tsx).notToContain('<code><style></code>');
+});
+
+test('vskToTsx: text re-escaping also applies in expression mode', () => {
+  const source = `component C {
+  const label = "a > b";
+  return <p>await in &lt;24h · a &gt; b {label}</p>;
+}`;
+  const tsx = vskToTsx(source);
+  expect(tsx).toContain('await in &lt;24h · a &gt; b');
+  expect(tsx).notToContain('await in <24h');
+  expect(tsx).notToContain('a > b {label}');
+});
+
+test('vskToTsx: mid-body declarations among JSX children are hoisted for later interpolation (statement mode)', () => {
+  const source = `component C {
+  const items = [1, 2, 3];
+  <div>
+    {(() => { const peek = items[0] })()}
+    const total = items.length * 2;
+    <p>{total} {peek}</p>
+  </div>
+}`;
+  const tsx = vskToTsx(source);
+  expect(tsx).toContain('const total = items.length * 2;');
+  expect(tsx).notToContain("{(() => { const total = items.length * 2 })()}");
+  expect(tsx).toContain('<p>{total}');
+  const totalIdx = tsx.indexOf('const total');
+  const pIdx = tsx.indexOf('<p>{total}');
+  expect(pIdx > totalIdx, `declaration emitted before the interpolation that reads it (total@${totalIdx}, p@${pIdx})`);
+});
+
+test('vskToTsx: hoisting does not escape control-flow block scope', () => {
+  const source = `component C {
+  const items = [1, 2, 3];
+  const obj = { a: 1, b: 2 };
+  <div>
+    for (const item of items) {
+      const inner = item * 2;
+      <span>{inner}</span>
+    }
+    for (const key in obj) {
+      <span>{key}</span>
+    }
+  </div>
+}`;
+  const tsx = vskToTsx(source);
+  // Loop-local declarations stay inside their loop body, not hoisted away.
+  expect(tsx).toContain('{(() => { for (const item of items) {');
+  expect(tsx).toContain('const inner = item * 2;');
+});
+
 const results = () => {
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);

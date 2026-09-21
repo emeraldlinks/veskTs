@@ -172,6 +172,39 @@ function getJSXTagName(el: any): string | null {
   return null;
 }
 
+/**
+ * Emits JSX text children. The parser has already decoded HTML entities in
+ * the value (`&lt;` → `<`, `&#123;` → `{`), so before re-emitting into a TSX
+ * surface we must re-escape the characters that tsc would otherwise read as
+ * syntax: `<` opens a tag, `>` and `{`/`}` are rejected in text, and `&`
+ * starts a fresh entity. @vesk/compiler's SSR and client codegen emit the
+ * same text through their own escaping/createTextNode paths, so this only
+ * affects the typecheck/LSP surface.
+ */
+function emitJSXText(g: VskGen, text: string, start: number, end: number): void {
+  if (
+    text.indexOf('<') === -1 &&
+    text.indexOf('>') === -1 &&
+    text.indexOf('&') === -1 &&
+    text.indexOf('{') === -1 &&
+    text.indexOf('}') === -1
+  ) {
+    g.add(text, start, end);
+    return;
+  }
+  let out = '';
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '<') out += '&lt;';
+    else if (c === '>') out += '&gt;';
+    else if (c === '&') out += '&amp;';
+    else if (c === '{') out += '&#123;';
+    else if (c === '}') out += '&#125;';
+    else out += c;
+  }
+  g.add(out, start, end);
+}
+
 /** Collapses newline+whitespace runs to single spaces and records the raw index of every kept character. */
 function collapseWithMap(value: string): { text: string; map: number[] } {
   let out = '';
@@ -445,7 +478,7 @@ function emitJSXAttr(g: VskGen, source: string, attr: any): void {
   }
 }
 
-function emitJSXElement(g: VskGen, source: string, el: any, opts: VskCodegenOptions): void {
+function emitJSXElement(g: VskGen, source: string, el: any, opts: VskCodegenOptions, hoist?: HoistContext): void {
   const op = el.openingElement;
   const name = op.name;
   let prev: number;
@@ -471,7 +504,7 @@ function emitJSXElement(g: VskGen, source: string, el: any, opts: VskCodegenOpti
     g.add(tail, prev, op.end);
   }
   if (op.selfClosing) return;
-  emitJSXChildren(g, source, el.children ?? [], opts);
+  emitJSXChildren(g, source, el.children ?? [], opts, hoist);
   if (el.closingElement) {
     g.add(source.slice(el.closingElement.start, el.closingElement.end), el.closingElement.start, el.closingElement.end);
   }
@@ -483,9 +516,9 @@ function emitJSXExprBody(g: VskGen, source: string, expr: any, opts: VskCodegenO
   g.add(source.slice(expr.start, expr.end), expr.start, expr.end);
 }
 
-function emitJSXFragment(g: VskGen, source: string, frag: any, opts: VskCodegenOptions): void {
+function emitJSXFragment(g: VskGen, source: string, frag: any, opts: VskCodegenOptions, hoist?: HoistContext): void {
   g.addRaw('<>');
-  emitJSXChildren(g, source, frag.children ?? [], opts);
+  emitJSXChildren(g, source, frag.children ?? [], opts, hoist);
   g.addRaw('</>');
 }
 
@@ -557,7 +590,13 @@ function emitForClauseMap(
   return true;
 }
 
-function emitJSXChildren(g: VskGen, source: string, children: any[], opts: VskCodegenOptions): void {
+function emitJSXChildren(
+  g: VskGen,
+  source: string,
+  children: any[],
+  opts: VskCodegenOptions,
+  hoist?: HoistContext
+): void {
   let i = 0;
   let forPending = false;
   while (i < children.length) {
@@ -624,7 +663,7 @@ function emitJSXChildren(g: VskGen, source: string, children: any[], opts: VskCo
 
       if (forPending && trimmed === '}') { forPending = false; i++; continue; }
       forPending = false;
-      g.add(text, child.start, child.end);
+      emitJSXText(g, text, child.start, child.end);
       i++;
     } else if (child.type === 'JSXExpressionContainer') {
       if (child.expression.type === 'JSXEmptyExpression') { i++; continue; }
@@ -640,10 +679,10 @@ function emitJSXChildren(g: VskGen, source: string, children: any[], opts: VskCo
         i++;
         continue;
       }
-      emitJSXElement(g, source, child, opts);
+      emitJSXElement(g, source, child, opts, hoist);
       i++;
     } else if (child.type === 'JSXFragment') {
-      emitJSXFragment(g, source, child, opts);
+      emitJSXFragment(g, source, child, opts, hoist);
       i++;
     } else if (
       child.type === 'IfStatement' || child.type === 'ForOfStatement' ||
@@ -654,6 +693,10 @@ function emitJSXChildren(g: VskGen, source: string, children: any[], opts: VskCo
     ) {
       // Statement-mode control flow nested among JSX children: TSX has no
       // statement children, so wrap each in an IIFE expression container.
+      // Bare declarations/expression statements are instead hoisted to the
+      // component body scope (see emitBodyCore) so later interpolations can
+      // reference them, mirroring the runtime IR which scopes them there too.
+      if (hoist && hoist.set.has(child)) { i++; continue; }
       g.addRaw('{(() => { ');
       emitBody(g, source, [child], '', opts);
       g.addRaw(' })()}');
@@ -786,7 +829,8 @@ function emitStatement(
   stmt: any,
   indent: string,
   isLast: boolean,
-  opts: VskCodegenOptions
+  opts: VskCodegenOptions,
+  hoist?: HoistContext
 ): void {
   switch (stmt.type) {
     case 'JSXElement':
@@ -797,12 +841,12 @@ function emitStatement(
         return;
       }
       g.add(indent);
-      emitJSXElement(g, source, stmt, opts);
+      emitJSXElement(g, source, stmt, opts, hoist);
       if (!isLast) g.addRaw(';');
       return;
     case 'JSXFragment':
       g.add(indent);
-      emitJSXFragment(g, source, stmt, opts);
+      emitJSXFragment(g, source, stmt, opts, hoist);
       if (!isLast) g.addRaw(';');
       return;
     case 'JSXExpressionContainer': {
@@ -820,7 +864,7 @@ function emitStatement(
       let firstLine = true;
       for (let i = 0; i < innerStmts.length; i++) {
         const before = g.code.length;
-        emitStatement(g, source, innerStmts[i], indent, isLast && i === innerStmts.length - 1, opts);
+        emitStatement(g, source, innerStmts[i], indent, isLast && i === innerStmts.length - 1, opts, hoist);
         if (g.code.length > before) {
           if (!firstLine) g.addRaw('\n');
           firstLine = false;
@@ -862,7 +906,7 @@ function emitStatement(
   }
 }
 
-function emitBody(g: VskGen, source: string, stmts: any[], indent: string, opts: VskCodegenOptions): void {
+function emitBody(g: VskGen, source: string, stmts: any[], indent: string, opts: VskCodegenOptions, hoist?: HoistContext): void {
   let firstLine = true;
   let i = 0;
   while (i < stmts.length) {
@@ -892,7 +936,7 @@ function emitBody(g: VskGen, source: string, stmts: any[], indent: string, opts:
       continue;
     }
     const before = g.code.length;
-    emitStatement(g, source, stmt, indent, isLast, opts);
+    emitStatement(g, source, stmt, indent, isLast, opts, hoist);
     if (g.code.length > before) {
       if (!firstLine) g.addRaw('\n');
       firstLine = false;
@@ -947,13 +991,149 @@ function emitReturn(g: VskGen, source: string, stmt: any, opts: VskCodegenOption
 }
 
 /**
+ * Hoists bare declarations/expression statements that sit among JSX children
+ * in a statement-mode body up to the component body scope. TSX cannot host
+ * statement children, and just IIFE-wrapping each one in `{(() => {..})()}`
+ * scopes names inside the IIFE — breaking later references (`const total = …`
+ * followed by `<p>{total}</p>`). The runtime IR scopes these statements at
+ * component level, so this TSX surface mirrors that. Only occurrences among
+ * JSX children are hoisted; statements inside control-flow blocks stay where
+ * they are (those are IIFE-scoped and their references are local too).
+ */
+interface HoistContext {
+  set: Set<unknown>;
+}
+
+function collectHoistEligible(children: any[], set: Set<unknown>, list?: any[]): void {
+  for (const child of children ?? []) {
+    if (child.type === 'JSXElement') {
+      if (getJSXTagName(child) === 'style') continue;
+      collectHoistEligible(child.children ?? [], set, list);
+      continue;
+    }
+    if (child.type === 'JSXFragment') {
+      collectHoistEligible(child.children ?? [], set, list);
+      continue;
+    }
+    if (child.type === 'VariableDeclaration' || child.type === 'ExpressionStatement') {
+      set.add(child);
+      if (list) list.push(child);
+      continue;
+    }
+  }
+}
+
+/**
  * Emits a statement-mode component body (bare JSX, control flow,
  * guard-clause returns). The body text starts directly with the first
  * statement (no leading whitespace) and the `{ ... }` wrapping is emitted
  * by the caller.
  */
 function emitBodyCore(g: VskGen, source: string, stmts: any[], opts: VskCodegenOptions): void {
-  emitBody(g, source, stmts, '', opts);
+  const hoistSet = new Set<unknown>();
+  const byRoot = new Map<object, any[]>();
+  const collectRoot = (root: any): void => {
+    const list: any[] = [];
+    collectHoistEligible(root.children ?? [], hoistSet, list);
+    if (list.length > 0) byRoot.set(root, list);
+  };
+  const scanRoots = (list: any[]): void => {
+    for (const s of list) {
+      if (!s) continue;
+      if (s.type === 'JSXElement' && getJSXTagName(s) !== 'style') {
+        collectRoot(s);
+      } else if (s.type === 'JSXFragment') {
+        collectRoot(s);
+      } else if (s.type === 'VeskBlock') {
+        scanRoots(s.body ?? []);
+      }
+    }
+  };
+  scanRoots(stmts);
+  const ctx: HoistContext = { set: hoistSet };
+  const isRoot = (st: any): boolean =>
+    (st.type === 'JSXElement' && getJSXTagName(st) !== 'style') || st.type === 'JSXFragment';
+
+  interface Unit {
+    node: any;
+    isHoisted: boolean;
+    empty?: any;
+  }
+  const units: Unit[] = [];
+  const pushStmts = (list: any[]): void => {
+    for (let i = 0; i < list.length; i++) {
+      const s = list[i];
+      if (!s) continue;
+      if (
+        s.type === 'ForOfStatement' &&
+        list[i + 1] &&
+        list[i + 1].type === 'VeskBlock' &&
+        list[i + 1].tag === 'empty'
+      ) {
+        units.push({ node: s, isHoisted: false, empty: list[i + 1] });
+        i++;
+        continue;
+      }
+      units.push({ node: s, isHoisted: isRoot(s) });
+    }
+  };
+  for (const s of stmts) {
+    if (!s) continue;
+    if (s.type === 'VeskBlock') {
+      pushStmts(s.body ?? []);
+      continue;
+    }
+    pushStmts([s]);
+  }
+
+  const emitUnit = (u: Unit, isLast: boolean): void => {
+    if (u.isHoisted) {
+      // Bare statements among this root element's JSX children must be visible
+      // to later interpolations, so emit them immediately before the root —
+      // after any body-level declarations they may depend on.
+      const list = byRoot.get(u.node);
+      if (list) {
+        byRoot.delete(u.node);
+        const n = list.length;
+        for (let k = 0; k < n; k++) {
+          const before = g.code.length;
+          emitStatement(g, source, list[k], '', false, opts, ctx);
+          // Separator newline after every hoisted statement — the last one
+          // separates it from its own root element.
+          if (g.code.length > before) g.addRaw('\n');
+        }
+      }
+    }
+    if (u.empty !== undefined) {
+      emitForOf(g, source, u.node, '', opts);
+      const inner = u.empty.body ?? [];
+      if (inner.length > 0) {
+        g.addRaw('\n');
+        g.add('');
+        g.add(
+          source.slice(u.node.right.start, u.node.right.end),
+          u.node.right.start,
+          u.node.right.end
+        );
+        g.addRaw('.length === 0 && (() => {');
+        g.addRaw('\n');
+        emitBody(g, source, inner, '  ', opts);
+        g.addRaw('\n');
+        g.add('');
+        g.addRaw('})();');
+      }
+      return;
+    }
+    const before = g.code.length;
+    emitStatement(g, source, u.node, '', isLast, opts, ctx);
+    // Separator newline between body statements — every unit except the last
+    // one. The single-statement body keeps `{ <jsx> }` untouched.
+    if (g.code.length > before && !isLast) g.addRaw('\n');
+  };
+
+  for (let i = 0; i < units.length; i++) {
+    emitUnit(units[i], i === units.length - 1);
+  }
 }
 
 /** Emits an expression-mode component body (`return <jsx>` or a bare expression). */
