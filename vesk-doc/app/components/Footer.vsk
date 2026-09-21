@@ -1,6 +1,6 @@
 import { VersionBadge } from './VersionBadge.vsk'
 
-const columns = [
+const columns: { title: string; links: { label: string; href: string; external?: boolean }[] }[] = [
   {
     title: "Product",
     links: [
@@ -24,10 +24,10 @@ const columns = [
   {
     title: "Community",
     links: [
-      { label: "GitHub", href: "/community/github" },
-      { label: "Discord", href: "/community/discord" },
-      { label: "Discussions", href: "/community/discussions" },
-      { label: "Contributors", href: "/community/contributors" },
+      { label: "GitHub", href: "/community/github", external: true },
+      { label: "Discord", href: "/community/discord", external: true },
+      { label: "Discussions", href: "/community/discussions", external: true },
+      { label: "Contributors", href: "/community/contributors", external: true },
     ],
    },
   {

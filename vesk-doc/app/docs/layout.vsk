@@ -11,7 +11,7 @@ interface DocsLayoutProps {
 }
 
 export const standalone = true
-async component DocsLayout(props) {
+async component DocsLayout(props: DocsLayoutProps) {
   <div class="min-h-screen bg-background text-foreground">
     <DocsHeader activeSlug={props.params?.slug} />
 

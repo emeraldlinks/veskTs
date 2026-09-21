@@ -1,6 +1,6 @@
 import { Link } from '@vesk/runtime/router';
 
-component NotFound404(props) {
+component NotFound404(props: { url?: string }) {
 	<main class="mx-auto max-w-3xl px-5 py-20 sm:px-8 text-center">
 		<p class="eyebrow mb-4 justify-center flex">404 · not found</p>
 		<h1 class="font-display text-6xl font-bold tracking-tight text-foreground/20">404</h1>

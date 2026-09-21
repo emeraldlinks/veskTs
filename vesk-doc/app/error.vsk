@@ -1,4 +1,4 @@
-component ErrorPage(props) {
+component ErrorPage(props: { statusCode?: number; error?: string; stack?: string; url?: string }) {
 	<div class="min-h-screen flex items-center justify-center bg-background p-4">
 		<div class="max-w-2xl w-full panel-strong p-6 sm:p-8">
 			<p class="eyebrow mb-3 text-accent">error · {props.statusCode}</p>

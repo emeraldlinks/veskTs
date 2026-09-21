@@ -4,7 +4,7 @@ component Statements {
 	</Head>
 	const items = ['alpha', 'beta', 'gamma']
 	const obj = { name: 'Vesk', year: 2026, tags: ['fast', 'reactive'] }
-	const score = 7
+	let score = 7
 	let n = 0
 
 	<div class="mx-auto w-full max-w-6xl px-5 py-14 sm:px-8 sm:py-20">
@@ -46,7 +46,7 @@ component Statements {
 
 		<h2 class="font-display text-lg font-semibold tracking-tight mt-8 mb-3">for-in (object keys)</h2>
 		for (const key in obj) {
-			<span class="mr-2 font-mono text-[12px] text-muted-foreground">{key}:{obj[key]}</span>
+			<span class="mr-2 font-mono text-[12px] text-muted-foreground">{key}:{obj[key as keyof typeof obj]}</span>
 		}
 
 		<h2 class="font-display text-lg font-semibold tracking-tight mt-8 mb-3">while</h2>
