@@ -289,7 +289,16 @@ declare namespace JSX {
     noscript?: VeskGlobalAttributes;
     template?: VeskGlobalAttributes;
     slot?: VeskGlobalAttributes & { name?: string };
-    meta?: VeskGlobalAttributes & { name?: string; content?: string; charSet?: string; httpEquiv?: string };
+    meta?: VeskGlobalAttributes & {
+      name?: string;
+      content?: string;
+      charSet?: string;
+      httpEquiv?: string;
+      // Lowercase aliases — HTML attribute names are case-insensitive and
+      // real code (and SSR output) writes charset. Keep in sync with the
+      // camelCase members.
+      charset?: string;
+    };
     title?: VeskGlobalAttributes;
     base?: VeskGlobalAttributes & { href?: string; target?: string };
     link?: VeskGlobalAttributes & {
@@ -301,6 +310,8 @@ declare namespace JSX {
       crossOrigin?: string;
       integrity?: string;
       type?: string;
+      // Lowercase alias — see the meta note above.
+      crossorigin?: string | boolean;
     };
     style?: VeskGlobalAttributes & { media?: string };
     script?: VeskGlobalAttributes & {
@@ -312,6 +323,8 @@ declare namespace JSX {
       integrity?: string;
       nonce?: string;
       noModule?: boolean | string;
+      // Lowercase aliases — see the meta note above.
+      crossorigin?: boolean | string;
     };
     svg?: VeskGlobalAttributes & {
       viewBox?: string;
