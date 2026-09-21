@@ -84,4 +84,4 @@ npm run test   # = test:unit (scripts/test.js) + test:dev
 ## Current focus (see /root/vesk/TODO.md)
 
 Full TypeScript support in `.vsk` (tsc-in-.vsk), `generateVskDts` correctness, `vesk typecheck`,
-hydrate-mode loop claiming. (async page 500 landed: awaited failed `useFetch` fails open at SSR — see TODO.)
+hydrate-mode loop claiming, async page 500.

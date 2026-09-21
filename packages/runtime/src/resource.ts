@@ -608,13 +608,6 @@ export function mutate(key: string, data?: unknown): void {
 	}
 }
 
-function isFetchError(error: unknown): boolean {
-	if (error instanceof HttpError || error instanceof TimeoutError) return true;
-	if (!(error instanceof Error)) return false;
-	// undici-sourced failures surface as `TypeError: fetch failed`/connect errors
-	return error.name === 'TypeError' && /fetch|connect|network/i.test(error.message);
-}
-
 function createResourceAccessor<T>(handle: ResourceHandle<T>): Resource<T> {
 	const state = handle.state;
 	const accessor: Record<string, unknown> = {};
@@ -634,17 +627,7 @@ function createResourceAccessor<T>(handle: ResourceHandle<T>): Resource<T> {
 		for (;;) {
 			const s = get(state) as ResourceState<T>;
 			if (!s.loading) {
-				if (s.error) {
-					// SSR fail-open: an awaited resource whose FETCH failed (HTTP /
-					// timeout / network) resolves to undefined instead of rejecting,
-					// so the page keeps rendering the developer's null/fallback
-					// branch rather than 500ing the whole document (async page 500).
-					// Unexpected non-fetch errors still throw, so genuine code bugs
-					// still surface error.vsk. On the client the rejection stays, so
-					// try/catch remains available interactively.
-					if (isServer() && isFetchError(s.error)) return undefined as T;
-					throw s.error;
-				}
+				if (s.error) throw s.error;
 				return s.data as T;
 			}
 			await handle.settled;

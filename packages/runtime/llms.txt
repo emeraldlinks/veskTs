@@ -184,7 +184,7 @@ useFetch.stream(urlOrFn: string | (() => string), options?: Omit<UseFetchOptions
 streamText(res: Response, into?: Tracked<string>, onChunk?: (chunk: string, total: string) => void): Promise<string> // TextDecoder chunk loop → set(into, total)
 resolveFetchUrl(url: string): string // prefers ctx.resolveUrl → ctx.url string → __vesk_ssr_base_url; absolute URLs pass through
 interface Resource<T> extends PromiseLike<T> { loading: boolean; error: unknown; data: T | undefined; _state?: Tracked; refresh: () => void; abort: () => void; into?: Tracked<T> }
-interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> { key?: string; into?: Tracked<T>; body?: unknown; staleTime?: number; failureTtl?: number; keepPreviousData?: boolean; retry?: number; retryDelay?: number; timeout?: number; enabled?: boolean; dedupe?: boolean } // await resource at SSR fails OPEN on fetch failure (resolves undefined; HttpError/TimeoutError/network TypeError) so pages don't 500; non-fetch errors still reject; client keeps rejecting
+interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> { key?: string; into?: Tracked<T>; body?: unknown; staleTime?: number; failureTtl?: number; keepPreviousData?: boolean; retry?: number; retryDelay?: number; timeout?: number; enabled?: boolean; dedupe?: boolean }
 interface UseFetchStreamOptions extends Omit<UseFetchOptions<string>, 'body'> { into?: Tracked<string>; onChunk?: (chunk: string, total: string) => void }
 interface SsrDataSink { set(key: string, value: unknown): void; get(key: string): unknown | undefined; snapshot(): Record<string, unknown>; clear(): void }
 ```

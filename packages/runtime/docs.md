@@ -201,16 +201,6 @@ into `__vsk_ssr_promises`, and resolved into `__vsk_ssr_data` via
 handoff object. On the **client** the injected SSR data settles the resource
 immediately without refetching.
 
-`await resource` resolves to the fetched `data` (a `PromiseLike` — `resource.error`
-rebinds to `resource.data` and vice-versa). On the **server**, a trick for
-awaiting that would otherwise 500 the page: a *fetch* failure (`HttpError`,
-`TimeoutError`, network `TypeError`) fails open — `await` resolves `undefined`
-so the developer's null/fallback branch renders instead of the whole document
-erroring (non-fetch code errors still reject, so real bugs still reach
-`error.vsk`). On the **client** the rejection is preserved so `try/catch`
-works interactively. Prefer the reactive guard (`if (res.loading)` /
-`if (res.error)`) for rich error branches.
-
 Options in `UseFetchOptions<T>`: `key`, `into` (a tracked cell to write
 into), `staleTime` (client cache TTL), `failureTtl` (server-only negative
 cache TTL in ms for a FAILED fetch by key — default `10000`, `0` disables;

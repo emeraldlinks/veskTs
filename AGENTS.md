@@ -73,5 +73,4 @@ node tests/hydration-test.mjs                # production hydration path; needs 
 ## Current focus (see TODO.md)
 
 Full TypeScript support in `.vsk` (tsc-in-.vsk), `generateVskDts` correctness,
-`vesk typecheck`, hydrate-mode loop claiming.
-(async page 500 landed: awaited failed `useFetch` fails open at SSR — see TODO.)
+`vesk typecheck`, hydrate-mode loop claiming, async page 500.
