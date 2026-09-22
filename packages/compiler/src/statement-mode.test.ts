@@ -212,6 +212,39 @@ test('stmt guard-clause with return null renders nothing on guard', () => {
   expect(shown).toEqual('<p>shown</p>');
 });
 
+test('stmt bare return guard (brace form) renders nothing on guard', () => {
+  // `if (c) return` (no argument) must still short-circuit: unlike `return
+  // null` the bare form carries no argument, so guard detection must not
+  // fall through and swallow the return.
+  const hidden = render(stmt(`
+    if (!props.show) {
+      return
+    }
+    return <p>shown</p>
+  `), 'App', { show: false });
+  expect(hidden).toEqual('');
+  const shown = render(stmt(`
+    if (!props.show) {
+      return
+    }
+    return <p>shown</p>
+  `), 'App', { show: true });
+  expect(shown).toEqual('<p>shown</p>');
+});
+
+test('stmt bare return guard (no-brace form) scopes following roots to the alternate', () => {
+  // The VersionBadge shape: a bare-return guard in front of more roots. The
+  // root must render only when the guard is not taken.
+  const source = `
+    if (!props.show) return
+    <span>v{props.ver}</span>
+  `;
+  const hidden = render(stmt(source), 'App', { show: false, ver: '0.2.33' });
+  expect(hidden).toEqual('');
+  const shown = render(stmt(source), 'App', { show: true, ver: '0.2.33' });
+  expect(shown).toEqual('<span>v0.2.33</span>');
+});
+
 test('stmt multiple guard clauses short-circuit in order', () => {
   const html = render(stmt(`
     if (props.a) {

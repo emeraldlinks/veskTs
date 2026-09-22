@@ -1226,6 +1226,180 @@ describe('B1: typed marker identity pinpoints divergence', () => {
   });
 });
 
+describe('B1b: element-less component site markers retire (guard clause)', () => {
+  it('a bare-return component marker no longer forces the next claim to fresh fallback', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const rootP = document.createElement('p'); rootP.className = 'guarded-hidden';
+    rootP.appendChild(document.createComment('vsk:c:GuardBadge'));
+    rootP.appendChild(document.createTextNode('  '));
+    const rootPMarker = document.createComment('vsk:t:p');
+    const shownP = document.createElement('p'); shownP.className = 'guarded-shown';
+    shownP.appendChild(document.createComment('vsk:c:GuardBadge'));
+    shownP.appendChild(document.createComment('vsk:t:span'));
+    const badge = document.createElement('span'); badge.className = 'badge-shown';
+    badge.appendChild(document.createTextNode('v0.2.33'));
+    shownP.appendChild(badge);
+    const shownPMarker = document.createComment('vsk:t:p');
+    root.appendChild(rootPMarker); root.appendChild(rootP);
+    root.appendChild(shownPMarker); root.appendChild(shownP);
+
+    const walker = createHydrateWalker(root);
+    const warns = captureWarns(() => {
+      const first = walker.nextElement('p');
+      expect(first.className).toBe('guarded-hidden');
+      const second = walker.nextElement('p');
+      // The element-less `<!--vsk:c:GuardBadge-->` at the cursor must be
+      // retired so the SECOND p claim lands on the real `.guarded-shown`.
+      expect(second).toBe(shownP);
+      const badgeClaim = walker.nextElement('span');
+      expect(badgeClaim).toBe(badge);
+    });
+    // The bare-return site marker must be physically gone from the DOM.
+    const leftover = [];
+    const scan = (n) => { for (const c of n.childNodes) { if (c.nodeType === 8) leftover.push(c); else scan(c); } };
+    scan(root);
+    expect(leftover.length).toBe(0);
+    expect(warns.filter((w) => /mismatch|miss/.test(w))).toEqual([]);
+    expect(assertFullyHydrated(root)).toBe(true);
+    cleanupDocument();
+  });
+
+  it('claimOnly retires an element-less component marker before a static claim', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const rootP = document.createElement('p'); rootP.className = 'guarded-hidden';
+    rootP.appendChild(document.createComment('vsk:c:GuardBadge'));
+    rootP.appendChild(document.createTextNode('  '));
+    const rootPMarker = document.createComment('vsk:t:p');
+    const shownP = document.createElement('p'); shownP.className = 'guarded-shown';
+    shownP.appendChild(document.createComment('vsk:c:GuardBadge'));
+    shownP.appendChild(document.createComment('vsk:t:span'));
+    const badge = document.createElement('span'); badge.className = 'badge-shown';
+    badge.appendChild(document.createTextNode('v0.2.33'));
+    shownP.appendChild(badge);
+    const shownPMarker = document.createComment('vsk:t:p');
+    root.appendChild(rootPMarker); root.appendChild(rootP);
+    root.appendChild(shownPMarker); root.appendChild(shownP);
+
+    const walker = createHydrateWalker(root);
+    const warns = captureWarns(() => {
+      walker.nextElement('p');
+      const second = walker.claimOnly('p');
+      expect(second).toBe(shownP);
+      expect(walker.nextElement('span')).toBe(badge);
+    });
+    const leftover = [];
+    const scan = (n) => { for (const c of n.childNodes) { if (c.nodeType === 8) leftover.push(c); else scan(c); } };
+    scan(root);
+    expect(leftover.length).toBe(0);
+    expect(warns.filter((w) => /mismatch|miss/.test(w))).toEqual([]);
+    expect(assertFullyHydrated(root)).toBe(true);
+    cleanupDocument();
+  });
+});
+
+describe('C1: in-element region nodes never disappear (icon swap)', () => {
+  it('an in-element region claims its SSR node through the shared walker and re-renders stay inside the element', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const btnMarker = document.createComment('vsk:t:button');
+    const btn = document.createElement('button'); btn.setAttribute('id', 'icon-btn');
+    // The icon region lives INSIDE the button: its SSR marker and element sit
+    // between the button's own tags, so the shared walker must claim them in
+    // place — never fall back to the page root (the "disappearing icon" bug).
+    const iconMarker = document.createComment('vsk:if');
+    const icon = document.createElement('em'); icon.className = 'icon-x';
+    icon.appendChild(document.createTextNode('X'));
+    btn.appendChild(iconMarker);
+    btn.appendChild(icon);
+    root.appendChild(btnMarker);
+    root.appendChild(btn);
+
+    const walker = createHydrateWalker(root);
+    const warns = captureWarns(() => {
+      expect(walker.nextElement('button')).toBe(btn);
+
+      // Emitted icon region: claim the SSR icon via the SHARED walker (its
+      // marker is inside the button) and swap in the client-side node.
+      const sr = walker.claimOnly();
+      expect(sr).toBe(icon);
+      const clientIcon = document.createElement('em'); clientIcon.className = 'icon-y';
+      clientIcon.appendChild(document.createTextNode('Y'));
+      sr.parentNode.replaceChild(clientIcon, sr);
+
+      // The client icon must live INSIDE the claimed button, never appended to
+      // the page root's end.
+      expect(btn.contains(clientIcon)).toBe(true);
+      expect(btn.childNodes.length).toBe(1);
+      expect(btn.firstChild).toBe(clientIcon);
+      expect(root.childNodes.length).toBe(1);
+      expect(root.firstChild).toBe(btn);
+    });
+
+    const clientIcon2 = document.createElement('em'); clientIcon2.className = 'icon-z';
+    clientIcon2.appendChild(document.createTextNode('Z'));
+    let n = btn.firstChild;
+    while (n) {
+      const next = n.nextSibling;
+      if (n.nodeType === 1) btn.removeChild(n);
+      n = next;
+    }
+    btn.insertBefore(clientIcon2, iconMarker.nextSibling);
+
+    // A re-render must also stay in the element and never escape to the root.
+    expect(btn.contains(clientIcon2)).toBe(true);
+    expect(root.childNodes.length).toBe(1);
+    expect(root.firstChild).toBe(btn);
+    expect(warns.filter((w) => /mismatch|miss/.test(w))).toEqual([]);
+    expect(assertFullyHydrated(root)).toBe(true);
+    cleanupDocument();
+  });
+
+  it('a following region anchors at its SSR slot once earlier regions are claimed, not at an earlier element', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const btnMarker = document.createComment('vsk:t:button');
+    const btn = document.createElement('button'); btn.setAttribute('id', 'icon-btn');
+    const iconMarker = document.createComment('vsk:if');
+    const icon = document.createElement('em'); icon.className = 'icon-x';
+    icon.appendChild(document.createTextNode('X'));
+    btn.appendChild(iconMarker);
+    btn.appendChild(icon);
+    // The panel region's OWN slot: after the button, at the page level.
+    const panelIf = document.createComment('vsk:if');
+    const p = document.createElement('p'); p.className = 'panel';
+    p.appendChild(document.createTextNode('menu'));
+    const panelIfEnd = document.createComment('vsk:if-end');
+    root.appendChild(btnMarker);
+    root.appendChild(btn);
+    root.appendChild(panelIf);
+    root.appendChild(p);
+    root.appendChild(panelIfEnd);
+
+    const walker = createHydrateWalker(root);
+    expect(walker.nextElement('button')).toBe(btn);
+    // In emitted order the icon region runs first and consumes its marker…
+    const sr = walker.claimOnly();
+    expect(sr).toBe(icon);
+
+    // …so when the panel region anchors at the walker's slot it must land in
+    // ITS position (page level, immediately before the panel's own SSR `vsk:if`
+    // marker) — never back inside the button at the icon's position.
+    const start = document.createComment('if');
+    const end = document.createComment('if-end');
+    expect(walker.insertBeforeNextClaim(start)).toBe(true);
+    expect(walker.insertBeforeNextClaim(end)).toBe(true);
+    expect(start.parentNode).toBe(root);
+    expect(start.nextSibling).toBe(end);
+    expect(end.nextSibling).toBe(panelIf);
+    expect(p.parentNode).toBe(root);
+    expect(panelIf.parentNode).toBe(root);
+    expect(btn.childNodes.length).toBe(1);
+    cleanupDocument();
+  });
+});
+
 describe('B3: subWalker transfers ownership (no shared refs, no cursor drift)', () => {
   it('split splices owned markers out; parent and child claim independently', () => {
     mockDocument();

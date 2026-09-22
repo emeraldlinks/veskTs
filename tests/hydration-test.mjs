@@ -1159,7 +1159,7 @@ async function main() {
   const DATA_ROUTES = new Set(['/', '/async', '/posts', '/portal', '/portal/guides']);
   const FULL_ROUTES = [
     '/', '/about', '/blog', '/blog/hello-world', '/async', '/comp-test',
-    '/actions', '/posts', '/empty', '/map', '/statements', '/broken',
+    '/actions', '/posts', '/empty', '/map', '/statements', '/guardtest', '/broken',
     '/store', '/store/widget', '/typed',
     '/portal', '/portal/guides',
   ];
@@ -1175,6 +1175,7 @@ async function main() {
     '/empty': 'Empty-',
     '/map': 'Inline .map() Demo',
     '/statements': 'JS Statement Demo',
+    '/guardtest': 'GuardTest',
     '/broken': 'BrokenComp exploded',
     '/store': 'Store',
     '/store/widget': 'Item: widget',
@@ -1221,6 +1222,59 @@ async function main() {
         const text = await page.evaluate(() => document.body.textContent.replace(/\s+/g, ' ').trim());
         assert(text.includes(SPA_TEXT[route]), `${route} rendered real content (${SPA_TEXT[route]})`);
         assert(errors.length === 0, `${route} zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+        if (route === '/statements') {
+          // Bare-return guard regression (VersionBadge shape): the guarded
+          // root must render only when the guard is NOT taken, on both SSR and
+          // the hydrated client — never unconditionally after the `if`.
+          const guard = await page.evaluate(() => ({
+            hidden: document.querySelector('.guarded-hidden')?.textContent ?? null,
+            shown: document.querySelector('.guarded-shown')?.textContent ?? null,
+          }));
+          assert(guard.hidden !== null && guard.shown !== null, '/statements renders the bare-return guard fixture');
+          assert((guard.hidden || '').trim() === '', '/statements bare-return guard renders nothing when taken');
+          assert((guard.shown || '').includes('v0.2.33'), '/statements bare-return guard renders root when not taken');
+        }
+        if (route === '/guardtest') {
+          // Minimal, chaos-free regression bed for the same guard: a component
+          // whose bare `return` emits nothing on the hidden branch must not
+          // misplace the shown branch's root on the hydrated client.
+          const guard = await page.evaluate(() => ({
+            hidden: document.querySelector('.g-hidden')?.textContent ?? null,
+            shown: document.querySelector('.g-shown')?.textContent ?? null,
+            hiddenClaimed: document.querySelector('.g-hidden')?.hasAttribute('data-vsk-claimed') ?? false,
+            shownPCount: document.querySelectorAll('.g-shown').length,
+          }));
+          assert(guard.hidden !== null && guard.shown !== null, '/guardtest renders the guard fixture');
+          assert((guard.hidden || '').trim() === '', '/guardtest bare-return guard renders nothing when taken');
+          assert((guard.shown || '').includes('v0.2.33'), '/guardtest bare-return guard renders root when not taken');
+          assert(guard.shownPCount === 1, `/guardtest has exactly one .g-shown <p> (got ${guard.shownPCount})`);
+          assert(guard.hiddenClaimed, '/guardtest .g-hidden is claimed by hydration');
+
+          // Disappearing-nodes regression: an in-element conditional region (the
+          // icon-swap ternary inside #icon-btn) must keep re-render content INSIDE
+          // the button — never detach the region's nodes from the element or let
+          // them fall back to the page root's end (the pre-fix symptom).
+          const icon = await page.evaluate(() => ({
+            btn: document.querySelector('#icon-btn')?.textContent.replace(/\s+/g, '') ?? null,
+            allIcons: [...document.querySelectorAll('.icon-check, .icon-cross')].map(n => ({ c: n.className, inside: !!n.closest('#icon-btn') })),
+          }));
+          assert(icon.btn !== null, '/guardtest renders the icon-toggle button');
+          assert(icon.allIcons.length === 1 && icon.allIcons[0].inside, '/guardtest initial icon renders inside the button only');
+          await clickEl(page, '#icon-btn');
+          const open = await page.evaluate(() => ({
+            inBtn: document.querySelector('#icon-btn .icon-check') !== null,
+            extraneous: [...document.querySelectorAll('.icon-check, .icon-cross')].filter(n => !n.closest('#icon-btn')).map(n => n.className),
+          }));
+          assert(open.inBtn, '/guardtest toggled icon renders back INSIDE the button (no disappearing nodes)');
+          assert(open.extraneous.length === 0, `/guardtest toggle leaked no icons outside the button (got ${open.extraneous.join(', ')})`);
+          await clickEl(page, '#icon-btn');
+          const closed = await page.evaluate(() => ({
+            inBtn: document.querySelector('#icon-btn .icon-cross') !== null,
+            extraneous: [...document.querySelectorAll('.icon-check, .icon-cross')].filter(n => !n.closest('#icon-btn')).map(n => n.className),
+          }));
+          assert(closed.inBtn, '/guardtest re-closed icon renders back INSIDE the button');
+          assert(closed.extraneous.length === 0, `/guardtest re-toggle leaked no icons outside the button (got ${closed.extraneous.join(', ')})`);
+        }
       } catch (e) {
         assert(false, `${route} load failed: ${(e.message || e).slice(0, 80)}`);
       }

@@ -16,6 +16,7 @@ const navItems: NavItem[] = [
 	{ label: 'Blog', href: '/blog' },
 	{ label: 'Posts', href: '/posts' },
 	{ label: 'Statements', href: '/statements' },
+	{ label: 'GuardTest', href: '/guardtest' },
 	{ label: 'Async', href: '/async' },
 	{ label: 'Map', href: '/map' },
 	{ label: 'Empty', href: '/empty' },

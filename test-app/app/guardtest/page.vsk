@@ -1,0 +1,20 @@
+component GuardTest {
+	const &[open] = track(false)
+
+	<Head>
+		<title>GuardTest — bare return guard clause</title>
+	</Head>
+
+	<h1 class="text-3xl font-bold mb-4">GuardTest</h1>
+
+	<p class="g-hidden"><GuardBadge latest={null} /></p>
+	<p class="g-shown"><GuardBadge latest={{ version: '0.2.33' }} /></p>
+	<button type="button" id="icon-btn" class="btn-icon" onClick={() => { open = !open }}>
+		{open ? <span class="icon-check">✓</span> : <span class="icon-cross">✗</span>}
+	</button>
+}
+
+component GuardBadge(props: { latest: { version: string } | null }) {
+	if (props.latest === null) return
+	<span class="badge-shown">v{props.latest.version}</span>
+}

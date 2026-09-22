@@ -48,6 +48,7 @@ function bothModes(name, source, assertionsFn, opts = {}) {
 // Strip ES module imports/exports so new Function() can evaluate
 function stripModuleWrapper(code) {
 	return code
+		.replace(/^import\s*\{[\s\S]*?\}\s*from\s*['"][^'"]*['"];?\s*/gm, '')
 		.replace(/^import .+ from ['"].+['"];?\s*/gm, '')
 		.replace(/^export (default |const )/gm, '')
 		.replace(/^export default \w+;\s*/gm, '');
@@ -1922,6 +1923,33 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		}
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
+
+	// vesk-doc menu panel regression: a no-content `if` region at the ROOT of a
+	// nested component's `<>` fragment (sibling of its `<header>`) must anchor to
+	// its SSR slot even though the component body runs inside the parent's child
+	// hydration frame. The anchor must never be gated on `childFrame` — `$root`
+	// fallback already implies the region is a top-level sibling of its claims.
+	bothModes('hydrate nested-component fragment if anchors fences regardless of child frame', `
+		const open = false;
+		component Panel() {
+			<>
+				<header class="top"><em>crew</em></header>
+				if (open) { <div class="panel">menu</div> }
+			</>
+		}
+		component App() {
+			<Panel />
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect((code.match(/insertBeforeNextClaim\(/g) || []).length).toBe(2);
+			expect(code).not.toContain('!__hydrate.childFrame');
+			expect(code).toContain('__place(');
+		} else {
+			expect(code).not.toContain('insertBeforeNextClaim(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
 });
 
 describe('Client Codegen — Async Components', () => {
@@ -2150,6 +2178,21 @@ describe('Statement-mode guard-clause early return', () => {
 	`, (code, mode) => {
 		if (mode === 'normal') expect(code).toContain('404');
 		else expect(code).toContain('if (!doc)');
+	});
+	bothModes('bare return guard folds rest into the alternate branch', `
+		component App(props: { show: boolean }) {
+			if (!props.show) return
+			<span>v{props.ver}</span>
+		}
+	`, (code) => {
+		// Regression: `if (c) return` (no argument) must not swallow the return
+		// and emit later roots unconditionally. The fixed output dispatches the
+		// empty guard branch and the root from an if/else; the buggy output had
+		// no `else` at all (roots emitted unconditionally after the `if`).
+		const ifIdx = code.indexOf('if (!props.show) {');
+		const elseIdx = code.indexOf('} else {');
+		expect(ifIdx > -1).toBe(true);
+		expect(elseIdx > ifIdx).toBe(true);
 	});
 });
 

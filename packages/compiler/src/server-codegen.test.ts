@@ -1767,6 +1767,30 @@ describe('Statement-mode guard-clause early return', () => {
 		expect(render(src, 'App', { slug: 'nope' })).toBe('<div>404</div>');
 		expect(render(src, 'App', { slug: 'a' })).toBe('<div>A</div>');
 	});
+	it('bare return guard renders nothing when taken (VersionBadge shape)', () => {
+		// `if (c) return` has no argument — it must still short-circuit, with
+		// later roots scoped into the not-taken branch.
+		const src = `
+			component App(props: { show: boolean }) {
+				if (!props.show) return
+				<span>v{props.ver}</span>
+			}
+		`;
+		expect(render(src, 'App', { show: false, ver: '0.2.33' })).toBe('');
+		expect(render(src, 'App', { show: true, ver: '0.2.33' })).toBe('<span>v0.2.33</span>');
+	});
+	it('bare return guard in brace form renders nothing when taken', () => {
+		const src = `
+			component App(props: { show: boolean }) {
+				if (!props.show) {
+					return
+				}
+				<div>found</div>
+			}
+		`;
+		expect(render(src, 'App', { show: false })).toBe('');
+		expect(render(src, 'App', { show: true })).toBe('<div>found</div>');
+	});
 	it('multiple guards fold right', () => {
 		const src = `
 			component App(props: { n: number }) {

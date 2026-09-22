@@ -1014,6 +1014,22 @@ function getReturnArgument(node: any): any {
   return null;
 }
 
+/**
+ * Returns the `return` statement of an early-return statement — either a bare
+ * `ReturnStatement` or a `BlockStatement` wrapping a single `ReturnStatement` —
+ * regardless of whether it has an argument. Returns `null` when the statement
+ * is not such a return. Unlike `getReturnArgument`, a *bare* `return` (no
+ * argument) is recognized: `if (c) return` must still short-circuit the rest
+ * of the body with an empty consequent.
+ */
+function getReturnStatement(node: any): any {
+  if (node.type === 'ReturnStatement') return node;
+  if (node.type === 'BlockStatement' && node.body.length === 1 && node.body[0].type === 'ReturnStatement') {
+    return node.body[0];
+  }
+  return null;
+}
+
 function isStatementMode(bodyStmts: any[]): boolean {
   if (bodyStmts.some((s) => s.type === 'JSXElement' || s.type === 'JSXExpressionContainer' || s.type === 'JSXFragment')) return true;
   for (const stmt of bodyStmts) {
@@ -1155,9 +1171,11 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
       // expression-mode `buildGuardChain`. Without this the `return` is
       // silently swallowed and execution falls through into code that
       // assumes the guard held.
-      const guardArg = !stmt.alternate ? getReturnArgument(stmt.consequent) : null;
-      if (guardArg) {
-        const consequent = exprToIR(source, guardArg);
+      const guardReturn = !stmt.alternate ? getReturnStatement(stmt.consequent) : null;
+      if (guardReturn) {
+        // A bare `return` (no argument) is a guard that renders nothing, like
+        // expression-mode's empty consequent for argument-less returns.
+        const consequent = guardReturn.argument ? exprToIR(source, guardReturn.argument) : [];
         const alternate = processStatementModeBody(source, bodyStmts.slice(i + 1), filename);
         nodes.push(new OpaqueDynamicRegion(toExpression(source, stmt.test), consequent, alternate));
         break;

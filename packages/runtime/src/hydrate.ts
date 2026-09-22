@@ -653,6 +653,20 @@ class WalkerEngine implements HydrateWalker {
 			}
 			const el = tm.comment.nextElementSibling as Element | null;
 			if (this.isAlreadyAdopted(tm, el)) continue;
+			// A component call-site marker (`<!--vsk:c:Name-->`) whose branch
+			// rendered NO element (bare `return`, `null`, empty keyed region)
+			// leaves an element-less marker at the cursor. It sits at the apex
+			// of an empty component region — its child hydrator rendered nothing
+			// to claim, so retire it and keep walking. Otherwise the parent's
+			// next element claim hits `el === null`, falls out to a fresh-node
+			// fallback, and every sibling after it nests under the previous
+			// claim (guard `<p>` eating the next section).
+			if (el === null && tm.identity !== null && tm.identity.charAt(0) === 'c') {
+				tm.state = 'claimed';
+				tm.comment.remove();
+				this.idx++;
+				continue;
+			}
 			if (tag && el && el.tagName.toLowerCase() !== tag) {
 				// SSR rendered a different tag than this claim wants. Leave the
 				// marker AND the element untouched and back off without moving
@@ -682,6 +696,12 @@ class WalkerEngine implements HydrateWalker {
 			}
 			this.recordAdopted(adopted);
 			this.retireAliases(adopted);
+			// A nested (non-keyed) component call leaves its `<!--vsk:c:Name-->`
+			// site marker immediately BEFORE the adopted element, i.e. behind the
+			// cursor. `retireAliases` only sweeps forward from `idx`, so that
+			// site marker would survive as junk at the cursor and misalign every
+			// later claim. Sweep the whole walk like `adoptKeyedElement` does.
+			this.retireAliasesOf(adopted);
 			tm.state = 'claimed';
 			return adopted;
 		}
@@ -729,6 +749,16 @@ class WalkerEngine implements HydrateWalker {
 			}
 			const el = tm.comment.nextElementSibling as Element | null;
 			if (this.isAlreadyAdopted(tm, el)) continue;
+			// Same element-less component call-site skip as nextElement: an
+			// empty child branch leaves its `<!--vsk:c:Name-->` marker with no
+			// element to claim, so retire and keep walking instead of falling
+			// back to a fresh node that swallows subsequent siblings.
+			if (el === null && tm.identity !== null && tm.identity.charAt(0) === 'c') {
+				tm.state = 'claimed';
+				tm.comment.remove();
+				this.idx++;
+				continue;
+			}
 			if (tag && el && el.tagName.toLowerCase() !== tag) {
 				reportMiss(
 					'tag-mismatch',
@@ -745,6 +775,9 @@ class WalkerEngine implements HydrateWalker {
 			}
 			this.recordAdopted(adopted);
 			this.retireAliases(adopted);
+			// See nextElement: sweep site-marker aliases that stack behind the
+			// cursor (e.g. `<!--vsk:c:Name-->` before a static component root).
+			this.retireAliasesOf(adopted);
 			tm.state = 'claimed';
 			return adopted;
 		}

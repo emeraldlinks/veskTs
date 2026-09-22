@@ -204,5 +204,22 @@ test('expr guard-clause with return null renders nothing on guard', () => {
   expect(shown).toEqual('<p>shown</p>');
 });
 
+test('expr bare return guard renders nothing on guard', () => {
+  const hidden = render(`component App(props) {
+    if (!props.show) {
+      return
+    }
+    return <p>shown</p>
+  }`, 'App', { show: false });
+  expect(hidden).toEqual('');
+  const shown = render(`component App(props) {
+    if (!props.show) {
+      return
+    }
+    return <p>shown</p>
+  }`, 'App', { show: true });
+  expect(shown).toEqual('<p>shown</p>');
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

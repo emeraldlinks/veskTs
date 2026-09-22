@@ -18,6 +18,7 @@
 | `/blog/:slug` | `app/blog/[slug]/page.vsk` | page (dynamic) |
 | `/posts` | `app/posts/page.vsk` | page |
 | `/statements` | `app/statements/page.vsk` | page |
+| `/guardtest` | `app/guardtest/page.vsk` | page (bare-return guard hydration regression bed) |
 | `/async` | `app/async/page.vsk` | page |
 | `/map` | `app/map/page.vsk` | page |
 | `/md` | `app/md/page.vsk` | page |

@@ -903,7 +903,9 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
     }
-    ctx.push(`const ${v} = ${awaitKw}${access}(${callArgs()}, __registry, ${walkerArg});`);
+    ctx.push(`let ${v} = undefined;`);
+    ctx.push(`if (__hydrate) __hydrate.childFrame = (__hydrate.childFrame || 0) + 1;`);
+    ctx.push(`try { ${v} = ${awaitKw}${access}(${callArgs()}, __registry, ${walkerArg}); } finally { if (__hydrate) __hydrate.childFrame--; }`);
     maybeReplace(v);
     maybeRetire();
     return v;
@@ -955,6 +957,14 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
 // `parent === '$root'`.
 function emitHydrateFenceAnchoring(ctx: Ctx, anchor: string, endAnchor: string, rootLevel: boolean): void {
   if (!ctx.hydrate || !rootLevel) return;
+  // `rootLevel` (fallback parent is `$root`) already implies the region is a
+  // top-level sibling of its enclosing claims — a region nested inside a
+  // claimed element gets that element as its `__place` fallback and never
+  // reaches here, so its fences stay local. Anchoring therefore works even
+  // inside a child `hydration frame`: the shared walker's cursor sits exactly
+  // at the region's SSR slot (e.g. a polish-mobile menu panel that follows a
+  // `<header>` in a `<>` fragment), so a no-content nested region must anchor
+  // there instead of drifting to the page root's end via `__place`'s fallback.
   ctx.push(`// Anchor region fences to the SSR slot so no-content regions do not fall back to $root's end.`);
   ctx.push(`if (__hydrate && __hydrate.insertBeforeNextClaim) {`);
   ctx.push(indent(`__hydrate.insertBeforeNextClaim(${anchor});`));
