@@ -124,7 +124,7 @@ async function main() {
       '  routeDataCache: 100,',
       '  security: myPreset("production", { trustProxy: true }),',
       '  plugins: [',
-      '    myPlugin({ entry: "src/global.css" }),',
+      '    myPlugin({ entry: "app/global.css" }),',
       '  ],',
       '  ssg: {},',
       '});',

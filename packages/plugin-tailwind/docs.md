@@ -13,13 +13,13 @@
 ```ts
 import tailwindcss from '@vesk/plugin-tailwind';
 
-tailwindcss({ entry: 'src/global.css', appDir: 'app' })
+tailwindcss({ entry: 'app/global.css', appDir: 'app' })
 // → { name, dependencies, onBuildStart, onCSS, onFileWatch }
 ```
 
 ### `TailwindOptions`
 
-- `entry?: string` — path to the CSS entry file (default `'src/global.css'`).
+- `entry?: string` — path to the CSS entry file (default `'app/global.css'`).
 - `appDir?: string` — directory to scan for class candidates (default `'app'`).
 
 ### `TailwindPlugin` (returned object)
@@ -36,7 +36,7 @@ Exported helper. Splits a CSS source into Tailwind directives and user CSS, hand
 
 ## How it works
 
-1. `onCSS` is called with the content of `src/global.css` (or the configured entry).
+1. `onCSS` is called with the content of `app/global.css` (or the configured entry).
 2. `extractTailwindDirectives` separates `@import 'tailwindcss'`, `@theme { ... }`, `@layer ...`, `@utility ...`, `@source ...` from user CSS.
 3. `@tailwindcss/node`'s `compile(directives, opts)` generates the Tailwind CSS.
 4. `scanCandidates(baseDir)` walks `appDir` (skipping `node_modules`, `dist`, `.vesk`, `.vercel`, `.git`), reads every `.vsk`/`.js`/`.ts`/`.jsx`/`.tsx` file, and extracts class names from `class="..."` / `class='...'` attributes using `CLASS_RE`.
@@ -46,7 +46,7 @@ Exported helper. Splits a CSS source into Tailwind directives and user CSS, hand
 
 | Mistake | Fix |
 |---|---|
-| Plugin does nothing in dev | Ensure `vesk.config.ts` includes `plugins: [tailwindcss({ entry: 'src/global.css', appDir: 'app' })]`. The `onCSS` hook only fires for the configured entry file. |
+| Plugin does nothing in dev | Ensure `vesk.config.ts` includes `plugins: [tailwindcss({ entry: 'app/global.css', appDir: 'app' })]`. The `onCSS` hook only fires for the configured entry file. |
 | Classes not detected | `scanCandidates` only reads `class="..."`/`class='...'` attributes. Dynamic class bindings (e.g. `class={condition ? 'a' : 'b'}`) are NOT scanned. |
 | HMR not triggered for CSS deps | The plugin populates `dependencies` during `onCSS` via `onDependency`. If Tailwind reads a file (e.g. `@source`), changes to that file return `{ handled: true }` and trigger a rebuild. |
 | Build fails with `@tailwindcss/node` import error | The plugin falls back to `tailwindcss` if `@tailwindcss/node` is unavailable. Ensure `@tailwindcss/oxide` native binary is installed for your platform. |

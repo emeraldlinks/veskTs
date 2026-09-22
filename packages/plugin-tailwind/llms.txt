@@ -12,7 +12,7 @@
 
 ```ts
 export interface TailwindOptions {
-  entry?: string;    // default 'src/global.css'
+  entry?: string;    // default 'app/global.css' (legacy 'src/global.css' fallback)
   appDir?: string;   // default 'app'
 }
 

@@ -25,7 +25,7 @@ export default defineConfig({
     cors: { origin: ['http://localhost:3002'] },
   }),
   plugins: [
-    tailwindcss({ entry: 'src/global.css', appDir: 'app' }),
+    tailwindcss({ entry: 'app/global.css', appDir: 'app' }),
     pwaPlugin({ name: 'Test App', shortName: 'VeskTest', themeColor: '#4f46e5' }),
     testPlugin,
   ],

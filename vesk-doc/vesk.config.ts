@@ -18,7 +18,7 @@ export default defineConfig({
 		contentSecurityPolicy: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; frame-src 'self'; connect-src 'self' https://registry.npmjs.org; object-src 'none'; base-uri 'self'; form-action 'self'",
 	}),
 	plugins: [
-		tailwindcss({ entry: 'src/global.css', appDir: 'app' }),
+		tailwindcss({ entry: 'app/global.css', appDir: 'app' }),
 	],
 	ssg: {},
 });

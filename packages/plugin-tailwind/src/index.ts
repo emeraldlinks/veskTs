@@ -206,7 +206,7 @@ type TailwindPlugin = {
 }
 
 export default function tailwindcss(options: TailwindOptions = {}): TailwindPlugin {
-  const entry = options.entry || 'src/global.css'
+  const entry = options.entry || 'app/global.css'
   const appDir = options.appDir || 'app'
   let compileReady: { compile: TailwindCompile; node: boolean } | null = null
 

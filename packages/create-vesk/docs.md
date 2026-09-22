@@ -13,14 +13,14 @@
 <project-name>/
   package.json          # scripts: dev/build/start/typecheck
   vesk.config.ts        # defineConfig + tailwind plugin + security preset
-  tsconfig.json         # strict TS, jsxImportSource '@vesk/compiler', path aliases
-  src/global.css        # @import 'tailwindcss' + base layer
+  tsconfig.json         # strict TS, jsxImportSource '@vesk/compiler', path aliases (@/* → root, @app/* → ./app/*)
   .env.example          # env var examples
   .gitignore            # node_modules, dist, .vesk, .env
   README.md             # getting started + project structure
   public/
     favicon.svg         # inline SVG favicon
   app/
+    global.css          # @import 'tailwindcss' + base layer
     layout.vsk          # root layout with NavLink
     page.vsk            # / — tracked counter demo
     about/page.vsk      # /about

@@ -751,13 +751,20 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
   let devGlobalCssContent = '';
   let lastServedCssGlobal = '';
+  const appCssPath = join(appDirPath, 'global.css');
   const srcDir = join(projectDir, 'src');
   const cssPath = join(srcDir, 'global.css');
   const altCssPath = join(srcDir, 'app.css');
   let rawCss = '';
-  if (existsSync(cssPath)) {
+  let devCssSource = '';
+  if (existsSync(appCssPath)) {
+    devCssSource = appCssPath;
+    rawCss = readFileSync(appCssPath, 'utf-8');
+  } else if (existsSync(cssPath)) {
+    devCssSource = cssPath;
     rawCss = readFileSync(cssPath, 'utf-8');
   } else if (existsSync(altCssPath)) {
+    devCssSource = altCssPath;
     rawCss = readFileSync(altCssPath, 'utf-8');
   }
   if (rawCss) {
@@ -770,7 +777,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     devGlobalCssContent = rawCss;
     for (const plugin of activeAtStart) {
       if (typeof plugin.onCSS === 'function') {
-        const result = await plugin.onCSS(rawCss, cssPath);
+        const result = await plugin.onCSS(rawCss, devCssSource);
         if (result !== null && typeof result === 'string') {
           devGlobalCssContent = result;
         }
@@ -999,7 +1006,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const active = getActiveDevPlugins();
       for (const plugin of active) {
         if (typeof plugin.onCSS === 'function') {
-          const result = await plugin.onCSS(rawCss, cssPath);
+          const result = await plugin.onCSS(rawCss, devCssSource);
           if (result !== null && typeof result === 'string') {
             nextGlobal = result;
           }
@@ -1131,7 +1138,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
               const fileDeleted = eventType === 'rename' && !fileExists;
 
               // CSS rescan runs concurrently with the JS build (a .vsk edit
-              // cannot change src/global.css) so the hot-swap broadcast is
+              // cannot change app/global.css) so the hot-swap broadcast is
               // not queued behind a second compile pass.
               const cssPromise = rebuildTailwindCss();
 

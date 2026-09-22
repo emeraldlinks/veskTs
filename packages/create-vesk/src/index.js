@@ -20,7 +20,6 @@ if (existsSync(targetDir)) {
 
 const pkgName = basename(projectName)
 const appDirPath = join(targetDir, 'app')
-const srcDir = join(targetDir, 'src')
 
 const dirs = [
 	appDirPath,
@@ -32,7 +31,6 @@ const dirs = [
 	join(appDirPath, 'api', 'posts'),
 	join(appDirPath, 'api', 'hello'),
 	join(appDirPath, 'api', 'echo', '[msg]'),
-	srcDir,
 	join(targetDir, 'public'),
 ]
 for (const d of dirs) mkdirSync(d, { recursive: true })
@@ -82,7 +80,7 @@ writeFileSync(join(targetDir, 'vesk.config.ts'), [
 	`\t\t// cors: { origin: ['https://app.example.com'] },`,
 	`\t}),`,
 	`\tplugins: [`,
-	`\t\ttailwindcss({ entry: 'src/global.css', appDir: 'app' }),`,
+	`\t\ttailwindcss({ entry: 'app/global.css', appDir: 'app' }),`,
 	`\t],`,
 	`\tssg: {},`,
 	`});`,
@@ -107,7 +105,7 @@ writeFileSync(join(targetDir, 'tsconfig.json'), JSON.stringify({
 		jsxImportSource: '@vesk/compiler',
 		lib: ['ES2022', 'DOM', 'DOM.Iterable'],
 		paths: {
-			'@/*': ['./src/*'],
+			'@/*': ['./*'],
 			'@app/*': ['./app/*'],
 		},
 	},
@@ -115,8 +113,8 @@ writeFileSync(join(targetDir, 'tsconfig.json'), JSON.stringify({
 	exclude: ['node_modules', 'dist'],
 }, null, 2) + '\n')
 
-// ── src/global.css ──
-writeFileSync(join(srcDir, 'global.css'), [
+// ── app/global.css ──
+writeFileSync(join(appDirPath, 'global.css'), [
 	`@import 'tailwindcss';`,
 	``,
 	`@layer base {`,
@@ -543,7 +541,7 @@ writeFileSync(join(targetDir, 'README.md'), [
 	`- \`npm run dev\` — dev server with HMR at http://localhost:3000`,
 	`- \`npm run build\` — production build (SSG + SSR) into \`.vesk/\``,
 	`- \`npm run start\` — run the production server`,
-	`- \`npm run typecheck\` — typecheck \`app/\` and \`src/\``,
+	`- \`npm run typecheck\` — typecheck \`app/\``,
 	'',
 	'## Project structure',
 	'',
@@ -561,7 +559,7 @@ writeFileSync(join(targetDir, 'README.md'), [
 	'  middleware.ts        # request middleware (onion model)',
 	'  api/posts/route.ts   # /api/posts',
 	'  api/hello/route.ts   # /api/hello',
-	'src/global.css        # tailwind entry',
+	'app/global.css        # tailwind entry',
 	'public/               # static assets',
 	'vesk.config.ts        # framework config',
 	'```',

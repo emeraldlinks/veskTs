@@ -40,7 +40,7 @@ async function main() {
     writeFileSync(join(compDir, 'package.json'), JSON.stringify({ name: '@vesk/compiler', version: '1.0.0', main: 'index.js' }));
     writeFileSync(join(compDir, 'index.js'), 'export function defineConfig(c){return c}');
     mkFakePkg(tmp, '@vesk/plugin-tailwind');
-    const initial = `import { defineConfig, preset } from '@vesk/compiler'\nimport tailwindcss from '@vesk/plugin-tailwind'\n\nexport default defineConfig({\n\tappDir: './app',\n\tplugins: [\n\t\ttailwindcss({ entry: 'src/global.css', appDir: 'app' }),\n\t],\n})\n`;
+    const initial = `import { defineConfig, preset } from '@vesk/compiler'\nimport tailwindcss from '@vesk/plugin-tailwind'\n\nexport default defineConfig({\n\tappDir: './app',\n\tplugins: [\n\t\ttailwindcss({ entry: 'app/global.css', appDir: 'app' }),\n\t],\n})\n`;
     writeFileSync(join(tmp, 'vesk.config.ts'), initial, 'utf-8');
     mkFakePkg(tmp, 'my-plugin');
     await addPluginToConfig(tmp, 'my-plugin');

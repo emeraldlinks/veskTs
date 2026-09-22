@@ -6,19 +6,27 @@
  * several ad-hoc copies.
  *
  * Vesk follows the single-file CSS convention used by other frameworks
- * (Next.js/Remix/SvelteKit): a single `src/global.css` is the stylesheet
- * source. When the Tailwind plugin is active the whole file is compiled into
- * one `/_vesk/static/global.css`; otherwise the user CSS is served as-is from
- * the same URL. There is no separate `_tailwind.css` anymore — user rules and
- * the compiled Tailwind output live in the same file, in one `<link>`.
+ * (Next.js/Remix/SvelteKit): a single `global.css` in the app directory
+ * (`app/global.css`) is the stylesheet source. When the Tailwind plugin is
+ * active the whole file is compiled into one `/_vesk/static/global.css`;
+ * otherwise the user CSS is served as-is from the same URL. There is no
+ * separate `_tailwind.css` anymore — user rules and the compiled Tailwind
+ * output live in the same file, in one `<link>`.
  */
 import { readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 export const GLOBAL_CSS_URL = '/_vesk/static/global.css';
 
-/** Resolve the project's user stylesheet source (`src/global.css`, then `src/app.css`). */
+/**
+ * Resolve the project's user stylesheet source. The app-directory convention
+ * (`app/global.css`, i.e. `resolve(appDir, 'global.css')`) is checked first;
+ * the legacy `src/global.css` and `src/app.css` locations are still honoured
+ * so existing projects keep working without a file move.
+ */
 export function resolveUserCssPath(appDir: string): string | null {
+  const appCssSrc = resolve(appDir, 'global.css');
+  if (existsSync(appCssSrc)) return appCssSrc;
   const cssSrc = resolve(appDir, '..', 'src', 'global.css');
   if (existsSync(cssSrc)) return cssSrc;
   const altCssSrc = resolve(appDir, '..', 'src', 'app.css');
@@ -26,7 +34,7 @@ export function resolveUserCssPath(appDir: string): string | null {
   return null;
 }
 
-/** True when the project has a user stylesheet source (`src/global.css` or `src/app.css`). */
+/** True when the project has a user stylesheet source (`app/global.css`, `src/global.css` or `src/app.css`). */
 export function hasUserCss(appDir: string): boolean {
   return resolveUserCssPath(appDir) !== null;
 }

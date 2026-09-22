@@ -157,7 +157,7 @@ export function generateSsrFunction(
   const compMap = componentMap || new Map();
   for (const [compName, compPath] of compMap) {
     const plan = precompilePlan(compPath);
-    compRegEntries.push(`  (() => {\n    const _compiled = (() => { try { return hydratePrecompile(${plan}); } catch { return null; } })();\n    registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });\n  })();`);
+    compRegEntries.push(`  (() => {\n    const _compiled = (() => { try { return hydratePrecompile(${plan}); } catch { return null; } })();\n    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });\n  })();`);
   }
   if (compRegEntries.length > 0) {
     registryCode = 'const __componentRegistry = new Map();\n{\n' + compRegEntries.join('\n') + '\n}\n';

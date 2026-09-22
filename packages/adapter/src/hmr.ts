@@ -378,7 +378,7 @@ function regenerateSsrFunction(
   for (const [compName, compPath] of compMap) {
     const compSrc = readFileSync(compPath, 'utf-8');
     const escapedSrc = escapeSource(compSrc);
-    compRegEntries.push(`  registry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const _compiled = (() => { try { setVskHydrate(true); return compileFile(_src, { sourcePath: ${JSON.stringify(compPath)} }); } catch { return null; } finally { setVskHydrate(false); } })();\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, cached: _compiled, sourcePath: ${JSON.stringify(compPath)} });\n    return result.body;\n  })`);
+    compRegEntries.push(`  __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n    const _src = \`${escapedSrc}\`;\n    const _comp = ${JSON.stringify(compName)};\n    const _compiled = (() => { try { setVskHydrate(true); return compileFile(_src, { sourcePath: ${JSON.stringify(compPath)} }); } catch { return null; } finally { setVskHydrate(false); } })();\n    const result = await renderPage(_src, _comp, props, __registry, { hydrate: true, cached: _compiled, sourcePath: ${JSON.stringify(compPath)} });\n    return result.body;\n  })`);
   }
   if (compRegEntries.length > 0) {
     registryCode = `const __componentRegistry = new Map();\n{\n${compRegEntries.join('\n')}\n}\n`;

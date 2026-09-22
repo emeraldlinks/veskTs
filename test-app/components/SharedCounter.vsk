@@ -1,0 +1,13 @@
+import { track } from '@vesk/runtime'
+
+interface SharedCounterProps {
+	base?: number
+}
+
+component SharedCounter(props: SharedCounterProps) {
+	const &[n] = track<number>(props.base || 1)
+	<div class="shared-counter-box">
+		<p class="shared-counter-label">Shared counter says {n}</p>
+		<button onClick={() => n++}> + </button>
+	</div>
+}

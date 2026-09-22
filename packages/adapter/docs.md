@@ -80,7 +80,7 @@ It also exposes `startDevServer` from `src/dev-server.ts` (not re-exported from
    chunk to `static/page-<slug>.js`. This stage also produces the tree-shaken
    client runtime (unless `importRuntime` is set).
 8. **Static assets** — `copyStaticAssets(publicDir, outDir)` → `static/public/`.
-9. **CSS** — reads `src/global.css` (or `src/app.css`) and writes the single
+9. **CSS** — reads `app/global.css` (legacy fallbacks `src/global.css` or `src/app.css`) and writes the single
    `static/global.css`. When the Tailwind plugin is active, `plugin.onCSS`
    compiles the whole file (directives + user rules) into it; otherwise the raw
    CSS is written as-is. One stylesheet link (`/_vesk/static/global.css`).

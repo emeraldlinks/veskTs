@@ -143,6 +143,49 @@ describe('collectVskImportPaths', () => {
       rmSync(tmp, { recursive: true });
     }
   });
+
+  it('resolves root-alias .vsk imports like Next.js (@/* → project root)', () => {
+    const tmp = mkdtempSync('/tmp/vesk-vskimports-test-');
+    try {
+      const rootDir = join(tmp, 'proj');
+      const appDir = join(rootDir, 'app');
+      const compDir = join(rootDir, 'components');
+      mkdirSync(appDir, { recursive: true });
+      mkdirSync(compDir, { recursive: true });
+      writeFileSync(join(compDir, 'Button.vsk'), 'component Button {}');
+      writeFileSync(join(appDir, 'layout.vsk'), 'component Layout {}');
+      writeFileSync(join(rootDir, 'tsconfig.json'), JSON.stringify({
+        compilerOptions: { baseUrl: '.', paths: { '@/*': ['./*'], '@app/*': ['./app/*'] } },
+      }));
+      const pagePath = join(appDir, 'page.vsk');
+      const aliasPaths = collectVskImportPaths([
+        `import { Button } from '@/components/Button.vsk';`,
+      ], pagePath);
+      expect(aliasPaths.length).toBe(1);
+      expect(aliasPaths[0]).toBe(join(compDir, 'Button.vsk'));
+      const appAliasPaths = collectVskImportPaths([
+        `import { Layout } from '@app/layout.vsk';`,
+      ], pagePath);
+      expect(appAliasPaths.length).toBe(1);
+      expect(appAliasPaths[0]).toBe(join(appDir, 'layout.vsk'));
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('skips bare non-alias specifiers that are not project files', () => {
+    const tmp = mkdtempSync('/tmp/vesk-vskimports-test-');
+    try {
+      const srcDir = join(tmp, 'app');
+      mkdirSync(srcDir, { recursive: true });
+      const paths = collectVskImportPaths([
+        `import { Helper } from './helpers.vsk';`,
+      ], join(srcDir, 'page.vsk'));
+      expect(paths.length).toBe(0);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
 });
 
 describe('stripTypeImport', () => {

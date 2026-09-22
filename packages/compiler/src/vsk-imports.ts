@@ -3,12 +3,16 @@ import { existsSync } from 'node:fs';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
 import { parse } from '@vesk/compiler/src/parser';
+import { resolveImportPath } from '@vesk/compiler/src/module-imports';
 import { importModuleTarget, tokenizeCode } from '@vesk/compiler/src/tokens';
 
 /**
  * Resolve `import ... from './path.vsk'` statements so helper components can
  * live in arbitrary `.vsk` files and be imported into any page, layout,
- * component or route file.
+ * component or route file. Bare-alias specifiers (`@/components/Button.vsk`,
+ * `@app/...` and anything else mapped by tsconfig `paths`) also resolve, so a
+ * shared component in `components/` can be imported with the root `@/` alias
+ * exactly like in Next.js.
  */
 
 export function vskImportTarget(importText: string): string | null {
@@ -72,9 +76,14 @@ export function collectVskImportPaths(imports: string[], sourcePath: string): st
   for (const imp of imports) {
     if (stripTypeImport(imp) === null) continue;
     const target = vskImportTarget(imp);
-    if (!target || !target.startsWith('.')) continue;
-    const full = resolve(dirname(sourcePath), target);
-    if (existsSync(full)) out.push(full);
+    if (!target) continue;
+    if (target.startsWith('.')) {
+      const full = resolve(dirname(sourcePath), target);
+      if (existsSync(full)) out.push(full);
+      continue;
+    }
+    const aliased = resolveImportPath(target, dirname(sourcePath));
+    if (aliased !== target && existsSync(aliased)) out.push(aliased);
   }
   return out;
 }

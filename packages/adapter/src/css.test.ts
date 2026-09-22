@@ -75,25 +75,35 @@ describe('resolveUserCssPath / hasUserCss', () => {
     assert(resolveUserCssPath(resolve(fixture, 'app')) === null, 'resolveUserCssPath null');
     assert(!hasUserCss(resolve(fixture, 'app')), 'hasUserCss false');
   });
-  it('detects src/global.css', () => {
+  it('detects app/global.css (primary convention)', () => {
     makeFixture();
-    writeFileSync(resolve(fixture, 'src', 'global.css'), 'body {}', 'utf-8');
-    assert(hasUserCss(resolve(fixture, 'app')), 'global.css detected');
+    writeFileSync(resolve(fixture, 'app', 'global.css'), 'body {}', 'utf-8');
+    assert(hasUserCss(resolve(fixture, 'app')), 'app/global.css detected');
     assert(
-      resolveUserCssPath(resolve(fixture, 'app')) === resolve(fixture, 'src', 'global.css'),
-      'global.css path reported'
+      resolveUserCssPath(resolve(fixture, 'app')) === resolve(fixture, 'app', 'global.css'),
+      'app/global.css path reported'
     );
   });
-  it('falls back to src/app.css', () => {
+  it('legacy src/global.css still detected (migration fallback)', () => {
+    makeFixture();
+    writeFileSync(resolve(fixture, 'src', 'global.css'), 'body {}', 'utf-8');
+    assert(hasUserCss(resolve(fixture, 'app')), 'src/global.css detected');
+    assert(
+      resolveUserCssPath(resolve(fixture, 'app')) === resolve(fixture, 'src', 'global.css'),
+      'src/global.css path reported'
+    );
+  });
+  it('falls back to legacy src/app.css', () => {
     makeFixture();
     writeFileSync(resolve(fixture, 'src', 'app.css'), 'body {}', 'utf-8');
     assert(resolveUserCssPath(resolve(fixture, 'app')) === resolve(fixture, 'src', 'app.css'), 'app.css fallback');
   });
-  it('prefers global.css over app.css', () => {
+  it('prefers app/global.css over both legacy locations', () => {
     makeFixture();
+    writeFileSync(resolve(fixture, 'app', 'global.css'), 'x { color: green; }', 'utf-8');
     writeFileSync(resolve(fixture, 'src', 'global.css'), 'a { color: red; }', 'utf-8');
     writeFileSync(resolve(fixture, 'src', 'app.css'), 'b { color: blue; }', 'utf-8');
-    assert(resolveUserCssPath(resolve(fixture, 'app')) === resolve(fixture, 'src', 'global.css'), 'global wins');
+    assert(resolveUserCssPath(resolve(fixture, 'app')) === resolve(fixture, 'app', 'global.css'), 'app/global wins');
   });
 });
 

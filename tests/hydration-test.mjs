@@ -711,6 +711,47 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 14b: Root components dir imported via the @/ root alias ──
+  console.log('\n=== TEST 14b: root components/ via @/ alias ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await goto(page, BASE + '/root-components', { waitUntil: 'networkidle0' });
+
+    const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
+    assert(h1 === 'Root components via @/ alias', 'h1: "' + h1 + '"');
+
+    // The shared component lives in components/ at the project root and is
+    // imported by the page as `@/components/SharedCounter.vsk`. It must render
+    // during SSR, hydrate, and keep its own reactive state.
+    const box = await page.evaluate(() => {
+      const el = document.querySelector('.shared-counter-box');
+      if (!el) return null;
+      return {
+        label: el.querySelector('.shared-counter-label')?.textContent?.trim() || '',
+        hasButton: !!el.querySelector('button'),
+      };
+    });
+    assert(box !== null, 'shared-counter-box present (root component rendered via @/ alias)');
+    assert(box.label === 'Shared counter says 5', 'SSR label: "' + box.label + '"');
+    assert(box.hasButton, 'root component has its own button');
+
+    await clickEl(page, '.shared-counter-box button');
+    await new Promise(r => setTimeout(r, 200));
+    const afterClick = await page.evaluate(() => document.querySelector('.shared-counter-label')?.textContent?.trim() || '');
+    assert(afterClick === 'Shared counter says 6', 'root component reactive state updates: "' + afterClick + '"');
+
+    await clickEl(page, '.shared-counter-box button');
+    await clickEl(page, '.shared-counter-box button');
+    await new Promise(r => setTimeout(r, 200));
+    const afterThree = await page.evaluate(() => document.querySelector('.shared-counter-label')?.textContent?.trim() || '');
+    assert(afterThree === 'Shared counter says 8', 'root component persists state across clicks: "' + afterThree + '"');
+
+    assert(errors.length === 0, 'zero JS errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    await page.close();
+  }
+
   // ── Test 15: Server actions (defineAction + Form) ──
   console.log('\n=== TEST 15: Server actions ===');
   {
@@ -1162,6 +1203,7 @@ async function main() {
     '/actions', '/posts', '/empty', '/map', '/statements', '/guardtest', '/broken',
     '/store', '/store/widget', '/typed',
     '/portal', '/portal/guides',
+    '/root-components',
   ];
   const SPA_TEXT = {
     '/': 'Welcome to Vesk',
@@ -1182,6 +1224,7 @@ async function main() {
     '/typed': 'Total likes',
     '/portal': 'Portal posts',
     '/portal/guides': 'Guides layout',
+    '/root-components': 'Root components via @/ alias',
   };
 
   {

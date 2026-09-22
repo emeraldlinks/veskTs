@@ -208,7 +208,7 @@ Call: `build(appDir, options)`. Returns `BuildResult | undefined`.
     → `{ main, chunks }`; write `main` → `static/client.js`; write each chunk →
     `static/<name>.js`.
 13. `copyStaticAssets(publicDir, outDir)` → `static/public/`.
-14. **CSS** — read `src/global.css` else `src/app.css`; `stripTailwindDirectives`
+14. **CSS** — read `app/global.css` else legacy `src/global.css`/`src/app.css`; `stripTailwindDirectives`
     (uses compiler `cssBlockEnd`) → `static/global.css`; run `plugin.onCSS`
     chain on the raw css → `static/_tailwind.css`.
 15. If `options.ssg` → `generateSsgRoutes(routeTree, appDir, outDir)` →

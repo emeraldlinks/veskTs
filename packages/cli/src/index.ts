@@ -27,7 +27,7 @@ function usage(code = 0) {
   console.error('  vesk typecheck [--no-strict]  Typecheck .vsk/.ts files via tsc-in-.vsk (strict by default)');
   console.error('  vesk start [-p 3000]          Start production server');
   console.error('  vesk dev [-p 3000]            Start dev server with HMR');
-  console.error('  vesk init                     Create src/global.css (Tailwind entrypoint) if missing');
+  console.error('  vesk init                     Create app/global.css (Tailwind entrypoint) if missing');
   console.error('  vesk --help                   Show this help');
   console.error('');
   console.error('Scaffolding:  npx create-vesk@latest <project-name>');
@@ -236,13 +236,13 @@ if (cmd === 'start') {
 
 if (cmd === 'init') {
   const projectDir = process.cwd();
-  const srcDir = join(projectDir, 'src');
-  const target = join(srcDir, 'global.css');
+  const appDirPath = join(projectDir, 'app');
+  const target = join(appDirPath, 'global.css');
   if (existsSync(target)) {
     console.error(`vesk init: ${target} already exists — skipping`);
     process.exit(0);
   }
-  mkdirSync(srcDir, { recursive: true });
+  mkdirSync(appDirPath, { recursive: true });
   writeFileSync(target, [
     `@import 'tailwindcss';`,
     ``,

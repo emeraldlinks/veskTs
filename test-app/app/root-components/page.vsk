@@ -1,0 +1,6 @@
+import { SharedCounter } from '@/components/SharedCounter.vsk'
+
+component RootComponents {
+	<h1>Root components via @/ alias</h1>
+	<SharedCounter base={5} />
+}

@@ -44,7 +44,7 @@ async function main() {
 
   // ── 0. Check JS errors on each page ──
   console.log('\n=== JS error inspection ===');
-  for (const path of ['/', '/about', '/blog', '/blog/hello-world']) {
+  for (const path of ['/', '/about', '/blog', '/blog/hello-world', '/root-components']) {
     const page = await browser.newPage();
     const errors = [];
     page.on('pageerror', err => errors.push(err.message));
@@ -69,6 +69,7 @@ async function main() {
     ['/blog', 'Blog'],
     ['/blog/hello-world', 'Post: hello-world'],
     ['/blog/ssr-in-vesk', 'Post: ssr-in-vesk'],
+    ['/root-components', 'Root components via @/ alias'],
   ]) {
     const page = await browser.newPage();
     const errors = [];

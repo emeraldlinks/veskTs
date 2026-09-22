@@ -773,7 +773,7 @@ export async function addPluginToConfig(projectDir: string, pkg: string): Promis
   let source: string;
   if (!path) {
     const importName = importNameForPackage(pkg);
-    const entry = pkg === '@vesk/plugin-tailwind' ? `${importName}({ entry: 'src/global.css', appDir: 'app' })` : `${importName}()`;
+const entry = pkg === '@vesk/plugin-tailwind' ? `${importName}({ entry: 'app/global.css', appDir: 'app' })` : `${importName}()`;
     source = `import { defineConfig } from '@vesk/compiler'\nimport ${importName} from '${pkg}'\n\nexport default defineConfig({\n\tplugins: [\n\t\t${entry}\n\t]\n})\n`;
     target = resolve(projectDir, 'vesk.config.ts');
     await writeConfigSource(projectDir, source);
@@ -838,7 +838,7 @@ export async function addPluginToConfig(projectDir: string, pkg: string): Promis
       else source = importLine + source;
     }
   }
-  const entry = pkg === '@vesk/plugin-tailwind' ? `${importName}({ entry: 'src/global.css', appDir: 'app' })` : `${importName}()`;
+  const entry = pkg === '@vesk/plugin-tailwind' ? `${importName}({ entry: 'app/global.css', appDir: 'app' })` : `${importName}()`;
   const newSource = insertIntoPluginsArray(source, entry);
   if (newSource === source) return;
   await writeConfigSource(projectDir, newSource);
