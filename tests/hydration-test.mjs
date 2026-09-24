@@ -1728,15 +1728,18 @@ async function main() {
       return readChips();
     };
 
-    // 22a: raw SSR — keyed chips carry data-vsk-key, unique on the wire.
-    console.log('  22a: raw SSR — data-vsk-key present, chips unique');
+    // 22a: raw SSR — chips carry their values, unique on the wire. Markerless
+    // hydration is positional claim-by-key: keys NEVER live on the DOM (the
+    // re-render JS key map owns identity), so the wire carries the rendered
+    // values, not `data-vsk-key` attributes.
+    console.log('  22a: raw SSR — chips carry unique values');
     {
       const raw = await (await fetch(BASE + '/map')).text();
       const chips = (raw.match(/class="rk-chip[^"]*"/g) || []);
       assert(raw.includes('id="rk-list"'), '/map SSR contains the reactive keyed list region');
       assert(chips.length === 3, '/map SSR emits exactly 3 rk-chips (got ' + chips.length + ')');
-      const keys = ['10', '20', '30'].map(k => (raw.match(new RegExp(`data-vsk-key="${k}"`, 'g')) || []).length);
-      assert(keys.every(c => c === 1), '/map SSR keys 10/20/30 each present exactly once (got ' + keys.join(',') + ')');
+      const vals = ['10', '20', '30'].map(k => (raw.match(new RegExp(`rk-chip[^>]*>\\s*${k}\\s*<`, 'g')) || []).length);
+      assert(vals.every(c => c === 1), '/map SSR chips 10/20/30 each present exactly once (got ' + vals.join(',') + ')');
     }
 
     // 22b: full load — chips adopted via claim-by-key, markers all claimed.
@@ -1759,8 +1762,8 @@ async function main() {
       let s = await waitChips(4);
       assert(s.count === 4 && JSON.stringify(s.values) === JSON.stringify(['10', '20', '30', '40']),
         'Add -> 4 chips 10,20,30,40 (got ' + s.count + ': ' + s.values.join(',') + ')');
-      assert(s.keys[0] === '10' && s.keys[1] === '20' && s.keys[2] === '30',
-        'Add keeps SSR keys on adopted chips (10,20,30)');
+      assert(s.claimed[0] && s.claimed[1] && s.claimed[2],
+        'Add keeps SSR chips adopted in place (data-vsk-claimed 10,20,30)');
       assert(s.keys[3] === null && !s.claimed[3],
         'Add renders the new chip fresh (no stale claim)');
       assert(new Set(s.values).size === s.values.length, 'Add produces no duplicate chip text');
@@ -1779,9 +1782,8 @@ async function main() {
       s = await waitChips(4);
       assert(JSON.stringify(s.values) === JSON.stringify(['40', '30', '20', '10']),
         'Reverse -> 40,30,20,10 (got ' + s.values.join(',') + ')');
-      assert(s.keys.indexOf('30') > -1 && s.keys.indexOf('20') > -1 && s.keys.indexOf('10') > -1,
-        'Reverse keeps adopted nodes (data-vsk-key survives reorder)');
-      assert(s.claimed.filter(Boolean).length === 3, 'Reverse keeps 3 claimed chips');
+      assert(s.claimed.filter(Boolean).length === 3,
+        'Reverse keeps SSR chips adopted (3 data-vsk-claimed survive reorder)');
       assert(new Set(s.values).size === s.values.length, 'Reverse produces no duplicate chip text');
       assert(errors.length === 0, 'interactions zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
     }

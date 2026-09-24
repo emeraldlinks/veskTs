@@ -2598,6 +2598,66 @@ describe('Client Codegen — Markerless Hydration', () => {
 		expect(code).not.toContain('injectSkipK(1)');
 	});
 
+	// A compiled child whose call throws BEFORE it claims (a try/catch region:
+	// `try { <Failing/> } catch { <p>…</p> }`) must NOT spend the region budget on
+	// the failed call — the catch branch's own claim needs the full residue to
+	// adopt the region's real SSR slot. Regression: the budget was zeroed BEFORE
+	// the call, so the catch claimed `nextElement(tag, 0)` and adopted the WRONG
+	// element (the / page's Appx/Appxx duplicate claims and orphaned SSR
+	// Count/Insufficient p nodes). The reset must come AFTER the child-frame
+	// try/finally so it only fires on the success path.
+	it('[markerless hyd] throwing compiled child leaves the region budget intact for the catch', () => {
+		const code = compileClient(`
+			component Failing() { throw new Error('boom'); }
+			component Appx() {
+				try {
+					<Failing/>
+				} catch(e) {
+					<p class="err">Error {(e as Error).message}</p>
+				}
+			}
+			export default component App() { const &[t] = track('z'); return (
+				<div id="root"><em class="static">margin</em><Appx/><b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		const inj = code.indexOf('.injectSkipK(');
+		if (inj === -1) throw new Error('expected an injectSkipK deposit into the compiled child:\n' + code.slice(0, 900));
+		// Old behaviour zeroed the budget immediately after injectSkipK (before the
+		// call). Fixed behaviour leaves the child-frame try/finally in between, so
+		// the reset only runs once the call RETURNS.
+		const reset = code.indexOf('= 0;', inj);
+		if (reset === -1) throw new Error('expected a region-budget reset after the call:\n' + code.slice(0, 900));
+		const between = code.slice(inj, reset);
+		if (!between.includes('childFrame--')) throw new Error('budget reset must come AFTER the child-frame try/finally:\n' + code.slice(0, 900));
+	});
+
+	// Root-level dynamic-region fences anchor at the region's own SSR slot
+	// (`idx + budget`), threaded through insertBeforeNextClaim as a second
+	// argument. A region that follows pure-static residue must NOT anchor at the
+	// raw cursor — that wraps the residue element and __place relocates the
+	// claimed content (the / Appx double-claim). The budget var is in scope at
+	// every anchor site, so the fence call must carry it as the offset.
+	it('[markerless hyd] root-level try/catch fences thread the region budget as the SSR-slot offset', () => {
+		const code = compileClient(`
+			component Failing() { throw new Error('boom'); }
+			component Appx() {
+				try {
+					<Failing/>
+				} catch(e) {
+					<p class="err">Error {(e as Error).message}</p>
+				}
+			}
+			export default component App() { const &[t] = track('z'); return (
+				<div id="root"><em class="static">margin</em><Appx/><b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		const ib = code.indexOf('.insertBeforeNextClaim(');
+		if (ib === -1) throw new Error('expected a root-level fence anchoring call:\n' + code.slice(0, 900));
+		// insertBeforeNextClaim receives BOTH the fence comment and the budget
+		// offset expression ($n…), so the fences wrap the residue-offset slot.
+		if (!code.slice(ib, ib + 120).includes(', $n')) throw new Error('fence anchoring must carry the budget offset argument:\n' + code.slice(0, 900));
+	});
+
 	// Static components have no first claim of their own — their stub must
 	// surface the caller's deposit into the SHARED walker it claims through.
 	// `claimOnly(undefined, takeSkipK())` does exactly the markerless semantics:

@@ -1,171 +1,137 @@
-# Vesk — handoff (Sep 24 2026, markerless-hydration session — commit to continue from a PC)
+# Vesk — handoff (Sep 24 2026, markerless-hydration session)
 
-> Last commit on `main`: `d985571` (Sep 22 23:43 Z, feat(css+imports)…).
-> Everything below this line is UNCOMMITTED working-tree work, packaged in the
-> accompanying commit `…` (see `git log -1`). Dev server on this box: `:3000`
-> serving the freshly-built CI tarballs.
+> Head of `main` carries the markerless hydration architecture
+> (`docs/hydration-markerless.md`, Phase 2+3 done: skipK threading, region
+> first-claim budgets, cross-boundary `injectSkipK` value-thread, tier-2 keyed
+> identity via `claimByKey`/`reconcileHydrated`, zero-marker SSR invariant).
+> This session fixed the / duplication bug, threaded the region-budget offset
+> through root-level fence anchoring, synced the adapter `placeFn`, and rewrote
+> the stale Test-22 `data-vsk-key` assertions. **`tests/hydration-test.mjs` is
+> green 466/466** and all unit suites + typecheck are clean.
 
-## Overall objective
+## What was broken → what this session fixed
 
-Land the **markerless hydration architecture** (`hydration-prop.md` →
-`docs/hydration-markerless.md`, Phase 2 design done, Phase 3 implementation
-mostly done) all the way to a green `tests/hydration-test.mjs` **467/467**, with
-zero runtime/decodeTrace regressions, then clean up probes + doc-write.
+### Bug 1 — Appxx try/catch duplication on `/` (error `<p>` ×2)
+`emitComponentCall` in `client-codegen.ts` zeroed the region `budget`
+(`regionBudget = 0`) **before** the self-claiming child call. A throwing child
+(`<Throws fail={true}/>`) consumed the `takeSkipK()` deposit but never claimed
+an SSR slot, so the enclosing catch branch resumed its claim with skipK 0 and
+adopted the WRONG sibling slot → the SSR `Count` + `Insufficient!` `<p>` nodes
+were left unclaimed (orphaned) next to freshly-rendered duplicates.
 
-Phase tracker is `TODO.md` (P3.1–P3.8 done, incl. skipK threading, region
-first-claim budgets, cross-boundary `injectSkipK` value-thread, tier-2 keyed
-identity via `claimByKey`/`reconcileHydrated`, zero-marker SSR invariant).
+**Fix:** the `= 0` budget reset moved to AFTER the child's `try { … } finally {
+childFrame-- }` — spent only once the call actually returns (see
+`client-codegen.ts` ~1023-1041).
 
-## What's WORKING (this uncommitted work, verified)
+### Bug 2 — root-level fences anchored at the raw cursor, not `idx + budget`
+Root-level regions sit at SSR slot `idx + budget` because the static residue
+(`h2`/`p`/`style` in the card) is never claimed. `insertBeforeCursor` anchored
+fences at `els[this.idx]`, warping them around the residue so `__place`
+relocated claimed content.
 
-- **`tests/hydration-test.mjs` = 464/467** (was 461 before this session). The two
-  fixes below made `/empty` (set of 3) and `/blocknav` (TEST 20, 411/423) green.
-- **Fix A — region fence anchoring via the right walker.** `client-codegen.ts`
-  `emitHydrateFenceAnchoring` now anchors `insertBeforeNextClaim(...)` using
-  `${ctx.walker}` (the claimed-container subWalker when a region body sits inside
-  a claimed node) instead of hardcoded `__hydrate`. Root-level regions keep
-  `ctx.walker === '__hydrate'` → emission unchanged. The bug: a region inside a
-  claimed parent anchored its `try`/`if` fences to the *root* walker, so content
-  was caught in the scopeToRegion of the wrong boundary.
-- **Fix B — containerless keyed top-level maps lost their static residue.**
-  `client-codegen.ts` `emitMap` hydKeyed branch now threads `skipK`:
-  `reconcileHydrated(..., ${parent}, ${skipK});`. `packages/runtime/src/reconcile.ts`
-  `reconcileHydrated` gained `skipK = 0`; calls `scopeToRegion` only when
-  `parent && parent.nodeType === 1 && layout.root !== parent` (containerless
-  keyed regions claim from the live walker cursor + skipK); passes
-  `skipK: i === 0 ? skipK : 0` — residue only on the FIRST `claimByKey`.
-  `ClaimByKeyOptions.skipK` already existed (structural `claimByKey` →
-  `advancePastSkippable(this.idx + k)`); marker-mode `claimByKey` ignores `skipK`
-  (safe), marker engine has no `scopeToRegion` (safe).
-- **Test counts:** runtime `hydrate.test.ts` **98/98** (+1 containerless-keyed
-  regression). Compiler `client-codegen.test.ts` **319/319** (+2: subWalker fence
-  anchoring; skipK threading regex). `npm run typecheck` clean. (Unit suites are
-  run against `dist/` — rebuild first: runtime `npx tsc -p
-  packages/runtime/tsconfig.build.json`, compiler `npx tsx
-  packages/cli/src/build-packages.ts`.)
-- **SSR of `/` is clean** (Count: 10 ×1, Insufficient ×1, Boom ×1) — the
-  duplication below is purely a post-hydration defect.
-- **`.vsk` zero-marker invariant** (from earlier phase): markerless SSR carries
-  zero `vsk` substrings / `<!--` comments / `data-*` attrs; user attrs survive.
+**Fix (compiler):** `emitHydrateFenceAnchoring(ctx, anchor, endAnchor,
+rootLevel, offsetExpr?)` now emits `insertBeforeNextClaim(anchor, budget)`; all
+6 root-level call sites (try/catch, opaque ×2, while, for, switch) pass
+`budget || undefined`.
+**Fix (runtime/`hydrate.ts`):** `insertBeforeNextClaim(node, offset?)` +
+`insertBeforeCursor(node, offset?)` gain an optional offset that targets
+`els[advancePastSkippable(this.idx + (offset||0))]` (MarkerWalker accepts and
+ignores `_offset`). The marker/legacy path is unchanged (default 0).
 
-## What's NOT working
+### Adapter `placeFn` drift (caught during verification)
+`packages/adapter/src/client-bundle.ts` re-injected its own `__place` skeleton
+that was missing the "Client-surplus nodes … move them into the region"
+loop the compiler's `__place` has (`client-codegen.ts:2177-2182`). The served
+bundle used the adapter copy (defined last, so it won), silently dropping that
+branch. **Synced** the adapter version word-for-word with the compiler's.
 
-1. **Test-22 remaining 3 assertions (the only suite failures):**
-   - `/map SSR keys 10/20/30 each present exactly once (got 0,0,0)`
-   - `Add keeps SSR keys on adopted chips (10,20,30)`
-   - `Reverse keeps adopted nodes (data-vsk-key survives reorder)`
-   These assert the OLD `data-vsk-key` marker contract. Under rug/markerless
-   max the keys are compile-time-only (never on the DOM), so the assertions are
-   stale. **Decision pending**: update the three to the markerless positional/
-   `data-vsk-claimed` contract (recommended), or relax the `server-jsgen.ts:274`
-   `data-vsk-key` markerless gate.
-2. **NEW — home page `/` duplicates the `Appxx` try/catch subtree after client
-   hydration** (NOT covered by the suite; found post-refresh). One `<p class="error">`
-   inside the card between `<!--try-->…<!--try-end-->` (fresh, unclaimed) plus a
-   **stray second one appended as the card's LAST child, AFTER `try-end`** (fresh,
-   unclaimed). `claimed:false` on both → the SSR original was claimed then removed
-   by `__cleanup`, and TWO fresh renders produced TWO error `<p>`s; one landed
-   before `try-end`, the other after it. Crash-free (0 pageerrors); pure DOM
-   duplication. Not covered by any passing test today.
+### Test-22 stale assertions (3 protocol regressions)
+`tests/hydration-test.mjs` asserted the OLD `data-vsk-key` marker contract.
+Under markerless, keys are compile-time-only and never land on the DOM — the
+adoption stamp is `data-vsk-claimed`, which the suite already reads. Rewrote
+22a (SSR chips carry unique *values*, no `data-vsk-key` on the wire), 22c Add
+(chips adopted in place via `data-vsk-claimed`), 22c Reverse (3 claimed chips
+survive the reorder; no `data-vsk-key` check). One redundant assert was
+collapsed, hence 466 not 467.
 
-## ACTIVELY WORKING ON — Appxx duplication (root cause evidence so far)
+## Verification (all green, this session)
 
-Chunk: `/_vesk/static/page-index.js` (NOT `page-home.js` — that 404s).
-`__hydrators["Throw"]` (line ~223 area) THROWS *before* any claim, so the try
-branch claims nothing; the Appxx hydrator (~554-632) then claims `p(Count)` and
-the error `p` positionally from the card subWalker, and a sync
-`effect(() => { destroy; __cleanup(tryStart, tryEnd); try{…Throw…}catch{create
-fresh p.error; insertBefore try-end} })` re-runs the region on first flush.
+- `tests/hydration-test.mjs` = **466 passed / 0 failed / 466 total** (needs the
+  dev server on :3000 + `CHROMIUM_PATH` override; see Commands).
+- `/` card DOM (post-hydration, direct browser probe): exactly one `Count: 10`,
+  one `Error: Boom!`, one `Error: Insufficient! 10`, all 6 SSR slots claimed,
+  fences anchored *after* the static residue —
+  `[h2, p, style, {try} Boom {try-end}, Count p, {try} Insufficient {try-end}]`.
+- Served `/_vesk/client.js` now carries the synced Client-surplus `__place`.
+- Compiler `client-codegen.test.ts` = **321/321** (+2 this session).
+- Runtime `hydrate.test.ts` = **100/100** (+2 this session).
+- Adapter `tree-shake.test.ts` = **19/19**; adapter `code-split.test.ts` =
+  **16/16** (needs `CHROMIUM_PATH`).
+- `npm run typecheck` clean (types + compiler + runtime + adapter + plugin-pwa).
 
-TRACE: `__cleanup` removes the originally-claimed SSR error `<p>`; catch re-adds
-a fresh one before `try-end`. That still predicts ONE error `<p>` — the second
-(after `try-end`, last card child) is unexplained. Suspects (second `p.error`):
-- `insertBeforeNextClaim` (structural walker `hydrate.ts:1241`) appending the
-  fence END marker at the wrong slot when exhausted, so `__place` branch-3
-  (`start.parentNode === null` → `$root.appendChild`) fires with `$root` = card.
-- Or region re-render caching an anchor to a comment that `__cleanup` moved.
+## New tests this session
 
-KEY QUESTION before coding: is this a **new regression** from Fix A/Fix B (the
-fence anchor now resolves to the CARD subWalker, so both fences + `__place` +
-`__cleanup` all operate inside the card — consistent with what we see) or
-**pre-existing** (Throw's pre-claim throw already made the region effect create
-two renders)? Neither fix touches Appxx's own emission (its hydrator param is
-already literally named `__hydrate`), and the card is claimed+`subWalker`ed, so
-Fix A/B *should* be inert here — but the refresh also changed the tarball build,
-so it may be new vs. the old served bundle. **Decisive check: revert to the old
-tarball build (`0.2.33-ci…`) is impractical; instead wrap `globalThis.__place` /
-`insertBeforeNextClaim` in `page.evaluateOnNewDocument` and log fence node
-parents + ancestry at insert time to see the stray's origin.**
+- `packages/compiler/src/client-codegen.test.ts` (~2588+):
+  - `[markerless hyd] throwing compiled child leaves the region budget intact
+    for the catch` — the `= 0` reset sits AFTER `childFrame--`.
+  - `[markerless hyd] root-level try/catch fences thread the region budget as
+    the SSR-slot offset` — `insertBeforeNextClaim(` carries a `, $n` arg.
+- `packages/runtime/src/hydrate.test.ts` (~638+):
+  - `insertBeforeCursor with a budget offset anchors after the residue, not at
+    the cursor`.
+  - `insertBeforeNextClaim offset past a skippable lands after it (budget math
+    matches claimAt)`.
+- Pre-existing fence tests (hydrate.test.ts 833-848/1202-1252/1842-1843) keep
+  the optional default offset=0 → untouched/valid.
 
-## Next step (upon resuming)
-
-1. Trace the stray: monkey-patch `__place`, `__cleanup`, and
-   `StructuralWalker.prototype.insertBeforeNextClaim` via `evaluateOnNewDocument`
-   (they're assigned/invoked after client.js defines them — use a setter trap on
-   `globalThis.__place`; walkers are page-local so log via patch earlier or reason
-   from the `__place start.parentNode===null` branch). Determine which insert
-   puts a `p.error` AFTER `try-end`.
-2. Fix at the correct layer (likely `__place`/fence-anchor accounting OR the
-   region effect's first-run cleanup ordering in Appxx). Verify with
-   `node /root/vesk/dupfind.mjs` → exactly one `Insufficient` `<p>`, one
-   `Count: 10`, zero strays after hydration; SSR stays clean.
-3. Only if the duplication turns out to be a Fix A/B regression: reassess the
-   fence-anchoring choice.
-4. Run `tests/hydration-test.mjs` → 467/467 after also resolving the 3 Test-22
-   assertions (recommended: rewrite to markerless positional contract).
-5. Cleanup + docs: delete probe scripts (`probe-*.mts/.mjs`, `homecheck.mjs`,
-   `homechunk.mjs`, `domexplore.mjs`, `dupfind.mjs`, `recon-test.mjs`),
-   remove `[hyd-dbg]` instrumentation if any re-added, update `TODO.md` +
-   `docs/hydration-markerless.md`, mark phase statuses.
-
-## Repo / env facts (this box = codespace, not the termux device)
+## Repo / env facts (this box = codespace, not a termux device)
 
 - Remote: `origin` → `github.com/emeraldlinks/veskTs`, branch `main`.
-- Dev server `:3000` is UP (HTTP 200) serving test-app pinned to fresh
-  `0.2.35-ci.1790229817019` tarballs; vesk-doc re-pinned to
-  `0.2.35-ci.1790190050890` (old `0.2.33-ci…` tarball set deleted → new set
-  staged in git; test-app tarballs are gitignored). Refresh tool:
-  `node scripts/refresh-testapp-deps.mjs <app>` (log: `/tmp/opencode/refresh3.log`).
-- Chromium: `/data/data/com.termux/files/usr/bin/chromium-browser` +
-  `--no-sandbox --disable-dev-shm-usage`. Suite runner:
-  `cd /root/vesk && node tests/hydration-test.mjs`.
-- Tooling quirks: source test files import `dist/` via exports map — rebuild
-  dist before running unit suites (see commands above). Backgrounded
-  `setsid … & disown` blocks the shell tool until its timeout but the job
-  SURVIVES — launch, then verify with a separate short command. ad-hoc scripts
-  needing `puppeteer-core` must live inside `/root/vesk` (module resolution).
-- Suite result file (last full run): `/tmp/opencode/hyd-final.txt`
-  (464 passed / 3 failed / 467 total; failures are lines 458/467/473).
+- Dev server :3000 UP serving test-app pinned to fresh
+  `0.2.36-ci.1790239179959` tarballs (test-app tarball set regenerated by the
+  refresh tool). Refresh tool: `node scripts/refresh-testapp-deps.mjs <app>`.
+- Chromium: `/tmp/opencode/chrome-headless-shell-linux64/chrome-headless-shell`
+  (chrome-for-testing **154.0.8037.57**, headless-shell). Suite runner:
+  `node tests/hydration-test.mjs` with `CHROMIUM_PATH` exporting that path.
+- Tooling quirks: source test files import `dist/` via the exports map — run
+  `npx tsx packages/cli/src/build-packages.ts` after compiler/runtime src edits
+  before unit suites. Backgrounded `setsid … & disown` blocks the shell tool
+  until its timeout but the job SURVIVES — launch, then verify with a separate
+  short command. Ad-hoc scripts needing `puppeteer-core` must live inside the
+  repo root (module resolution).
+- git status pending commit: Fix 1 + Fix 2 (compiler + runtime + tests), the
+  adapter `placeFn` sync, the Test-22 rewrites, and test-app package pins.
 
 ## Relevant files
 
-- `packages/compiler/src/client-codegen.ts` — `emitHydrateFenceAnchoring`
-  (`${ctx.walker}`), `emitMap` hydKeyed reconcile `…, ${parent}, ${skipK});`.
-- `packages/runtime/src/reconcile.ts` — `reconcileHydrated` (`skipK = 0`, scope
-  only when `layout.root !== parent`, skipK on first `claimByKey`).
-- `packages/runtime/src/hydrate.ts` — `StructuralWalker` :1008, `claimAt` :1049,
-  `claimByKey` :1200-1231 (`options.skipK` → `advancePastSkippable`), 
-  `insertBeforeNextClaim` :987 (walkers) / :1241, `scopeToRegion` :1186,
-  `captureSsrElementChildren` :266, `__cleanup` :1053 / `__place` :1013.
-- `packages/compiler/src/server-jsgen.ts:274` — `data-vsk-key` markerless gate
-  (Test-22 contract site).
-- `packages/compiler/src/client-codegen.test.ts` (+2) / `packages/runtime/src/hydrate.test.ts` (+1) — new regression tests.
-- `tests/hydration-test.mjs` — `/empty`:241, TEST 20 blocknav ~1497-1530, TEST 22
-  ~1692-1835 (`data-vsk-key` lines 458/467/473), TEST 1 home.
-- `/tmp/opencode/page-index.js` — fetched home chunk (Appxx hydrator ~554-632).
-- `test-app/app/page.vsk` — home page with `Appx`/`Appxx`/`Throw` (the duplication fixture).
-- `docs/hydration-markerless.md` (design contract), `hydration-prop.md` (task).
-- Local probes (throwaway): `probe-*.mts/.mjs`, `homecheck.mjs`, `homechunk.mjs`,
-  `domexplore.mjs`, `dupfind.mjs` (the dup finder used this session).
+- `packages/compiler/src/client-codegen.ts` — Fix 1 (`emitComponentCall`
+  ~1023-1041), Fix 2 (`emitHydrateFenceAnchoring` ~1089-1103 + 6 call sites at
+  1170/1269/1357/1457/1528/1692 passing `budget || undefined`; `regionBudgetVar`/
+  `markerlessSkipExpr` 1106-1150; `$root = __hydrate.root` ~2017).
+- `packages/runtime/src/hydrate.ts` — interface `insertBeforeNextClaim(offset?)`
+  ~99-107; MarkerWalker impl ~992 (ignores offset); StructuralWalker
+  `insertBeforeCursor` ~1090 + `insertBeforeNextClaim` delegate ~1252-1253.
+- `packages/adapter/src/client-bundle.ts` — `placeFn` ~1143 synced to the
+  compiler `__place` (Client-surplus loop added).
+- `tests/hydration-test.mjs` — Test-22 rewrites (22a ~1731, 22c ~1762/1782);
+  TEST 22 block ~1688-1835; TEST 1 home.
+- `packages/compiler/src/client-codegen.test.ts` / `packages/runtime/src/
+  hydrate.test.ts` — new regression tests (see above).
+- `test-app/app/page.vsk` — Appx/Appxx/Throws/Throw sources (74-75, 84-113)
+  grounding the / duplication fixture.
+- `docs/hydration-markerless.md` (design contract), `hydration-prop.md` (task),
+  `TODO.md` (phase tracker — update after this work).
+- Local probes (throwaway, being cleaned up): `dupfind.mjs`, `domexplore.mjs`,
+  `hdump.mjs`, `traceplace.mjs`.
 
 ## Commands
 
 ```bash
-npx tsx packages/cli/src/build-packages.ts          # rebuild compiler dist (required after src edits)
-npx tsc -p packages/runtime/tsconfig.build.json     # rebuild runtime dist
-npx tsx packages/runtime/src/hydrate.test.ts        # runtime suite 98/98
-npx tsx packages/compiler/src/client-codegen.test.ts# compiler suite 319/319
-node tests/hydration-test.mjs                      # E2E hydration (needs :3000 + chromium) 467 total
+npx tsx packages/cli/src/build-packages.ts          # rebuild packages dist (required after src edits)
+npx tsx packages/compiler/src/client-codegen.test.ts# compiler suite 321/321
+npx tsx packages/runtime/src/hydrate.test.ts        # runtime suite 100/100
+CHROMIUM_PATH=/tmp/opencode/chrome-headless-shell-linux64/chrome-headless-shell \
+  node tests/hydration-test.mjs                     # E2E hydration 466/466 (needs :3000)
 node scripts/refresh-testapp-deps.mjs <app>         # re-pin app deps to fresh CI tarballs
 npm run typecheck                                   # tsc --noEmit
 ```

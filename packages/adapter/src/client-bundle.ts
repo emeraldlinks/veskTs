@@ -1150,6 +1150,12 @@ async function buildMainBundle(
     '\t\tconst p = nodes[0].parentNode;\n' +
     '\t\tp.insertBefore(start, nodes[0]);\n' +
     '\t\tp.insertBefore(end, nodes[nodes.length - 1].nextSibling);\n' +
+    '\t\t// Client-surplus nodes (SSR rendered fewer items than the client data)\n' +
+    '\t\t// are freshly claimed and still detached — move them into the region in\n' +
+    '\t\t// client order before `end`, instead of stranding them off-parent.\n' +
+    '\t\tfor (let i = 0; i < nodes.length; i++) {\n' +
+    '\t\t\tif (nodes[i].parentNode === null) p.insertBefore(nodes[i], end);\n' +
+    '\t\t}\n' +
     '\t\treturn;\n' +
     '\t}\n' +
     '\tfallback.appendChild(start);\n' +

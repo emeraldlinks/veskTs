@@ -637,6 +637,60 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     cleanupDocument();
   });
 
+  // A root-level dynamic region that follows pure-static residue must anchor its
+  // fences at `idx + budget` (the region's first-claim SSR slot), NOT at the raw
+  // cursor — otherwise the fences wrap the residue and `__place` relocates the
+  // claimed content out of position (the try/catch Appx/Appxx duplication in /).
+  it('insertBeforeCursor with a budget offset anchors after the residue, not at the cursor', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const h2 = document.createElement('h2');
+    const pEdit = document.createElement('p');
+    const style = document.createElement('style');
+    const boom = document.createElement('p');
+    const count = document.createElement('p');
+    parent.appendChild(h2); parent.appendChild(pEdit); parent.appendChild(style);
+    parent.appendChild(boom); parent.appendChild(count);
+    const walker = createHydrateWalker(parent);
+    // The h2/pEdit/style were retrieved from __vsk_ssrEls and never claimed; the
+    // region's first claim lands 3 slots past the cursor (the value Home injects
+    // via injectSkipK before invoking the region component).
+    walker.injectSkipK(3);
+    const budget = walker.takeSkipK();
+    expect(budget).toBe(3);
+    const start = document.createComment('try');
+    const end = document.createComment('try-end');
+    // Rendered in codegen order: anchor first, end second, both offset by budget.
+    expect(walker.insertBeforeNextClaim(start, budget)).toBe(true);
+    expect(walker.insertBeforeNextClaim(end, budget)).toBe(true);
+    // Both fences sit immediately before the boom <p> (idx 3), NOT before the h2.
+    expect(boom.previousSibling).toBe(end);
+    expect(end.previousSibling).toBe(start);
+    expect(h2.nextSibling).toBe(pEdit);
+    // The fences did not consume any slot: the catch claim still adopts the p.
+    expect(walker.nextElement('p', budget)).toBe(boom);
+    expect(walker.nextElement('p')).toBe(count);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('insertBeforeNextClaim offset past a skippable lands after it (budget math matches claimAt)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const head = document.createElement('h1');
+    const style = document.createElement('style');
+    const p = document.createElement('p');
+    parent.appendChild(head); parent.appendChild(style); parent.appendChild(p);
+    const walker = createHydrateWalker(parent);
+    // skipK=2 accounts for h1 + style in the caller's residue estimate; claimAt
+    // advancePastSkippable(idx+2) lands on the <p>. The fence must sit there too.
+    const fence = document.createComment('if');
+    expect(walker.insertBeforeNextClaim(fence, 2)).toBe(true);
+    expect(p.previousSibling).toBe(fence);
+    expect(walker.nextElement('p', 2)).toBe(p);
+    cleanupDocument();
+  });
+
   it('containerless keyed region claims root-sibling items via the cursor, never the root headings', () => {
     mockDocument();
     // /empty's statement-mode keyed `for` sits among static siblings at the

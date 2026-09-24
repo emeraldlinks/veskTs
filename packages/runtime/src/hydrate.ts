@@ -95,8 +95,13 @@ export interface HydrateWalker {
 	 * owner's following claim. Falls back to the walker root's end when there is
 	 * no live marker (region is the last fragment child). Returns false when no
 	 * host is available (detached subtree).
+	 *
+	 * Markers are per-region, so `offset` (the caller's first-claim budget — SSR
+	 * slots past the cursor) is ignored by marker-based engines and only carries
+	 * meaning for the structural (markerless) walker, where the fence must sit
+	 * exactly where the region's first claim will land (`idx + budget`).
 	 */
-	insertBeforeNextClaim?(node: Node): boolean;
+	insertBeforeNextClaim?(node: Node, offset?: number): boolean;
 	/**
 	 * Markerless value-thread offset (Phase 3.c): a caller deposits the residue
 	 * that precedes a compiled component call so the callee's FIRST top-level
@@ -984,7 +989,7 @@ class WalkerEngine implements HydrateWalker {
 		return null;
 	}
 
-	insertBeforeNextClaim(node: Node): boolean {
+	insertBeforeNextClaim(node: Node, _offset = 0): boolean {
 		// Find the next marker the positional cursor would consume: exactly the
 		// slot a region occupying this source position would have occupied in
 		// the SSR DOM.
@@ -1071,16 +1076,22 @@ class StructuralWalker implements HydrateWalker {
 	}
 
 	/**
-	 * Insert `node` immediately before the next unconsumed SSR element (the
-	 * `skipK` cursor slot). Falls back to appending at the end of the root.
-	 * Used by root-level dynamic regions whose branch had no SSR content: the
-	 * fence anchors at the region's source position instead of the root's end.
+	 * Insert `node` immediately before the `offset`-th unconsumed SSR element
+	 * after the `skipK` cursor slot. Falls back to appending at the end of the
+	 * root. Used by root-level dynamic regions whose branch had no SSR content:
+	 * the fence anchors at the region's source position instead of the root's
+	 * end. `offset` carries the region's first-claim budget (SSR slots past the
+	 * cursor): a region that follows static residue must anchor after those
+	 * residue slots, at exactly where its own first claim will land — otherwise
+	 * fences wrap the WRONG slot and `__place` relocates the claimed content
+	 * (e.g. a try/catch whose preceding h2/p/style residue pushes its slot to
+	 * `idx + 3`).
 	 */
-	insertBeforeCursor(node: Node): boolean {
+	insertBeforeCursor(node: Node, offset = 0): boolean {
 		const host = this.root;
 		if (host === null || host === undefined) return false;
 		try {
-			let n = this.idx;
+			let n = this.advancePastSkippable(this.idx + (offset || 0));
 			while (n < this.els.length && this.els[n].parentNode !== host) n++;
 			if (n < this.els.length) host.insertBefore(node, this.els[n]);
 			else host.appendChild(node);
@@ -1238,8 +1249,8 @@ class StructuralWalker implements HydrateWalker {
 		return null;
 	}
 
-	insertBeforeNextClaim(node: Node): boolean {
-		return this.insertBeforeCursor(node);
+	insertBeforeNextClaim(node: Node, offset = 0): boolean {
+		return this.insertBeforeCursor(node, offset);
 	}
 }
 

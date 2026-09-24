@@ -1025,11 +1025,17 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       // this same walker with its own zero `topPendingSkip`). A region budget is
       // spent by THIS call, so sibling claims in the branch stay positional.
       ctx.push(`${walkerArg}.injectSkipK(${promptExpr});`);
-      if (regionBudget) ctx.push(`${regionBudget} = 0;`);
     }
     ctx.push(`let ${v} = undefined;`);
     ctx.push(`if (__hydrate) __hydrate.childFrame = (__hydrate.childFrame || 0) + 1;`);
     ctx.push(`try { ${v} = ${awaitKw}${access}(${callArgs()}, __registry, ${walkerArg}); } finally { if (__hydrate) __hydrate.childFrame--; }`);
+    // Spend the region budget only once the call RETURNS: a self-claiming child
+    // that throws before claiming (the try/catch fallback in / with fail:true)
+    // consumed the takeSkipK deposit but never advanced the walker cursor, so the
+    // enclosing catch branch must still see the original budget. Zeroing it before
+    // the call made the catch claim with skipK 0 and adopt the WRONG SSR slot
+    // (the Appxx duplicate-claims / orphaned SSR Count + Insufficient p nodes).
+    if (ctx.markerless && promptExpr && !plainTarget && regionBudget) ctx.push(`${regionBudget} = 0;`);
     maybeReplace(v);
     maybeRetire();
     return v;
@@ -1080,7 +1086,7 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
 // walker slot moves their content to the element's following sibling slot, which
 // makes the icon vanish from the button on re-render. `rootLevel` should be
 // `parent === '$root'`.
-function emitHydrateFenceAnchoring(ctx: Ctx, anchor: string, endAnchor: string, rootLevel: boolean): void {
+function emitHydrateFenceAnchoring(ctx: Ctx, anchor: string, endAnchor: string, rootLevel: boolean, offsetExpr?: string): void {
   if (!ctx.hydrate || !rootLevel) return;
   // `rootLevel` (fallback parent is `$root`) already implies the region is a
   // top-level sibling of its enclosing claims — a region nested inside a
@@ -1098,8 +1104,8 @@ function emitHydrateFenceAnchoring(ctx: Ctx, anchor: string, endAnchor: string, 
   // '__hydrate'`, so their emission is unchanged.
   ctx.push(`// Anchor region fences to the SSR slot so no-content regions do not fall back to $root's end.`);
   ctx.push(`if (${ctx.walker} && ${ctx.walker}.insertBeforeNextClaim) {`);
-  ctx.push(indent(`${ctx.walker}.insertBeforeNextClaim(${anchor});`));
-  ctx.push(indent(`${ctx.walker}.insertBeforeNextClaim(${endAnchor});`));
+  ctx.push(indent(`${ctx.walker}.insertBeforeNextClaim(${anchor}${offsetExpr ? `, ${offsetExpr}` : ''});`));
+  ctx.push(indent(`${ctx.walker}.insertBeforeNextClaim(${endAnchor}${offsetExpr ? `, ${offsetExpr}` : ''});`));
   ctx.push(`}`);
 }
 
@@ -1161,7 +1167,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   if (!ctx.hydrate) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effArr} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('try-end');`);
-  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const asyncKw = ctx.isAsyncScope ? 'await ' : '';
 
@@ -1260,7 +1266,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
     ctx.push(`const ${anchor} = document.createComment('if');`);
     ctx.push(`let ${effectsVar} = [];`);
     ctx.push(`const ${endAnchor} = document.createComment('if-end');`);
-    emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
+    emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
     const asyncKw = ctx.isAsyncScope ? 'await ' : '';
     const fnOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
     const renderNames: string[] = [];
@@ -1348,7 +1354,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('if-end');`);
-  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const asyncKw = ctx.isAsyncScope ? 'await ' : '';
   const fnOpen = ctx.isAsyncScope ? 'async () => {' : '() => {';
@@ -1448,7 +1454,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('while-end');`);
-  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const renderLoop = ctx.n();
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
@@ -1519,7 +1525,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('for-end');`);
-  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const renderLoop = ctx.n();
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
@@ -1683,7 +1689,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
   ctx.push(`let ${effectsVar} = [];`);
   ctx.push(`const ${endAnchor} = document.createComment('switch-end');`);
-  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root');
+  emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const renderSwitch = ctx.n();
   ctx.push(`const ${renderSwitch} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
