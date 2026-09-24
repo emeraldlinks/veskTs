@@ -2693,6 +2693,44 @@ describe('Client Codegen — Markerless Hydration', () => {
 });
 
 
+describe('commented-out code never compiles (issue #1/#2)', () => {
+	bothModes('commented-out JSX element emits no element and no text node', `component App(props) {
+	<div>
+		//<span class="old">OLD</span>
+		<span>{props.label}</span>
+	</div>
+}`, (code) => {
+		expect(code).not.toContain('OLD');
+		expect(code).not.toContain('"old"');
+		expect(code).toContain('props.label');
+	});
+
+	bothModes('commented-out expression emits no live binding', `component App(props) {
+	<div>
+		<span>{props.count}</span>
+		//{props.count + 100}
+	</div>
+}`, (code) => {
+		expect(code).toContain('props.count');
+		expect(code).not.toContain('props.count + 100');
+	});
+
+	bothModes('commented-out statement is skipped', `component App(props) {
+	const n = props.count
+	//const n = 999
+	<p>{n}</p>
+}`, (code) => {
+		expect(code).not.toContain('999');
+	});
+
+	bothModes('a URL in an attribute is not treated as a comment', `component App(props) {
+	<a href="https://vesk.dev/a//b">{props.label}</a>
+}`, (code) => {
+		expect(code).toContain('https://vesk.dev/a//b');
+	});
+});
+
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

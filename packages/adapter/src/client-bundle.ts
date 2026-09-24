@@ -1,4 +1,4 @@
-import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync, rmSync, mkdtempSync } from 'node:fs';
+import { readFileSync, existsSync, writeFileSync, unlinkSync, statSync, rmSync, mkdtempSync, mkdirSync } from 'node:fs';
 import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -1044,6 +1044,30 @@ let runtimeEntryId = 0;
 const RUNTIME_ENTRY = '.runtime-tree-entry.mjs';
 
 /**
+ * esbuild resolves entry points and absolute import specifiers with forward
+ * slashes; a native Windows path (`C:\...`) is not resolvable.
+ */
+function esbuildPath(p: string): string {
+  return sep === '/' ? p : p.split(sep).join('/');
+}
+
+/**
+ * The tree-shake entry is written outside the project tree on purpose. It used
+ * to be written into `node_modules/@vesk/runtime/dist`, which (a) tripped the
+ * dev watcher on every build — an endless rebuild loop on Windows, where
+ * `fs.watch` reports backslash paths that slipped past the `node_modules/`
+ * skip check — and (b) raced concurrent builds, so one build could delete the
+ * entry while another was still resolving it (`Could not resolve …`). The
+ * entry now lives in a temp dir and imports the runtime by absolute path.
+ */
+function runtimeTreeShakeEntry(): string {
+  return join(tmpdir(), 'vesk-runtime-tree-shake', RUNTIME_ENTRY);
+}
+
+/** Serializes tree-shake builds so concurrent callers never share the entry file. */
+let treeShakeQueue: Promise<unknown> = Promise.resolve();
+
+/**
  * Builds a single self-contained runtime module for the given used names.
  *
  * The runtime's real module graph is bundled by esbuild into one IIFE whose
@@ -1052,7 +1076,13 @@ const RUNTIME_ENTRY = '.runtime-tree-entry.mjs';
  * const bindings. This replaces the old regex-based file concatenation, which
  * leaked runtime module-scope names into the page scope.
  */
-export async function buildTreeShakenRuntime(runtimeDir: string, usedNames: string[]): Promise<string> {
+export function buildTreeShakenRuntime(runtimeDir: string, usedNames: string[]): Promise<string> {
+  const run = treeShakeQueue.then(() => buildTreeShakenRuntimeNow(runtimeDir, usedNames));
+  treeShakeQueue = run.catch(() => undefined);
+  return run;
+}
+
+async function buildTreeShakenRuntimeNow(runtimeDir: string, usedNames: string[]): Promise<string> {
   const unique = [...new Set(usedNames)];
   const available = runtimeExportNames(runtimeDir);
   const missing = unique.filter((n) => !available.has(n));
@@ -1060,12 +1090,14 @@ export async function buildTreeShakenRuntime(runtimeDir: string, usedNames: stri
     console.error(`vesk: runtime names not exported — ${missing.join(', ')}; falling back to full runtime`);
     return buildRuntimeCode(runtimeDir);
   }
-  const entry = join(runtimeDir, RUNTIME_ENTRY);
+  const entry = runtimeTreeShakeEntry();
+  const indexClient = esbuildPath(join(runtimeDir, 'index-client.js'));
   try {
+    try { mkdirSync(dirname(entry), { recursive: true }); } catch { /* exists */ }
     try { rmSync(entry); } catch { /* not present yet */ }
-    writeFileSync(entry, `export { ${unique.join(', ')} } from './index-client.js';\n`);
+    writeFileSync(entry, `export { ${unique.join(', ')} } from ${JSON.stringify(indexClient)};\n`);
     const result = await build({
-      entryPoints: [entry],
+      entryPoints: [esbuildPath(entry)],
       bundle: true,
       format: 'iife',
       globalName: '__veskRuntime',

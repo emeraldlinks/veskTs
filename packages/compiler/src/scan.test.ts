@@ -13,6 +13,7 @@ import {
   stripTrailingSemicolons,
   containsForOfIn,
   collapseNewlineWhitespace,
+  blankLeadingLineComments,
 } from '@vesk/compiler/src/scan';
 
 let passed = 0;
@@ -274,6 +275,71 @@ describe('scan — skipString / skipComment', () => {
   it('skips block comments', () => {
     const text = '/* ) } */code';
     expect(skipComment(text, 0)).toBe(9);
+  });
+});
+
+describe('scan — blankLeadingLineComments', () => {
+  it('blanks a line-leading // comment', () => {
+    expect(blankLeadingLineComments('// gone\nkept')).toBe('       \nkept');
+  });
+
+  it('blanks an indented line-leading // comment', () => {
+    expect(blankLeadingLineComments('\t\t// gone\n\t\tkept')).toBe('\t\t       \n\t\tkept');
+  });
+
+  it('preserves length and every offset', () => {
+    const src = 'a\n// note\nb';
+    expect(blankLeadingLineComments(src).length).toBe(src.length);
+  });
+
+  it('preserves newlines inside a blanked line so line numbers hold', () => {
+    const src = '// one\n// two\ncode';
+    const out = blankLeadingLineComments(src);
+    expect(out.split('\n').length).toBe(src.split('\n').length);
+    expect(out.endsWith('code')).toBe(true);
+  });
+
+  it('leaves a trailing // comment after code alone (acorn ignores it)', () => {
+    expect(blankLeadingLineComments('const n = 1 // note')).toBe('const n = 1 // note');
+  });
+
+  it('leaves a mid-line // in JSX text alone', () => {
+    expect(blankLeadingLineComments('<p>ratio 1//2</p>')).toBe('<p>ratio 1//2</p>');
+  });
+
+  it('never blanks // inside a double-quoted string', () => {
+    expect(blankLeadingLineComments('<a href="https://x.dev/a//b">x</a>')).toBe('<a href="https://x.dev/a//b">x</a>');
+  });
+
+  it('never blanks // inside a single-quoted string', () => {
+    expect(blankLeadingLineComments("const s = 'a//b'")).toBe("const s = 'a//b'");
+  });
+
+  it('never blanks // inside a template literal', () => {
+    const src = 'const t = `one\n// literal\ntwo`';
+    expect(blankLeadingLineComments(src)).toBe(src);
+  });
+
+  it('never blanks // inside a template ${} interpolation', () => {
+    const src = 'const t = `${x}//y`';
+    expect(blankLeadingLineComments(src)).toBe(src);
+  });
+
+  it('leaves escaped slashes in a regex alone', () => {
+    expect(blankLeadingLineComments('const re = /https:\\/\\//')).toBe('const re = /https:\\/\\//');
+  });
+
+  it('blanks a comment line that follows a multi-line string', () => {
+    const out = blankLeadingLineComments('const t = `a\nb`\n// gone\ncode');
+    expect(out.endsWith('\ncode')).toBe(true);
+    expect(out.includes('// gone')).toBe(false);
+  });
+
+  it('blanks each line of a multi-line commented-out JSX block', () => {
+    const src = '//<div>\n//  <span>x</span>\n//</div>\n<p>kept</p>';
+    const out = blankLeadingLineComments(src);
+    expect(out.includes('<span>')).toBe(false);
+    expect(out.includes('<p>kept</p>')).toBe(true);
   });
 });
 

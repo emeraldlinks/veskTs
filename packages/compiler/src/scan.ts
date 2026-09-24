@@ -147,6 +147,53 @@ export function skipComment(text: string, i: number): number {
 }
 
 /**
+ * Blanks out `//` line comments that begin a line, overwriting the comment
+ * characters with spaces so every source offset (and therefore every
+ * diagnostic line/column) is preserved.
+ *
+ * In JSX-children position acorn reads `//` as JSXText rather than a
+ * comment, so `//<span>old</span>` inside a component still rendered the
+ * element and `//{count + 1}` still emitted a live binding. Blanking a
+ * line-leading `//` before the parse makes a commented-out line behave like
+ * a comment in every position of a `.vsk` file.
+ *
+ * Only line-leading `//` is blanked: a trailing `// note` after code is a
+ * real comment acorn already ignores, and blanking a mid-line `//` would
+ * corrupt regex literals (`/https:\/\//`) and intentional JSX text. Strings
+ * and template literals are skipped, so a `//` inside them is never touched.
+ */
+export function blankLeadingLineComments(text: string): string {
+  const chars = text.split('');
+  const n = text.length;
+  let lineStart = true;
+  let i = 0;
+  while (i < n) {
+    const ch = text[i];
+    if (ch === '\n') { lineStart = true; i++; continue; }
+    if (isWhitespaceChar(ch)) { i++; continue; }
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const end = skipString(text, i);
+      for (let k = i; k < end; k++) {
+        const c = text[k];
+        if (c === '\n') lineStart = true;
+        else if (!isWhitespaceChar(c)) lineStart = false;
+      }
+      i = end;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '/' && lineStart) {
+      let j = i;
+      while (j < n && text[j] !== '\n') { chars[j] = ' '; j++; }
+      i = j;
+      continue;
+    }
+    lineStart = false;
+    i++;
+  }
+  return chars.join('');
+}
+
+/**
  * Given the index of an opening `(`, `[` or `{`, returns the index of its
  * matching closing delimiter. Strings, `//` and `/* ... *​/` comments are
  * skipped so delimiters inside them do not count. Returns `text.length`

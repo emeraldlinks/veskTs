@@ -180,6 +180,25 @@ test('dts: destructured params type from annotation', () => {
   has(dts, 'export type FooProps = Props;', 'annotation type used');
 });
 
+test('commented-out code is stripped for tsc (issue #1/#2)', () => {
+  const out = vskToTsx(`import { track } from '@vesk/runtime'
+
+component Home(props: { count: number }) {
+	const &[n] = track(0)
+	//const bad: number = "not a number"
+	<div>
+		//<span class="old">OLD</span>
+		<span>{props.count}</span>
+		//{props.count + 100}
+	</div>
+}
+`);
+  has(out, 'props.count', 'live binding survives');
+  notHas(out, 'not a number', 'commented-out declaration stripped');
+  notHas(out, 'count + 100', 'commented-out expression stripped');
+  notHas(out, 'OLD', 'commented-out JSX stripped');
+});
+
 console.log(`\n==================================================`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 console.log(`${failed === 0 ? 'All tests passed!' : 'Some tests failed!'}`);

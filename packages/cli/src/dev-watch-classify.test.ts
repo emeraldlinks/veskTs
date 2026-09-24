@@ -26,7 +26,6 @@ const ignored: string[] = [
   '.git/HEAD',
   'tarballs/pkg.tgz',
   'tmp-vesk-chunk-abc.js',
-  '.next/cache/file.js',
   'node_modules/.pnpm/idx',
 ];
 for (const p of ignored) {
@@ -93,6 +92,32 @@ for (const name of ROUTE_STRUCTURAL_VSK) {
 
 // structural marker only matters when it's a .vsk (e.g. a non-vsk 'page' is irrelevant)
 assert(shouldRescanRoutes('app/components/page.vsk', 'change') === true, 'structural basename anywhere rescans');
+
+// --- Windows separators (issue #1: endless rebuild loop) ---
+// Node's recursive fs.watch reports backslash paths on Windows. Before the
+// normalization these slipped past the node_modules/ skip checks, matched the
+// `.mjs` extension and retriggered the build that had just written the file.
+const windowsIgnored: string[] = [
+  'node_modules\\@vesk\\runtime\\dist\\.runtime-tree-entry.mjs',
+  'node_modules\\react\\index.js',
+  '.vesk\\dev\\static\\client.js',
+  '.git\\HEAD',
+  'tarballs\\pkg.tgz',
+];
+for (const p of windowsIgnored) {
+  assert(classifyHmrWatchPath(p) === 'ignored', `ignored (windows): ${p}`);
+}
+const windowsHandled: Array<[string, string]> = [
+  ['app\\page.vsk', 'vsk'],
+  ['app\\global.css', 'css'],
+  ['src\\lib\\api.ts', 'script'],
+  ['app\\components\\page.vsk', 'vsk'],
+];
+for (const [p, kind] of windowsHandled) {
+  assert(classifyHmrWatchPath(p) === kind, `${kind} (windows): ${p}`);
+}
+assert(shouldRescanRoutes('app\\page.vsk', 'change') === true, 'windows structural .vsk rescans');
+assert(shouldRescanRoutes('app\\components\\Button.vsk', 'change') === false, 'windows component edit skips scan');
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total\n`);
 process.exit(failed > 0 ? 1 : 0);

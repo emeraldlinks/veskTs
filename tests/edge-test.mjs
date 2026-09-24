@@ -2,7 +2,7 @@
  * Vesk Edge Runtime Test.
  * Builds the test-app for the 'edge' platform and drives the generated
  * `handleEdgeRequest(request)` handler directly with Node's Request/Response —
- * no browser, no HTTP server. Asserts SSR HTML, hydration markers, embedded
+ * no browser, no HTTP server. Asserts SSR HTML, markerless output, embedded
  * static serving, API routes and 404 handling.
  * Usage: node edge-test.mjs  (run by scripts/test.js after prod hydration)
  */
@@ -64,8 +64,10 @@ async function main() {
     const navOk = flat.includes('>Home<') && flat.includes('>About<') && flat.includes('>Blog<');
     assert(navOk, 'nav links present');
 
+    // Markerless is the default: SSR emits plain HTML and the client claims it
+    // structurally, so no `<!--vsk:…-->` markers should be present.
     const markers = (html.match(/<!--vsk(--|:)/g) || []).length;
-    assert(markers > 0, `hydration markers present in SSR output (${markers})`);
+    assert(markers === 0, `SSR output is markerless (found ${markers} markers)`);
     assert(flat.includes('<script type="module" src="/_vesk/static/client.js">'), 'client runtime script tag present');
   }
 

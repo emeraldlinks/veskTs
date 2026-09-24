@@ -286,5 +286,55 @@ test('stmt bare expression statement not in a loop still renders', () => {
   expect(html).toEqual('Hello');
 });
 
+// ── `//` commented-out lines must not render or run (issue #1/#2) ──
+
+test('stmt commented-out JSX element does not render', () => {
+  const html = render(stmt(`
+    <div>
+      //<span class="old">OLD</span>
+      <span>new</span>
+    </div>
+  `), 'App', {});
+  expect(html).toEqual('<div><span>new</span></div>');
+});
+
+test('stmt commented-out expression does not render', () => {
+  const html = render(stmt(`
+    <div>
+      <span>{props.count}</span>
+      //{props.count + 100}
+    </div>
+  `), 'App', { count: 5 });
+  expect(html).toEqual('<div><span>5</span></div>');
+});
+
+test('stmt multi-line commented-out if block compiles and renders nothing', () => {
+  const html = render(stmt(`
+    <div>
+      //if (props.on) {
+      //  <span>hidden</span>
+      //}
+      <span>shown</span>
+    </div>
+  `), 'App', { on: true });
+  expect(html).toEqual('<div><span>shown</span></div>');
+});
+
+test('stmt commented-out statement is skipped', () => {
+  const html = render(stmt(`
+    const n = props.count
+    //const n = 999
+    <p>{n}</p>
+  `), 'App', { count: 7 });
+  expect(html).toEqual('<p>7</p>');
+});
+
+test('stmt a URL in JSX text is not treated as a comment', () => {
+  const html = render(stmt(`
+    <p>see https://vesk.dev/a//b now</p>
+  `), 'App', {});
+  expect(html).toEqual('<p>see https://vesk.dev/a//b now</p>');
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

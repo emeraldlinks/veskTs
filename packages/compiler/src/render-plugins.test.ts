@@ -66,6 +66,27 @@ component App(props: { name?: string }) {
   </article>
 }`;
 
+/**
+ * True when `html` contains a real `<tag>…text…</tag>` element whose content
+ * includes `text`. The head reconciler stamps `data-vesk-head` on page-owned
+ * head tags so they win over `headExtra`, so an exact `<title>X</title>`
+ * match is too brittle — the tag may carry that attribute.
+ */
+function headTagHas(html: string, tag: string, text: string): boolean {
+  const open = '<' + tag;
+  const close = '</' + tag + '>';
+  let i = html.indexOf(open);
+  while (i !== -1) {
+    const gt = html.indexOf('>', i);
+    if (gt === -1) return false;
+    const end = html.indexOf(close, gt);
+    if (end === -1) return false;
+    if (html.slice(gt + 1, end).includes(text)) return true;
+    i = html.indexOf(open, end);
+  }
+  return false;
+}
+
 function headInjector(tag: string): VeskPlugin {
   return {
     name: 'test-head',
@@ -137,7 +158,7 @@ it('renderFullPage (expression mode): onHead + onHtml hooks run', async () => {
     hydrate: true,
     plugins: [pwaLike, pluginOnHtml],
   });
-  if (!html.includes('<title>Page Title</title>')) throw new Error('page head missing');
+  if (!headTagHas(html, 'title', 'Page Title')) throw new Error('page head missing');
   if (!html.includes(PLUGIN_MANIFEST)) throw new Error('manifest not injected');
   if (!html.includes(PLUGIN_THEME)) throw new Error('theme-color not injected');
   if (!html.includes('src="/pwa-init.js"')) throw new Error('init script not injected');
@@ -150,7 +171,7 @@ it('renderFullPage (statement mode): onHead + onHtml hooks run', async () => {
     hydrate: true,
     plugins: [pwaLike, pluginOnHtml],
   });
-  if (!html.includes('<title>Stmt Title</title>')) throw new Error('statement-mode head missing');
+  if (!headTagHas(html, 'title', 'Stmt Title')) throw new Error('statement-mode head missing');
   if (!html.includes(PLUGIN_MANIFEST)) throw new Error('manifest not injected in statement mode');
   if (!html.includes('data-plugin="1"')) throw new Error('onHtml not run in statement mode');
 });
@@ -186,7 +207,7 @@ it('renderFullPage: page head wins over headExtra title/meta', async () => {
   const extra = '<title>Extra Title</title>\n<meta name="description" content="extra-desc" />';
   const pageWithDesc = `component App { <Head><title>Page Title</title><meta name="description" content="page-desc" /></Head> <p>x</p> }`;
   const html = await renderFullPage(pageWithDesc, 'App', {}, new Map(), { hydrate: true, headExtra: extra });
-  if (!html.includes('<title>Page Title</title>')) throw new Error('page title lost to headExtra');
+  if (!headTagHas(html, 'title', 'Page Title')) throw new Error('page title lost to headExtra');
   if (html.includes('Extra Title')) throw new Error('headExtra title leaked over page title');
   if (!html.includes('page-desc')) throw new Error('page description lost');
   if (html.includes('extra-desc')) throw new Error('headExtra description leaked over page description');
@@ -207,7 +228,7 @@ it('renderPageStream (expression): onHead applied, onHtml NOT called', async () 
     { name: 'no-html', async onHtml() { htmlCalls++; return null; } },
   ] as VeskPlugin[];
   const out = await runStream(pageExpr, 'App', { hydrate: true, plugins });
-  if (!out.includes('<title>Page Title</title>')) throw new Error('page head missing in stream');
+  if (!headTagHas(out, 'title', 'Page Title')) throw new Error('page head missing in stream');
   if (!out.includes(PLUGIN_MANIFEST)) throw new Error('manifest not injected into stream head');
   if (!out.includes('src="/pwa-init.js"')) throw new Error('init script not injected into stream head');
   if (htmlCalls !== 0) throw new Error(`onHtml must not run on streamed docs (got ${htmlCalls})`);
@@ -215,7 +236,7 @@ it('renderPageStream (expression): onHead applied, onHtml NOT called', async () 
 
 it('renderPageStream (statement): head hooks run', async () => {
   const out = await runStream(pageStmt, 'App', { hydrate: true, plugins: [pwaLike] });
-  if (!out.includes('<title>Stmt Title</title>')) throw new Error('statement-mode head missing in stream');
+  if (!headTagHas(out, 'title', 'Stmt Title')) throw new Error('statement-mode head missing in stream');
   if (!out.includes(PLUGIN_MANIFEST)) throw new Error('manifest not injected into statement-mode stream');
 });
 
@@ -228,13 +249,13 @@ it('ssg (expression): live plugins applied to head + html', async () => {
   const result = await ssg(pageExpr, 'App', { name: 'W' }, { plugins: [pwaLike, pluginOnHtml] });
   if (!result.html.includes(PLUGIN_MANIFEST)) throw new Error('manifest not injected in ssg');
   if (!result.html.includes('data-plugin="1"')) throw new Error('onHtml not run in ssg');
-  if (!result.html.includes('<title>Page Title</title>')) throw new Error('page head missing in ssg');
+  if (!headTagHas(result.html, 'title', 'Page Title')) throw new Error('page head missing in ssg');
 });
 
 it('ssg (statement): live plugins applied', async () => {
   const result = await ssg(pageStmt, 'App', { name: 'W' }, { plugins: [pwaLike] });
   if (!result.html.includes(PLUGIN_MANIFEST)) throw new Error('manifest not injected in ssg statement mode');
-  if (!result.html.includes('<title>Stmt Title</title>')) throw new Error('statement-mode head missing in ssg');
+  if (!headTagHas(result.html, 'title', 'Stmt Title')) throw new Error('statement-mode head missing in ssg');
 });
 
 it('ssg applies headExtra without live plugins', async () => {
@@ -260,7 +281,7 @@ it('null from onHead keeps prior head; onHtml return null keeps doc', async () =
     { name: 'html-null', async onHtml() { return null; } },
   ] as VeskPlugin[];
   const html = await renderFullPage(pageExpr, 'App', { name: 'W' }, new Map(), { hydrate: true, plugins });
-  if (!html.includes('<title>Page Title</title>')) throw new Error('head dropped by null hook');
+  if (!headTagHas(html, 'title', 'Page Title')) throw new Error('head dropped by null hook');
   if ((html.match(/<body>/g) || []).length !== 1) throw new Error('html mangled by null hook');
 });
 

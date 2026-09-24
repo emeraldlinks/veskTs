@@ -510,7 +510,20 @@ export type HmrWatchKind = 'vsk' | 'css' | 'script' | 'events' | 'config' | 'ign
  * project regardless of location — only `node_modules`, build outputs and VCS
  * internals are excluded.
  */
-export function classifyHmrWatchPath(relPath: string): HmrWatchKind {
+/**
+ * Normalizes a watch-relative path to forward slashes. Node's recursive
+ * `fs.watch` reports Windows paths with backslashes
+ * (`node_modules\@vesk\runtime\dist\.runtime-tree-entry.mjs`), which would
+ * slip past every `split('/')` / `includes('node_modules/')` check below and
+ * be classified as a watched source file — the runtime tree-shake writes that
+ * entry on each build, so the rebuild retriggered itself forever.
+ */
+function normalizeWatchPath(relPath: string): string {
+  return relPath.includes('\\') ? relPath.split('\\').join('/') : relPath;
+}
+
+export function classifyHmrWatchPath(relPathRaw: string): HmrWatchKind {
+  const relPath = normalizeWatchPath(relPathRaw);
   const first = relPath.split('/')[0];
   if (HMR_SKIP_DIRS.has(first) || HMR_SKIP_MARKERS.some((m) => relPath.includes(m))) return 'ignored';
   const name = relPath.slice(relPath.lastIndexOf('/') + 1);
@@ -528,8 +541,9 @@ export function classifyHmrWatchPath(relPath: string): HmrWatchKind {
  * edits can only restructure routes when the file name itself is a route
  * marker (page/layout/loading/error/not-found/offline/network.vsk).
  */
-export function shouldRescanRoutes(relPath: string, eventType: string): boolean {
+export function shouldRescanRoutes(relPathRaw: string, eventType: string): boolean {
   if (eventType === 'rename') return true;
+  const relPath = normalizeWatchPath(relPathRaw);
   const name = relPath.slice(relPath.lastIndexOf('/') + 1);
   return relPath.endsWith('.vsk') && ROUTE_STRUCTURAL_VSK.has(name);
 }
