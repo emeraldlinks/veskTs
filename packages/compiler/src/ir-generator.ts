@@ -291,6 +291,15 @@ function componentUsesFetch(nodes: IRNode[]): boolean {
 function extractKeyExpr(nodes: IRNode[]): Expression | null {
   for (const n of nodes) {
     if (n instanceof StaticNode && n.keyExpr) return n.keyExpr;
+    // `<ItemRow key={item.id} …/>` carries the key as a regular prop on the
+    // component call. Honor it so component-rooted maps get the same keyed
+    // (claim-by-key / reconcile) treatment as element-rooted maps instead of
+    // falling back to the positional `__place` region — which stranding fresh
+    // surplus items and cannot reorder adopted ones.
+    if (n instanceof ComponentCall) {
+      const k = n.props.find((p) => p.name === 'key');
+      if (k) return k.value;
+    }
   }
   return null;
 }

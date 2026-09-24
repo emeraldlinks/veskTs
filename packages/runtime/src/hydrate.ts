@@ -36,6 +36,12 @@ export interface ClaimByKeyOptions {
 	 * twin rots.
 	 */
 	relocate?: boolean;
+	/**
+	 * Markerless structural walks: the number of unconsumed SSR slots before the
+	 * region's next item (keyed regions carry no compile-time residue, so this
+	 * is accepted for symmetry with the marker engine and stays 0 in practice).
+	 */
+	skipK?: number;
 }
 
 export interface HydrateWalker {
@@ -91,6 +97,16 @@ export interface HydrateWalker {
 	 * host is available (detached subtree).
 	 */
 	insertBeforeNextClaim?(node: Node): boolean;
+	/**
+	 * Markerless value-thread offset (Phase 3.c): a caller deposits the residue
+	 * that precedes a compiled component call so the callee's FIRST top-level
+	 * claim skips it (its own `topPendingSkip` starts at zero and the shared
+	 * walker cursor has not advanced over the caller's static leftovers). The
+	 * deposit is transient — `takeSkipK` reads and consumes it once. Marker-based
+	 * engines never receive the deposit and no-op.
+	 */
+	injectSkipK?(n: number): void;
+	takeSkipK?(): number;
 }
 
 interface HydrateIdleOptions {
@@ -986,56 +1002,260 @@ class WalkerEngine implements HydrateWalker {
 			return false;
 		}
 	}
+
+	injectSkipK(_n: number): void {
+		// Marker-based walks are positioned by the marker stream; the offset
+		// value-thread is a markerless construct.
+	}
+
+	takeSkipK(): number {
+		return 0;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Structural (markerless) walker
+//
+// Marker-based hydration walks comment markers + their SSR elements. The
+// markerless design walks PLAIN server HTML: a per-parent stack of element
+// lists, claimed positionally by `skipK` (the number of source siblings the
+// caller already consumed — static residues it retrieved from `__vsk_ssrEls`)
+// and by tag. The compiler emits `nextElement(tag, skipK)` claims with the
+// descriptor implicit in the tag; divergence follows §2.2 step 4: a tag
+// mismatch consumes exactly one slot, reports, and hands back a fresh element
+// that the caller mounts — the SSR node is never bound, never deleted.
+//
+// The same engine backs `createHydrateChildWalker`, so runtime components that
+// claim offspring positionally (loading stubs, slot content) keep working with
+// identical semantics.
+// ---------------------------------------------------------------------------
+
+class StructuralWalker implements HydrateWalker {
+	root: HTMLElement | null;
+	// Snapshot taken at construction, so fresh nodes mounted during the render
+	// are never re-claimed and claims stay aligned to the SSR source list.
+	private els: Element[];
+	private idx = 0;
+	private adopted = new WeakSet<Element>();
+
+	constructor(root: HTMLElement | null, els?: Element[]) {
+		this.root = root;
+		this.els = els || (root ? Array.prototype.slice.call(root.children) : []);
+	}
+
+	/**
+	 * Non-claimable framework preamble elements that the SSR renderer may emit
+	 * as real DOM nodes ahead of a component's first claimable element (scoped
+	 * `<style>` blocks, the loader title). The marker stream tracked them
+	 * implicitly; the structural walker must step PAST them without consuming a
+	 * claim slot, otherwise every subsequent positional claim shifts by one and
+	 * the whole subtree falls back to fresh-node building.
+	 */
+	private static skipTags = new Set(['style', 'script', 'template', 'title', 'meta', 'link', 'base']);
+
+	static isSkippable(el: Element): boolean {
+		return StructuralWalker.skipTags.has(el.tagName.toLowerCase());
+	}
+
+	private advancePastSkippable(index: number): number {
+		while (index < this.els.length && StructuralWalker.isSkippable(this.els[index])) index++;
+		return index;
+	}
+
+	done(): boolean {
+		return this.idx >= this.els.length;
+	}
+
+	remainingCount(): number {
+		return this.els.length - this.idx;
+	}
+
+	/**
+	 * Insert `node` immediately before the next unconsumed SSR element (the
+	 * `skipK` cursor slot). Falls back to appending at the end of the root.
+	 * Used by root-level dynamic regions whose branch had no SSR content: the
+	 * fence anchors at the region's source position instead of the root's end.
+	 */
+	insertBeforeCursor(node: Node): boolean {
+		const host = this.root;
+		if (host === null || host === undefined) return false;
+		try {
+			let n = this.idx;
+			while (n < this.els.length && this.els[n].parentNode !== host) n++;
+			if (n < this.els.length) host.insertBefore(node, this.els[n]);
+			else host.appendChild(node);
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	// Markerless value-thread offset (Phase 3.c): a transient residue deposit for
+	// a compiled component's first top-level claim. `injectSkipK` is emitted by
+	// the CALLER before invoking a self-claiming child (which cannot see the
+	// caller's compile-time skipK); `takeSkipK` is read exactly once at the
+	// callee's first claim and resets the deposit so later claims stay
+	// positional against the advancing cursor. Consumed synchronously on the
+	// same walker reference the call was made through.
+	private inheritOffset = 0;
+
+	injectSkipK(n: number): void {
+		this.inheritOffset = n;
+	}
+
+	takeSkipK(): number {
+		const n = this.inheritOffset;
+		this.inheritOffset = 0;
+		return n;
+	}
+
+	private claimAt(tag: string | undefined, skipK: number, raw: boolean): Element {
+		if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
+			// eslint-disable-next-line no-console
+			console.error('[hyd-dbg] claimAt', tag, 'skip=', skipK, 'idx=', this.idx, 'els=', this.els.length);
+		}
+		let target = this.advancePastSkippable(this.idx + (skipK || 0));
+		// The caller's residue accounting may overshoot (region estimates use
+		// max over branches); back off to the cursor rather than past the list.
+		if (target > this.els.length) target = this.idx;
+		while (target < this.els.length) {
+			const el = this.els[target];
+			if (tag && el.tagName.toLowerCase() !== tag) {
+				// §2.2 step 4: descriptor failed. Consume exactly ONE slot and
+				// hand back a fresh element — the SSR node is never bound, never
+				// deleted. The caller detaches the fresh node when provably safe
+				// or leaves it inert for the sweep.
+				this.idx = this.advancePastSkippable(target + 1);
+				reportMiss(
+					'tag-mismatch',
+					`descriptor wanted <${tag}> but the SSR slot holds <${el.tagName.toLowerCase()}>; consuming one slot and rendering fresh.`,
+					false
+				);
+				return document.createElement(tag || 'div');
+			}
+			if (this.adopted.has(el)) {
+				// Double-claim guard: a node already adopted (cross-position
+				// move) is a consumed slot; skip past it and keep walking.
+				target = this.advancePastSkippable(target + 1);
+				continue;
+			}
+			this.idx = this.advancePastSkippable(target + 1);
+			this.adopted.add(el);
+			if (!raw) stripDirectTextNodes(el);
+			captureSsrElementChildren(el);
+			stampClaimed(el);
+			return el;
+		}
+		this.idx = this.els.length;
+		reportMiss(
+			'exhausted',
+			`hydration claim missed <${tag || 'element'}>; the client rendered more or different content than SSR.`,
+			// Not loud: an exhausted walker is the normal post-hydration
+			// re-render shape (every further claim legitimately builds fresh
+			// nodes) — telemetry-only, mirroring the marker engine.
+			false
+		);
+		return document.createElement(tag || 'div');
+	}
+
+	nextElement(tag?: string, skipK = 0): Element {
+		return this.claimAt(tag, skipK, false);
+	}
+
+	claimOnly(tag?: string, skipK = 0): Element {
+		return this.claimAt(tag, skipK, true);
+	}
+
+	subWalker(rootEl: HTMLElement): HydrateWalker {
+		if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
+			// eslint-disable-next-line no-console
+			console.error('[hyd-dbg] subWalker over <' + (rootEl && rootEl.tagName) + '> kids=' + (rootEl ? rootEl.children.length : -1));
+		}
+		return new StructuralWalker(rootEl);
+	}
+
+	/**
+	 * Markerless region scope (Phase 3.e): keyed lists claim their items from a
+	 * walker over their OWN container, not the top-level walker — the top
+	 * walker's positional cursor would otherwise adopt the region container's
+	 * siblings. The scoped walker snapshots the region's children and SHARES
+	 * the adoption ledger, so sibling regions in the same container never
+	 * double-claim (skip `adopted`) and top-level claims never re-adopt a node
+	 * the region already claimed.
+	 */
+	scopeToRegion(rootEl: HTMLElement): StructuralWalker {
+		const w = new StructuralWalker(rootEl);
+		w.adopted = this.adopted;
+		return w;
+	}
+
+	retireDetached(): void {
+		// Structural walks hold no marker list; nothing to sweep.
+	}
+
+	takeMarkers(_comments: Comment[]): void {
+		// Structural walks hold no markers; nothing to transfer.
+	}
+
+	claimByKey(_key: string, _options?: ClaimByKeyOptions): HydrateClaim | null {
+		// Keyed identity, markerless (Phase 3.c/d2). Keys never live on the DOM,
+		// so a keyed item adopts the next unconsumed SSR region slot POSITIONALLY
+		// (region order == client order on first paint; every map template has
+		// one per-item static structure, so a fingerprint cannot distinguish
+		// keys within a region — §2.5 tier 2). Identity is preserved for the
+		// order-matching case, the anchor/`marker` bookkeeping in reconcile.ts
+		// pins the adopted element (`c.el`), and a first-paint reorder is
+		// corrected on the first reactive update via the JS key map — the
+		// documented, non-silent contract. An exhausted region yields null so
+		// `reconcileHydrated` renders the surplus client items fresh at the
+		// region tail (never duplicated). `skipK` is accepted for symmetry with
+		// the marker engine but keyed regions have no compile-time residue.
+		const k = (_options && _options.skipK) || 0;
+		if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
+			// eslint-disable-next-line no-console
+			console.error('[hyd-dbg] claimByKey key=', _key, 'idx=', this.idx, 'els=', this.els.length, 'root=<', this.root ? this.root.tagName : '-', '>');
+		}
+		let target = this.advancePastSkippable(this.idx + k);
+		if (target > this.els.length) target = this.idx;
+		while (target < this.els.length) {
+			const el = this.els[target];
+			if (this.adopted.has(el)) {
+				target = this.advancePastSkippable(target + 1);
+				continue;
+			}
+			this.idx = this.advancePastSkippable(target + 1);
+			this.adopted.add(el);
+			stripDirectTextNodes(el);
+			captureSsrElementChildren(el);
+			stampClaimed(el);
+			return { el };
+		}
+		this.idx = this.els.length;
+		return null;
+	}
+
+	peekKey(_key: string): Element | null {
+		return null;
+	}
+
+	insertBeforeNextClaim(node: Node): boolean {
+		return this.insertBeforeCursor(node);
+	}
 }
 
 export function createHydrateWalker(container: HTMLElement | null, markerList?: Comment[]): HydrateWalker {
 	const markers = markerList || (container ? collectVskMarkers(container) : []);
+	// Markerless automatic detection: a container whose SSR output carries NO
+	// hydration comments is plain server HTML → walk it structurally. Explicit
+	// marker lists (deferred-strategy slices) always stay marker-based.
+	if (!markerList && container && markers.length === 0 && container.children.length > 0) {
+		return new StructuralWalker(container);
+	}
 	return new WalkerEngine(container, markers);
 }
 
 export function createHydrateChildWalker(parentEl: HTMLElement | null): HydrateWalker {
-	let childIdx = 0;
-	const children = parentEl ? parentEl.children : [];
-
-	return {
-		root: parentEl,
-		done() {
-			return childIdx >= children.length;
-		},
-		nextElement(tag?: string) {
-			while (childIdx < children.length) {
-				const child = children[childIdx++];
-				if (!tag || child.tagName.toLowerCase() === tag) {
-					stripDirectTextNodes(child);
-					captureSsrElementChildren(child);
-					stampClaimed(child);
-					return child;
-				}
-			}
-			return document.createElement(tag || 'div');
-		},
-		claimOnly(tag?: string) {
-			while (childIdx < children.length) {
-				const child = children[childIdx++];
-				if (!tag || child.tagName.toLowerCase() === tag) {
-					captureSsrElementChildren(child);
-					stampClaimed(child);
-					return child;
-				}
-			}
-			return document.createElement(tag || 'div');
-		},
-		subWalker(rootEl: HTMLElement) {
-			return createHydrateChildWalker(rootEl);
-		},
-		retireDetached() {
-			// Child-walkers hold no marker list; nothing to sweep.
-		},
-		takeMarkers(_comments: Comment[]) {
-			// Child-walkers hold no marker list; nothing to transfer. The
-			// layout slot contract falls back to the shared walk.
-		},
-	};
+	return new StructuralWalker(parentEl);
 }
 
 export function hydrate(

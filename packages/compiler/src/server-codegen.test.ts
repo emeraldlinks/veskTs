@@ -3,7 +3,7 @@
  *
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
-import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate } from '@vesk/compiler/src/server-codegen';
+import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate, setVskMarkerless } from '@vesk/compiler/src/server-codegen';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -537,7 +537,7 @@ describe('Statement Mode Server Rendering', () => {
 			component App(props: { items: { id: number, name: string }[] }) {
 				return <ul>{props.items.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;
 			}
-		`, 'App', { items: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] }, new Map(), { hydrate: true });
+		`, 'App', { items: [{ id: 1, name: 'A' }, { id: 2, name: 'B' }] }, new Map(), { hydrate: true, markerless: false });
 		expect(html).toBe('<!--vsk:t:ul--><ul><!--vsk:t:li--><li data-vsk-key="1">A</li><!--vsk:t:li--><li data-vsk-key="2">B</li></ul>');
 	});
 	it('hydrate SSR stamps data-vsk-key on statement-mode keyed for-of roots', () => {
@@ -549,7 +549,7 @@ describe('Statement Mode Server Rendering', () => {
 					}
 				</ul>
 			}
-		`, 'App', { todos: [{ id: 7, text: 'X' }] }, new Map(), { hydrate: true });
+		`, 'App', { todos: [{ id: 7, text: 'X' }] }, new Map(), { hydrate: true, markerless: false });
 		expect(html).toBe('<!--vsk:t:ul--><ul><!--vsk:t:li--><li data-vsk-key="7">X</li></ul>');
 	});
 	it('non-hydrate SSR emits no markers or data-vsk-key', () => {
@@ -572,7 +572,7 @@ describe('Statement Mode Server Rendering', () => {
 					<p>WEB</p>
 				}
 			}
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		// the initially-rendered static branch is claimable, not a bare element
 		expect(html).toBe('<!--vsk:t:p--><p>SSR</p>');
 	});
@@ -1347,7 +1347,7 @@ describe('Async Discipline', () => {
 		}
 	});
 
-	it('layout rendering a slot does not need async', async () => {
+	it('layout rendering a slot does not need async (markerless: plain output, no slot boundary)', async () => {
 		const html = await render(`
 			async component Page() {
 				const data = await Promise.resolve('page')
@@ -1357,19 +1357,11 @@ describe('Async Discipline', () => {
 				<main>{props.children}</main>
 			}
 		`, 'Layout', { children: 'slot' });
-		// The slot contract wraps every `{props.children}` region in an
-		// id-paired boundary (`<!--vsk-slot:sN-->` … `<!--vsk-slot-end:sN-->`)
-		// so the client scopes page claims instead of sharing the cursor.
-		// The sid is process-global monotonic, so assert shape + pairing
-		// without pinning the exact number.
-		expect(html).toContain('<main><!--vsk-slot:');
-		expect(html).toContain('slot<!--vsk-slot-end:');
-		const openIdx = html.indexOf('<!--vsk-slot:');
-		const closeIdx = html.indexOf('<!--vsk-slot-end:');
-		const openId = html.slice(openIdx + '<!--vsk-slot:'.length, html.indexOf('-->', openIdx));
-		const closeId = html.slice(closeIdx + '<!--vsk-slot-end:'.length, html.indexOf('-->', closeIdx));
-		expect(openId.length > 0).toBe(true);
-		expect(closeId).toBe(openId);
+		// Markerless drops the id-paired `<!--vsk-slot:sN-->` boundary: SSR
+		// output is plain and the client scopes page claims via the
+		// `createLayoutSlot` boundary walker instead.
+		expect(html).toBe('<main>slot</main>');
+		expect(html).not.toContain('vsk-slot');
 		expect(html.indexOf('</main>')).toBe(html.length - '</main>'.length);
 	});
 });
@@ -1381,6 +1373,33 @@ describe('Error Cases', () => {
 	it('throws for unknown component', () => {
 		try { render('component App { return <div />; }', 'X'); throw new Error('no throw'); }
 		catch (e) { expect(e.message).toContain('not found'); }
+	});
+
+	it('undeclared component tag fails with actionable message, not __veskScope crash (statement mode)', () => {
+		try {
+			render(`
+				component App {
+					<main><Slot /></main>
+				}
+			`, 'App');
+			throw new Error('no throw');
+		} catch (e: any) {
+			expect(e.message).toContain('"Slot" was not found');
+			expect(e.message).toContain('component');
+			expect(e.message).not.toContain('__veskScope');
+		}
+	});
+
+	it('undeclared component tag fails with actionable message, not __veskScope crash (expression mode)', () => {
+		try {
+			render(`
+				component App { return <main><Slot /></main>; }
+			`, 'App');
+			throw new Error('no throw');
+		} catch (e: any) {
+			expect(e.message).toContain('"Slot" was not found');
+			expect(e.message).not.toContain('__veskScope');
+		}
 	});
 });
 
@@ -1441,12 +1460,12 @@ describe('Sub-Component Static Extraction', () => {
 	});
 
 	it('dynamic element gets a typed marker', () => {
-		const html = render(`component App(props: { n: number }) { return <div>{props.n}</div>; }`, 'App', { n: 42 }, new Map(), { hydrate: true });
+		const html = render(`component App(props: { n: number }) { return <div>{props.n}</div>; }`, 'App', { n: 42 }, new Map(), { hydrate: true, markerless: false });
 		expect(html).toContain('<!--vsk:t:div--><div>42</div>');
 	});
 
 	it('static child inside dynamic container lacks <!--vsk--> markers', () => {
-		const html = render(`component App(props: { n: number }) { return <div class="outer"><span>Static</span><p>{props.n}</p></div>; }`, 'App', { n: 7 }, new Map(), { hydrate: true });
+		const html = render(`component App(props: { n: number }) { return <div class="outer"><span>Static</span><p>{props.n}</p></div>; }`, 'App', { n: 7 }, new Map(), { hydrate: true, markerless: false });
 		expect(html.match(/<!--vsk:t:/g)).toHaveLength(2);
 		// The <span> should NOT have <!--vsk--> (fully static subtree)
 		// The <p> with DynamicBinding should have <!--vsk-->
@@ -1461,7 +1480,7 @@ describe('Sub-Component Static Extraction', () => {
 	});
 
 	it('deeply nested static subtree gets no markers', () => {
-		const html = render(`component App(props: { n: number }) { return <div><article><section><p>Deep</p></section></article><span>{props.n}</span></div>; }`, 'App', { n: 3 }, new Map(), { hydrate: true });
+		const html = render(`component App(props: { n: number }) { return <div><article><section><p>Deep</p></section></article><span>{props.n}</span></div>; }`, 'App', { n: 3 }, new Map(), { hydrate: true, markerless: false });
 		// Only the dynamic <span> and its dynamic ancestors get markers
 		expect(html).toContain('<!--vsk:t:span--><span>3</span>');
 		// The static <article>/<section>/<p> chain has NO markers
@@ -1479,7 +1498,7 @@ describe('Hydrate component-call wrapper', () => {
 		const html = render(`
 			component Nav { return <header class="sticky top-0">Hi</header>; }
 			component App { return <Nav />; }
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		// The component call-site renders exactly `<!--vsk:c:Nav-->` + the
 		// callee's own root. No `<span style="display:contents">` box may sit between
 		// marker and root: the hydration walker's claim reads the root directly
@@ -1492,7 +1511,7 @@ describe('Hydrate component-call wrapper', () => {
 		const html = render(`
 			component Nav { <header class="sticky top-0">Hi</header> }
 			component App { <Nav /> }
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		expect(html).toBe('<!--vsk:c:Nav--><header class="sticky top-0">Hi</header>');
 	});
 
@@ -1500,7 +1519,7 @@ describe('Hydrate component-call wrapper', () => {
 		const html = render(`
 			component Split { <header>Top</header> <nav>Nav</nav> }
 			component App { <Split /> }
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		// Marker-only boundary: multiple statement-mode roots still claim
 		// directly off the shared walker; no layout wrapper is introduced.
 		expect(html).toBe('<!--vsk:c:Split--><header>Top</header><nav>Nav</nav>');
@@ -1516,7 +1535,7 @@ describe('Hydrate component-call wrapper', () => {
 					<span>Language</span>
 				</p>
 			}
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		// The marker-only boundary is `<!--vsk:c:Linkish--><a …>docs</a>` — the marker
 		// precedes phrasing content (`<a>`), which never triggers an implicit
 		// `<p>` close, so SSR-body parsing keeps the marker in the paragraph.
@@ -1536,7 +1555,7 @@ describe('Hydrate component-call wrapper', () => {
 		const html = render(`
 			component Card { return <section>Hi</section>; }
 			component App { return <div><Card /></div>; }
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		expect(html).toContain('<!--vsk:c:Card--><section>Hi</section>');
 		expect(html).not.toContain('<!--vsk--><section>Hi</section>');
 	});
@@ -1545,7 +1564,7 @@ describe('Hydrate component-call wrapper', () => {
 		const html = render(`
 			component Card { <section>Hi</section> }
 			component App { <div><Card /></div> }
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		expect(html).toContain('<!--vsk:c:Card--><section>Hi</section>');
 		expect(html).not.toContain('<!--vsk--><section>Hi</section>');
 	});
@@ -1554,7 +1573,7 @@ describe('Hydrate component-call wrapper', () => {
 		const html = render(`
 			component Card { return <section>Hi</section>; }
 			component App { return <div>{true ? <Card /> : null}</div>; }
-		`, 'App', {}, new Map(), { hydrate: true });
+		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
 		// Opaque-region static claims stay bare; the call-site is typed.
 		expect(html).toContain('<!--vsk:c:Card-->');
 	});
@@ -1652,10 +1671,12 @@ describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
 
 	function hydratePrecompile(source) {
 		setVskHydrate(true);
+		setVskMarkerless(false);
 		try {
 			return compileFile(source);
 		} finally {
 			setVskHydrate(false);
+			setVskMarkerless(false);
 		}
 	}
 
@@ -1670,7 +1691,7 @@ describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
 
 	it('renderPage with hydrate-precompiled cached emits markers', async () => {
 		const cached = hydratePrecompile(pageSrc);
-		const result = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		const result = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: false, cached });
 		setVskHydrate(false);
 		expect(result.body).toBe('<!--vsk:t:div--><div>Hello, W!</div>');
 	});
@@ -1682,22 +1703,22 @@ describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
 	});
 	it('cached hydrate render matches fresh compile render', async () => {
 		const cached = hydratePrecompile(pageSrc);
-		const viaCache = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		const viaCache = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: false, cached });
 		setVskHydrate(false);
-		const viaFresh = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true });
+		const viaFresh = await renderPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: false });
 		setVskHydrate(false);
 		expect(viaCache.body).toBe(viaFresh.body);
 	});
 	it('renderFullPage with hydrate-precompiled cached emits markers', async () => {
 		const cached = hydratePrecompile(pageSrc);
-		const html = await renderFullPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		const html = await renderFullPage(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: false, cached });
 		setVskHydrate(false);
 		expect(html).toContain('<!--vsk:t:div-->');
 		expect(html).toContain('Hello, W!');
 	});
 	it('renderPageStream with hydrate-precompiled cached emits markers', async () => {
 		const cached = hydratePrecompile(pageSrc);
-		const stream = renderPageStream(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, cached });
+		const stream = renderPageStream(pageSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: false, cached });
 		let out = '';
 		for await (const chunk of stream) out += chunk;
 		setVskHydrate(false);
@@ -1716,6 +1737,205 @@ describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
 		let out = '';
 		for await (const chunk of stream) out += chunk;
 		expect(out).not.toContain('<script type="module"');
+	});
+});
+
+describe('Markerless SSR (structural hydration)', () => {
+	const probeSrc = `
+		component App(props: { name: string }) {
+			const &[count] = track(0);
+			<div class="wrapper">
+				<p>{count}</p>
+				<button onClick={() => {}}>increment</button>
+			</div>
+		}
+	`;
+
+	it('markerless hydrate emits plain HTML with zero hydration comments/attrs', async () => {
+		setVskMarkerless(true);
+		try {
+			const result = await renderPage(probeSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: true });
+			expect(result.body).not.toContain('<!--vsk');
+			expect(result.body).not.toContain('data-vsk');
+			expect(result.body).toBe('<div class="wrapper"><p>0</p><button>increment</button></div>');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+
+	it('marker mode still emits markers when the same source compiles with hydrate only', async () => {
+		setVskMarkerless(false);
+		try {
+			const result = await renderPage(probeSrc, 'App', { name: 'W' }, new Map(), { hydrate: true, markerless: false });
+			expect(result.body).toContain('<!--vsk:t:div-->');
+			expect(result.body).toContain('<!--vsk:t:p-->');
+			expect(result.body).toContain('<!--vsk:t:button-->');
+		} finally {
+			setVskHydrate(false);
+		}
+	});
+
+	it('markerless keyed maps drop data-vsk-key and render the plain body template', async () => {
+		const src = `
+			component App(props: { items: { id: number }[] }) {
+				<ul>
+					{props.items.map((it) => <li key={it.id}>{it.id}</li>)}
+				</ul>
+			}
+		`;
+		setVskMarkerless(true);
+		try {
+			const result = await renderPage(src, 'App', { items: [{ id: 1 }, { id: 2 }] }, new Map(), { hydrate: true, markerless: true });
+			expect(result.body).toBe('<ul><li>1</li><li>2</li></ul>');
+			expect(result.body).not.toContain('data-vsk-key');
+			expect(result.body).not.toContain('<!--vsk');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+
+	// A `key` prop on a component call is honored as the map key: the SSR side
+	// still renders the plain body template (keys never reach the DOM in
+	// markerless mode) and the client keyed path claims by key.
+	it('markerless component-rooted keyed maps render the plain body with no key markers', async () => {
+		const src = `
+			component ItemRow(props: { id: number }) {
+				<li data-id={props.id}>{props.id}</li>
+			}
+			component App(props: { items: { id: number }[] }) {
+				<ul>
+					{props.items.map((it) => <ItemRow key={it.id} id={it.id} />)}
+				</ul>
+			}
+		`;
+		setVskMarkerless(true);
+		try {
+			const result = await renderPage(src, 'App', { items: [{ id: 1 }, { id: 2 }] }, new Map(), { hydrate: true, markerless: true });
+			expect(result.body).toBe('<ul><li data-id="1">1</li><li data-id="2">2</li></ul>');
+			expect(result.body).not.toContain('data-vsk-key');
+			expect(result.body).not.toContain('<!--vsk');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+
+	it('markerless layout slots drop slot boundary comments', async () => {
+		const src = `
+			component Layout(props: { children: unknown }) {
+				<main>{props.children}</main>
+			}
+		`;
+		setVskMarkerless(true);
+		try {
+			const result = await renderPage(src, 'Layout', { children: 'slot' }, new Map(), { hydrate: true, markerless: true });
+			expect(result.body).not.toContain('vsk-slot');
+			expect(result.body).not.toContain('<!--vsk');
+			expect(result.body).toBe('<main>slot</main>');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+
+	it('markerless component calls drop the c: component marker', async () => {
+		const src = `
+			component Inner(props: { label: string }) {
+				<span>{props.label}</span>
+			}
+			component App(props) {
+				<Inner label="hi" />
+			}
+		`;
+		setVskMarkerless(true);
+		try {
+			const result = await renderPage(src, 'App', {}, new Map(), { hydrate: true, markerless: true });
+			expect(result.body).not.toContain('<!--vsk');
+			expect(result.body).toBe('<span>hi</span>');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+
+	// Full-surface zero-marker invariant: across every SSR emitter (static
+	// nodes, dynamic text, ternaries, keyed maps, component borders, events,
+	// islands, slots/layouts) a markerless hydrate render must ship ZERO vsk
+	// comments, ZERO `data-vsk-*` attributes, and zero HTML comments. User-
+	// authored attributes (data-id/data-user) survive untouched.
+	it('markerless full expression/statement surface emits zero vsk markers/attrs', async () => {
+		const src = `
+			component Child(props: { x: string }) { <span data-user={props.x}>{props.x}</span> }
+			component StaticChild() { <strong class="s">static</strong> }
+			component Chip client(props: { label: string }) { <span class="chip">{props.label}</span> }
+			component Section(props: { children: unknown }) { <section class="sec">{props.children}</section> }
+			export default component App(props) {
+				const &[n] = track(3);
+				const &[open] = track(true);
+				const &[items] = track([{ id: 1, a: 'A' }, { id: 2, a: 'B' }]);
+				let lvl = 2;
+				let total = 0;
+				<div id="root">
+					<h1 class="title">{n}</h1>
+					{open ? <em class="yes">on</em> : <em class="no">off</em>}
+					{items.map((it) => <li key={it.id} data-id={it.id}>{it.a}</li>)}
+					<Child x="hi" />
+					<StaticChild />
+					<button onClick={() => {}}>go</button>
+					<Chip label="iso" />
+					<Section><b>inner</b></Section>
+					while (total < 1) { <i class="w">w{total}</i>; total += 1; }
+					if (lvl === 2) { <em class="z2">two</em> } else { <em class="zx">x</em> }
+					<p class="static">note</p>
+					<em>{lvl}</em>
+				</div>
+			}
+		`;
+		setVskMarkerless(true);
+		try {
+			const result = await renderPage(src, 'App', {}, new Map(), { hydrate: true, markerless: true });
+			expect(result.body).not.toContain('vsk');
+			expect(result.body).not.toContain('<!--');
+			expect(result.body).not.toContain('data-vsk');
+			// User-authored dynamic/static attrs are untouched.
+			expect(result.body).toContain('data-id="1"');
+			expect(result.body).toContain('data-user="hi"');
+			// The feature surface renders exactly (structural cursor target).
+			expect(result.body).toBe(
+				'<div id="root"><h1 class="title">3</h1><em class="yes">on</em>' +
+				'<li data-id="1">A</li><li data-id="2">B</li>' +
+				'<span data-user="hi">hi</span><strong class="s">static</strong><button>go</button>' +
+				'<span class="chip">iso</span><section class="sec"><b>inner</b></section>' +
+				'<i class="w">w0</i><em class="z2">two</em><p class="static">note</p><em>2</em></div>'
+			);
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+
+	it('markerless full-page render (document + scripts) emits zero vsk markers/attrs', async () => {
+		const src = `
+			export default component App(props) {
+				const &[items] = track([{ id: 1 }, { id: 2 }]);
+				<ul>{items.map((it) => <li key={it.id}>{it.id}</li>)}</ul>
+			}
+		`;
+		setVskMarkerless(true);
+		try {
+			const html = await renderFullPage(src, 'App', {}, new Map(), { hydrate: true, markerless: true });
+			expect(html).not.toContain('vsk');
+			expect(html).not.toContain('<!--');
+			expect(html).not.toContain('data-vsk');
+			// prettifyHtml reformats the body; assert the surface instead.
+			expect(html).toContain('<div id="root">');
+			expect(html.replace(/\s+/g, '')).toContain('<ul><li>1</li><li>2</li></ul>');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
 	});
 });
 

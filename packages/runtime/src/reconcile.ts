@@ -92,17 +92,42 @@ export function reconcileHydrated<T>(
 	createItem: (item: T, index: number, effs: Block[], root: Element | null) => void,
 	walker: KeyedHydrateWalker,
 	parent: Node,
+	skipK = 0,
 ): (newItems: T[]) => void {
 	// Phase 1: adopt every item by key up front. Relocate moves out-of-order
 	// nodes to the cursor, so afterwards adopted elements stand contiguous in
 	// client order with node identity preserved. Anchors must be placed AFTER
 	// this (phase 2): placing them first would strand moved nodes outside the
 	// region and corrupt every later range operation.
+	//
+	// Markerless regions scope claim-by-key to their own container: the
+	// structural walker's positional cursor sits on the top-level container, so
+	// keyed items nested under a region element would otherwise steal that
+	// element's siblings. `scopeToRegion` also shares the adoption ledger, so a
+	// later sibling region (or a top-level claim) skips already-adopted nodes.
+	// A CONTAINERLESS keyed region (items are direct children of the walker's
+	// OWN root — e.g. a statement-mode keyed `for` beside static siblings in a
+	// page) must NOT re-scope: a fresh walker over the root from index 0 would
+	// positionally adopt the root's unrelated siblings (headings, nav) as the
+	// region's items. It claims from the live walker's cursor instead, where
+	// `skipK` (the compile-time static residue standing between the cursor and
+	// the region's first SSR item) aligns the first claim to the right slot.
+	let claimWalker = walker;
+	const layout = walker as { scopeToRegion?: (root: HTMLElement) => KeyedHydrateWalker; root?: Node | null };
+	const scope = layout.scopeToRegion;
+	const parentIsElement = parent && parent.nodeType === 1;
+	if (scope && parentIsElement && layout.root !== parent) {
+		claimWalker = scope.call(walker, parent as HTMLElement);
+	}
+	if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
+		// eslint-disable-next-line no-console
+		console.error('[hyd-dbg] reconcileHydrated items=', items.length, 'scoped=', claimWalker !== walker, 'parent=<', parent && parent.nodeName, '>', 'hasClaim=', !!claimWalker.claimByKey, 'walkerType=', (walker as { constructor?: { name?: string } }).constructor && (walker as { constructor: { name?: string } }).constructor.name);
+	}
 	const claimed = new Map<string, Element>();
 	for (let i = 0; i < items.length; i++) {
 		const key = keyFn(items[i], i);
 		if (claimed.has(key)) continue;
-		const c = walker.claimByKey ? walker.claimByKey(key, { relocate: true }) : null;
+		const c = claimWalker.claimByKey ? claimWalker.claimByKey(key, { relocate: true, skipK: i === 0 ? skipK : 0 }) : null;
 		if (c) claimed.set(key, c.el);
 	}
 

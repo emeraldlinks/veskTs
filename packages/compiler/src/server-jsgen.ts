@@ -12,7 +12,7 @@ import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, f
 import {
   isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
-  __vskHydrate, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
+  __vskHydrate, __vskMarkerless, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
 import { localValueImportNames } from '@vesk/compiler/src/module-imports';
 
@@ -109,6 +109,11 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
   }
   if (node instanceof RuntimeStatement) return semicolonizeStatement(transformTracked(node as any, tracked || new Map()));
   if (node instanceof SlotNode) {
+    // Markerless mode drops the slot boundary comments: SSR output is plain
+    // HTML and slot claims scope structurally (createLayoutSlot subject to the
+    // markerless layout contract — Phase 3.x). The children themselves render
+    // identically either way.
+    if (__vskMarkerless) return `__out.push(props.children || '');`;
     const sid = `s${nextVskId()}`;
     return `__out.push('<!--vsk-slot:${sid}-->');__out.push(props.children || '');__out.push('<!--vsk-slot-end:${sid}-->');`;
   }
@@ -146,9 +151,11 @@ function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string,
   let openTag = `<${node.tag}`;
   const forceClaim = takeVskForceClaim();
   const subtreeNeedsJS = __vskHydrate && (forceClaim || !isStaticIR(node.children));
-  if (subtreeNeedsJS) {
+  if (subtreeNeedsJS && !__vskMarkerless) {
     // Keyed static boundary (Hydrate-Todo: no bare markers): the walker
     // asserts this tag on adopt and names it in every miss/orphan report.
+    // Markerless mode omits the comment entirely — the structural walker
+    // scopes interior claims to the claimed element's own children.
     lines.push('__out.push(' + JSON.stringify(`<!--vsk:t:${sanitizeMarkerName(node.tag)}-->`) + ');');
   }
   for (const attr of node.attributes) {
@@ -264,7 +271,7 @@ function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, T
   // injected into a shadow copy of the item root at codegen time — it flows
   // through the existing dynamic-attribute machinery (which also forces a
   // claim marker on otherwise-static roots).
-  const bodyForItem: IRNode[] = __vskHydrate && node.keyExpr ? keyedItemTemplate(node) : node.bodyTemplate;
+  const bodyForItem: IRNode[] = __vskHydrate && !__vskMarkerless && node.keyExpr ? keyedItemTemplate(node) : node.bodyTemplate;
 
   const hasAlternate = node.alternateNodes.length > 0;
   const arrVar = hasAlternate ? `__a${nextVskId()}` : null;
@@ -476,8 +483,16 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   // components during SSR.
   const calleeVar = `__cc${nextVskId()}`;
   lines.push(`const ${calleeVar} = ${callee};`);
+  // Registry lookups can resolve to `undefined` when a JSX tag names a
+  // component that was never declared, imported, or registered at runtime
+  // (e.g. `<Slot/>` in a framework where `{props.children}` is the channel).
+  // Guard the hoisted callee so the failure is an actionable message instead
+  // of `Cannot read properties of undefined (reading '__veskScope')` mid-deref.
+  if (!node.calleeExpr) {
+    lines.push(`if (${calleeVar} == null) throw new Error(${JSON.stringify(`Component "${compName}" was not found while rendering SSR HTML. Declare it with the \`component\` keyword, import it, or register it in the component registry.`)});`);
+  }
   const callExpr = `${awaitKw}${calleeVar}(${propsObj}, __registry, (${calleeVar}.__veskScope || __vesk))`;
-  if (__vskHydrate) {
+  if (__vskHydrate && !__vskMarkerless) {
     lines.push(`__out.push(${JSON.stringify(componentMarker(compName))} + (${callExpr} || ''));`);
   } else {
     lines.push(`__out.push(${callExpr} || '');`);

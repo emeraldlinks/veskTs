@@ -137,13 +137,13 @@ describe('Client Codegen — DOM Creation', () => {
 		component App { return <><div>A</div><div>B</div></>; }
 	`, (code, mode) => {
 		if (mode === 'normal') expect(code).toContain('DocumentFragment');
-		else expect(code).toContain('__hydrate.claimOnly()');
+		else expect(code).toContain('__hydrate.claimOnly(undefined,');
 	});
 	bothModes('uses fragment statement mode', `
 		component App { <div>A</div><div>B</div> }
 	`, (code, mode) => {
 		if (mode === 'normal') expect(code).toContain('DocumentFragment');
-		else expect(code).toContain('__hydrate.claimOnly()');
+		else expect(code).toContain('__hydrate.claimOnly(undefined,');
 	});
 });
 
@@ -439,7 +439,7 @@ describe('Client Codegen — Control Flow', () => {
 		expect(code).toContain('document.createTextNode(String(n))');
 		expect(code).not.toContain('effect(() => { $n');
 		if (mode === 'hydrate') {
-			expect(code).toContain('__hydrate.nextElement("span")');
+			expect(code).toContain('__hydrate.nextElement("span",');
 			expect(code).toContain('__cl.push(');
 		}
 	});
@@ -501,7 +501,7 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 		}
 	`, (code, mode) => {
 		if (mode === 'hydrate') {
-			expect(code).toContain('createLayoutSlot(__hydrate,');
+			expect(code).toContain('createLayoutSlot($n4, $n3)');
 			expect(code).toContain('props.children(__slot.walker)');
 			expect(code).toContain('__pendingChild = __slot.track(__child)');
 			expect(code).not.toContain('props.children(__hydrate)');
@@ -518,7 +518,7 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 		}
 	`, (code, mode) => {
 		if (mode === 'hydrate') {
-			expect(code).toContain('createLayoutSlot(__hydrate,');
+			expect(code).toContain('createLayoutSlot($n4, $n3)');
 			expect(code).toContain('props.children(__slot.walker)');
 			expect(code).toContain('__pendingChild = __slot.track(__child)');
 			expect(code).not.toContain('props.children(__hydrate)');
@@ -750,7 +750,7 @@ describe('Client Codegen — Refs', () => {
 			return <input ref={el => inputEl = el} />;
 		}
 	`, (code) => {
-		expect(code).toContain('(el => inputEl = el)($n0)');
+		expect(code).toContain('(el => inputEl = el)($n');
 	});
 
 	bothModes('ref callback statement mode', `
@@ -759,7 +759,7 @@ describe('Client Codegen — Refs', () => {
 			<input ref={el => inputEl = el} />
 		}
 	`, (code) => {
-		expect(code).toContain('(el => inputEl = el)($n0)');
+		expect(code).toContain('(el => inputEl = el)($n');
 	});
 
 	bothModes('ref with tracked variable', `
@@ -1249,19 +1249,71 @@ describe('Keyed .map() reconciliation', () => {
 			throw new Error('normal mode must not use claim-by-key hydration codegen:\n' + code.slice(0, 400));
 	});
 
-	it('[hydrate] keyed map claims by key instead of rebuilding', () => {
+	it('[marker hydrate] keyed map claims by key instead of rebuilding', () => {
 		const code = compileClient(`
 			component App(props: { items: { id: number, name: string }[] }) {
 				return <ul>{props.items.map((item) => <li key={item.id}>{item.name}</li>)}</ul>;
 			}
-		`, null, { hydrate: true, forceClient: true });
+		`, null, { hydrate: true, forceClient: true, markerless: false });
 		if (!code.includes('reconcileHydrated(')) throw new Error('Expected reconcileHydrated() in hydrate mode:\n' + code.slice(0, 500));
-		if (!code.includes('__root || __hydrate.nextElement("li")'))
-			throw new Error("Expected claimed root `__root || __hydrate.nextElement(\"li\")` in hydrate renderItem:\n" + code.slice(0, 1200));
+		if (!code.includes('__root || document.createElement("li")'))
+			throw new Error("Expected claimed root `__root || document.createElement(\"li\")` in hydrate renderItem:\n" + code.slice(0, 1200));
 		if (!/\(item, __e, __r, __root\) =>/.test(code))
 			throw new Error('Expected 4-arg renderItem (item, __e, __r, __root) with claimable root:\n' + code.slice(0, 1200));
 		if (!code.includes('__root.nextSibling'))
 			throw new Error('Expected claimed item to insert after __root.nextSibling:\n' + code.slice(0, 1200));
+	});
+
+	// A `key` prop on a COMPONENT call (`<ItemRow key={item.id}/>`) must be
+	// honored as the map key — previously only element roots (`<li key=…>`) fed
+	// `MapRegion.keyExpr`, so a component-rooted keyed map degraded to the
+	// positional `__place` region: client-surplus items were stranded (fresh
+	// node never inserted) and reorder moved nothing. In every mode the map must
+	// now route through the keyed reconcile path.
+	it('[normal] component-rooted keyed map rebuilds via reconcile', () => {
+		const code = compileClient(`
+			component ItemRow(props: { id: number }) { return <li data-id={props.id}>{props.id}</li>; }
+			component App(props: { items: { id: number }[] }) {
+				return <ul>{props.items.map((item) => <ItemRow key={item.id} id={item.id} />)}</ul>;
+			}
+		`, null, { forceClient: true });
+		if (!code.includes('reconcile(')) throw new Error('Expected reconcile() for normal component-keyed map:\n' + code.slice(0, 400));
+		if (code.includes('reconcileHydrated')) throw new Error('normal mode must use reconcile, not claim-by-key:\n' + code.slice(0, 400));
+		if (!code.includes('(item) => item.id')) throw new Error('Expected key expression item.id in the reconcile key fn:\n' + code.slice(0, 400));
+	});
+
+	it('[hydrate] component-rooted keyed map claims by key', () => {
+		const code = compileClient(`
+			component ItemRow(props: { id: number }) { return <li data-id={props.id}>{props.id}</li>; }
+			component App(props: { items: { id: number }[] }) {
+				return <ul>{props.items.map((item) => <ItemRow key={item.id} id={item.id} />)}</ul>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		if (!code.includes('reconcileHydrated(')) throw new Error('Expected reconcileHydrated() for markerless component-keyed map:\n' + code.slice(0, 500));
+		// The keyed renderItem carries a claimable `__root` param; the non-keyed
+		// region would emit `__cl.push(` / a collect array instead.
+		if (!/\(item, __e, __r, __root\) =>/.test(code)) throw new Error('Expected 4-arg keyed renderItem with __root:\n' + code.slice(0, 800));
+		if (code.includes('__cl.push(')) throw new Error('component-keyed map must not degrade to the __place/collect region:\n' + code.slice(0, 500));
+		if (!code.includes('__components["ItemRow"]')) throw new Error('Expected ItemRow call inside the keyed renderItem:\n' + code.slice(0, 500));
+	});
+});
+
+describe('Hydrate helper runtime contract', () => {
+	// `__place`'s "nodes are in place" branch brackets adopted SSR nodes but
+	// must ALSO attach freshly-claimed (client-surplus) nodes: when the client
+	// data grows past the SSR list, the surplus item claims a fresh detached
+	// element which otherwise strands off-parent (visible only as a missing
+	// item). Regression: SSR renders 2 <li>, client hydrates with 3.
+	it('[markerless hyd] __place attaches client-surplus fresh nodes before end', () => {
+		const code = compileClient(`
+			component ItemRow(props: { id: number }) { return <li data-id={props.id}>{props.id}</li>; }
+			component App(props: { items: { id: number }[] }) {
+				return <ul>{props.items.map((item) => <ItemRow id={item.id} />)}</ul>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('// Client-surplus nodes');
+		expect(code).toContain('if (nodes[i].parentNode === null) p.insertBefore(nodes[i], end);');
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
 });
 
@@ -1677,7 +1729,7 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			// every branch must adopt the server-rendered element (claimStatic),
 			// so a switch away from the initially-rendered branch rebuilds it in place.
 			expect(
-				code.match(/__hydrate\.nextElement\("p"\)/g)?.length ?? 0
+				code.match(/__hydrate\.nextElement\("p"/g)?.length ?? 0
 			).toBe(3);
 			expect(code).toContain('createTextNode("WEB")');
 			expect(code).toContain('createTextNode("NATIVE")');
@@ -1704,9 +1756,9 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		if (mode === 'hydrate') {
 			// both roots of the multi-root alternate claim their own subtree.
 			expect(
-				code.match(/__hydrate\.nextElement\("p"\)/g)?.length ?? 0
+				code.match(/__hydrate\.nextElement\("p"/g)?.length ?? 0
 			).toBe(2);
-			expect(code).toContain('__hydrate.nextElement("span")');
+			expect(code).toContain('__hydrate.nextElement("span",');
 			expect(code).toContain('createTextNode("ON")');
 		} else {
 			expect(code).toContain('document.createElement("span")');
@@ -1947,6 +1999,58 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			expect(code).toContain('__place(');
 		} else {
 			expect(code).not.toContain('insertBeforeNextClaim(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// Row fences INSIDE a claimed element must anchor to that element's
+	// sub-walker, never the top-level `__hydrate`: anchoring at the root would
+	// append the conditional's fences to the page root, and the `__place`
+	// branch-1 rescue would then relocate the claimed SSR row OUT of its
+	// container (the /blocknav leak). Root-level regions keep `ctx.walker ===
+	// '__hydrate'`, which today's earlier tests already pin.
+	bothModes('markerless nested map-row if fences anchor to the list sub-walker, not __hydrate', `
+		const open = false;
+		component App() {
+			<ul>
+				for (const row of [1, 2]) {
+					if (open) { <li class="pick">{row}</li> }
+				}
+			</ul>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('insertBeforeNextClaim(');
+			expect(code).not.toContain('__hydrate.insertBeforeNextClaim(');
+		} else {
+			expect(code).not.toContain('insertBeforeNextClaim(');
+		}
+		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
+	});
+
+	// A top-level keyed region with static sibling residue carries that residue
+	// as `skipK` into `reconcileHydrated`: the containerless claim must adopt
+	// the region's own SSR items, not the page's static headings (/empty).
+	bothModes('markerless top-level keyed statement-map threads its residue as reconcile skipK', `
+		interface Todo { id: number; text: string }
+		const initialTodos: Todo[] = [{ id: 1, text: 'A' }];
+		component App() {
+			let &[todos] = track<Todo[]>(initialTodos);
+			<div class="page">
+				<h2>Statement-mode empty block</h2>
+				for (const todo of todos; key todo.id) {
+					<div class="task">{todo.text}</div>
+				}
+			</div>
+		}
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('reconcileHydrated(');
+			// the static <h2> residue between the root claims and the keyed
+			// region rides along as the final `skipK` argument
+			expect(/reconcileHydrated\([\s\S]*?,\s*1\);/.test(code)).toBe(true);
+		} else {
+			expect(code).not.toContain('reconcileHydrated(');
 		}
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
@@ -2280,6 +2384,251 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 		component App { return <div><Foo /></div>; }
 	`, (code) => {
 		expect(code).toContain('__components["Foo"]');
+	});
+});
+
+describe('Client Codegen — Markerless Hydration', () => {
+
+	// Markerless claims position themselves with explicit skipK (the count of
+	// unclaimed SSR slots before the target) instead of relying on the marker
+	// stream. The skipK must only stand in for slots the walker will NOT
+	// consume: the walker advances past EVERY claim on its own, so counting a
+	// claimed sibling's residue into the next sibling's skipK double-jumps the
+	// cursor past the list and exhausts it (fresh nodes where SSR already bound
+	// one). This is the regression under test: `<p>{n}</p><button…>…</button>`
+	// are consecutive claimed siblings; `button` must claim at relative cursor
+	// (0), never `headroom + 1`.
+	it('[markerless hyd] consecutive claimed siblings claim at relative cursor, no double-count', () => {
+		const code = compileClient(`
+			component Counter({ n = 0 }) {
+				return <div class="wrapper"><p>{n}</p><button onClick={() => {}}>inc</button></div>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('__hydrate.subWalker(');
+		expect(code).toContain('nextElement("p", 0)');
+		expect(code).toContain('nextElement("button", 0)');
+		expect(code).not.toContain('nextElement("button", 1)');
+	});
+
+	// A pure-static sibling between two claims occupies an SSR slot the walker
+	// never claims (it is retrieved from `__vsk_ssrEls`, not via nextElement),
+	// so the LATER claim must skip it. skipK accumulates ONLY those unclaimed
+	// residues (1), not the already-claimed first sibling's slot.
+	it('[markerless hyd] pure-static sibling between claims is counted in next skipK', () => {
+		const code = compileClient(`
+			component App({ a = 1, b = 2 }) {
+				return <div><em>{a}</em><i class="static">fix</i><b>{b}</b></div>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		// <em>: claims slot 0 at relative cursor 0. Static <i>: never claimed.
+		// <b>: must skip exactly the unclaimed <i> -> skipK 1 (NOT 2).
+		expect(code).toContain('nextElement("em", 0)');
+		expect(code).toContain('nextElement("b", 1)');
+	});
+
+	// The marker mode equivalent emits raw nextElement (no skipK) and a flat
+	// shared walker — the marker stream positions the claims. Asserting the two
+	// modes differ proves skipK is strictly a markerless construct.
+	it('[marker hyd] same component claims with no skipK on the shared walker', () => {
+		const code = compileClient(`
+			component Counter({ n = 0 }) {
+				return <div class="wrapper"><p>{n}</p><button onClick={() => {}}>inc</button></div>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: false });
+		expect(code).toContain('__hydrate.nextElement("p")');
+		expect(code).toContain('__hydrate.nextElement("button")');
+		expect(code).not.toContain('nextElement("p", 0)');
+		expect(code).not.toContain('__hydrate.subWalker(');
+	});
+
+	// Top-level (component body, not inside a claimed element): skipK accounting
+	// must hold there too. A pure-static sibling at the top level is left
+	// unclaimed in the SSR DOM, so the next claimed sibling crosses it.
+	it('[markerless hyd] top-level claims skip unclaimed static siblings', () => {
+		const code = compileClient(`
+			component App({ t = 'title' }) {
+				<>
+					<h1>{t}</h1>
+					<p class="static">note</p>
+					<span>{t}</span>
+				</>
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		// The FIRST top-level claim reads the inherited residue deposit (the
+		// value-thread offset) instead of a hardcoded 0; at the true document
+		// root the deposit is 0, but a fragment-root child called after a
+		// caller-side residue must advance past it. The static <p> then sits
+		// between claims, so <span> skips exactly it.
+		expect(code).toContain('nextElement("h1", $n0)');
+		expect(code).toContain('nextElement("span", 1)');
+	});
+
+	it('[markerless hyd] region claims inside a claimed parent keep relative skipK', () => {
+		const code = compileClient(`
+			const open = true;
+			component App({ t = 'x' }) {
+				<div>
+					<span>static</span>
+					{open ? <em>{t}</em> : <em>no</em>}
+					<button onClick={() => {}}>go</button>
+				</div>
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		// <button> is the claim after the ternary region inside <div>; its
+		// skipK resets to 0 once the region's claims advance the cursor.
+		expect(code).toContain('nextElement("button", 0)');
+	});
+
+	// P3.6 regression: a region's OWN first claim must carry the offset of the
+	// pure-static residue inside its claimed parent (the walker cursor never
+	// advanced past it — it was retrieved from `__vsk_ssrEls`). The region
+	// declares a first-claim budget `let $nK = N` and its first executing
+	// branch claim consumes it (`nextElement(tag, $nK)` then `$nK = 0`), so the
+	// ternary's `<em>` lands on the SSR `<em>` instead of claiming the static
+	// `<i>` (tag mismatch -> fresh + stranded SSR). The trailing `<b>` then
+	// resolves positionally on the advanced cursor.
+	it('[markerless hyd] region first claim consumes the residue budget (expression-mode ternary)', () => {
+		const code = compileClient(`
+			component App({ open = false, t = 'x' }) {
+				return <div>
+					<i class="static">fix</i>
+					{open ? <em>{t}</em> : <em>alt</em>}
+					<b>{t}</b>
+				</div>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('// first-claim budget: region SSR sits 1 slot(s) past the walker cursor');
+		expect(code).toContain('nextElement("em", $n');
+		expect(code).not.toContain('nextElement("em", 0)');
+		// The claim after the region resolves positionally on the advanced cursor.
+		expect(code).toContain('nextElement("b", 0)');
+	});
+
+	// Statement-mode counterpart: `if … else` regions (emitOpaque) need the same
+	// budget treatment, not expression-mode ternaries only.
+	it('[markerless hyd] region first claim consumes the residue budget (statement-mode if)', () => {
+		const code = compileClient(`
+			component App({ open = false, t = 'x' }) {
+				<div>
+					<i class="static">fix</i>
+					if (open) { <em>{t}</em> } else { <em>alt</em> }
+					<b>{t}</b>
+				</div>
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('// first-claim budget: region SSR sits 1 slot(s) past the walker cursor');
+		expect(code).toContain('nextElement("em", $n');
+		expect(code).not.toContain('nextElement("em", 0)');
+		expect(code).not.toContain('nextElement("em", 1)');
+		expect(code).toContain('nextElement("b", 0)');
+	});
+
+	// Map regions: the FIRST item's first claim carries the budget; subsequent
+	// items and the trailing sibling resolve positionally on the cursor.
+	it('[markerless hyd] map region first item claim consumes the residue budget', () => {
+		const code = compileClient(`
+			component App({ items = [], t = 'x' }) {
+				<div>
+					<i class="static">fix</i>
+					{items.map((x) => <li>{x}</li>)}
+					<b>{t}</b>
+				</div>
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('// first-claim budget: region SSR sits 1 slot(s) past the walker cursor');
+		expect(code).toContain('nextElement("li", $n');
+		expect(code).toContain('nextElement("b", 0)');
+	});
+
+	// Marker mode must keep emitting the raw shared-walker claims for the same
+	// region shape — no budget, no subWalker, no skipK. The marker stream
+	// positions every claim, so the offset machinery is strictly markerless.
+	it('[marker hyd] region claims stay on the flat shared walker with no budget', () => {
+		const code = compileClient(`
+			component App({ open = false, t = 'x' }) {
+				return <div>
+					<i class="static">fix</i>
+					{open ? <em>{t}</em> : <em>alt</em>}
+					<b>{t}</b>
+				</div>;
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: false });
+		expect(code).not.toContain('// first-claim budget');
+		expect(code).not.toContain('__hydrate.subWalker(');
+		expect(code).toContain('__hydrate.nextElement("em")');
+		expect(code).toContain('__hydrate.nextElement("b")');
+	});
+
+	// ---- Phase 3.c: cross-boundary residue (value-thread offset) ----
+
+	// A CALLER scope holds a pure-static sibling that directly precedes a
+	// COMPILED CHILD (<Child/>, which claims its own root from the caller's
+	// walker through a subWalker it cannot see the caller's compile-time skipK
+	// from). The caller deposits the residue offset on the walker reference
+	// (`injectSkipK(1)`) immediately before the call; the child reads it once at
+	// its first top-level claim via the inherited budget below.
+	it('[markerless hyd] compiled child preceded by residue receives injectSkipK deposit', () => {
+		const code = compileClient(`
+			component Child() { const &[t] = track('hi'); return <span class="dyn">Child {t}</span>; }
+			export default component App() { const &[t] = track('ok'); return (
+				<div id="root"><em class="static">margin</em><Child/><b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		// The <em> residue sits before the child: the caller must deposit 1.
+		expect(code).toContain('injectSkipK(1)');
+		// The child reads the deposit exactly once at its first top-level claim.
+		expect(code).toContain("(typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)");
+		expect(code).toContain('nextElement("span", $n');
+	});
+
+	// Region variant: a ternary/if whose WINNING FIRST claim is a compiled
+	// component, not an element. The region's static-residue budget (`$nK = 1`)
+	// must be injected into the child call the same way, then reset, so the
+	// child's root claim skips the region's residue instead of drifting.
+	it('[markerless hyd] region first claim (compiled component) injects the residue budget', () => {
+		const code = compileClient(`
+			component RChild() { const &[t] = track('r'); return <span class="r">{t}</span>; }
+			export default component App(props: { open: boolean }) { const &[t] = track('z'); return (
+				<div id="root"><em class="static">margin</em>{props.open ? <RChild/> : <em>alt {t}</em>}<b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('// first-claim budget: region SSR sits 1 slot(s) past the walker cursor');
+		expect(code).toContain('.injectSkipK($n');
+		// Deposit resets once injected so later claims stay positional.
+		expect(code).not.toContain('injectSkipK(1)');
+	});
+
+	// Static components have no first claim of their own — their stub must
+	// surface the caller's deposit into the SHARED walker it claims through.
+	// `claimOnly(undefined, takeSkipK())` does exactly the markerless semantics:
+	// consume the inherited offset, then claim the element that residue-skip
+	// addresses.
+	it('[markerless hyd] static-component stub claims via claimOnly(undefined, takeSkipK())', () => {
+		const code = compileClient(`
+			component StaticChild() { <strong class="s">fixed</strong> }
+			export default component App() { const &[t] = track('ok'); return (
+				<div id="root"><em class="static">margin</em><StaticChild/><b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain("claimOnly(undefined, (typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0))");
+	});
+
+	// Marker mode must keep the value-thread machinery off its output: the
+	// marker stream already positions every claim, so injectSkipK/takeSkipK and
+	// the first-claim budget are strictly markerless constructs.
+	it('[marker hyd] same component stack emits no inject/takeSkipK or claims (undefined …)', () => {
+		const code = compileClient(`
+			component Child() { const &[t] = track('hi'); return <span class="dyn">Child {t}</span>; }
+			component StaticChild() { <strong class="s">fixed</strong> }
+			export default component App() { const &[t] = track('ok'); return (
+				<div id="root"><em class="static">margin</em><Child/><StaticChild/><b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: false });
+		expect(code).not.toContain('injectSkipK');
+		expect(code).not.toContain('takeSkipK');
+		expect(code).not.toContain('claimOnly(undefined,');
+		expect(code).not.toContain('// first-claim budget');
+		expect(code).not.toContain('__hydrate.subWalker(');
 	});
 });
 

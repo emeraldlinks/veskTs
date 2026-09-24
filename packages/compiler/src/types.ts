@@ -48,6 +48,14 @@ export interface FullPageOptions {
   security?: import('@vesk/types').VeskSecurity;
   __vesk?: Record<string, unknown>;
   hydrate?: boolean;
+  /**
+   * Markerless (structural) hydration: SSR emits ordinary application HTML
+   * with no hydration comments and no `data-vsk-*` attributes; the client
+   * walks plain elements positionally. This is the DEFAULT. Pass
+   * `markerless: false` to restore legacy marker emission. Only takes effect
+   * when `hydrate` is true.
+   */
+  markerless?: boolean;
   sourcePath?: string;
   externalDataScript?: import('@vesk/types').ExternalDataScript;
   cached?: CompileFileResult;

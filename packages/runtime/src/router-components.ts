@@ -318,6 +318,13 @@ export function Link(
 		// eats it, and cascades into fresh-node fallback. Keyed
 		// (`c:Link`) — no bare markers; the call-site marker carries the
 		// caller name while this one names the self-rendered anchor.
+		// Markerless SSR (the default) drops the self-prefix entirely:
+		// the compiler emits no call-site marker in that mode, so the
+		// anchor is claimed positionally.
+		const markerlessSsr = (globalThis as any).__vsk_ssr_markerless === true;
+		if (markerlessSsr) {
+			return `<a ${attrs}>${childStr}</a>`;
+		}
 		return `<!--vsk:c:Link--><a ${attrs}>${childStr}</a>`;
 	}
 	const a = document.createElement('a');

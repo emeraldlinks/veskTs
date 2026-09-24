@@ -865,7 +865,7 @@ it('useFetch failure renders the error branch in SSR (expression mode, single fe
   assert(!html.includes('Loading...'), `loading state should not remain in SSR body: ${html.slice(0, 900)}`);
 });
 
-it('useFetch failure in hydrate mode still emits hydration markers', async () => {
+it('useFetch failure in hydrate mode stays markerless (error branch renders)', async () => {
   const source = `component App {
     const posts = useFetch('/api/fail-posts-hydrate');
     if (posts.error) {
@@ -897,7 +897,7 @@ it('useFetch failure in hydrate mode still emits hydration markers', async () =>
   show('  html', html.slice(0, 900));
   assert(calls === 1, `failing key should be fetched once across re-render passes (got ${calls})`);
   assert(html.includes('Failed to load posts'), `error branch should render in SSR body: ${html.slice(0, 900)}`);
-  assert(html.includes('<!--vsk:t:div-->'), `hydration markers missing on failed fetch: ${html.slice(0, 900)}`);
+  assert(!html.includes('<!--vsk'), `default hydrate output must be markerless: ${html.slice(0, 900)}`);
 });
 
 it('awaiting a failing useFetch in an async component rejects the render (500 path)', async () => {
@@ -1527,13 +1527,14 @@ component App {
   assert(html.includes('&lt;script&gt;'), `content not escaped: ${html}`);
 });
 
-it('[md][expr] renderPage hydrate path wraps component in marker', () => {
+it('[md][expr] renderPage hydrate path emits plain HTML (markerless)', () => {
   const source = `import { Md } from '@vesk/runtime';
 component App {
   return <Md content="### Hi" />;
 }`;
   const r = renderPage(source, 'App', {}, new Map(), { hydrate: true }) as { body: string };
-  assert(r.body.startsWith('<!--vsk:c:Md--><div class="vesk-md">'), `hydrate marker missing: ${r.body}`);
+  assert(r.body.startsWith('<div class="vesk-md">'), `markerless wrapper missing: ${r.body}`);
+  assert(!r.body.includes('<!--vsk'), `markers must not appear in default hydrate output: ${r.body}`);
   assert(r.body.includes('<h3 id="hi">Hi</h3>'), `markdown missing in hydrate output: ${r.body}`);
 });
 

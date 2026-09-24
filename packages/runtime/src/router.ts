@@ -1138,6 +1138,17 @@ async function hydrateInitial(
 
 	const layoutNodes = chain.filter(n => n.layout);
 
+	if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
+		// eslint-disable-next-line no-console
+		console.error('[hyd-dbg] hydrateInitial', {
+			pageName: pageNode._pageName,
+			pageType: typeof pageNode.page,
+			layoutNames: layoutNodes.map(n => n._layoutName),
+			hydratorKeys: router.__hydrators ? Object.keys(router.__hydrators) : null,
+			containerKids: container.children.length,
+		});
+	}
+
 	const hydrators = router.__hydrators;
 	if (!pageNode.page && !(hydrators && pageNode._pageName && hydrators[pageNode._pageName as string])) {
 		// The route's component chunk failed to load or compile. While
@@ -1230,6 +1241,10 @@ async function hydrateInitial(
 			const childHydrator = renderLayoutChain(index + 1);
 			return (walker: HydrateWalker) => {
 				const layoutProps = { children: childHydrator, params: paramValues };
+				if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug && index === 0) {
+					// eslint-disable-next-line no-console
+					console.error('[hyd-dbg] invoking outer layout', node._layoutName, typeof hydLayout, 'pageChild=', typeof childHydrator);
+				}
 				const result = hydLayout(layoutProps, new Map(), walker);
 				storeLayoutInstance(router, node, layoutProps, result);
 				return result;
@@ -1252,6 +1267,14 @@ async function hydrateInitial(
 		setIsHydrating(false);
 	} catch (error: unknown) {
 		setIsHydrating(false);
+		if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
+			// eslint-disable-next-line no-console
+			console.error('[hyd-dbg] hydrateInitial FAILED:', error);
+			if (error instanceof Error && error.stack) {
+				// eslint-disable-next-line no-console
+				console.error('[hyd-dbg] hydrateInitial stack:', error.stack.split('\n').slice(0, 12).join('\n'));
+			}
+		}
 		// Hydration failed — most often the page component throwing on the
 		// client after a clean SSR. Re-render through renderMatch so the error
 		// component replaces just the page slot and the layout/nav survives.

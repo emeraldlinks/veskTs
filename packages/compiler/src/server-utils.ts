@@ -12,18 +12,36 @@ const VOID_ELEMENTS = new Set([
 const RAW_TEXT_ELEMENTS = new Set(['style','script','title']);
 
 export let __vskHydrate = false;
+// Markerless (structural) hydration mode: SSR emits ordinary application HTML
+// with no hydration comments and no `data-vsk-*` attributes — the client
+// recovery architecture walks plain elements positionally instead of via
+// markers. Markerless is the DEFAULT; pass `markerless: false` to render
+// options to restore the legacy marker emission (hydration markers only ever
+// appear when `__vskHydrate` is also true).
+export let __vskMarkerless = true;
 export let __vskId = 0;
 export let __vskForceClaim = false;
 export let __vskImportedNames: Set<string> | null = null;
 
-export function resetVskState(hydrate = false): void {
+export function resetVskState(hydrate = false, markerless = true): void {
   __vskHydrate = hydrate;
+  __vskMarkerless = markerless;
   __vskId = 0;
   __vskForceClaim = false;
+  // Runtime components that hand-render SSR roots (e.g. the router `Link`,
+  // which self-prefixes a `<!--vsk:c:Link-->` claim marker in marker mode)
+  // must mirror the compiler's marker choice while serving a request.
+  // Mirrored as a global, not an import, so `@vesk/runtime` never depends on
+  // the compiler package.
+  (globalThis as any).__vsk_ssr_markerless = markerless === true;
 }
 
 export function setVskHydrate(v: boolean): void {
   __vskHydrate = v;
+}
+
+export function setVskMarkerless(v: boolean): void {
+  __vskMarkerless = v;
 }
 
 export function setVskImportedNames(names: Set<string> | null): void {

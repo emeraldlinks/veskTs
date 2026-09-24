@@ -341,6 +341,33 @@ test('Link SSR emits a claim marker before the anchor', () => {
 	}
 });
 
+test('Link SSR drops the claim marker in markerless mode', () => {
+	const saved = globalThis.document;
+	const savedMarkerless = (globalThis as any).__vsk_ssr_markerless;
+	try {
+		delete globalThis.document;
+		(globalThis as any).__vsk_ssr_markerless = true;
+		const out = Link({ href: '/docs/x', class: 'nav', children: '<span>go</span>' });
+		expect(out).toBe('<a href="/docs/x" class="nav"><span>go</span></a>');
+	} finally {
+		globalThis.document = saved;
+		(globalThis as any).__vsk_ssr_markerless = savedMarkerless;
+	}
+});
+
+test('Link SSR markerless NavLink delegates to the same markerless path', () => {
+	const saved = globalThis.document;
+	const savedMarkerless = (globalThis as any).__vsk_ssr_markerless;
+	try {
+		delete globalThis.document;
+		(globalThis as any).__vsk_ssr_markerless = true;
+		expect(NavLink({ href: '/b' }, undefined, undefined)).toBe('<a href="/b"></a>');
+	} finally {
+		globalThis.document = saved;
+		(globalThis as any).__vsk_ssr_markerless = savedMarkerless;
+	}
+});
+
 test('Link hydrate adopts SSR anchor without duplicating children', () => {
 	const ssrRoot = document.createElement('div');
 	const ssrA = document.createElement('a');

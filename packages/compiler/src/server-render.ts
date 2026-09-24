@@ -93,7 +93,7 @@ export function render(
   registry: Map<string, Function> = new Map(),
   options: Record<string, unknown> = {}
 ): string | Promise<string> {
-  resetVskState(!!options.hydrate);
+  resetVskState(!!options.hydrate, options.markerless !== false);
   const compiled = compileFile(source, { sourcePath: (options.sourcePath as string) || undefined });
   const componentMap = compiled.componentMap;
   const renderFn = componentMap.get(componentName);
@@ -136,7 +136,7 @@ export function renderPage(
   registry: Map<string, Function> = new Map(),
   options: Record<string, unknown> = {}
 ): RenderPageResult | Promise<RenderPageResult> {
-  resetVskState(!!options.hydrate);
+  resetVskState(!!options.hydrate, options.markerless !== false);
   let __vesk: Record<string, unknown>, componentMap: Map<string, Function>, ir: IRRoot;
   if (options.cached) {
     const cached = options.cached as CompileFileResult;
@@ -358,12 +358,12 @@ export async function ssg(
     return !isStatic(c.body);
   });
 
-  const rendered = await renderPage(source, componentName, props, options.registry || new Map(), { hydrate: needsClient });
+  const rendered = await renderPage(source, componentName, props, options.registry || new Map(), { hydrate: needsClient, markerless: options.markerless !== false });
   const bodyHtml = rendered.body;
   const headHtml = rendered.head;
 
   const clientCode = needsClient
-    ? compileClient(source, null, { hydrate: true })
+    ? compileClient(source, null, { hydrate: true, markerless: options.markerless !== false })
     : '';
 
   const serializedProps = safeJsonForScript(JSON.stringify(props));
@@ -591,7 +591,7 @@ export function renderPageStream(
   const renderFn = componentMap.get(componentName);
   if (!renderFn) throw new Error(`Component "${componentName}" not found in source`);
 
-  resetVskState(!!options.hydrate);
+  resetVskState(!!options.hydrate, options.markerless !== false);
 
   const targetComp = ir.components.find((c) => c.name === componentName);
   const cssUrls: string[] = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);

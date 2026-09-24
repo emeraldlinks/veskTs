@@ -198,6 +198,15 @@ export function transformTracked(irNode: Expression | RuntimeStatement | Dynamic
         )
           return context.next();
         if (
+          parent.type === 'MemberExpression' &&
+          !parent.computed &&
+          parent.property === node
+        )
+          // Non-computed member PROPERTY names are never identifier reads —
+          // `props.items` must stay `props.items` even when a tracked binding
+          // is also named `items`; only the `.object` side rewires.
+          return context.next();
+        if (
           parent.type === 'Property' &&
           parent.value === node &&
           parent.key &&
@@ -317,7 +326,13 @@ class Ctx {
   selfClaimNames = new Set<string>();
   delegatedEvents = new Set<string>();
   directEvents = new Set<string>();
-  hydrate = false;
+hydrate = false;
+  // Markerless structural hydration: claims run `nextElement(tag, skipK)` with
+  // positional residue offsets and interior claims rebind the walker to the
+  // claimed element (subWalker). Only meaningful when `hydrate` is also true.
+  // Markerless is the DEFAULT; pass `markerless: false` to restore legacy
+  // marker-mode claim emission.
+  markerless = true;
   inTryBody = false;
   claimStatic = false;
   // While set, the next StaticNode claimed in hydrate mode uses `__root` (the
@@ -367,8 +382,8 @@ class Ctx {
   }
 }
 
-function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, compPrefix = '__components'): string | null {
-  if (node instanceof StaticNode) return emitStatic(ctx, node, tracked, effectsVar);
+function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, compPrefix = '__components', skipK = 0, regionBudget?: string): string | null {
+  if (node instanceof StaticNode) return emitStatic(ctx, node, tracked, effectsVar, skipK, regionBudget);
   if (node instanceof TextNode) {
     if (!node.value) return null;
     const v = ctx.n();
@@ -383,9 +398,9 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     return null;
   }
   if (node instanceof ComponentRef) return null;
-  if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked, effectsVar, parentVar, compPrefix);
-  if (node instanceof OpaqueDynamicRegion) return emitOpaque(ctx, node, tracked, effectsVar, parentVar);
-  if (node instanceof MapRegion) return emitMap(ctx, node, tracked, effectsVar, parentVar);
+  if (node instanceof ComponentCall) return emitComponentCall(ctx, node, tracked, effectsVar, parentVar, compPrefix, skipK, regionBudget);
+  if (node instanceof OpaqueDynamicRegion) return emitOpaque(ctx, node, tracked, effectsVar, parentVar, skipK, regionBudget);
+  if (node instanceof MapRegion) return emitMap(ctx, node, tracked, effectsVar, parentVar, skipK, regionBudget);
   if (node instanceof ServerBlock) return null;
   if (node instanceof ClientBlock) {
     const savedHydrate = ctx.hydrate;
@@ -422,10 +437,10 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     }
     return null;
   }
-  if (node instanceof TryCatch) return emitTryCatch(ctx, node, tracked, effectsVar, parentVar);
-  if (node instanceof WhileLoop) return emitWhileLoop(ctx, node, tracked, parentVar);
-  if (node instanceof ForLoop) return emitForLoop(ctx, node, tracked, parentVar);
-  if (node instanceof SwitchBlock) return emitSwitchBlock(ctx, node, tracked, parentVar);
+  if (node instanceof TryCatch) return emitTryCatch(ctx, node, tracked, effectsVar, parentVar, skipK, regionBudget);
+  if (node instanceof WhileLoop) return emitWhileLoop(ctx, node, tracked, parentVar, skipK, regionBudget);
+  if (node instanceof ForLoop) return emitForLoop(ctx, node, tracked, parentVar, skipK, regionBudget);
+  if (node instanceof SwitchBlock) return emitSwitchBlock(ctx, node, tracked, parentVar, skipK, regionBudget);
   if (node instanceof PropSlot) return null;
   if (node instanceof PropSlotRender) {
     const slotProp = `props.${node.propName}`;
@@ -460,7 +475,7 @@ const PROPERTY_ATTRS: Record<string, Set<string>> = {
   progress: new Set(['value']),
 };
 
-function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo>, effectsVar: string | null): string | null {
+function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo>, effectsVar: string | null, skipK = 0, regionBudget?: string): string | null {
   const el = ctx.n();
   if (ctx.hydrate) {
     const claim = ctx.claimStatic;
@@ -468,10 +483,29 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     if (!claim && isStaticIR(node.children)) return null;
     const rootClaim = ctx.rootClaim;
     ctx.rootClaim = false;
+    // Markerless mode positions the claim explicitly: `skipK` is the number of
+    // source siblings already consumed before this node (static residues the
+    // caller retrieved from `__vsk_ssrEls`, preceding claims, etc.). Marker
+    // mode keeps the raw nextElement — the marker stream positions it.
+    //
+    // `regionBudget` is a markerless first-claim budget `let __pk = <N>`
+    // declared by an enclosing region: the first claim that EXECUTES consumes
+    // it (the region's SSR elements sit `N` source slots after the parent
+    // cursor — leftover pure-static residues the walker never claimed), then
+    // it drops to 0 so every later claim resolves positionally on the walker's
+    // advancing cursor. It only applies to THIS claim — the element's children
+    // are claimed on their own sub-walker and carry their own residue math.
+    const skipExpr = regionBudget && ctx.markerless ? markerlessSkipExpr(regionBudget, skipK) : skipK;
+    const skipArg = ctx.markerless ? `, ${skipExpr}` : '';
+    // `rootClaim` marks the keyed renderItem root: claimed items supply the
+    // SSR element as `__root`, fresh items must CREATE one. The walker is never
+    // valid here as a fallback — its cursor doesn't advance past claimByKey, so
+    // `nextElement` would steal a neighboring SSR node to render the new item.
     const claimedExpr = rootClaim
-      ? `__root || ${ctx.walker}.nextElement(${JSON.stringify(node.tag)})`
-      : `${ctx.walker}.nextElement(${JSON.stringify(node.tag)})`;
+      ? `__root || document.createElement(${JSON.stringify(node.tag)})`
+      : `${ctx.walker}.nextElement(${JSON.stringify(node.tag)}${skipArg})`;
     ctx.push(`const ${el} = ${claimedExpr};`);
+    if (regionBudget && ctx.markerless) ctx.push(`${regionBudget} = 0;`);
   } else {
     ctx.push(`const ${el} = document.createElement(${JSON.stringify(node.tag)});`);
   }
@@ -509,7 +543,46 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
       && isReactiveExpression((textKids[0] as DynamicBinding).expression, tracked);
   }
 
+  // Markerless scoping: any descendant claim (nested static with dynamic
+  // content, component call, region, loop) must resolve against THIS claimed
+  // element's own children, not the page walker — rebind the walker to a
+  // sub-walker over `el` for the children pass. Fully-static children and the
+  // single text-snapshot are covered within the loop and never claim, so they
+  // don't force a sub-walker. Rebound, never leaked: marker mode is untouched.
+  const savedWalker = ctx.walker;
+  let needsSubWalker = false;
+  if (ctx.hydrate && ctx.markerless) {
+    for (const child of children) {
+      if (child instanceof TextNode) continue;
+      if (child instanceof DynamicBinding && child.kind === 'text') continue;
+      if (child instanceof StaticNode && isStaticIR(child.children)) continue;
+      if (child instanceof TrackDecl) continue;
+      if (child instanceof ComponentRef) continue;
+      if (child instanceof ServerBlock) continue;
+      if (child instanceof ClientBlock) continue;
+      if (child instanceof HeadBlock) continue;
+      if (child instanceof RuntimeStatement) continue;
+      if (child instanceof PropSlot) continue;
+      needsSubWalker = true;
+      break;
+    }
+  }
+  if (needsSubWalker) {
+    const sub = ctx.n();
+    ctx.push(`const ${sub} = ${ctx.walker}.subWalker(${el});`);
+    ctx.walker = sub;
+  }
+
   let residueBefore = 0;
+  // Markerless skipK bookkeeping: `residueBefore` is the absolute element-slot
+  // index (used for `__vsk_ssrEls` retrieval and text-slot anchoring) and
+  // counts CLAIMED children too. But the structural walker advances its own
+  // cursor for every claimed child, so skipK must only stand in for slots the
+  // walker will NOT consume: pure-static children (retrieved from
+  // `__vsk_ssrEls`, never via nextElement) and text/other zero-residue nodes.
+  // Counting claimed residue into skipK double-jumps the cursor past the list
+  // and exhausts the walker early — fresh nodes where SSR already bound one.
+  let pendingSkip = 0;
   for (const child of children) {
     let childVar: string | null;
     // Hydrate mode: pure static subtree children of a claimed element are already
@@ -574,10 +647,18 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
       // duplicates after the SSR text (the SSR <h1> "compiler is the
       // product." regression). Keep the element as-is and don't recurse.
       childVar = ssrEl;
+      // The walker cursor never advances past this retrieved slot — it was
+      // never claimed via nextElement — so the next claim must skip it.
+      pendingSkip += ssrResidueEstimate(child);
     } else if (singleReactiveText && child instanceof DynamicBinding && child.kind === 'text') {
       childVar = emitDynamicBinding(ctx, child, tracked, effectsVar, `${el}.__vsk_ssrText`);
     } else {
-      childVar = emitNode(ctx, child, tracked, effectsVar, el);
+      childVar = emitNode(ctx, child, tracked, effectsVar, el, '__components', pendingSkip);
+      // This node claims at least one walker slot (typically a subWalker over
+      // this element). The walker cursor advances past the claim AND past every
+      // unclaimed pure-static sibling it just skipped over, so relative skip
+      // accounting restarts from zero for the next sibling.
+      if (claimsWalkerNode(ctx, child)) pendingSkip = 0;
     }
     if (childVar) {
       if (ctx.hydrate) {
@@ -642,6 +723,8 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
         }
       }
   }
+
+  if (ctx.walker !== savedWalker) ctx.walker = savedWalker;
 
   return el;
 }
@@ -816,9 +899,15 @@ function emitFragment(ctx: Ctx, nodes: IRNode[], tracked: Map<string, TrackedInf
   const savedEffects = ctx.effects;
   ctx.effects = [];
   ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
+  let fragPendingSkip = 0;
   for (const child of nodes) {
-    const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
+    const childVar = emitNode(ctx, child, tracked, effectsVar, '$f', '__components', fragPendingSkip);
     if (childVar) ctx.push(`$f.appendChild(${childVar});`);
+    // Markerless: only unclaimed residue must be skipped by the next claim.
+    // Claiming children advance the walker cursor themselves; pure-static
+    // children retrieved from the SSR element list never do.
+    if (claimsWalkerNode(ctx, child)) fragPendingSkip = 0;
+    else fragPendingSkip += ssrResidueEstimate(child);
   }
   for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
   ctx.effects = savedEffects;
@@ -826,7 +915,7 @@ function emitFragment(ctx: Ctx, nodes: IRNode[], tracked: Map<string, TrackedInf
   return frag;
 }
 
-function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, compPrefix = '__components'): string | null {
+function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, compPrefix = '__components', skipK = 0, regionBudget?: string): string | null {
   const propsEntries: string[] = node.props.map((p) => {
     if (typeof p.value === 'string') return `${JSON.stringify(p.name)}: ${JSON.stringify(p.value)}`;
     const expr = transformTracked(p.value as any, tracked);
@@ -861,6 +950,14 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       ?? (ctx.importedNames.has(node.componentName)
         ? node.componentName
         : `__components[${JSON.stringify(node.componentName)}]`);
+    // Registry lookups can resolve to `undefined` when a JSX tag names a
+    // component that was never declared, imported, or registered (e.g.
+    // `<Slot/>` in a framework where `{props.children}` is the channel).
+    // Guard BEFORE the call so the failure is an actionable message instead
+    // of `undefined is not a function` mid-render.
+    if (!calleeExpr && !ctx.importedNames.has(node.componentName)) {
+      ctx.push(`if (${access} == null) throw new Error(${JSON.stringify(`Component "${node.componentName}" was not found while rendering. Declare it with the \`component\` keyword, import it, or register it in the component registry.`)});`);
+    }
     // SSR for component calls is marker-ONLY (`<!--vsk-->` + the component's
     // own root; no display:contents wrapper). Compiled `.vsk` components claim
     // their own root on the SHARED walker. Call targets that are not known
@@ -869,12 +966,32 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     // with the fresh node they returned — never a duplicate, never a box.
     const plainTarget = !!(calleeExpr || ctx.importedNames.has(node.componentName)) && !ctx.selfClaimNames.has(node.componentName);
     const walkerArg = ctx.walker;
+    // Markerless value-thread offset (Phase 3.c): the residue that precedes THIS
+    // call site — a static sibling the walker never claimed (`skipK`), or a
+    // region/branch budget (`regionBudget`), or both, which ADD. It must reach
+    // the child's first top-level claim even though that code lives in a
+    // separately compiled function with its own `topPendingSkip = 0`:
+    //  - compiled (self-claiming) children receive it as a transient deposit on
+    //    the shared walker they are invoked with (`injectSkipK` before the call,
+    //    consumed by their first claim). A region budget is spent in the process
+    //    so later claims in the branch resolve positionally.
+    //  - plain targets (imported/member expressions) cannot claim, so the offset
+    //    instead flows into the post-call `claimOnly` adoption.
+    const promptExpr = ctx.markerless && (regionBudget || skipK > 0)
+      ? markerlessSkipExpr(regionBudget, skipK)
+      : null;
     const maybeReplace = (v: string) => {
       if (!plainTarget) return;
       // nodeType 11 = DocumentFragment: self-claiming imports (Link/Md/Form)
       // return a fragment when they adopted their SSR root, so there is nothing
       // to replace — claiming here would steal the NEXT sibling's root.
-      ctx.push(`if (${v} && ${v}.parentNode == null && ${v}.nodeType !== 11) { const __sr = ${walkerArg}.claimOnly(); if (__sr && __sr.parentNode) __sr.parentNode.replaceChild(${v}, __sr); }`);
+      const claim = promptExpr
+        ? `${walkerArg}.claimOnly(undefined, ${promptExpr})`
+        : `${walkerArg}.claimOnly()`;
+      ctx.push(`if (${v} && ${v}.parentNode == null && ${v}.nodeType !== 11) { const __sr = ${claim}; if (__sr && __sr.parentNode) __sr.parentNode.replaceChild(${v}, __sr); }`);
+      // A plain target consumes the region budget at adoption; subsequent
+      // claims in the enclosing branch must resolve positionally from here.
+      if (regionBudget && ctx.markerless) ctx.push(`${regionBudget} = 0;`);
     };
     const maybeRetire = () => {
       if (ctx.selfClaimNames.has(node.componentName)) {
@@ -902,6 +1019,13 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       ctx.hydrate = savedHydrate;
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
+    }
+    if (ctx.markerless && promptExpr && !plainTarget) {
+      // Deposit the residue for the child's first top-level claim (it runs on
+      // this same walker with its own zero `topPendingSkip`). A region budget is
+      // spent by THIS call, so sibling claims in the branch stay positional.
+      ctx.push(`${walkerArg}.injectSkipK(${promptExpr});`);
+      if (regionBudget) ctx.push(`${regionBudget} = 0;`);
     }
     ctx.push(`let ${v} = undefined;`);
     ctx.push(`if (__hydrate) __hydrate.childFrame = (__hydrate.childFrame || 0) + 1;`);
@@ -933,6 +1057,7 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     } else if (ctx.importedNames.has(node.componentName)) {
       ctx.push(`const ${v} = ${awaitKw}${node.componentName}(${callArgs()});`);
     } else {
+      ctx.push(`if (${compPrefix}[${JSON.stringify(node.componentName)}] == null) throw new Error(${JSON.stringify(`Component "${node.componentName}" was not found while rendering. Declare it with the \`component\` keyword, import it, or register it in the component registry.`)});`);
       ctx.push(`const ${v} = ${awaitKw}${compPrefix}[${JSON.stringify(node.componentName)}](${callArgs()});`);
     }
   }
@@ -965,19 +1090,72 @@ function emitHydrateFenceAnchoring(ctx: Ctx, anchor: string, endAnchor: string, 
   // at the region's SSR slot (e.g. a polish-mobile menu panel that follows a
   // `<header>` in a `<>` fragment), so a no-content nested region must anchor
   // there instead of drifting to the page root's end via `__place`'s fallback.
+  // Anchor against the CURRENT walker (`ctx.walker`), not always `__hydrate`:
+  // for a region nested inside a claimed element the row fences must land inside
+  // that element (where its `__place` fallback lives), otherwise a non-keyed
+  // list's row claims get relocated to the top-level root and its SSR content
+  // leaks out of the container. Root-level regions keep `ctx.walker ===
+  // '__hydrate'`, so their emission is unchanged.
   ctx.push(`// Anchor region fences to the SSR slot so no-content regions do not fall back to $root's end.`);
-  ctx.push(`if (__hydrate && __hydrate.insertBeforeNextClaim) {`);
-  ctx.push(indent(`__hydrate.insertBeforeNextClaim(${anchor});`));
-  ctx.push(indent(`__hydrate.insertBeforeNextClaim(${endAnchor});`));
+  ctx.push(`if (${ctx.walker} && ${ctx.walker}.insertBeforeNextClaim) {`);
+  ctx.push(indent(`${ctx.walker}.insertBeforeNextClaim(${anchor});`));
+  ctx.push(indent(`${ctx.walker}.insertBeforeNextClaim(${endAnchor});`));
   ctx.push(`}`);
 }
 
-function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string): string | null {
+// Markerless first-claim budget for a dynamic region's SSR offset.
+//
+// A region is emitted into a scope whose walker cursor has NOT advanced over the
+// pure-static residues that precede it (they were retrieved from `__vsk_ssrEls`,
+// never claimed), so the region's SSR elements sit `skipK` source slots past the
+// cursor. Every turn a branch renders, its claims are emitted against that same
+// cursor — the FIRST claim of whichever branch actually executes must translate
+// the offset into a positional skip. Each region therefore declares a budget
+// `let __pk = skipK` and references it from EVERY claim in its branch bodies:
+// the first claim to execute consumes it (`nextElement(tag, __pk)`, then
+// `__pk = 0`), and every later claim — same branch, other branches, later loop
+// iterations, map items — resolves positionally on the advancing cursor. Text
+// children never claim a walker slot, so they leave the budget intact for the
+// next element claim (matching the walker, which ignores text nodes).
+//
+// A nested region that is itself a branch's first claim has its own skipK of 0
+// and inherits the enclosing branch's budget instead of declaring a fresh one —
+// exactly one claim (its first) still consumes the offset. A nested region with
+// its own positive skipK (residue inside ITS parent, e.g. a claimed element)
+// declares a fresh budget; the enclosing budget was already consumed by that
+// element's own claim.
+function regionBudgetVar(ctx: Ctx, skipK: number, regionBudget?: string, inheritedInit?: string): string | null {
+  if (!ctx.markerless || !ctx.hydrate) return null;
+  if (skipK > 0) {
+    const pk = ctx.n();
+    ctx.push(`let ${pk} = ${skipK}; // first-claim budget: region SSR sits ${skipK} slot(s) past the walker cursor`);
+    return pk;
+  }
+  if (inheritedInit) {
+    const pk = ctx.n();
+    ctx.push(`let ${pk} = ${inheritedInit}; // first-claim budget: inherited from the caller's walker residue`);
+    return pk;
+  }
+  return regionBudget || null;
+}
+
+// Combine a compile-time residue offset (`skipK`) with a runtime first-claim
+// budget (`regionBudget` — a `let __pk = …` var declared by a region or the
+// inherited walker deposit) into a single skip expression. When both are
+// present they ADD: the budget is the CALLER's residue past the cursor, while
+// skipK is residue WITHIN the current scope; the claim must skip both.
+function markerlessSkipExpr(regionBudget: string | undefined, skipK: number): string {
+  if (regionBudget) return skipK > 0 ? `${regionBudget} + ${skipK}` : regionBudget;
+  return String(skipK);
+}
+
+function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effArr = ctx.n();
   const catchParam = node.catchParamName || '__e';
   const parent = parentVar || '$root';
+  const budget = ctx.hydrate ? regionBudgetVar(ctx, skipK, regionBudget) : null;
 
   ctx.push(`const ${anchor} = document.createComment('try');`);
   if (!ctx.hydrate) ctx.push(`${parent}.appendChild(${anchor});`);
@@ -1003,7 +1181,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
       ctx.push(indent(`const __cl = [];`));
     }
     for (const child of body) {
-      const childVar = emitNode(ctx, child, tracked, isCatch ? null : effArr, hydMode ? undefined : '__p', compPrefix);
+      const childVar = emitNode(ctx, child, tracked, isCatch ? null : effArr, hydMode ? undefined : '__p', compPrefix, 0, budget || undefined);
       if (childVar) {
         if (hydMode) ctx.push(indent(`__cl.push(${childVar});`));
         else ctx.push(indent(`__p.insertBefore(${childVar}, ${endAnchor});`));
@@ -1058,9 +1236,10 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
   return null;
 }
 
-function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, TrackedInfo>, effTarget: string | null, parentVar?: string): string | null {
+function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, TrackedInfo>, effTarget: string | null, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const hyd = ctx.hydrate;
   const parent = parentVar || '$root';
+  const budget = hyd ? regionBudgetVar(ctx, skipK, regionBudget) : null;
   const isOpaque = (n: unknown): n is OpaqueDynamicRegion => !!n && typeof (n as any).condition !== 'undefined';
   if (hyd && node.alternateNodes.length === 1 && isOpaque(node.alternateNodes[0])) {
     const chain: { cond: string; nodes: IRNode[] }[] = [];
@@ -1094,7 +1273,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       for (const n of chain[i].nodes) {
         const savedClaim = ctx.claimStatic;
         if (hyd) ctx.claimStatic = true;
-        const v = emitNode(ctx, n, tracked, effectsVar, parentVar);
+        const v = emitNode(ctx, n, tracked, effectsVar, parentVar, '__components', 0, budget || undefined);
         ctx.claimStatic = savedClaim;
         if (v) ctx.push(indent(`${cl}.push(${v});`));
       }
@@ -1110,7 +1289,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       for (const n of finalElse) {
         const savedClaim = ctx.claimStatic;
         if (hyd) ctx.claimStatic = true;
-        const v = emitNode(ctx, n, tracked, effectsVar, parentVar);
+        const v = emitNode(ctx, n, tracked, effectsVar, parentVar, '__components', 0, budget || undefined);
         ctx.claimStatic = savedClaim;
         if (v) ctx.push(indent(`${cl2}.push(${v});`));
       }
@@ -1183,7 +1362,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   for (const n of node.consequentNodes) {
     const savedClaim = ctx.claimStatic;
     if (hyd) ctx.claimStatic = true;
-    const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : conFrag);
+    const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : conFrag, '__components', 0, budget || undefined);
     ctx.claimStatic = savedClaim;
     if (v) {
       if (hyd) ctx.push(indent(`__cl.push(${v});`));
@@ -1205,7 +1384,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
     for (const n of node.alternateNodes) {
       const savedAltClaim = ctx.claimStatic;
       if (hyd) ctx.claimStatic = true;
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : altFrag);
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : altFrag, '__components', 0, budget || undefined);
       ctx.claimStatic = savedAltClaim;
       if (v) {
         if (hyd) ctx.push(indent(`__cl.push(${v});`));
@@ -1256,13 +1435,14 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   return null;
 }
 
-function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedInfo>, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const condExpr = transformTracked(node.condition as any, tracked);
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
   const hyd = ctx.hydrate;
   const parent = parentVar || '$root';
+  const budget = hyd ? regionBudgetVar(ctx, skipK, regionBudget) : null;
 
   ctx.push(`const ${anchor} = document.createComment('while');`);
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
@@ -1278,7 +1458,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   if (node.isDoWhile) {
     ctx.push(indent(`do {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b');
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
         if (hyd) ctx.push(indent(`__cl.push(${v});`));
         else ctx.push(indent(`__b.appendChild(${v});`));
@@ -1288,7 +1468,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   } else {
     ctx.push(indent(`while (${condExpr}) {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b');
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
         if (hyd) ctx.push(indent(`__cl.push(${v});`));
         else ctx.push(indent(`__b.appendChild(${v});`));
@@ -1327,12 +1507,13 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   return null;
 }
 
-function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
   const hyd = ctx.hydrate;
   const parent = parentVar || '$root';
+  const budget = hyd ? regionBudgetVar(ctx, skipK, regionBudget) : null;
 
   ctx.push(`const ${anchor} = document.createComment('for');`);
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
@@ -1349,7 +1530,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     const srcExpr = transformTracked(node.condition as any, tracked);
     ctx.push(indent(`for (${node.init} of (Array.isArray(${srcExpr}) ? ${srcExpr} : (${srcExpr} == null ? [] : Object.keys(${srcExpr})))) {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b');
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
         if (hyd) ctx.push(indent(`__cl.push(${v});`));
         else ctx.push(indent(`__b.appendChild(${v});`));
@@ -1373,7 +1554,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     const head = initPart ? `${initPart}; ${condExpr}` : `; ${condExpr}`;
     ctx.push(indent(`for (${head}; ${updatePart}) {`));
     for (const n of node.bodyTemplate) {
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b');
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
         if (hyd) ctx.push(indent(`__cl.push(${v});`));
         else ctx.push(indent(`__b.appendChild(${v});`));
@@ -1489,13 +1670,14 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   return null;
 }
 
-function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, TrackedInfo>, parentVar?: string): string | null {
+function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, TrackedInfo>, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const discExpr = transformTracked(node.discriminant as any, tracked);
   const anchor = ctx.n();
   const endAnchor = ctx.n();
   const effectsVar = ctx.n();
   const hyd = ctx.hydrate;
   const parent = parentVar || '$root';
+  const budget = hyd ? regionBudgetVar(ctx, skipK, regionBudget) : null;
 
   ctx.push(`const ${anchor} = document.createComment('switch');`);
   if (!hyd) ctx.push(`${parent}.appendChild(${anchor});`);
@@ -1522,7 +1704,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
       ctx.push(indent(`default:`));
     }
     for (const n of c.body) {
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__c');
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__c', '__components', 0, budget || undefined);
       if (v) {
         if (hyd) ctx.push(indent(`__cl.push(${v});`));
         else ctx.push(indent(`__c.appendChild(${v});`));
@@ -1562,7 +1744,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   return null;
 }
 
-function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, effTarget: string | null, parentVar?: string): string | null {
+function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, effTarget: string | null, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const arrExpr = transformTracked(node.expression as any, tracked);
   const itemVar = node.itemVariable;
   const anchor = ctx.n();
@@ -1576,6 +1758,9 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
   // adopted and wired instead of being rebuilt (which left SSR phantoms behind).
   const hydKeyed = ctx.hydrate && keyed;
   const parent = parentVar || '$root';
+  // Keyed maps resolve each item through claim-by-key, never positionally, so
+  // the first-claim budget only applies to the non-keyed hydrate path.
+  const budget = hyd ? regionBudgetVar(ctx, skipK, regionBudget) : null;
   // A re-render effect is only valid when the map iterates a tracked/reactive
   // source. Iterating a static collection (module const, top-level array) or a
   // loop/statement-local derived value (e.g. `col.links`, `pages`) renders once;
@@ -1626,7 +1811,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
   }
   if (hydKeyed) ctx.rootClaim = true;
   for (const n of node.bodyTemplate) {
-    const v = emitNode(ctx, n, tracked, '__e', hyd ? undefined : '__it');
+    const v = emitNode(ctx, n, tracked, '__e', hyd ? undefined : '__it', '__components', 0, budget || undefined);
     if (v) {
       if (hyd) {
         ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, __r);`));
@@ -1662,7 +1847,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     if (hydKeyed) ctx.hydrate = false;
     for (const n of node.alternateNodes) {
       ctx.claimStatic = true;
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? undefined : frag);
+      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? undefined : frag, '__components', 0, budget || undefined);
       if (v) {
         if (hyd) ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, ${endAnchor});`));
         else ctx.push(indent(`${frag}.appendChild(${v});`));
@@ -1696,7 +1881,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
       // inside `parent` (pre-attach, `anchor.parentNode` is null) and peeks all
       // keys before claim-by-key consumes the walker, so server-rendered items
       // are adopted and wired in place instead of being rebuilt.
-      ctx.push(`const ${initList} = () => { ${reconciler} = reconcileHydrated(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e, __root) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'}, null, __root), __hydrate, ${parent}); };`);
+      ctx.push(`const ${initList} = () => { ${reconciler} = reconcileHydrated(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e, __root) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'}, null, __root), __hydrate, ${parent}, ${skipK}); };`);
     } else {
       ctx.push(`const ${initList} = () => { ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'})); };`);
     }
@@ -1799,13 +1984,14 @@ function computeAsyncComponents(comps: ComponentIR[]): Set<string> {
   return new Set(comps.filter((c) => c.isAsync).map((c) => c.name));
 }
 
-function generateComponent(comp: ComponentIR, importedNames: Set<string> = new Set(), hydrate = false, asyncComps: Set<string> = new Set(), linkNames: Set<string> = new Set(), selfClaimNames: Set<string> = new Set(), alloc?: NameAlloc): string {
+function generateComponent(comp: ComponentIR, importedNames: Set<string> = new Set(), hydrate = false, asyncComps: Set<string> = new Set(), linkNames: Set<string> = new Set(), selfClaimNames: Set<string> = new Set(), alloc?: NameAlloc, markerless = true): string {
   const tracked = collectTrackedNames(comp.body);
   const ctx = new Ctx(alloc);
   ctx.importedNames = importedNames;
   ctx.linkNames = linkNames;
   ctx.selfClaimNames = selfClaimNames;
   ctx.hydrate = hydrate;
+  ctx.markerless = markerless;
   ctx.asyncComps = asyncComps;
   ctx.isAsyncScope = comp.isAsync || asyncComps.has(comp.name);
 
@@ -1847,9 +2033,22 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
       emitNode(ctx, node, tracked, null);
     }
   }
+  let topPendingSkip = 0;
+  let topBudget: string | null = null;
+  if (ctx.markerless && ctx.hydrate) {
+    // Inherited walker deposit (Phase 3.c): a caller that placed this component
+    // right after pure-static residue deposits it on the shared walker
+    // (`injectSkipK`, consumed once by `takeSkipK`). The FIRST top-level claim
+    // translates it into a positional skip exactly like a region budget, so the
+    // component's root lands on its own SSR slot wherever the call appears.
+    // Pure-static top-level nodes return null without claiming and leave the
+    // budget intact for the next claim.
+    topBudget = regionBudgetVar(ctx, 0, undefined,
+      `(typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)`);
+  }
   for (const node of comp.body) {
     if (node instanceof TrackDecl) continue;
-    const v = emitNode(ctx, node, tracked, null);
+    const v = emitNode(ctx, node, tracked, null, undefined, '__components', topPendingSkip, topBudget || undefined);
     if (v) {
       if (ctx.hydrate) {
         // The first top-level node becomes `$mount`. Late top-level nodes are
@@ -1861,6 +2060,15 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
         ctx.push(indent(`$root.appendChild(${v});`));
       }
     }
+    // Markerless: only unclaimed residue must be skipped by the next claim.
+    // Claiming children advance the walker cursor themselves; pure-static
+    // top-level nodes return null (left in the SSR DOM unclaimed) and are
+    // never walked over, so the next claim must skip past them.
+    if (claimsWalkerNode(ctx, node)) {
+      topBudget = null;
+      topPendingSkip = 0;
+    }
+    else topPendingSkip += ssrResidueEstimate(node);
   }
 
   const effCode = ctx.flushEffects();
@@ -1891,7 +2099,7 @@ function buildParamInit(paramNames: string[]): string {
   return `const { ${paramNames.join(', ')} } = props;`;
 }
 
-function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc): string {
+function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc, markerless = true): string {
   const mapLines: string[] = [];
   mapLines.push(`const __components = {};`);
   const asyncComps = computeAsyncComponents(irRoot.components);
@@ -1927,12 +2135,18 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc): 
   for (const comp of irRoot.components) {
     if (hydrate && isStaticComponent(comp)) {
       // Static components keep their SSR content untouched: claim the root
-      // WITHOUT stripping its direct text (nothing will re-create it).
-      const stub = `(props, __registry, __hydrate) => { return __hydrate.claimOnly(); }`;
+      // WITHOUT stripping its direct text (nothing will re-create it). In
+      // markerless mode the claim also consumes the caller's inherited
+      // residue deposit (`takeSkipK`), matching a generated component's
+      // first-claim budget.
+      const claimExpr = markerless
+        ? `__hydrate.claimOnly(undefined, (typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0))`
+        : `__hydrate.claimOnly()`;
+      const stub = `(props, __registry, __hydrate) => { return ${claimExpr}; }`;
       mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
-    const code = generateComponent(comp, directNames, hydrate, asyncComps, linkNames, selfClaimNames, alloc);
+    const code = generateComponent(comp, directNames, hydrate, asyncComps, linkNames, selfClaimNames, alloc, markerless);
     mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
   }
 
@@ -1954,6 +2168,12 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc): 
   mapLines.push(`\t\tconst p = nodes[0].parentNode;`);
   mapLines.push(`\t\tp.insertBefore(start, nodes[0]);`);
   mapLines.push(`\t\tp.insertBefore(end, nodes[nodes.length - 1].nextSibling);`);
+  mapLines.push(`\t\t// Client-surplus nodes (SSR rendered fewer items than the client data)`);
+  mapLines.push(`\t\t// are freshly claimed and still detached — move them into the region in`);
+  mapLines.push(`\t\t// client order before \`end\`, instead of stranding them off-parent.`);
+  mapLines.push(`\t\tfor (let i = 0; i < nodes.length; i++) {`);
+  mapLines.push(`\t\t\tif (nodes[i].parentNode === null) p.insertBefore(nodes[i], end);`);
+  mapLines.push(`\t\t}`);
   mapLines.push(`\t\treturn;`);
   mapLines.push(`\t}`);
   mapLines.push(`\tfallback.appendChild(start);`);
@@ -2008,6 +2228,25 @@ function isStaticIR(body: IRNode[]): boolean {
     }
   }
   return true;
+}
+
+// Whether emitting `node` advances the structural walker's cursor (claims a
+// walker slot via nextElement). Markerless skipK accounting must only stand in
+// for siblings the walker will NOT consume; a claiming sibling advances the
+// cursor itself, so its residue must not be counted again. A pure-static
+// StaticNode only claims when `claimStatic` forces it (the emitStatic early
+// return for static-only subtrees under `!claim`); otherwise its SSR element is
+// left in place untouched and the next claim must skip it.
+function claimsWalkerNode(ctx: Ctx, node: IRNode): boolean {
+  if (node instanceof StaticNode) return ctx.claimStatic || !isStaticIR(node.children);
+  if (node instanceof ComponentCall) return true;
+  if (node instanceof OpaqueDynamicRegion) return true;
+  if (node instanceof MapRegion) return true;
+  if (node instanceof ForLoop) return true;
+  if (node instanceof WhileLoop) return true;
+  if (node instanceof SwitchBlock) return true;
+  if (node instanceof TryCatch) return true;
+  return false;
 }
 
 function isStaticComponent(comp: ComponentIR): boolean {
@@ -2145,13 +2384,13 @@ export function escapeHtml(str: string): string {
     .split("'").join('&#39;');
 }
 
-function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean; nameAllocator?: NameAlloc }): string {
+function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean; nameAllocator?: NameAlloc; markerless?: boolean }): string {
   const needsClient = ir.components.some((c) => c.isClient || !isStaticComponent(c));
   if (!options.forceClient && !needsClient) {
     return '';
   }
 
-  const componentMapCode = buildComponentMap(ir, options.hydrate, options.nameAllocator);
+  const componentMapCode = buildComponentMap(ir, options.hydrate, options.nameAllocator, options.markerless !== false);
   const importLines = ir.imports.length > 0 ? ir.imports.join('\n') + '\n' : '';
   const topCode = (options.includeTopLevel === false ? [] : transformTopLevelForActions(ir.topLevelCode, 'client')).join('\n') + '\n';
 
@@ -2212,7 +2451,7 @@ ${exportCode}
   return moduleCode.trim();
 }
 
-export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean; sourcePath?: string; mdRoots?: string[]; nameAllocator?: NameAlloc } = {}): string {
+export function compileClient(source: string, _componentName: string | null, options: { forceClient?: boolean; hydrate?: boolean; includeTopLevel?: boolean; sourcePath?: string; mdRoots?: string[]; nameAllocator?: NameAlloc; markerless?: boolean } = {}): string {
   if (options.sourcePath) {
     source = inlineMdImportsFrom(source, options.sourcePath, options.mdRoots || []);
   }
@@ -2233,7 +2472,7 @@ export function compileClientBoth(
   source: string,
   _componentName: string | null,
   sourcePath?: string,
-  opts?: { skipHyd?: boolean },
+  opts?: { skipHyd?: boolean; markerless?: boolean },
 ): { comp: string; hyd: string; name: string | null } {
   const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
   // Downstream type-stripping mutates AST nodes in place (stripTsTypes),
@@ -2257,7 +2496,7 @@ export function compileClientBoth(
   if (opts?.skipHyd) return { comp, hyd: '', name };
   return {
     comp,
-    hyd: emitClientFromIR(irHyd!, { forceClient: true, hydrate: true, includeTopLevel: false, nameAllocator: alloc }),
+    hyd: emitClientFromIR(irHyd!, { forceClient: true, hydrate: true, includeTopLevel: false, nameAllocator: alloc, markerless: opts?.markerless !== false }),
     name,
   };
 }

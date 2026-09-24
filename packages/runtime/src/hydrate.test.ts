@@ -483,6 +483,457 @@ describe('createHydrateChildWalker', () => {
     const sub = walker.subWalker({ children: [], childNodes: [] });
     expect(typeof sub.nextElement).toBe('function');
   });
+
+  it('claims first matching child positionally', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const a = document.createElement('span');
+    const b = document.createElement('b');
+    parent.appendChild(a); parent.appendChild(b);
+    const walker = createHydrateChildWalker(parent);
+    expect(walker.nextElement('span')).toBe(a);
+    expect(walker.nextElement('b')).toBe(b);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+});
+
+describe('markerless structural walker (plain SSR HTML)', () => {
+  it('nextElement claims elements positionally with skipK over pixels of residue', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const staticResidue = document.createElement('i'); // skipped static margin
+    const target = document.createElement('span');
+    const tail = document.createElement('span');
+    parent.appendChild(staticResidue); parent.appendChild(target); parent.appendChild(tail);
+    // No markers anywhere: createHydrateWalker auto-selects the structural walker.
+    const walker = createHydrateWalker(parent);
+    expect(walker.root).toBe(parent);
+    // skipK = 1 skips the static residue already retrieved from __vsk_ssrEls.
+    const a = walker.nextElement('span', 1);
+    expect(a).toBe(target);
+    expect(target.hasAttribute('data-vsk-claimed')).toBe(true);
+    expect(walker.nextElement('span')).toBe(tail);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('tag mismatch consumes exactly one slot and reports, then walks on', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const wrong = document.createElement('div');
+    const right = document.createElement('p');
+    parent.appendChild(wrong); parent.appendChild(right);
+    const walker = createHydrateWalker(parent);
+    const seen = [];
+    onHydrationMismatch((issue) => seen.push(issue));
+    const el = walker.nextElement('p');
+    // Divergence: fresh element handed back, the SSR slot consumed.
+    expect(el.tagName).toBe('P');
+    expect(el.parentNode).toBe(null);
+    // The wrong-tag SSR node is never bound, never deleted.
+    expect(parent.contains(wrong)).toBe(true);
+    expect(wrong.textContent).toBe('');
+    expect(seen.some((i) => i.kind === 'tag-mismatch')).toBe(true);
+    // The walker moved past the consumed slot: next claim hits the real <p>.
+    expect(walker.nextElement('p')).toBe(right);
+    expect(walker.done()).toBe(true);
+    onHydrationMismatch(null);
+    cleanupDocument();
+  });
+
+  // Phase 3.c value-thread offset: a caller deposits a residue count on the
+  // exact walker reference a compiled child draws from, the child reads it
+  // exactly once at its first claim, and the deposit never survives to
+  // unrelated claims or sub-walkers.
+  it('injectSkipK/takeSkipK deposit is consumed exactly once on the same reference', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const residue = document.createElement('i');
+    const target = document.createElement('span');
+    parent.appendChild(residue); parent.appendChild(target);
+    const walker = createHydrateWalker(parent);
+    // No deposit yet: takeSkipK reads 0.
+    expect(walker.takeSkipK()).toBe(0);
+    // Caller emits injectSkipK(1) right before invoking the child.
+    walker.injectSkipK(1);
+    // The compiled child seeds its first claim with the deposit.
+    const budget = walker.takeSkipK();
+    expect(budget).toBe(1);
+    const el = walker.nextElement('span', budget);
+    expect(el).toBe(target);
+    // Deposit is reset: a second read (or a later sibling claim) sees 0.
+    expect(walker.takeSkipK()).toBe(0);
+    const tail = walker.nextElement('span');
+    expect(tail === target).toBe(false);
+    expect(tail.tagName).toBe('SPAN');
+    cleanupDocument();
+  });
+
+  it('the deposit does not leak into a sub-walker', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const child = document.createElement('section');
+    parent.appendChild(child);
+    const walker = createHydrateWalker(parent);
+    walker.injectSkipK(2);
+    // createHydrateChildWalker/stub subWalkers are fresh references; without a
+    // matching injectSkipK on THAT reference the offset must not carry over.
+    const sub = walker.subWalker(child);
+    expect(sub.takeSkipK()).toBe(0);
+    expect(walker.takeSkipK()).toBe(2);
+    cleanupDocument();
+  });
+
+  it('skippable <style> preamble does not shift positional claims (layout SSR shape)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const style = document.createElement('style');
+    const loader = document.createElement('div');
+    loader.setAttribute('data-vesk-loading-indicator', '');
+    const nav = document.createElement('nav');
+    const main = document.createElement('main');
+    const footer = document.createElement('footer');
+    parent.appendChild(style); parent.appendChild(loader); parent.appendChild(nav); parent.appendChild(main); parent.appendChild(footer);
+    const walker = createHydrateWalker(parent);
+    // The layout's scoped <style> is a real DOM node inside #root; the first
+    // claim targets the loader div. Before the fix every claim shifted by one
+    // (style eaten as a slot) and the whole page rebuilt fresh.
+    expect(walker.nextElement('div')).toBe(loader);
+    expect(walker.nextElement('nav')).toBe(nav);
+    expect(walker.nextElement('main')).toBe(main);
+    expect(walker.nextElement('footer')).toBe(footer);
+    expect(walker.done()).toBe(true);
+    // The <style> node is untouched and still owned by the document.
+    expect(style.parentNode).toBe(parent);
+    expect(parent.contains(style)).toBe(true);
+    cleanupDocument();
+  });
+
+  it('skippable <style> gap between claims is stepped over without consuming a slot', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const head = document.createElement('h1');
+    const style = document.createElement('style');
+    const p = document.createElement('p');
+    parent.appendChild(head); parent.appendChild(style); parent.appendChild(p);
+    const walker = createHydrateWalker(parent);
+    expect(walker.nextElement('h1')).toBe(head);
+    expect(walker.nextElement('p')).toBe(p);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('script/template preamble is skippable too', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const script = document.createElement('script');
+    const tpl = document.createElement('template');
+    const section = document.createElement('section');
+    parent.appendChild(script); parent.appendChild(tpl); parent.appendChild(section);
+    const walker = createHydrateWalker(parent);
+    expect(walker.nextElement('section')).toBe(section);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('containerless keyed region claims root-sibling items via the cursor, never the root headings', () => {
+    mockDocument();
+    // /empty's statement-mode keyed `for` sits among static siblings at the
+    // page root. The static headings are never claimed by the walker: the
+    // actions `div` claims with skipK=1 (over the static h1), the `ul` with
+    // skipK=1 (over the static h2), leaving the cursor midway and one static
+    // residue (`h2 "Statement-mode empty block"`) between cursor and region.
+    const main = document.createElement('main');
+    const h1 = document.createElement('h1'); h1.appendChild(document.createTextNode('Empty-state Demo'));
+    const actions = document.createElement('div'); actions.setAttribute('class', 'flex gap-2 mb-6');
+    const h2a = document.createElement('h2'); h2a.appendChild(document.createTextNode('Keyed for-of with empty block'));
+    const ul = document.createElement('ul'); ul.setAttribute('class', 'space-y-2');
+    const h2b = document.createElement('h2'); h2b.appendChild(document.createTextNode('Statement-mode empty block'));
+    const item1 = document.createElement('div'); item1.setAttribute('class', 'task'); item1.appendChild(document.createTextNode('Buy milk'));
+    const item2 = document.createElement('div'); item2.setAttribute('class', 'task'); item2.appendChild(document.createTextNode('Write docs'));
+    const footer = document.createElement('p'); footer.appendChild(document.createTextNode('footer'));
+    main.appendChild(h1); main.appendChild(actions); main.appendChild(h2a); main.appendChild(ul);
+    main.appendChild(h2b); main.appendChild(item1); main.appendChild(item2); main.appendChild(footer);
+
+    const walker = createHydrateWalker(main);
+    // Prior claims (skipK over the static elements the walker does not eat).
+    expect(walker.nextElement('div', 1)).toBe(actions);
+    expect(walker.nextElement('ul', 1)).toBe(ul);
+
+    const anchor = document.createComment('map');
+    const endAnchor = document.createComment('map-end');
+    const rendered = [];
+    const createItem = (item, _i, effs, root) => {
+      effs.push(new BlockMock());
+      // Mirrors compiled renderItem: `__root || walker.nextElement(...)`.
+      const el = root || document.createElement('div');
+      el.appendChild(document.createTextNode(item));
+      rendered.push(el);
+    };
+
+    // The containerless keyed region: parent is the walker's own root, so no
+    // re-scope; the static h2 residue is covered by the compile-time skipK.
+    reconcileHydrated(
+      anchor, endAnchor,
+      ['Buy milk', 'Write docs'],
+      (item) => item,
+      createItem,
+      walker,
+      main,
+      1,
+    );
+
+    // Items adopted in place, in order, from the region slots.
+    expect(rendered[0]).toBe(item1);
+    expect(rendered[1]).toBe(item2);
+    expect(item1.getAttribute('data-vsk-claimed')).toBe('');
+    expect(item2.getAttribute('data-vsk-claimed')).toBe('');
+    // Static siblings are never claimed, renamed, or relocated.
+    expect(h1.getAttribute('data-vsk-claimed')).toBe(null);
+    expect(h1.textContent).toBe('Empty-state Demo');
+    expect(h2b.getAttribute('data-vsk-claimed')).toBe(null);
+    expect(h2b.textContent).toBe('Statement-mode empty block');
+    expect(footer.getAttribute('data-vsk-claimed')).toBe(null);
+    // Anchors surround exactly the region span between the static heading
+    // and the footer (the `k:` item markers sit between anchor and items).
+    const ai = main.childNodes.indexOf(anchor);
+    const item1i = main.childNodes.indexOf(item1);
+    const item2i = main.childNodes.indexOf(item2);
+    const eai = main.childNodes.indexOf(endAnchor);
+    expect(ai).toBeGreaterThan(main.childNodes.indexOf(h2b));
+    expect(item1i).toBeGreaterThan(ai);
+    expect(item2i).toBeGreaterThan(item1i);
+    expect(eai).toBeGreaterThan(item2i);
+    expect(eai).toBeLessThan(main.childNodes.indexOf(footer));
+    cleanupDocument();
+  });
+
+  it('scopeToRegion claims keyed items inside their container, never its siblings', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const ul = document.createElement('ul');
+    const p = document.createElement('p');
+    ul.appendChild(document.createElement('span'));
+    ul.appendChild(document.createElement('span'));
+    ul.appendChild(document.createElement('span'));
+    parent.appendChild(ul); parent.appendChild(p);
+    const walker = createHydrateWalker(parent);
+    expect(walker.nextElement('ul')).toBe(ul);
+    // Keyed region claims must stay inside the ul — the top-level walker's
+    // positional cursor would otherwise adopt the ul's sibling `<p>`.
+    const region = walker.scopeToRegion(ul);
+    const c1 = region.claimByKey('k1');
+    const c2 = region.claimByKey('k2');
+    const c3 = region.claimByKey('k3');
+    expect(c1 && c1.el).toBe(ul.children[0]);
+    expect(c2 && c2.el).toBe(ul.children[1]);
+    expect(c3 && c3.el).toBe(ul.children[2]);
+    expect(region.done()).toBe(true);
+    // The top-level walker's next claim still gets the sibling that the
+    // (unscoped) claimByKey would have stolen.
+    expect(walker.nextElement('p')).toBe(p);
+    cleanupDocument();
+  });
+
+  it('scopeToRegion shares the adoption ledger — sibling regions never double-claim', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const ul = document.createElement('ul');
+    for (let i = 0; i < 4; i++) ul.appendChild(document.createElement('span'));
+    parent.appendChild(ul);
+    const walker = createHydrateWalker(parent);
+    walker.nextElement('ul');
+    // Two keyed maps in the same container: the second map must skip the items
+    // the first claimed, not re-adopt them.
+    const regionA = walker.scopeToRegion(ul);
+    expect(regionA.claimByKey('a1')!.el).toBe(ul.children[0]);
+    expect(regionA.claimByKey('a2')!.el).toBe(ul.children[1]);
+    const regionB = walker.scopeToRegion(ul);
+    expect(regionB.claimByKey('b1')!.el).toBe(ul.children[2]);
+    expect(regionB.claimByKey('b2')!.el).toBe(ul.children[3]);
+    expect(regionB.claimByKey('b3')).toBe(null);
+    cleanupDocument();
+  });
+
+  it('exhausted walker builds fresh nodes silently on post-hydration re-renders (no warn spam)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const a = document.createElement('span');
+    parent.appendChild(a);
+    const walker = createHydrateWalker(parent);
+    expect(walker.nextElement('span')).toBe(a);
+    const warns = captureWarns(() => {
+      const x = walker.nextElement('span');
+      const y = walker.nextElement('span');
+      expect(x.tagName).toBe('SPAN');
+      expect(y.tagName).toBe('SPAN');
+    });
+    expect(warns.length).toBe(0);
+    cleanupDocument();
+  });
+
+  it('skipK overshoot backs off to cursor instead of walking past the list', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const a = document.createElement('span');
+    parent.appendChild(a);
+    const walker = createHydrateWalker(parent);
+    const el = walker.nextElement('span', 5);
+    expect(el).toBe(a);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('claims cannot go backwards: later claims never re-adopt an earlier slot', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const a = document.createElement('span');
+    const b = document.createElement('span');
+    parent.appendChild(a); parent.appendChild(b);
+    const walker = createHydrateWalker(parent);
+    expect(walker.nextElement('span')).toBe(a);
+    // Positional cursor has moved past `a`; the next claim takes `b`.
+    const next = walker.nextElement('span');
+    expect(next).toBe(b);
+    cleanupDocument();
+  });
+
+  it('claimOnly does not strip direct SSR text (static-component stub)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const p = document.createElement('p');
+    p.appendChild(document.createTextNode('static text'));
+    parent.appendChild(p);
+    const walker = createHydrateWalker(parent);
+    const claimed = walker.claimOnly('p');
+    expect(claimed).toBe(p);
+    expect(claimed.textContent).toBe('static text');
+    cleanupDocument();
+  });
+
+  it('subWalker scopes interior claims to the claimed element children', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const card = document.createElement('div');
+    const h = document.createElement('h1');
+    const btn = document.createElement('button');
+    card.appendChild(h); card.appendChild(btn);
+    parent.appendChild(card);
+    const walker = createHydrateWalker(parent);
+    const claimed = walker.nextElement('div');
+    expect(claimed).toBe(card);
+    const sub = walker.subWalker(claimed);
+    expect(sub.nextElement('h1')).toBe(h);
+    expect(sub.nextElement('button')).toBe(btn);
+    expect(sub.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('insertBeforeCursor anchors before the next unconsumed SSR element', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const a = document.createElement('span');
+    const b = document.createElement('span');
+    parent.appendChild(a); parent.appendChild(b);
+    const walker = createHydrateWalker(parent);
+    walker.nextElement('span');
+    const fence = document.createComment('fence');
+    expect(walker.insertBeforeCursor(fence)).toBe(true);
+    expect(parent.childNodes[1]).toBe(fence);
+    expect(walker.root).toBe(parent);
+    // The anchor did not consume the following element.
+    expect(walker.nextElement('span')).toBe(b);
+    cleanupDocument();
+  });
+
+  it('claimByKey adopts the cursor slot positionally (keyed identity, Phase 3d)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const liA = document.createElement('li'); liA.appendChild(document.createTextNode('A'));
+    const liB = document.createElement('li'); liB.appendChild(document.createTextNode('B'));
+    parent.appendChild(liA); parent.appendChild(liB);
+    const walker = createHydrateWalker(parent);
+    // Keys never live on the DOM; the item adopts the next unconsumed region
+    // slot. Identity is the SSR node itself, not a key lookup.
+    let c = walker.claimByKey('a');
+    expect(c === null).toBe(false);
+    expect(c!.el).toBe(liA);
+    c = walker.claimByKey('b');
+    expect(c === null).toBe(false);
+    expect(c!.el).toBe(liB);
+    expect(walker.done()).toBe(true);
+    expect(walker.remainingCount()).toBe(0);
+    cleanupDocument();
+  });
+
+  it('claimByKey never re-claims a slot consumed by a positional claim', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const liA = document.createElement('li');
+    const liB = document.createElement('li');
+    parent.appendChild(liA); parent.appendChild(liB);
+    const walker = createHydrateWalker(parent);
+    const first = walker.nextElement('li');
+    expect(first).toBe(liA);
+    // The cursor already advanced past liA; the keyed claim picks up liB.
+    const c = walker.claimByKey('b');
+    expect(c === null).toBe(false);
+    expect(c!.el).toBe(liB);
+    cleanupDocument();
+  });
+
+  it('claimByKey returns null when the region is exhausted (client surplus renders fresh)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    parent.appendChild(document.createElement('li'));
+    const walker = createHydrateWalker(parent);
+    expect(walker.claimByKey('a') === null).toBe(false);
+    expect(walker.claimByKey('b')).toBe(null);
+    expect(walker.remainingCount()).toBe(0);
+    cleanupDocument();
+  });
+
+  it('claimByKey mixes cleanly with region budget claims (skipK accepted, residue 0)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const liA = document.createElement('li');
+    parent.appendChild(liA);
+    const walker = createHydrateWalker(parent);
+    // Keyed regions carry no compile-time residue; skipK stays 0. A stray
+    // nonzero skipK must not rewind the cursor past adopted nodes.
+    const c = walker.claimByKey('a', { relocate: true, skipK: 0 });
+    expect(c === null).toBe(false);
+    expect(c!.el).toBe(liA);
+    cleanupDocument();
+  });
+
+  it('retireDetached and takeMarkers are no-ops for structural walks', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const walker = createHydrateWalker(parent);
+    walker.retireDetached();
+    walker.takeMarkers([document.createComment('vsk')]);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('explicit empty marker list stays marker-engine (deferred strategy slices)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    parent.appendChild(document.createElement('span'));
+    // Auto-detect would pick structural, but an EXPLICIT list is the marker
+    // contract (viewport/idle/interaction slices) — keep WalkerEngine.
+    const walker = createHydrateWalker(parent, []);
+    // Marker-engine fresh fallback on a container whose sole child has no marker.
+    const warns = captureWarns(() => {
+      const el = walker.nextElement('span');
+      expect(el.tagName).toBe('SPAN');
+      expect(el.parentNode).toBe(null);
+    });
+    expect(warns.length).toBe(0);
+    cleanupDocument();
+  });
 });
 
 describe('SSR element residue capture (text/component ordering)', () => {

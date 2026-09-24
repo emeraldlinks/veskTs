@@ -97,15 +97,15 @@ describe('SSG (Static Site Generation)', () => {
 		expect(!result.html.includes('<!--vsk:')).toBe(true);
 	});
 
-	it('dynamic SSG page emits typed hydration markers', async () => {
+	it('dynamic SSG page stays markerless (plain HTML)', async () => {
 		const src = `import { track } from '@vesk/runtime';
 		export component Page {
 			const &[n] = track(1);
 			return <div>{n}</div>
 		}`;
 		const result = await ssg(src);
-		expect(result.body).toContain('<!--vsk:t:div--><div>1</div>');
-		expect(!result.body.includes('<!--vsk--><div>')).toBe(true);
+		expect(result.body).toContain('<div>1</div>');
+		expect(!result.body.includes('<!--vsk')).toBe(true);
 	});
 
 	it('getStaticProps sync provides props to render', async () => {

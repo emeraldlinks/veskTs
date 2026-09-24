@@ -910,9 +910,11 @@ async function main() {
     });
     assert(postsPage.hasPostsH1, '/posts page header rendered');
     assert(postsPage.hasPostData, '/posts SSR page renders fetched post data');
-    // Confirm vsk hydration markers exist in SSR output via fetch
+    // Markerless default: no vsk hydration markers (comments or data-vsk
+    // attributes) leak into SSR output — the client walks plain HTML.
     const rawHtml = await fetch(BASE + '/posts').then(r => r.text());
-    assert((rawHtml.match(/<!--vsk(--|:)/g) || []).length > 0, '/posts SSR output contains <!--vsk--> hydration markers');
+    const rawMarkerCount = (rawHtml.match(/<!--vsk(--|:)/g) || []).length;
+    assert(rawMarkerCount === 0, `/posts SSR output has zero markerless markers (got ${rawMarkerCount})`);
 
     await page.close();
   }
@@ -1883,35 +1885,17 @@ async function main() {
   {
     console.log('\n=== TEST 24: layout-slot integrity ===');
 
-    // 24a: SSR — every vsk-slot open marker is closed by its exact id, with
-    // perfect LIFO nesting (outer layout opens first, closes last). Ids are a
-    // per-compile counter, so only pairing (never the concrete id) is asserted.
-    console.log('  24a: SSR vsk-slot boundaries pair by id, LIFO-nested');
-    const pairIds = (raw) => {
-      const order = [];
-      const stack = [];
-      const re = /<!--(vsk-slot|vsk-slot-end):(s\d+)-->/g;
-      let m;
-      while ((m = re.exec(raw))) {
-        order.push(m[1] + ':' + m[2]);
-        if (m[1] === 'vsk-slot') stack.push(m[2]);
-        else {
-          const open = stack.pop();
-          if (open !== m[2]) return { order, unbalanced: 'mismatch ' + open + ' vs ' + m[2] };
-        }
-      }
-      return { order, stack, unbalanced: stack.length ? 'unclosed ' + stack.join(',') : null };
-    };
-    for (const [route, expectPairs] of [['/portal', 2], ['/portal/guides', 3]]) {
+    // 24a: SSR — markerless layout slots emit no boundary comments at all:
+    // the hydrate walker re-establishes slot ownership positionally from the
+    // plain nested layout content.
+    console.log('  24a: SSR layout slots emit zero boundary markers (markerless)');
+    for (const route of ['/portal', '/portal/guides']) {
       const raw = await (await fetch(BASE + route)).text();
-      const res = pairIds(raw);
-      assert(!res.unbalanced, `${route}: slot markers balance (${res.unbalanced})`);
       const openCount = (raw.match(/<!--vsk-slot:s\d+-->/g) || []).length;
       const closeCount = (raw.match(/<!--vsk-slot-end:s\d+-->/g) || []).length;
-      assert(openCount === expectPairs && closeCount === expectPairs,
-        `${route}: exactly ${expectPairs} paired slot boundaries (open ${openCount}, close ${closeCount})`);
-      assert(res.order[0].startsWith('vsk-slot:') && res.order[res.order.length - 1].startsWith('vsk-slot-end:'),
-        `${route}: outer layout opens first and closes last (${res.order[0]} .. ${res.order[res.order.length - 1]})`);
+      const markerCount = (raw.match(/<!--vsk(--|:)/g) || []).length;
+      assert(openCount === 0 && closeCount === 0 && markerCount === 0,
+        `${route}: markerless SSR emits no slot/vsk boundary markers (open ${openCount}, close ${closeCount}, vsk ${markerCount})`);
     }
 
     // 24b: full load — single nav/main/footer, exact-once content, no markers.

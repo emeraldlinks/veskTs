@@ -43,19 +43,11 @@ component App { return <Child trigger={<Button label="Go"/>}><span>body</span></
 describe('server-render — JSX value as a component prop', () => {
   it('renders the trigger slot next to children', () => {
     const html = render(slotSource, 'App', {});
-    // `props.children` reads a SlotNode: SSR wraps it in id-paired boundary
-    // markers (`<!--vsk-slot:sN-->` … `<!--vsk-slot-end:sN-->`) that the
-    // hydrate codegen claims in place. The id is a per-compile counter —
-    // assert the pairing contract, never a concrete id.
-    const open = '<!--vsk-slot:';
-    const close = '<!--vsk-slot-end:';
-    const openIdx = html.indexOf(open);
-    const closeIdx = html.indexOf(close);
-    expect(html.startsWith('<div><button>Go</button>' + open)).toBeTruthy();
-    const openId = html.slice(openIdx + open.length, html.indexOf('-->', openIdx));
-    const closeId = html.slice(closeIdx + close.length, html.indexOf('-->', closeIdx));
-    expect(closeId).toBe(openId);
-    expect(html).toBe(`<div><button>Go</button><!--vsk-slot:${openId}--><span>body</span><!--vsk-slot-end:${openId}--></div>`);
+    // `props.children` reads a SlotNode: markerless SSR renders it inline —
+    // the slot boundary contract (`<!--vsk-slot:sN-->` … `<!--vsk-slot-end:sN-->`)
+    // is marker-mode only, so default output is plain HTML in DOM order.
+    expect(html).toBe('<div><button>Go</button><span>body</span></div>');
+    expect(html.includes('<!--vsk')).toBe(false);
   });
 
   it('threads dynamic expressions inside the slot body', () => {
