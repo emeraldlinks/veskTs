@@ -594,9 +594,9 @@ async function applyRouteData(
 		pageNode._dataPath = pathname;
 		pageNode._dataFetchedAt = Date.now();
 	}
-	if (data.head) {
-		applyHead(data.head);
-		if (pageNode) pageNode._head = data.head;
+	if (data && 'head' in data) {
+		applyHead(data.head || '');
+		if (pageNode) pageNode._head = data.head || '';
 	}
 	const hasRealProps = data.props
 		? Object.keys(data.props as Record<string, unknown>).some(k => k !== 'params')

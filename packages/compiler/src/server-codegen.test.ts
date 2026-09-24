@@ -4,6 +4,7 @@
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
 import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate, setVskMarkerless } from '@vesk/compiler/src/server-codegen';
+import { mergeHeadHtml } from '@vesk/compiler/src/server-codegen';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -1640,6 +1641,70 @@ describe('SEO — Head Block', () => {
 		expect(result.body).toContain('<p>Body</p>');
 		expect(result.head).toContain('Page Title');
 		expect(result.head).toContain('<meta');
+	});
+	it('tracks route-declared head tags with data-vesk-head', () => {
+		const result = renderPage(`component App {
+			<Head>
+				<title>Tracked Title</title>
+				<meta name="desc" content="A page" />
+				<link rel="stylesheet" href="/fonts.css" />
+				<base href="/" />
+				<style>body { color: red }</style>
+			</Head>
+			<p>Body</p>
+		}`, 'App');
+		expect(result.head).toContain('data-vesk-head');
+		expect(result.head).toContain('<title data-vesk-head>Tracked Title</title>');
+		expect(result.head).toContain('<meta name="desc" content="A page" data-vesk-head />');
+		expect(result.head).toContain('<link rel="stylesheet" href="/fonts.css" data-vesk-head />');
+		expect(result.head).toContain('<base href="/" data-vesk-head />');
+		expect(result.head).toContain('<style data-vesk-head>');
+	});
+	it('does not tag script or charset head tags', () => {
+		const result = renderPage(`component App {
+			<Head>
+				<meta charset="utf-8" />
+				<script src="/analytics.js"></script>
+				<noscript>No JS</noscript>
+				<link rel="stylesheet" href="/app.css" />
+			</Head>
+			<p>Body</p>
+		}`, 'App');
+		expect(result.head).toContain('<meta charset="utf-8" />');
+		expect(result.head).not.toContain('<meta charset="utf-8" data-vesk-head');
+		expect(result.head).toContain('<script src="/analytics.js"></script>');
+		expect(result.head).not.toContain('script src="/analytics.js" data-vesk-head');
+		expect(result.head).toContain('<noscript>No JS</noscript>');
+		expect(result.head).not.toContain('noscript data-vesk-head');
+		expect(result.head).toContain('<link rel="stylesheet" href="/app.css" data-vesk-head />');
+	});
+	it('markerless full-page render stays markerless with route head tags', async () => {
+		setVskMarkerless(true);
+		try {
+			const html = await renderFullPage(`component App {
+				<Head>
+					<title>Markerless Title</title>
+					<link rel="stylesheet" href="/route.css" />
+				</Head>
+				<p>Body</p>
+			}`, 'App');
+			expect(html).not.toContain('vsk');
+			expect(html).not.toContain('<!--');
+			expect(html).not.toContain('data-vsk');
+			expect(html).toContain('>Markerless Title<');
+			expect(html).toContain('data-vesk-head');
+		} finally {
+			setVskMarkerless(false);
+			setVskHydrate(false);
+		}
+	});
+	it('mergeHeadHtml preserves data-vesk-head on layout and page tags', () => {
+		const merged = mergeHeadHtml(
+			'<meta name="desc" content="page" data-vesk-head />',
+			'<link rel="stylesheet" href="/layout.css" data-vesk-head />'
+		);
+		expect(merged.html).toContain('data-vesk-head');
+		expect(merged.html).toContain('/layout.css');
 	});
 });
 

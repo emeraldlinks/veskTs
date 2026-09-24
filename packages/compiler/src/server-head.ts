@@ -78,7 +78,16 @@ function headElementKey(node: IRNode, props: Record<string, unknown>, locals: Re
   return null;
 }
 
-function irNodeToHeadHtml(node: IRNode, props: Record<string, unknown>, locals: Record<string, unknown> = {}): string {
+const HEAD_RECONCILE_MARKER = 'data-vesk-head';
+const HEAD_RECONCILE_TAGS = new Set(['title', 'meta', 'link', 'base', 'style']);
+
+function headIsReconcilable(tag: string, attrMap: Map<string, string>): boolean {
+  if (!HEAD_RECONCILE_TAGS.has(tag)) return false;
+  if (tag === 'meta' && attrMap.has('charset')) return false;
+  return true;
+}
+
+function irNodeToHeadHtml(node: IRNode, props: Record<string, unknown>, locals: Record<string, unknown> = {}, reconcileable = false): string {
   if (node instanceof StaticNode) {
     const attrMap = new Map(node.attributes.map((a) => [a.name, a.value]));
     for (const child of node.children) {
@@ -89,15 +98,16 @@ function irNodeToHeadHtml(node: IRNode, props: Record<string, unknown>, locals: 
         } catch { /* skip */ }
       }
     }
+    const marker = reconcileable && headIsReconcilable(node.tag, attrMap) ? ` ${HEAD_RECONCILE_MARKER}` : '';
     const attrs = [...attrMap.entries()]
       .map(([k, v]) => ` ${k}="${escapeHtml(v)}"`)
       .join('');
-    if (node.selfClosing) return `<${node.tag}${attrs} />`;
+    if (node.selfClosing) return `<${node.tag}${attrs}${marker} />`;
     const inner = node.children
       .filter((c) => !(c instanceof DynamicBinding && c.kind === 'attribute' && c.target !== 'ref'))
-      .map((c) => irNodeToHeadHtml(c, props, locals))
+      .map((c) => irNodeToHeadHtml(c, props, locals, false))
       .join('');
-    return `<${node.tag}${attrs}>${inner}</${node.tag}>`;
+    return `<${node.tag}${attrs}${marker}>${inner}</${node.tag}>`;
   }
   if (node instanceof TextNode) return node.value;
   if (node instanceof DynamicBinding) {
@@ -121,7 +131,7 @@ export function renderHeadHtml(comp: ComponentIR, props: Record<string, unknown>
         const key = headElementKey(child, props, locals);
         if (key !== null && seen.has(key)) continue;
         if (key !== null) seen.add(key);
-        parts.push(irNodeToHeadHtml(child, props, locals));
+        parts.push(irNodeToHeadHtml(child, props, locals, true));
       }
     }
   }

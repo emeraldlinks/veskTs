@@ -1,5 +1,5 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute } from '@vesk/runtime/src/router';
-import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating } from '@vesk/runtime/src/router-components';
+import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating, applyHead } from '@vesk/runtime/src/router-components';
 import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
@@ -9,6 +9,11 @@ let failed = 0;
 function test(name, fn) {
 	try { fn(); passed++; console.log(`  ✓ ${name}`); }
 	catch (e) { failed++; console.log(`  ✗ ${name} — ${e.message}`); }
+}
+
+function describe(name, fn) {
+	console.log(`\n${name}`);
+	fn();
 }
 
 let asyncQueue: Promise<void> = Promise.resolve();
@@ -101,6 +106,7 @@ function makeEl(tag) {
 		setAttribute(k, v) { attrs[k] = String(v); },
 		getAttribute(k) { return attrs[k] || null; },
 		removeAttribute(k) { delete attrs[k]; },
+		hasAttributes() { return Object.keys(attrs).length > 0; },
 		_listeners: {},
 		addEventListener(type, fn) { if (!this._listeners[type]) this._listeners[type] = []; this._listeners[type].push(fn); },
 		removeEventListener(type, fn) { if (this._listeners[type]) this._listeners[type] = this._listeners[type].filter(l => l !== fn); },
@@ -2121,6 +2127,129 @@ test('createRouter renders a standalone route without the root layout', () => {
 	expect(storeRendered.length).toBeGreaterThanOrEqual(1);
 	// Root layout must never run for a standalone route.
 	expect(rootRendered).toBe(false);
+});
+
+describe('applyHead reconciliation of route-declared head tags', () => {
+	function functionalHead() {
+		const head = makeEl('head');
+		const find = (root, sel, out) => {
+			for (const c of (root.children || [])) {
+				if (c.nodeType !== 1) continue;
+				if (sel === '[data-vesk-head]') {
+					if (c.attributes && c.attributes['data-vesk-head'] !== undefined) out.push(c);
+				} else if (c.tagName === sel.toUpperCase()) {
+					out.push(c);
+				}
+				find(c, sel, out);
+			}
+			return out;
+		};
+		head.querySelectorAll = (sel) => find(head, sel, []);
+		head.querySelector = (sel) => head.querySelectorAll(sel)[0] || null;
+		return head;
+	}
+
+	const attrsOf = (el) => (el && el.attributes) ? Object.fromEntries(Object.entries(el.attributes)) : {};
+	const findLink = (head, href) => {
+		return findAttrs(head, (a) => a.tagName === 'LINK' && a.attributes && a.attributes.href === href);
+	};
+	const findAttrs = (root, pred) => {
+		const out = [];
+		(function walk(el) {
+			for (const c of (el.children || [])) {
+				if (c.nodeType !== 1) continue;
+				if (pred(c)) out.push(c);
+				walk(c);
+			}
+		})(root);
+		return out;
+	};
+
+	let oldHead;
+	const swapHead = (h) => { oldHead = document.head; (global.document as any).head = h; };
+	const restoreHead = () => { (global.document as any).head = oldHead; };
+
+	test('applyHead adds link/base/style tags tagged with the sweep marker', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<title>T</title><link rel="stylesheet" href="/global.css" /><meta name="desc" content="d" /><style>body{color:red}</style>');
+			expect(document.head.textContent.includes('T')).toBe(true);
+			const links = findLink(head, '/global.css');
+			expect(links.length).toBe(1);
+			expect(attrsOf(links[0])['data-vesk-head']).toBe('');
+			expect(attrsOf(links[0]).rel).toBe('stylesheet');
+			const metas = findAttrs(head, (a) => a.tagName === 'META' && a.attributes && a.attributes.name === 'desc');
+			expect(metas.length).toBe(1);
+			expect(attrsOf(metas[0])['data-vesk-head']).toBe('');
+			expect(attrsOf(metas[0]).content).toBe('d');
+			const styles = findAttrs(head, (a) => a.tagName === 'STYLE');
+			expect(styles.length).toBe(1);
+			expect(styles[0].textContent.includes('color:red')).toBe(true);
+			expect(attrsOf(styles[0])['data-vesk-head']).toBe('');
+		} finally { restoreHead(); }
+	});
+
+	test('applyHead replaces stale flagged tags on a second nav (link swap)', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<link rel="stylesheet" href="/fonts.css" />');
+			expect(findLink(head, '/fonts.css').length).toBe(1);
+			applyHead('<link rel="stylesheet" href="/app.css" />');
+			expect(findLink(head, '/fonts.css').length).toBe(0);
+			expect(findLink(head, '/app.css').length).toBe(1);
+		} finally { restoreHead(); }
+	});
+
+	test('applyHead sweeps tags from the SSR head that the server tagged', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			head.appendChild(makeEl('link'));
+			const link = head.children[0];
+			link.tagName = 'LINK';
+			link.setAttribute('rel', 'stylesheet');
+			link.setAttribute('href', '/ssr-fonts.css');
+			link.setAttribute('data-vesk-head', '');
+			expect(findLink(head, '/ssr-fonts.css').length).toBe(1);
+			applyHead('<link rel="stylesheet" href="/app.css" />');
+			expect(findLink(head, '/ssr-fonts.css').length).toBe(0);
+			expect(findLink(head, '/app.css').length).toBe(1);
+		} finally { restoreHead(); }
+	});
+
+	test('applyHead with empty head clears stale tagged tags but keeps untagged chrome', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<link rel="stylesheet" href="/app.css" />');
+			expect(findLink(head, '/app.css').length).toBe(1);
+			const chrome = makeEl('link');
+			chrome.tagName = 'LINK';
+			chrome.setAttribute('rel', 'stylesheet');
+			chrome.setAttribute('href', '/global.css');
+			head.appendChild(chrome);
+			applyHead('');
+			expect(findLink(head, '/app.css').length).toBe(0);
+			expect(findLink(head, '/global.css').length).toBe(1);
+		} finally { restoreHead(); }
+	});
+
+	test('applyHead updates the title and skips charset meta', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<title>First</title><meta charset="utf-8" />');
+			expect(document.head.textContent.includes('First')).toBe(true);
+			// charset is framework chrome — applyHead must not re-add it as a route tag.
+			expect(findAttrs(head, (a) => a.tagName === 'META').length).toBe(0);
+			applyHead('<title>Second</title>');
+			const titles = findAttrs(head, (a) => a.tagName === 'TITLE');
+			expect(titles.length).toBe(1);
+			expect(titles[0].textContent).toBe('Second');
+		} finally { restoreHead(); }
+	});
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

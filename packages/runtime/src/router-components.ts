@@ -183,38 +183,71 @@ export function handleScroll(pathname: string, isReplace?: boolean, scrollBehavi
 
 const HEAD_MARKER = 'data-vesk-head';
 
+function applyHeadAttrs(el: HTMLElement, raw: string): void {
+	for (const attrMatch of raw.matchAll(/([a-zA-Z0-9\-:]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) {
+		const name = attrMatch[1];
+		const value = attrMatch[3] ?? attrMatch[4] ?? '';
+		// charset is framework chrome (added by baseHeadParts) and is never
+		// tagged, so never re-add it as a route-declared tag.
+		if (name.toLowerCase() === 'charset') continue;
+		el.setAttribute(name, value);
+	}
+}
+
 export function applyHead(headHtml: string): void {
-	if (typeof document === 'undefined' || !headHtml) return;
+	if (typeof document === 'undefined') return;
 	const head = document.head;
 	if (!head) return;
 
+	// Sweep route-declared head tags — both tags this client applied on a
+	// previous SPA navigation and tags the server tagged in the initial SSR
+	// head. Untagged framework chrome (charset/viewport, global.css, plugin
+	// injects, scripts) survives.
 	for (const el of Array.from(head.querySelectorAll('[' + HEAD_MARKER + ']'))) {
 		el.remove();
 	}
 
+	if (!headHtml) return;
+
 	const titleMatch = headHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
 	if (titleMatch) {
-		const existing = head.querySelector('title');
-		if (existing) existing.textContent = titleMatch[1];
-		else {
-			const t = document.createElement('title');
-			t.textContent = titleMatch[1];
-			head.appendChild(t);
-		}
+		const t = document.createElement('title');
+		t.textContent = titleMatch[1];
+		t.setAttribute(HEAD_MARKER, '');
+		head.appendChild(t);
 	}
 
 	for (const m of headHtml.matchAll(/<meta\b([^>]*)>/gi)) {
 		const meta = document.createElement('meta');
-		const raw = m[1] || '';
-		for (const attrMatch of raw.matchAll(/([a-zA-Z0-9\-:]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) {
-			const name = attrMatch[1];
-			const value = attrMatch[3] ?? attrMatch[4] ?? '';
-			if (name.toLowerCase() === 'charset') continue;
-			meta.setAttribute(name, value);
-		}
+		applyHeadAttrs(meta, m[1] || '');
 		if (!meta.hasAttributes()) continue;
 		meta.setAttribute(HEAD_MARKER, '');
 		head.appendChild(meta);
+	}
+
+	for (const m of headHtml.matchAll(/<link\b([^>]*)>/gi)) {
+		const link = document.createElement('link');
+		applyHeadAttrs(link, m[1] || '');
+		if (!link.hasAttributes()) continue;
+		link.setAttribute(HEAD_MARKER, '');
+		head.appendChild(link);
+	}
+
+	const baseMatch = headHtml.match(/<base\b([^>]*)>/i);
+	if (baseMatch) {
+		const base = document.createElement('base');
+		applyHeadAttrs(base, baseMatch[1] || '');
+		if (base.hasAttributes()) {
+			base.setAttribute(HEAD_MARKER, '');
+			head.appendChild(base);
+		}
+	}
+
+	for (const m of headHtml.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)) {
+		const style = document.createElement('style');
+		style.textContent = m[2];
+		style.setAttribute(HEAD_MARKER, '');
+		head.appendChild(style);
 	}
 }
 

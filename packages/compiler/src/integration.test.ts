@@ -88,14 +88,14 @@ it('renders <Head> with static title', () => {
   show('  .head', r.head);
   assert(r.body === '<p>Body</p>', `body: ${JSON.stringify(r.body)}`);
   assert(r.head.includes('My Page'), `head missing title: ${JSON.stringify(r.head)}`);
-  assert(r.head.includes('<title>'), `head malformed: ${JSON.stringify(r.head)}`);
+  assert(r.head.includes('<title data-vesk-head>My Page'), `head malformed: ${JSON.stringify(r.head)}`);
 });
 
 it('renders <Head> with dynamic title expression', () => {
   const r = show('renderPage', renderPage('component App(props) { <Head><title>{props.t} — Site</title></Head> return <p>ok</p>; }', 'App', { t: 'Hello' }));
   show('  .head', r.head);
   assert(r.head.includes('Hello'), `head missing dynamic value: ${JSON.stringify(r.head)}`);
-  assert(r.head.includes('<title>Hello'), `head malformed: ${JSON.stringify(r.head)}`);
+  assert(r.head.includes('<title data-vesk-head>Hello'), `head malformed: ${JSON.stringify(r.head)}`);
 });
 
 it('renders <Head> with dynamic meta content', () => {
@@ -258,7 +258,7 @@ it('ssg with <Head> includes head content', async () => {
   }`, 'App'));
   show('  .html', result.html.slice(0, 400));
   assert(result.html.includes('SSG Title'), `head missing: ${JSON.stringify(result.html.slice(0, 300))}`);
-  assert(result.html.includes('<title>'), `title tag missing`);
+  assert(result.html.includes('<title data-vesk-head>SSG Title'), `title tag missing`);
 });
 
 it('ssg renders static body without hydration JS (zero-JS)', async () => {
@@ -307,7 +307,7 @@ it('[stmt] ssg with <Head> includes head content', async () => {
   }`, 'App'));
   show('  .html', result.html.slice(0, 400));
   assert(result.html.includes('SSG Title'), `head missing: ${JSON.stringify(result.html.slice(0, 300))}`);
-  assert(result.html.includes('<title>'), `title tag missing`);
+  assert(result.html.includes('<title data-vesk-head>SSG Title'), `title tag missing`);
 });
 
 it('[stmt] ssg renders static body without hydration JS (zero-JS)', async () => {
