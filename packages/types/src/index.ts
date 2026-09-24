@@ -54,14 +54,39 @@ export interface ApiRouteNode {
 // Middleware
 // ────────────────────────────────────────────────────────────────────────────
 
-export interface MiddlewareContext {
+/**
+ * A typed key/value store for request-scoped values. Keys and values are
+ * linked through the shape `T`, so `set('user', u)` is only allowed when `u`
+ * matches `T['user']` and `get('user')` returns exactly that type.
+ */
+export interface Locals<T extends object> {
+  set<K extends keyof T>(key: K, value: T[K]): void;
+  get<K extends keyof T>(key: K): T[K];
+  has<K extends keyof T>(key: K): boolean;
+  delete<K extends keyof T>(key: K): void;
+  all(): T;
+}
+
+/**
+ * Middleware context. Parameterize it with your locals shape to get end-to-end
+ * typing across the chain:
+ *
+ * ```ts
+ * type AppLocals = { user: User; requestId: string };
+ * export async function middleware(ctx: MiddlewareContext<AppLocals>, next: () => Promise<void>) {
+ *   ctx.set('user', await findUser(ctx));   // typed
+ *   const user = ctx.get('user');           // User, not unknown
+ * }
+ * ```
+ */
+export interface MiddlewareContext<L extends Record<string, unknown> = Record<string, unknown>> {
   request: Request;
   params: Record<string, string>;
   url: URL;
-  locals: Record<string, unknown>;
+  locals: L;
   cookies: Record<string, string>;
-  set(key: string, value: unknown): void;
-  get(key: string): unknown;
+  set<K extends keyof L & string>(key: K, value: L[K]): void;
+  get<K extends keyof L & string>(key: K): L[K];
   [key: string]: unknown;
 }
 

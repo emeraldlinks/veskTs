@@ -3,6 +3,7 @@ import { join, dirname, normalize, relative, resolve, sep } from 'node:path';
 import * as ts from 'typescript';
 import { parse } from '@vesk/compiler/src/parser';
 import { vskToTsx, generateVskDts } from '@vesk/compiler/src/vsk-tsx';
+import { resolveAliasModule } from '@vesk/compiler/src/module-imports';
 
 export interface TypecheckOptions {
   strict?: boolean;
@@ -392,6 +393,16 @@ declare namespace JSX {
 }
 declare type Component = string | number | boolean | null | undefined | Component[];
 declare const Head: (props: { children?: Component }) => Component;
+// Server-side .vsk code reads process.env (NODE_ENV, feature flags, secrets).
+// @types/node is not installed for browser targets, so declare the slice the
+// framework documents rather than failing every project that branches on env.
+declare const process: {
+  env: Record<string, string | undefined>;
+  argv: string[];
+  platform: string;
+  cwd(): string;
+  exit(code?: number): never;
+};
 interface Tracked<T> {
   get(): T;
   set(value: T): void;
@@ -409,7 +420,26 @@ declare function peek<T>(fn: () => T): T;
 declare function tick(): Promise<void>;
 declare function flushSync(fn: () => void): void;
 declare function on_destroy(fn: () => void): void;
-declare function createContext<T>(defaultValue?: T): { id: symbol; defaultValue: T | undefined };
+/**
+ * A context created by createContext. The value type flows from the default
+ * (or an explicit type argument) through set() and every get().
+ */
+interface VeskContext<T> {
+  readonly id: symbol;
+  get(): T;
+  set(value: T): void;
+}
+declare function createContext<const T>(defaultValue: T): VeskContext<T>;
+// Typed request-scoped store (middleware locals, event payloads). Declare the
+// shape once and every set/get is checked against it.
+interface VeskLocals<T extends object> {
+  set<K extends keyof T>(key: K, value: T[K]): void;
+  get<K extends keyof T>(key: K): T[K];
+  has<K extends keyof T>(key: K): boolean;
+  delete<K extends keyof T>(key: K): void;
+  all(): T;
+}
+declare function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
 // useFetch returns a THENABLE resource, not the data itself. In async
 // components you must \`await\` it before reading/iterating the payload;
 // passing \`into: <tracked cell>\` writes the payload into the cell and makes
@@ -529,6 +559,8 @@ declare module '@vesk/runtime' {
   export function track<T>(initialValue: T): Tracked<T>;
   export function track<T>(fn: () => T): Derived<T>;
   export function derived<T>(fn: () => T): Derived<T>;
+  export function createContext<const T>(defaultValue: T): VeskContext<T>;
+  export function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
 }
 `;
 
@@ -686,7 +718,11 @@ function createTypecheckHost(projectRoot: string, appDir: string, vskFiles: Map<
     resolveModuleNameLiterals(moduleLiterals, containingFile, redirectedReference, options) {
       return moduleLiterals.map(({ text }) => {
         if (text.endsWith('.vsk')) {
-          const abs = normalize(join(dirname(containingFile), text));
+          // Honor tsconfig `paths` aliases (`@/components/X.vsk`) the same way
+          // the build does, instead of treating the specifier as a relative
+          // path under the importing file's directory.
+          const aliased = text.startsWith('.') ? null : resolveAliasModule(text, dirname(containingFile));
+          const abs = normalize(aliased ?? join(dirname(containingFile), text));
           return {
             resolvedModule: {
               resolvedFileName: abs + '.d.ts',
@@ -775,6 +811,8 @@ export function typecheckProject(projectRoot: string, opts: TypecheckOptions = {
     esModuleInterop: true,
     allowSyntheticDefaultImports: true,
     allowImportingTsExtensions: true,
+    // Required so the virtual `.vsk` files are actually pulled into the
+    // program (without it tsc silently excludes them and reports nothing).
     allowNonTsExtensions: true,
     resolveJsonModule: true,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],

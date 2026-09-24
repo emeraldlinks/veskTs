@@ -335,8 +335,29 @@ describe('scan — blankComments', () => {
     expect(out.includes('// gone')).toBe(false);
   });
 
-  it('blanks a block comment wherever it appears', () => {
-    expect(blankComments('const n = /* five */ 5;')).toBe('const n =            5;');
+  it('leaves a mid-line block comment alone (acorn already ignores it)', () => {
+    expect(blankComments('const n = /* five */ 5;')).toBe('const n = /* five */ 5;');
+  });
+
+  it('blanks a line-leading block comment before code', () => {
+    expect(blankComments('/* note */\nconst n = 5;')).toBe('          \nconst n = 5;');
+  });
+
+  it('leaves /* with no terminator untouched instead of blanking to EOF', () => {
+    // Regression: a runaway scan for a missing `*/` blanked the rest of the
+    // file. JSX text legitimately contains `/*`-looking runs.
+    expect(blankComments('/* never closed')).toBe('/* never closed');
+  });
+
+  it('does not swallow JSX text containing a /*-looking run (app/api/**/route.ts)', () => {
+    // Real vesk-doc source: <code>app/api/**/route.ts</code> and <code>/api/**</code>.
+    const src = '<p>File <code>app/api/**/route.ts</code> at <code>/api/**</code>.</p>';
+    expect(blankComments(src)).toBe(src);
+  });
+
+  it('preserves a /*-looking run inside a JSX attribute value', () => {
+    const src = '<meta name="d" content="app/api/**/route.ts, GET" />';
+    expect(blankComments(src)).toBe(src);
   });
 
   it('blanks a multi-line block comment but keeps its newlines', () => {
@@ -351,10 +372,6 @@ describe('scan — blankComments', () => {
   it('preserves length for a multi-line block comment', () => {
     const src = 'a\n/* x\ny */\nb';
     expect(blankComments(src).length).toBe(src.length);
-  });
-
-  it('leaves an unterminated block comment blanked to end of input', () => {
-    expect(blankComments('/* never closed')).toBe('               ');
   });
 
   it('never blanks a block-comment marker inside a string', () => {
@@ -372,8 +389,8 @@ describe('scan — blankComments', () => {
     expect(out.endsWith('code')).toBe(true);
   });
 
-  it('keeps the {/* */} JSX idiom as an empty expression container', () => {
-    expect(blankComments('<div>{/* gone */}</div>')).toBe('<div>{          }</div>');
+  it('preserves the {/* */} JSX idiom verbatim (acorn strips it in the container)', () => {
+    expect(blankComments('<div>{/* gone */}</div>')).toBe('<div>{/* gone */}</div>');
   });
 
   it('blanks each line of a multi-line commented-out JSX block', () => {

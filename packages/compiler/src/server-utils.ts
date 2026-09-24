@@ -1058,11 +1058,26 @@ function tryParseImport(code: string): any | null {
   }
 }
 
-export function buildParamInit(paramNames: string[]): string {
+/**
+ * Emits the statement that binds a component's declared first parameter to
+ * the incoming props object.
+ *
+ * - No parameter, or a parameter already named `props`: nothing to do.
+ * - A single identifier with any OTHER name (`component Card(p)`, React-style):
+ *   alias the whole props object. It used to be treated as a destructuring
+ *   pattern, so `const { p } = props` bound `p` to `props.p` (undefined) and
+ *   every `p.x` read threw at runtime.
+ * - Two or more names, or a name carrying a default (`title = ''`): those come
+ *   from a destructuring pattern, so destructure as before.
+ */
+export function buildParamInit(paramNames: string[], propsAlias: string | null = null): string {
+  if (propsAlias) {
+    return propsAlias === 'props' ? '' : `const ${propsAlias} = props;`;
+  }
+  if (paramNames.length === 0) return '';
   if (paramNames.length === 1 && paramNames[0] === 'props') {
     return '';
   }
-  if (paramNames.length === 0) return '';
   return `const { ${paramNames.join(', ')} } = props;`;
 }
 

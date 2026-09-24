@@ -652,8 +652,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
   if (!process.env.NODE_ENV) process.env.NODE_ENV = 'development';
   const secCfg = (config.security || {}) as Record<string, unknown>;
   const maxBodyBytes = (typeof secCfg.maxBodyBytes === 'number' ? secCfg.maxBodyBytes : undefined) || DEFAULT_MAX_BODY_BYTES;
-  const appDirPath = join(projectDir, 'app');
-  const publicDir = join(projectDir, 'public');
+  // Honor configured appDir/publicDir (same defaults as the CLI resolver), so
+  // dev serves the same tree `build` compiles.
+  const appDirPath = resolve(projectDir, typeof config.appDir === 'string' ? config.appDir : './app');
+  const publicDir = resolve(projectDir, typeof config.publicDir === 'string' ? config.publicDir : './public');
   installMdReadHook([publicDir]);
 
   try {

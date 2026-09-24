@@ -2030,7 +2030,7 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
   }
   ctx.push(indent(`let __pendingChild = null;`));
 
-  const paramInit = buildParamInit(comp.paramNames);
+  const paramInit = buildParamInit(comp.paramNames, comp.propsAlias);
   if (paramInit) ctx.push(indent(paramInit));
 
   // Hoist TrackDecls to top to avoid TDZ when Head/effects reference them before declaration
@@ -2099,7 +2099,10 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
   return ctx.getCode();
 }
 
-function buildParamInit(paramNames: string[]): string {
+function buildParamInit(paramNames: string[], propsAlias: string | null = null): string {
+  // A plain-identifier first parameter is the whole props object under another
+  // name (React-style); anything else came from a destructuring pattern.
+  if (propsAlias) return propsAlias === 'props' ? '' : `const ${propsAlias} = props;`;
   if (paramNames.length === 1 && paramNames[0] === 'props') return '';
   if (paramNames.length === 0) return '';
   return `const { ${paramNames.join(', ')} } = props;`;

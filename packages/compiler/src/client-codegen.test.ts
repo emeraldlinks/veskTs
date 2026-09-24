@@ -2693,6 +2693,38 @@ describe('Client Codegen — Markerless Hydration', () => {
 });
 
 
+describe('component props parameter may use any name (React-style)', () => {
+	bothModes('binds a renamed single parameter to the whole props object', `component Card(p) {
+	<span>{p.title}</span>
+}`, (code) => {
+		expect(code).toContain('const p = props;');
+		expect(code).not.toContain('const { p } = props;');
+	});
+
+	bothModes('a parameter named props needs no alias', `component Card(props) {
+	<span>{props.title}</span>
+}`, (code) => {
+		expect(code).not.toContain('= props;');
+	});
+
+	bothModes('a destructuring pattern still destructures', `component Card({ title, body = '' }) {
+	<span>{title}{body}</span>
+}`, (code) => {
+		expect(code).toContain('const { title, body = ');
+		expect(code).not.toContain('const title = props;');
+	});
+
+	bothModes('a renamed parameter passes through a component call', `component Child(p) {
+	<b>{p.n}</b>
+}
+
+component Parent() {
+	<Child n={1} />
+}`, (code) => {
+		expect(code).toContain('const p = props;');
+	});
+});
+
 describe('commented-out code never compiles (issue #1/#2)', () => {
 	bothModes('commented-out JSX element emits no element and no text node', `component App(props) {
 	<div>

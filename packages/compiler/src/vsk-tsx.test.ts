@@ -69,21 +69,21 @@ test('expression mode preserved', () => {
 
 test('track decl rewritten to typed aliases', () => {
   const tsx = vskToTsx(`component C { let &[count, c] = track(0); <p>{count.get()}</p> }`);
-  has(tsx, 'let count: any = track(0); let c: any = count', 'two-name track');
+  has(tsx, 'const __cell = track(0); let count = __cell.get(); let c: any = count', 'two-name track');
   const single = vskToTsx(`component C { let &[n] = track(5); <p>{n}</p> }`);
-  has(single, 'let n: any = track(5)', 'single-name track');
+  has(single, 'const __cell = track(5); let n = __cell.get()', 'single-name track');
 });
 
 test('const track decl absorbs the const keyword (no "const let")', () => {
   const tsx = vskToTsx(`component C { const &[count] = track<number>(10); <p>{count}</p> }`);
-  has(tsx, 'let count: number = (track<number>(10) as unknown as number);', 'const keyword absorbed');
+  has(tsx, 'let count: number = (track(10) as unknown as number);', 'const keyword absorbed');
   notHas(tsx, 'const let', 'no duplicated keyword');
   notHas(tsx, ';;', 'no doubled semicolon');
 });
 
 test('multi-name const track decl keeps a single statement terminator', () => {
   const tsx = vskToTsx(`component C { const &[posts, cell] = track<number[]>([]); <p>{posts}</p> }`);
-  has(tsx, 'let posts: number[] = (track<number[]>([]) as unknown as number[]); let cell: any = posts', 'multi-name rewrite');
+  has(tsx, 'let posts: number[] = (track([]) as unknown as number[]); let cell: any = posts', 'multi-name rewrite');
   notHas(tsx, 'const let', 'no duplicated keyword');
   notHas(tsx, ';;', 'no doubled semicolon');
 });
@@ -95,12 +95,12 @@ test('typed track decl keeps annotation', () => {
 
 test('track<T> type arg becomes value annotation', () => {
   const tsx = vskToTsx(`component C { let &[count] = track<number>(0); <p>{count}</p> }`);
-  has(tsx, 'let count: number = (track<number>(0) as unknown as number);', 'type arg used');
+  has(tsx, 'let count: number = (track(0) as unknown as number);', 'type arg used');
 });
 
 test('untyped track decl falls back to any', () => {
   const tsx = vskToTsx(`component C { let &[count] = track(0); <p>{count}</p> }`);
-  has(tsx, 'let count: any = track(0);', 'any fallback');
+  has(tsx, 'const __cell = track(0); let count = __cell.get();', 'any fallback');
 });
 
 test('style block stripped', () => {

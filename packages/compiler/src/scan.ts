@@ -195,9 +195,21 @@ export function blankComments(text: string): string {
       continue;
     }
     if (ch === '/' && text[i + 1] === '*') {
-      let j = i;
-      while (j < n && !(text[j] === '*' && text[j + 1] === '/')) j++;
-      const end = Math.min(j + 2, n);
+      // Only a line-leading `/*` is blanked, for the same reason as `//`, and
+      // only when a terminator actually exists on the way. JSX text legitimately
+      // contains `/*`-looking runs — `app/api/**/route.ts` inside <code> is the
+      // canonical one — and a scanner that hunts for a missing `*/` would run
+      // past the end of the "comment" and blank the rest of the document,
+      // producing an unterminated-JSX build error. Mid-line block comments are
+      // real comments that acorn already ignores.
+      if (!lineStart) { i += 2; continue; }
+      let j = i + 2;
+      let end = -1;
+      while (j < n) {
+        if (text[j] === '*' && text[j + 1] === '/') { end = j + 2; break; }
+        j++;
+      }
+      if (end === -1) { lineStart = false; i += 2; continue; }
       for (let k = i; k < end; k++) if (text[k] !== '\n') chars[k] = ' ';
       lineStart = false;
       i = end;

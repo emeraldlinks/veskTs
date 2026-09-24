@@ -1591,8 +1591,18 @@ export function createRouter(
 					if (decision === false) return;
 					if (typeof decision === 'string' && decision !== url.pathname && (self._guardDepth ?? 0) < 5) {
 						self._guardDepth = (self._guardDepth ?? 0) + 1;
-						try { self.navigate(decision, { replace: true }); }
-						finally { self._guardDepth = 0; }
+						// Reset only once the redirect chain settles. A
+						// synchronous reset happens before an async guard's
+						// nested navigate() runs, so the counter never
+						// accumulated and the loop cap never engaged.
+						const hop = self.navigate(decision, { replace: true });
+						if (hop && typeof (hop as Promise<void>).then === 'function') {
+							return (hop as Promise<void>).then(
+								() => { self._guardDepth = 0; },
+								() => { self._guardDepth = 0; },
+							);
+						}
+						self._guardDepth = 0;
 						return;
 					}
 					proceedNav();
@@ -2050,8 +2060,17 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					if (decision === false) return;
 					if (typeof decision === 'string' && decision !== url.pathname && (router._guardDepth || 0) < 5) {
 						router._guardDepth = (router._guardDepth || 0) + 1;
-						try { router.navigate(decision, { replace: true }); }
-						finally { router._guardDepth = 0; }
+						// See the sibling navigate(): reset once the chain
+						// settles, not synchronously, or an async guard's
+						// nested navigate() runs after the counter is zeroed.
+						const hop = router.navigate(decision, { replace: true });
+						if (hop && typeof (hop as Promise<void>).then === 'function') {
+							return (hop as Promise<void>).then(
+								() => { router._guardDepth = 0; },
+								() => { router._guardDepth = 0; },
+							);
+						}
+						router._guardDepth = 0;
 						return;
 					}
 					afterGuards();

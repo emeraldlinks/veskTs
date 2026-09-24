@@ -22,7 +22,16 @@ export declare function peek<T>(fn: () => T): T;
 export declare function tick(): Promise<void>;
 export declare function flushSync(fn: () => void): void;
 export declare function on_destroy(fn: () => void): void;
-export declare function createContext<T>(defaultValue?: T): { id: symbol; defaultValue: T | undefined };
+export interface VeskContext<T> { readonly id: symbol; get(): T; set(value: T): void; }
+export declare function createContext<const T>(defaultValue: T): VeskContext<T>;
+export interface VeskLocals<T extends object> {
+  set<K extends keyof T>(key: K, value: T[K]): void;
+  get<K extends keyof T>(key: K): T[K];
+  has<K extends keyof T>(key: K): boolean;
+  delete<K extends keyof T>(key: K): void;
+  all(): T;
+}
+export declare function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
 `;
 
 const CLEAN_PAGE = `component Page() {\n  const ok: string = 'fine'\n  <p>{ok}</p>\n}\n`;
@@ -48,6 +57,202 @@ function fixture(files: Record<string, string>): Fixture {
     cleanup: () => rmSync(root, { recursive: true, force: true }),
   };
 }
+
+test('typecheck: context value type flows from createContext through get()', () => {
+  const f = fixture({
+    'app/page.vsk': `import { createContext } from '@vesk/runtime';
+
+const Theme = createContext<'light' | 'dark'>('light');
+
+export component Page() {
+	Theme.set('dark');
+	const theme: 'light' | 'dark' = Theme.get();
+	<p>{theme}</p>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected a clean typecheck, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: createContext infers the literal type of the default', () => {
+  const f = fixture({
+    'app/page.vsk': `import { createContext } from '@vesk/runtime';
+
+const Theme = createContext('light');
+
+export component Page() {
+	// 'light' is the inferred literal type, so 'dark' must be rejected.
+	Theme.set('dark');
+	<p>ok</p>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (!msgs.includes('page.vsk')) {
+      throw new Error(`expected an error for setting an unlisted literal, got:\n${msgs || '(no errors)'}`);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: context rejects a wrong-typed value', () => {
+  const f = fixture({
+    'app/page.vsk': `import { createContext } from '@vesk/runtime';
+
+interface User { name: string }
+const CurrentUser = createContext<User | null>(null);
+
+export component Page() {
+	CurrentUser.set({ name: 42 });
+	<p>ok</p>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (!msgs.includes('page.vsk')) {
+      throw new Error(`expected an error for a wrong-typed context value, got:\n${msgs || '(no errors)'}`);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: createLocals links keys to their value types', () => {
+  const f = fixture({
+    'app/page.vsk': `import { createLocals } from '@vesk/runtime';
+
+interface User { name: string }
+const appLocals = createLocals<{ user: User | null; requestId: string }>();
+
+export component Page() {
+	appLocals.set('requestId', 'abc');
+	const id: string = appLocals.get('requestId');
+	const user: User | null = appLocals.get('user');
+	<p>{id}{user?.name}</p>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected a clean typecheck, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: createLocals rejects a wrong value type for a known key', () => {
+  const f = fixture({
+    'app/page.vsk': `import { createLocals } from '@vesk/runtime';
+
+const appLocals = createLocals<{ requestId: string }>();
+
+export component Page() {
+	appLocals.set('requestId', 123);
+	<p>ok</p>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (!msgs.includes('page.vsk')) {
+      throw new Error(`expected an error for a wrong locals value type, got:\n${msgs || '(no errors)'}`);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: a bare for-of loop variable is treated as a declaration', () => {
+  // `for (p of xs)` declares nothing in TypeScript, so passing it straight
+  // through made every use of `p` an error ("Cannot find name 'p'").
+  const f = fixture({
+    'app/page.vsk': `interface Post { title: string }
+export component Home() {
+	const posts: Post[] = []
+	for (p of posts) {
+		<span>{p.title}</span>
+	}
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected a clean typecheck, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: a bare for-in loop variable is treated as a declaration', () => {
+  const f = fixture({
+    'app/page.vsk': `export component Home() {
+	const bag: Record<string, number> = {}
+	for (k in bag) {
+		<span>{bag[k]}</span>
+	}
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected a clean typecheck, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: an explicit const/let loop variable is preserved', () => {
+  const f = fixture({
+    'app/page.vsk': `export component Home() {
+	const xs: number[] = [1, 2]
+	for (const x of xs) {
+		<span>{x}</span>
+	}
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected a clean typecheck, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: same-named components in different files do not collide', () => {
+  // Without module identity each generated file is a *script*, so two
+  // components named the same became duplicate globals.
+  const f = fixture({
+    'app/a/page.vsk': `export component Dup() { <p>a</p> }\n`,
+    'app/b/page.vsk': `export component Dup() { <p>b</p> }\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs.includes('Duplicate function implementation')) {
+      throw new Error(`same-named components collided:\n${msgs}`);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: an unannotated track() keeps its element type for callbacks', () => {
+  // `let items: any = track([...])` erased the type, so `items.map(n => ...)`
+  // failed under strict with an implicit-any parameter.
+  const f = fixture({
+    'app/page.vsk': `export component Home() {
+	let &[items] = track([10, 20, 30])
+	<div>{items.map(n => <span key={n}>{n}</span>)}</div>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs.includes("implicitly has an 'any' type")) {
+      throw new Error(`track() lost its element type:\n${msgs}`);
+    }
+  } finally { f.cleanup(); }
+});
 
 test('typecheck: reports errors in .ts files outside app/ (components, src, anywhere)', () => {
   const f = fixture({

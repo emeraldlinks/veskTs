@@ -367,6 +367,51 @@ test('stmt a string containing a block-comment marker is preserved', () => {
   expect(html).toEqual('<p>/* not a comment */</p>');
 });
 
+test('stmt MULTI-LINE {/* */} idiom renders nothing', () => {
+  const html = render(stmt(`
+    <div>
+      {/* gone
+          still gone */}
+      <span>x</span>
+    </div>
+  `), 'App', {});
+  expect(html).toEqual('<div><span>x</span></div>');
+});
+
+test('stmt both /* */ and {/* */} forms work together', () => {
+  const html = render(stmt(`
+    <div>
+      {/* a */}
+      /* b */
+      <span>x</span>
+    </div>
+  `), 'App', {});
+  expect(html).toEqual('<div><span>x</span></div>');
+});
+
+test('stmt a /*-looking run in JSX text is preserved (app/api/**/route.ts)', () => {
+  // Regression: a scanner hunting for a missing `*/` blanked the rest of the
+  // document and the build failed with "Unterminated JSX contents".
+  const html = render(stmt(`
+    <p>File <code>app/api/**/route.ts</code> at <code>/api/**</code>.</p>
+  `), 'App', {});
+  expect(html).toContain('app/api/**/route.ts');
+  expect(html).toContain('/api/**');
+});
+
+test('stmt a props parameter may be named anything (React-style)', () => {
+  expect(render(stmt(`
+    <span>{p.title}</span>
+  `).replace('component App {', 'component App(p) {'), 'App', { title: 'Hi' })).toEqual('<span>Hi</span>');
+});
+
+test('stmt a destructured props parameter still destructures', () => {
+  const html = render(`component App({ title, body = 'd' }) {
+	<span>{title}{body}</span>
+}`, 'App', { title: 'T' });
+  expect(html).toEqual('<span>Td</span>');
+});
+
 test('stmt a URL in JSX text is not treated as a comment', () => {
   const html = render(stmt(`
     <p>see https://vesk.dev/a//b now</p>

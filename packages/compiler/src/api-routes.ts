@@ -333,8 +333,13 @@ export async function executeApiRoute(
       Object.defineProperty(request, 'signal', { value: signal, writable: false });
     }
 
-    const beforeHooks = (mod.beforeRequest || []) as Array<(req: Request, ctx: Record<string, unknown>) => Response | Promise<Response>>;
-    for (const hook of beforeHooks) {
+    // A route hook may be exported as a single function (the documented form)
+    // or as an array of them. Normalize both instead of assuming an array.
+    const toHookList = <T,>(v: unknown): Array<(req: Request, arg: T) => Response | Promise<Response>> => {
+      if (v == null) return [];
+      return (Array.isArray(v) ? v : [v]) as Array<(req: Request, arg: T) => Response | Promise<Response>>;
+    };
+    for (const hook of toHookList<Record<string, unknown>>(mod.beforeRequest)) {
       const hookResult = await hook(request, { params, locals });
       if (hookResult instanceof Response) return hookResult;
     }
@@ -352,8 +357,7 @@ export async function executeApiRoute(
       throw e;
     }
 
-    const afterHooks = (mod.afterRequest || []) as Array<(req: Request, res: unknown) => Response | Promise<Response>>;
-    for (const hook of afterHooks) {
+    for (const hook of toHookList<unknown>(mod.afterRequest)) {
       const hookResult = await hook(request, response);
       if (hookResult instanceof Response) response = hookResult;
     }

@@ -54,10 +54,14 @@ SECURITY_PRESETS['default'] = { ...SECURITY_PRESETS['strict'] };
 export function preset(name: string, overrides: VeskSecurity = {}): VeskSecurity {
   const presets: Record<string, VeskSecurity> = {
     production: { ...SECURITY_PRESETS['strict'] },
+    // `strict` is the real name of the production preset; both resolve to it.
+    strict: { ...SECURITY_PRESETS['strict'] },
     development: {
       ...SECURITY_PRESETS['strict'],
       contentSecurityPolicy: false,
     },
+    // autoEscape only, SAMEORIGIN framing, no CSRF/HSTS/CSP.
+    minimal: { ...SECURITY_PRESETS['minimal'] },
   };
   if (!presets[name]) {
     throw VeskError.configError(`Unknown security preset: "${name}".`, Object.keys(presets));
@@ -76,9 +80,20 @@ export function definePlugin<P extends VeskPlugin>(plugin: P): P {
 }
 
 export function defineConfig(config: VeskConfig): VeskConfig {
+  // `security: false` (or 'off') is an explicit opt-out: no CSRF, no CSP, no
+  // HSTS, no framing policy, no log redaction. It used to be rewritten to `{}`
+  // and then re-filled with the strict defaults below, so a project that asked
+  // for no security silently got all of it. `autoEscape` stays on — escaping
+  // untrusted text is not an optional header, so 'off' means "no ambient
+  // protections", not "render unescaped HTML".
   if ((config.security as VeskSecurityPreset | false | undefined) === false || config.security === 'off') {
-    config.security = {};
-  } else if (typeof config.security === 'string') {
+    config.security = { autoEscape: true } as VeskSecurity;
+    if (config.routeDataCache === undefined) config.routeDataCache = 0;
+    const mdOff = normalizeMdConfig(config.md);
+    if (mdOff !== undefined) config.md = mdOff;
+    return config;
+  }
+  if (typeof config.security === 'string') {
     const p = SECURITY_PRESETS[config.security as string];
     if (!p) throw VeskError.configError(`Unknown security preset string: "${config.security}".`, Object.keys(SECURITY_PRESETS));
     config.security = { ...p };

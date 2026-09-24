@@ -327,6 +327,63 @@ function isTrackDeclStatement(stmt: any): boolean {
 }
 
 /**
+ * Removes the type-argument list from a leading call expression, so
+ * `track<Post[]>([])` becomes `track([])`.
+ *
+ * `.vsk` files are type-checked as virtual files with a non-standard
+ * extension, where TypeScript reads `f<T>(x)` as the JSX element `<T>` rather
+ * than a generic call. That mis-parse swallows the rest of the enclosing
+ * function body, so every later binding is reported as "Cannot find name".
+ * Callers only use this when the type is preserved elsewhere (an explicit
+ * annotation on the binding), so nothing is lost.
+ */
+function stripCallTypeArgs(text: string): string {
+  let i = 0;
+  while (i < text.length && /\s/.test(text[i])) i++;
+  const nameStart = i;
+  while (i < text.length && /[A-Za-z0-9_$]/.test(text[i])) i++;
+  if (i === nameStart) return text;
+  // A property/element access chain (`ns.track<T>(x)`) — step over the rest.
+  while (i < text.length && (text[i] === '.' || text[i] === '?' || text[i] === '[')) {
+    const ch = text[i];
+    if (ch === '[') {
+      const close = text.indexOf(']', i);
+      if (close === -1) return text;
+      i = close + 1;
+    } else {
+      i++;
+      while (i < text.length && /[A-Za-z0-9_$]/.test(text[i])) i++;
+    }
+  }
+  if (text[i] !== '<') return text;
+  // Match the closing `>` of the type argument list, allowing nested angle
+  // brackets and quoted literal types.
+  let depth = 0;
+  let quote = '';
+  for (let j = i; j < text.length; j++) {
+    const c = text[j];
+    if (quote) {
+      if (c === '\\') { j++; continue; }
+      if (c === quote) quote = '';
+      continue;
+    }
+    if (c === '"' || c === "'" || c === '`') { quote = c; continue; }
+    if (c === '<') depth++;
+    else if (c === '>') {
+      depth--;
+      if (depth === 0) {
+        const after = text.slice(j + 1);
+        if (/^\s*\(/.test(after)) return text.slice(0, i) + after;
+        return text;
+      }
+    } else if (c === ';' || c === '\n') {
+      return text;
+    }
+  }
+  return text;
+}
+
+/**
  * Emits the rewrite for a `const &[count] = track(0)` declarator. Mirrors
  * the exact text produced by the previous string-level rewrite: the first
  * declarator absorbs the statement's `const`/`let`/`var` keyword, the
@@ -397,8 +454,17 @@ function emitTrackDeclStatement(
       // Annotating it with the value annotation made `&[v, cell]` emit
       // `cell: T = <Tracked>` (unsound), and broke passing `cell` to APIs
       // expecting `Tracked<unknown>` (e.g. useFetch `into`).
-      g.add(`const ${cellName} = `);
-      g.add(initText, decl.init.start, decl.init.end);
+      // With an explicit annotation the type argument is redundant, and a
+      // leading `f<T>(...)` would be mis-read as JSX on a `.vsk` virtual file.
+      if (annotation) {
+        g.add(`const ${cellName}: Tracked<`);
+        g.add(annotation, annStart, annEnd);
+        g.add('> = ');
+      } else {
+        g.add(`const ${cellName} = `);
+      }
+      const cellInit = annotation ? stripCallTypeArgs(initText) : initText;
+      g.add(cellInit, decl.init.start, decl.init.end);
       g.add(';');
       // First binding: the VALUE read from the cell.
       g.add(' let ');
@@ -422,16 +488,22 @@ function emitTrackDeclStatement(
         g.add(': ');
         g.add(annotation, annStart, annEnd);
         g.add(' = (');
-        g.add(initText, decl.init.start, decl.init.end);
+        g.add(stripCallTypeArgs(initText), decl.init.start, decl.init.end);
         g.add(' as unknown as ');
         g.add(annotation, annStart, annEnd);
         g.add(');');
       } else {
-        g.add('let ');
-        g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
-        g.add(': any = ');
+        // No annotation: infer through a cell so the binding keeps its real
+        // type. `let items: any = track([...])` used to erase it, and every
+        // callback derived from the value (`items.map(n => …)`) then failed
+        // under `strict` with "parameter implicitly has an 'any' type".
+        const cellName = g.cellCount === 0 ? '__cell' : `__cell${g.cellCount}`;
+        g.cellCount++;
+        g.add(`const ${cellName} = `);
         g.add(initText, decl.init.start, decl.init.end);
-        g.add(';');
+        g.add('; let ');
+        g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
+        g.add(` = ${cellName}.get();`);
       }
       for (let n = 1; n < names.length; n++) {
         g.add(' let ');
@@ -719,10 +791,28 @@ function emitIf(g: VskGen, source: string, stmt: any, indent: string, opts: VskC
   }
 }
 
+/**
+ * Emits a for-of/for-in loop variable.
+ *
+ * `for (p of items)` declares nothing in TypeScript/JavaScript — `p` there is a
+ * reference to an outer binding, so `tsc` reports `Cannot find name 'p'` and
+ * `vesk typecheck` fails. In a statement-mode component body a bare loop
+ * variable is plainly meant as the loop's own binding, so declare it. An
+ * existing `const`/`let`/`var` (or a destructuring pattern) is passed through.
+ */
+function emitLoopVariable(g: VskGen, source: string, left: any): void {
+  if (left && left.type === 'Identifier') {
+    g.addRaw('const ');
+    g.add(source.slice(left.start, left.end), left.start, left.end);
+    return;
+  }
+  g.add(source.slice(left.start, left.end), left.start, left.end);
+}
+
 function emitForOf(g: VskGen, source: string, stmt: any, indent: string, opts: VskCodegenOptions): void {
   g.add(indent);
   g.addRaw('for (');
-  g.add(source.slice(stmt.left.start, stmt.left.end), stmt.left.start, stmt.left.end);
+  emitLoopVariable(g, source, stmt.left);
   g.addRaw(' of ');
   g.add(source.slice(stmt.right.start, stmt.right.end), stmt.right.start, stmt.right.end);
   g.addRaw(') ');
@@ -732,7 +822,7 @@ function emitForOf(g: VskGen, source: string, stmt: any, indent: string, opts: V
 function emitForIn(g: VskGen, source: string, stmt: any, indent: string, opts: VskCodegenOptions): void {
   g.add(indent);
   g.addRaw('for (');
-  g.add(source.slice(stmt.left.start, stmt.left.end), stmt.left.start, stmt.left.end);
+  emitLoopVariable(g, source, stmt.left);
   g.addRaw(' in ');
   g.add(source.slice(stmt.right.start, stmt.right.end), stmt.right.start, stmt.right.end);
   g.addRaw(') ');
@@ -1299,6 +1389,13 @@ export function compileVskCodegen(source: string, opts: VskCodegenOptions = {}):
   if (isModuleAst(ast) && containsIdentifier(code, 'Head') && !isIdentifierImported(code, 'Head')) {
     g.prepend('declare const Head: (props: { children?: Component }) => Component;\n');
     code = g.code;
+  }
+  // A `.vsk` file with no import/export is a *script* to TypeScript, so its
+  // top-level component functions land in the global scope and collide with the
+  // same-named component in another file ("Duplicate function implementation").
+  // Give every generated file module identity.
+  if (!isModuleAst(ast)) {
+    code += '\nexport {};\n';
   }
 
   return { code, mappings: g.mappings, styleRegions: g.styleRegions, errors: [] };

@@ -42,6 +42,14 @@ export class IRRoot {
 export class ComponentIR {
   name: string;
   paramNames: string[];
+  /**
+   * The declared first parameter when it is a plain identifier
+   * (`component Card(p)`), i.e. the whole props object bound to another name.
+   * `null` for a destructuring pattern (`component Card({ title })`) or when
+   * there is no parameter. `paramNames` alone cannot express this: `p` and
+   * `{ p }` both flatten to `['p']` but need opposite bindings.
+   */
+  propsAlias: string | null;
   propsType: string | null;
   isClient: boolean;
   isAsync: boolean;
@@ -64,10 +72,12 @@ export class ComponentIR {
       exported?: boolean;
       defaultExport?: boolean;
       propsType?: string | null;
+      propsAlias?: string | null;
     } = {}
   ) {
     this.name = name;
     this.paramNames = paramNames;
+    this.propsAlias = opts.propsAlias ?? null;
     this.body = body;
     this.isClient = opts.isClient ?? false;
     this.isAsync = opts.isAsync ?? false;

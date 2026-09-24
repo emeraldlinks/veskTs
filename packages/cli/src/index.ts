@@ -93,20 +93,35 @@ async function loadConfig(projectDir: string) {
   if (!config) return {};
 
   const sec = config.security;
-  if (sec !== undefined && sec !== false && typeof sec === 'object' && (sec as VeskSecurity).redactLogs !== false) {
-    try { setRedactLogging(true); } catch {}
+  if (sec !== undefined && sec !== false && typeof sec === 'object' && (sec as VeskSecurity).redactLogs !== false) {    try { setRedactLogging(true); } catch {}
   }
 
   return config;
 }
 
+/**
+ * Resolves the project's `appDir` / `publicDir` / `outDir` from config, with
+ * the documented defaults. Every command must use this — they used to
+ * hardcode `app/`, `.vesk` and `public/` independently, so a configured
+ * `appDir`/`outDir` was honored by neither (build ignored it, and a build that
+ * DID honor it produced output `start` could not find).
+ */
+function resolveProjectDirs(projectDir: string, config: Record<string, unknown> | null | undefined) {
+  const cfg = config || {};
+  return {
+    appDir: resolve(projectDir, typeof cfg.appDir === 'string' ? cfg.appDir : './app'),
+    publicDir: resolve(projectDir, typeof cfg.publicDir === 'string' ? cfg.publicDir : './public'),
+    outDir: resolve(projectDir, typeof cfg.outDir === 'string' ? cfg.outDir : '.vesk'),
+  };
+}
+
 if (cmd === 'build') {
   const projectDir = process.cwd();
-  const appDirPath = join(projectDir, 'app');
-  const publicDir = join(projectDir, 'public');
+  const rawConfig = (await loadConfig(projectDir) || {}) as Record<string, unknown>;
+  const { appDir: appDirPath, publicDir, outDir } = resolveProjectDirs(projectDir, rawConfig);
 
   if (!existsSync(appDirPath)) {
-    console.error(`vesk build: no app/ directory found in ${projectDir}`);
+    console.error(`vesk build: no app directory found in ${projectDir} (config appDir: ${rawConfig.appDir ?? './app'})`);
     process.exit(1);
   }
 
@@ -120,13 +135,15 @@ if (cmd === 'build') {
   const targetIdx = restArgs.indexOf('--target');
   const target = targetIdx !== -1 && restArgs[targetIdx + 1] === 'edge' ? 'edge' : 'node';
 
-  const config = await loadConfig(projectDir);
-  const plugins = (config as Record<string, unknown>)?.plugins || [];
-  const mdCfg = (config as Record<string, unknown>)?.md;
-  const opts: Record<string, unknown> = { publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
+  const config = rawConfig;
+  const plugins = config.plugins || [];
+  const mdCfg = config.md;
+  const opts: Record<string, unknown> = { outDir, publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
   if (mdCfg) opts.md = mdCfg;
   if (config.routeDataCache !== undefined) opts.routeDataCache = config.routeDataCache;
   if (platform) opts.platform = platform;
+  // `ssg: {}` in the config turns on prerendering (the option is boolean).
+  if (config.ssg !== undefined && config.ssg !== false) opts.ssg = true;
 
   try {
     await build(appDirPath, opts);
@@ -181,9 +198,9 @@ if (cmd === 'build') {
 
 if (cmd === 'seo') {
   const projectDir = process.cwd();
-  const appDirPath = join(projectDir, 'app');
+  const { appDir: appDirPath } = resolveProjectDirs(projectDir, (await loadConfig(projectDir) || {}) as Record<string, unknown>);
   if (!existsSync(appDirPath)) {
-    console.error(`vesk seo: no app/ directory found in ${projectDir}`);
+    console.error(`vesk seo: no app directory found in ${projectDir}`);
     process.exit(1);
   }
 
@@ -198,9 +215,9 @@ if (cmd === 'seo') {
 
 if (cmd === 'typecheck') {
   const projectDir = process.cwd();
-  const appDirPath = join(projectDir, 'app');
+  const { appDir: appDirPath } = resolveProjectDirs(projectDir, (await loadConfig(projectDir) || {}) as Record<string, unknown>);
   if (!existsSync(appDirPath)) {
-    console.error(`vesk typecheck: no app/ directory found in ${projectDir}`);
+    console.error(`vesk typecheck: no app directory found in ${projectDir}`);
     process.exit(1);
   }
 
@@ -226,9 +243,17 @@ if (cmd === 'typecheck') {
 
 if (cmd === 'start') {
   const projectDir = process.cwd();
-  const outDir = join(projectDir, '.vesk');
+  // Read the same config `build` used, so a configured `outDir` is honored
+  // here too — otherwise build writes to the configured dir and start looks in
+  // `.vesk`, and the production server serves nothing.
+  const { outDir } = resolveProjectDirs(projectDir, (await loadConfig(projectDir) || {}) as Record<string, unknown>);
   const port = parsePortArg(args);
   const host = parseHostArg(args);
+
+  if (!existsSync(outDir)) {
+    console.error(`vesk start: no build found at ${outDir} — run "vesk build" first.`);
+    process.exit(1);
+  }
 
   startProdServer(outDir, { port, host });
   await new Promise(() => {});
@@ -236,7 +261,7 @@ if (cmd === 'start') {
 
 if (cmd === 'init') {
   const projectDir = process.cwd();
-  const appDirPath = join(projectDir, 'app');
+  const { appDir: appDirPath } = resolveProjectDirs(projectDir, (await loadConfig(projectDir) || {}) as Record<string, unknown>);
   const target = join(appDirPath, 'global.css');
   if (existsSync(target)) {
     console.error(`vesk init: ${target} already exists — skipping`);
@@ -257,7 +282,7 @@ if (cmd === 'init') {
 
 if (cmd === 'dev') {
   const projectDir = process.cwd();
-  const appDirPath = join(projectDir, 'app');
+  const { appDir: appDirPath, publicDir } = resolveProjectDirs(projectDir, (await loadConfig(projectDir) || {}) as Record<string, unknown>);
   const port = parsePortArg(args);
   const host = parseHostArg(args);
 

@@ -174,6 +174,14 @@ export function webhook(options: WebhookOptions): (request: Request) => Promise<
 	}
 
 	async function webhookHandler(request: Request): Promise<Response> {
+		// A webhook receiver is POST-only. Without this a GET/DELETE to the
+		// same route ran the signature path (and could invoke `handler`).
+		if (request.method !== 'POST') {
+			return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+				status: 405,
+				headers: { 'Content-Type': 'application/json', Allow: 'POST' },
+			});
+		}
 		const signature = request.headers.get(headerName);
 		if (!signature) {
 			return new Response(JSON.stringify({ error: 'Missing signature header' }), {
@@ -254,10 +262,14 @@ export function cookies(): CookieStore {
 	}) as unknown as CookieStore;
 }
 
-export function locals(): Record<string, unknown> {
+/**
+ * Request-scoped locals for the current request. Pass your shape to read them
+ * back with their declared types: `const { user } = locals<{ user: User }>()`.
+ */
+export function locals<L extends object = Record<string, unknown>>(): L {
 	const req = getRequest();
-	if (req && req.locals) return req.locals;
-	return {};
+	if (req && req.locals) return req.locals as L;
+	return {} as L;
 }
 
 export function headers(): Record<string, string | Function | undefined> {
@@ -367,6 +379,18 @@ export class ServerResponse extends Response {
 			headers: { 'x-vesk-next': '1' },
 		});
 	}
+}
+
+/** Default request-body cap (1 MiB). Mirrors the compiler's DEFAULT_MAX_BODY_BYTES. */
+export const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+
+/** Thrown when a request body exceeds the cap. Carries `status = 413`. */
+export class PayloadTooLargeError extends Error {
+  readonly status: number = 413;
+  constructor(message = `Request body exceeds limit (${DEFAULT_MAX_BODY_BYTES} bytes)`) {
+    super(message);
+    this.name = 'PayloadTooLargeError';
+  }
 }
 
 export class VeskRequest extends ServerRequest {
@@ -592,14 +616,37 @@ class _VeskResponse extends ServerResponse {
 		return this;
 	}
 
+	/**
+	 * Rejects a body that declares itself over the cap before any bytes are
+	 * read. The dev server additionally caps the Node stream itself; this is
+	 * the portable guard for platform/serverless builds, so a route that does
+	 * `await req.json()` on an oversized payload fails with 413 instead of an
+	 * opaque 500.
+	 */
+	_assertBodyWithinLimit(): void {
+		const limit = DEFAULT_MAX_BODY_BYTES;
+		const declared = Number(this.headers?.get('content-length') || '0');
+		if (Number.isFinite(declared) && declared > limit) {
+			throw new PayloadTooLargeError(`Request body exceeds limit (${limit} bytes)`);
+		}
+	}
+
 	async text(): Promise<string> {
 		this._flushSecurityHeaders();
+		this._assertBodyWithinLimit();
 		return super.text();
 	}
 
 	async json(): Promise<unknown> {
 		this._flushSecurityHeaders();
+		this._assertBodyWithinLimit();
 		return super.json();
+	}
+
+	async formData(): Promise<FormData> {
+		this._flushSecurityHeaders();
+		this._assertBodyWithinLimit();
+		return super.formData();
 	}
 
 	setCookie(name: string, value: string, opts: {

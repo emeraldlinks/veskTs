@@ -2252,6 +2252,39 @@ describe('applyHead reconciliation of route-declared head tags', () => {
 	});
 });
 
+describe('router — async guard redirect loop cap', () => {
+	testAsync('a cyclic async-guard redirect settles instead of spinning', async () => {
+		const mk = (t: string) => { const el = document.createElement('p'); el.textContent = t; return el; };
+		const container = document.createElement('div');
+		// A genuine cycle: every navigation is redirected to the other path.
+		// The depth counter must actually accumulate for the cap to bound it.
+		const router = createRouter({ '/a': () => mk('a'), '/b': () => mk('b') }, { container });
+		let hops = 0;
+		router.beforeEach(async (to) => {
+			hops++;
+			return to === '/a' ? '/b' : '/a';
+		});
+		await router.navigate('/');
+		// Drain the microtask/timer queue: an un-awaited redirect chain would
+		// otherwise still be running when we assert (which made this test pass
+		// even with the cap broken).
+		for (let i = 0; i < 30; i++) await tick(0);
+		// The cap is 5 hops; the guard must stop being re-entered after that.
+		if (hops > 6) throw new Error(`expected at most 6 guard hops, got ${hops}`);
+	});
+
+	testAsync('an async guard redirect is awaited (navigate resolves after the hop)', async () => {
+		const mk = (t: string) => { const el = document.createElement('p'); el.textContent = t; return el; };
+		const container = document.createElement('div');
+		const router = createRouter({ '/': () => mk('home'), '/login': () => mk('login') }, { container });
+		let hops = 0;
+		router.beforeEach(async (to) => { hops++; if (to !== '/login') return '/login'; });
+		await router.navigate('/');
+		expect(hops).toBe(2);
+		expect(container.textContent).toContain('login');
+	});
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
 console.log('All runtime router tests passed!');

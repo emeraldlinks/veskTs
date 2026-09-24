@@ -1430,6 +1430,10 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
 
     const name = inner.id.name;
     const paramNames = getParamNames(inner.params, source);
+    // A plain-identifier first parameter receives the whole props object under
+    // its own name (React-style); a destructuring pattern receives the fields.
+    const firstParam = inner.params?.[0];
+    const propsAlias = firstParam && firstParam.type === 'Identifier' ? firstParam.name : null;
     const propsType = getPropsType(inner.params, source);
     const bodyStmts = inner.body.body;
     const isClientComp = !!inner.client;
@@ -1444,7 +1448,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       const raw = processStatementModeBody(source, bodyStmts, file);
       const { body, css } = extractStyle(raw);
       validateBlocks(name, isClientComp, body, file, source);
-      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
+      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType, propsAlias });
       comp.style = css;
       components.push(comp);
       __slotProps = prevSlotProps;

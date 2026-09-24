@@ -253,6 +253,8 @@ class ServerRequest extends Request { get/set cookies: CookieStore; get/set para
 class ServerResponse extends Response { static json(body, init?); static redirect(url, status=307); static rewrite(url); static next() }
 class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown>; resolveUrl(url: string): string; static from(request: Request, init?: { params?: Record<string,string>; locals?: Record<string,unknown> }): VeskRequest; get host(): string; get origin(): string; get/set query, ip, protocol, hostname, parsedUrl }
 VeskResponse  // Proxy over an internal _VeskResponse Response subclass; static stream(readable: ReadableStream, init?: ResponseInit): VeskResponse — chunked streaming (Transfer-Encoding: chunked, delivered via deliverResponse getReader loop; readable as unknown as BodyInit)
+PayloadTooLargeError extends Error { readonly status: 413 }   // thrown when a body exceeds DEFAULT_MAX_BODY_BYTES
+DEFAULT_MAX_BODY_BYTES: 1048576                                 // 1 MiB request-body cap
 withValidation(request: Request, schema: { safeParse: (data) => { success: boolean; error?: { issues: {path:(string|number)[];message:string}[] }; data?: unknown } }, opts?: { jsonOnly?: boolean }): Promise<unknown | Response>
 useBody(): Promise<unknown>
 useParams(): Record<string, string>       // request params (NOT router)

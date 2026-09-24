@@ -585,7 +585,7 @@ export function buildComponentEntries(irRoot: IRRoot): ComponentMapEntry[] {
   const entries: ComponentMapEntry[] = [];
   for (const comp of irRoot.components) {
     const bodyCode = generateFunctionBody(comp, importedNames);
-    const paramInit = buildParamInit(comp.paramNames);
+    const paramInit = buildParamInit(comp.paramNames, comp.propsAlias);
     const diag = process.env.VESK_SSR_LOG
       ? `console.error('[SSR-CALL]', ${JSON.stringify(comp.name)}, props ? JSON.stringify(props) : String(props));\n`
       : '';

@@ -292,6 +292,32 @@ test('expr a string containing a block-comment marker is preserved', () => {
   expect(html).toEqual('<p>/* keep */</p>');
 });
 
+test('expr MULTI-LINE {/* */} idiom renders nothing', () => {
+  const html = render(`component App(props) {
+    return (
+      <div>
+        {/* gone
+            still gone */}
+        <span>x</span>
+      </div>
+    );
+  }`, 'App', {});
+  expect(html).toEqual('<div><span>x</span></div>');
+});
+
+test('expr MULTI-LINE /* */ at line start renders nothing', () => {
+  const html = render(`component App(props) {
+    return (
+      <div>
+        /* gone
+           more */
+        <span>x</span>
+      </div>
+    );
+  }`, 'App', {});
+  expect(html).toEqual('<div><span>x</span></div>');
+});
+
 test('expr a URL in JSX text is not treated as a comment', () => {
   const html = render(`component App(props) {
     return <p>see https://vesk.dev/a//b now</p>;

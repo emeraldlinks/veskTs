@@ -198,7 +198,7 @@ test('track decl name carries a reactive mapping to the source pattern name', ()
 test('track decl rewrite text is identical to vskToTsx', () => {
   const src = `component C { let &[count, c] = track(0); <p>{count.get()}</p> }`;
   const r = compileVskCodegen(src);
-  expect(r.code.includes('let count: any = track(0);'), 'plain rewrite keeps let + any');
+  expect(r.code.includes('const __cell = track(0); let count = __cell.get();'), 'plain rewrite keeps let + any');
   expect(r.code.includes('let c: any = count;'), 'extra name aliases the first');
 });
 
@@ -211,8 +211,8 @@ test('typedCells emits inferred Tracked cells with unique cell names', () => {
 }`;
   const r = compileVskCodegen(src, { typedCells: true });
   expect(r.code.includes('const __cell = track(0);'), 'first cell is __cell');
-  expect(r.code.includes('const __cell1 = track<number[]>([]);'), 'second cell is __cell1 (inferred Tracked)');
-  expect(r.code.includes('const __cell2 = track<Map<string, number>>(new Map());'), 'third cell is __cell2 (inferred Tracked)');
+  expect(r.code.includes('const __cell1: Tracked<number[]> = track([]);'), 'second cell is __cell1 (inferred Tracked)');
+  expect(r.code.includes('const __cell2: Tracked<Map<string, number>> = track(new Map());'), 'third cell is __cell2 (inferred Tracked)');
   expect(r.code.includes('let count = __cell.get();'), 'count infers from get()');
   expect(r.code.includes('let posts: number[] = __cell1.get();'), 'posts infers from get()');
   expect(r.code.includes('let map: Map<string, number> = __cell2.get();'), 'map infers from get()');

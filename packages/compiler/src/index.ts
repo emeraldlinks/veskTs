@@ -24,7 +24,7 @@ export type { VeskSecurity } from '@vesk/compiler/src/types';
 export type { VeskCors } from '@vesk/compiler/src/types';
 export type { VeskRateLimit } from '@vesk/compiler/src/types';
 
-export { defineConfig, validateConfig, preset, definePlugin } from '@vesk/compiler/src/config';
+export { defineConfig, validateConfig, preset, definePlugin, MD_DEFAULT_ALLOW_TAGS } from '@vesk/compiler/src/config';
 export { scanRoutes, scanComponents, collectSources, matchUrl } from '@vesk/compiler/src/router';
 export { compileVskCodegen } from '@vesk/compiler/src/vsk-tsx';
 export type {

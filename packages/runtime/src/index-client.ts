@@ -10,7 +10,7 @@ export type { NetworkState, EffectiveType } from '@vesk/runtime/src/network';
 export { bindValue, bindChecked, bindGroup } from '@vesk/runtime/src/bindings';
 export { applyStyle, styleText } from '@vesk/runtime/src/style';
 export type { StyleInput } from '@vesk/runtime/src/style';
-export { createContext, Context, getActiveComponent, setActiveComponent } from '@vesk/runtime/src/context';
+export { createContext, createLocals, Context, getActiveComponent, setActiveComponent, type Locals } from '@vesk/runtime/src/context';
 export { createResource, setSsrData, clearSsrData, resolveSsrResources, useFetch } from '@vesk/runtime/src/resource';
 export { Portal } from '@vesk/runtime/src/portal';
 export { reconcile, reconcileHydrated } from '@vesk/runtime/src/reconcile';
