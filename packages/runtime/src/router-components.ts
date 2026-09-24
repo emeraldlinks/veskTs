@@ -187,8 +187,6 @@ function applyHeadAttrs(el: HTMLElement, raw: string): void {
 	for (const attrMatch of raw.matchAll(/([a-zA-Z0-9\-:]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) {
 		const name = attrMatch[1];
 		const value = attrMatch[3] ?? attrMatch[4] ?? '';
-		// charset is framework chrome (added by baseHeadParts) and is never
-		// tagged, so never re-add it as a route-declared tag.
 		if (name.toLowerCase() === 'charset') continue;
 		el.setAttribute(name, value);
 	}
@@ -199,10 +197,6 @@ export function applyHead(headHtml: string): void {
 	const head = document.head;
 	if (!head) return;
 
-	// Sweep route-declared head tags — both tags this client applied on a
-	// previous SPA navigation and tags the server tagged in the initial SSR
-	// head. Untagged framework chrome (charset/viewport, global.css, plugin
-	// injects, scripts) survives.
 	for (const el of Array.from(head.querySelectorAll('[' + HEAD_MARKER + ']'))) {
 		el.remove();
 	}
