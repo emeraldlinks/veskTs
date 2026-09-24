@@ -126,6 +126,10 @@ async function __invokeRoute(route, request) {
   }
 }
 
+function __escapeScript(json) {
+  return json.split('<').join('\\u003c').split('\\u2028').join('\\u2028').split('\\u2029').join('\\u2029');
+}
+
 function __matchPath(pattern, pathname) {
   const patternParts = pattern.split('/').filter(Boolean);
   const pathParts = pathname.split('/').filter(Boolean);
@@ -154,6 +158,24 @@ ${serverStoreLine}
 
   if (__prerendered.has(pathname) && !isDataRequest) {
     return new Response(null, { status: 308, headers: { Location: '/_vesk/static/public' + (pathname.endsWith('/') ? pathname + 'index.html' : pathname + '.html') } });
+  }
+
+  // Serve the SSR-data handoff the page references (script tag /ssr-data.js?t=...).
+  // The render stashed the payload in the shared global store — mirror the node
+  // prod/dev servers so edge/serverless hydration never re-fetches resources that
+  // SSR already resolved. Entry is consumed on read (bound store).
+  if (pathname === '/ssr-data.js') {
+    const dataToken = url.searchParams.get('t') || '';
+    const dataStore = (globalThis.__vsk_ssr_data_store || {});
+    const payload = dataStore[dataToken];
+    if (payload) delete dataStore[dataToken];
+    const dataLines = [];
+    if (payload && payload.props) dataLines.push('globalThis.__vesk_props = ' + __escapeScript(JSON.stringify(payload.props)) + ';');
+    if (payload && payload.ssrData) dataLines.push('globalThis.__vsk_ssr_data = ' + __escapeScript(JSON.stringify(payload.ssrData)) + ';');
+    return new Response(dataLines.join('\\n') || '// no ssr data', {
+      status: 200,
+      headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' },
+    });
   }
 
 ${eventsStartLine}

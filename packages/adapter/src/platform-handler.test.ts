@@ -182,6 +182,28 @@ export async function handle(request) {
       const res = await handleRequest(new Request('http://test.local/zzz'));
       assert(res.status === 404, `expected 404, got ${res.status}`);
     });
+
+    await it('serves the SSR-data handoff for /ssr-data.js?t=<token> (edge hydration parity)', async () => {
+      const g = globalThis as Record<string, unknown>;
+      const store = (g.__vsk_ssr_data_store || (g.__vsk_ssr_data_store = {})) as Record<string, Record<string, unknown>> ;
+      store['tok123'] = { ssrData: { 'vesk-compiler-latest': { version: '0.2.36' } }, props: { a: 1 } };
+      const res = await handleRequest(new Request('http://test.local/ssr-data.js?t=tok123'));
+      assert(res.status === 200, `expected 200, got ${res.status}`);
+      assert((res.headers.get('content-type') || '').includes('javascript'), `expected application/javascript, got ${res.headers.get('content-type')}`);
+      assert(res.headers.get('cache-control') === 'no-store', `expected no-store, got ${res.headers.get('cache-control')}`);
+      const body = await res.text();
+      assert(body.includes('globalThis.__vsk_ssr_data'), 'expected __vsk_ssr_data global in body');
+      assert(body.includes('"version":"0.2.36"') || body.includes('0.2.36'), 'expected serialized payload in body');
+      assert(body.includes('globalThis.__vesk_props'), 'expected __vesk_props global in body');
+      assert(store['tok123'] === undefined, 'expected store entry to be consumed on read');
+    });
+
+    await it('serves a no-op script for an unknown ssr-data token (never a 404)', async () => {
+      const res = await handleRequest(new Request('http://test.local/ssr-data.js?t=zzznope'));
+      assert(res.status === 200, `expected 200, got ${res.status}`);
+      const body = await res.text();
+      assert(body.includes('// no ssr data'), `expected no-op script body, got: ${body}`);
+    });
   });
 
   rmSync(tmpRoot, { recursive: true, force: true });
