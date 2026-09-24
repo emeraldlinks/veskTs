@@ -1,6 +1,6 @@
 {
   "name": "@vesk/plugin-pwa",
-  "version": "0.2.37",
+  "version": "0.2.38",
   "type": "module",
   "description": "Progressive Web App plugin for Vesk — generates manifest.webmanifest and service worker",
   "main": "./dist/index.js",
@@ -18,7 +18,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/types": "^0.2.37"
+    "@vesk/types": "^0.2.38"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
