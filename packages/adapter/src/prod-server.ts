@@ -521,6 +521,12 @@ export async function startProdServer(outDir: string, options?: { port?: number;
               return;
             } catch (e) {
               const err = e instanceof Error ? e : new Error(String(e));
+              if (err.name === 'Redirect') {
+                const redirect = err as Error & { url?: unknown; status?: unknown };
+                res.writeHead(Number(redirect.status) || 302, { Location: typeof redirect.url === 'string' ? redirect.url : '/' });
+                res.end();
+                return;
+              }
               if (err.name === 'NotFoundError') {
                 res.writeHead(404, { 'Content-Type': 'text/html' });
                 res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');

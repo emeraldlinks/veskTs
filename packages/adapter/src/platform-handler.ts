@@ -106,6 +106,26 @@ ${prerenderedList}
 ${isrCache}
 const __routes = [${routeEntries.join(',\n')}];
 
+async function __invokeRoute(route, request) {
+  try {
+    return await route.handler(request);
+  } catch (e) {
+    if (e && typeof e === 'object' && e.name === 'Redirect') {
+      return new Response(null, {
+        status: Number(e.status) || 302,
+        headers: { Location: String(e.url || '/') },
+      });
+    }
+    if (e && typeof e === 'object' && e.name === 'NotFoundError') {
+      return new Response('<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>', {
+        status: 404,
+        headers: { 'Content-Type': 'text/html' },
+      });
+    }
+    throw e;
+  }
+}
+
 function __matchPath(pattern, pathname) {
   const patternParts = pattern.split('/').filter(Boolean);
   const pathParts = pathname.split('/').filter(Boolean);
@@ -165,7 +185,7 @@ ${eventsRequestLine}
     if (!params) continue;
 
     if (route.type === 'api') {
-      return await route.handler(request);
+      return await __invokeRoute(route, request);
     }
 
     if (route.revalidate && route.revalidate > 0 && !isDataRequest) {
@@ -178,7 +198,7 @@ ${eventsRequestLine}
       }
     }
 
-    const response = await route.handler(request);
+    const response = await __invokeRoute(route, request);
 
     if (route.revalidate && route.revalidate > 0 && !isDataRequest) {
       const html = await response.clone().text();

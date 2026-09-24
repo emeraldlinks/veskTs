@@ -121,6 +121,69 @@ async function main() {
     });
   });
 
+  await describe('generated handleRequest error mapping (edge parity)', async () => {
+    const appDir = join(tmpRoot, 'app');
+    mkdirSync(appDir, { recursive: true });
+    const fnsDir = join(tmpRoot, 'server', 'functions');
+    mkdirSync(fnsDir, { recursive: true });
+
+    writeFileSync(join(fnsDir, 'docs_slug.js'), `
+export async function handle(request) {
+  const slug = new URL(request.url).pathname.split('/').pop();
+  if (slug === 'nope') {
+    const e = new Error('doc slug missing: ' + slug);
+    e.name = 'NotFoundError';
+    throw e;
+  }
+  return new Response('<h1>doc ' + slug + '</h1>', { headers: { 'Content-Type': 'text/html' } });
+}
+`);
+
+    writeFileSync(join(fnsDir, 'legacy.js'), `
+export async function handle(request) {
+  const e = new Error('moved');
+  e.name = 'Redirect';
+  e.url = '/new';
+  e.status = 302;
+  throw e;
+}
+`);
+
+    const { generatePlatformHandlerSource } = await importStaged();
+    const src = generatePlatformHandlerSource({
+      ssrRoutes: [{ fullPath: '/docs/:slug' }, { fullPath: '/legacy' }],
+      apiRoutes: [],
+      prerenderedPaths: [],
+      hasMiddleware: false,
+      appDir,
+    });
+    assert(src.includes('__invokeRoute'), 'expected an __invokeRoute guard in the generated handler');
+    const entry = join(tmpRoot, 'handler-entry.js');
+    writeFileSync(entry, src);
+    const { handleRequest } = await import(pathToFileURL(entry).href);
+
+    await it('renders a matched SSR route (200)', async () => {
+      const res = await handleRequest(new Request('http://test.local/docs/hello'));
+      assert(res.status === 200, `expected 200, got ${res.status}`);
+    });
+
+    await it('maps NotFoundError from the SSR function to 404 (no edge crash)', async () => {
+      const res = await handleRequest(new Request('http://test.local/docs/nope'));
+      assert(res.status === 404, `expected 404, got ${res.status}`);
+    });
+
+    await it('maps Redirect from the SSR function to a 3xx with Location', async () => {
+      const res = await handleRequest(new Request('http://test.local/legacy'));
+      assert(res.status === 302, `expected 302, got ${res.status}`);
+      assert(res.headers.get('location') === '/new', `expected Location /new, got ${res.headers.get('location')}`);
+    });
+
+    await it('falls back to 404 for unmatched paths', async () => {
+      const res = await handleRequest(new Request('http://test.local/zzz'));
+      assert(res.status === 404, `expected 404, got ${res.status}`);
+    });
+  });
+
   rmSync(tmpRoot, { recursive: true, force: true });
 }
 
