@@ -11,7 +11,7 @@
  *   VESK_TEST_TARGET=production  target the prod server (sanitized errors)
  *
  * Scopes (mirrors tests/hydration-test.mjs for test-app):
- *   1  SSR route table: status/content-type/ssr-data/markers/structure
+ *   1  SSR route table: status/content-type/ssr-data/markerless-clean/structure
  *   2  Initial load: zero JS errors, title, h1, markers claimed
  *   3  Reactivity: Nav mobile menu toggle (link list appears/disappears)
  *   3b Docs full-load mobile menu placement (hydration): the conditional
@@ -192,7 +192,10 @@ async function main() {
       assert(res.status === 200, `${route.path} → 200 (got ${res.status})`);
       assert((res.headers.get('content-type') || '').includes('text/html'), `${route.path} → text/html`);
       assert((html.match(/ssr-data\.js/g) || []).length === 1, `${route.path} → exactly one ssr-data script`);
-      assert((html.match(/<!--vsk:/g) || []).length > 0, `${route.path} → hydration markers present in SSR`);
+      // Markerless default: SSR carries plain HTML — zero vsk hydration
+      // comments. Hydration claims structurally (StructuralWalker/skipK), and
+      // the browser tests below prove it against live DOM.
+      assert((html.match(/<!--vsk:/g) || []).length === 0, `${route.path} → markerless SSR: zero vsk hydration markers`);
       if (route.spa) assert(html.includes(route.spa), `${route.path} → SSR contains "${route.spa}"`);
       if (route.argsTitle) assert(html.includes(route.title), `${route.path} → SSR title contains "${route.title}"`);
       const bodyIdx = html.indexOf('<body');

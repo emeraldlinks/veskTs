@@ -1,0 +1,10 @@
+component Offline(props: { url?: string; retry?: () => void; online?: boolean }) {
+	<main class="min-h-screen flex items-center justify-center bg-background p-4">
+		<div class="max-w-2xl w-full panel-strong p-6 sm:p-8 text-center">
+			<p class="eyebrow mb-4 justify-center flex text-accent">offline</p>
+			<h1 class="font-display text-2xl font-semibold tracking-tight sm:text-3xl">You're offline</h1>
+			<p class="mt-3 font-mono text-[13px] leading-relaxed text-muted-foreground">The page you asked for needs the network. Check your connection and try again.</p>
+			<button type="button" class="btn-solid mt-8 px-6 py-3 text-sm" onClick={() => props.retry?.()}>Retry now</button>
+		</div>
+	</main>
+}

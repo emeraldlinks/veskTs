@@ -1,10 +1,19 @@
-component ErrorPage(props: { statusCode?: number; error?: string; stack?: string; url?: string }) {
+component ErrorPage(props: { statusCode?: number; error?: string | Error; stack?: string; url?: string; offline?: boolean }) {
+	const message = typeof props.error === 'string' ? props.error : props.error?.message ?? 'Something went wrong'
+	const isDev =
+		typeof process !== 'undefined'
+			? process.env.NODE_ENV !== 'production'
+			: typeof document !== 'undefined' && !!document.querySelector('script[src$="/_vesk/hmr.js"]')
+	const showStack = isDev && !!props.stack && !props.offline
+
 	<div class="min-h-screen flex items-center justify-center bg-background p-4">
 		<div class="max-w-2xl w-full panel-strong p-6 sm:p-8">
 			<p class="eyebrow mb-3 text-accent">error · {props.statusCode}</p>
-			<h1 class="font-display text-2xl font-semibold tracking-tight sm:text-3xl">Error {props.statusCode}</h1>
-			<p class="mt-3 font-mono text-[13px] leading-relaxed text-muted-foreground">{props.error}</p>
-			<pre class="mt-6 max-h-64 overflow-auto bg-surface border border-border p-4 font-mono text-[12px] leading-relaxed text-muted-foreground">{props.stack}</pre>
+			<h1 class="font-display text-2xl font-semibold tracking-tight sm:text-3xl">{props.offline ? "Offline" : `Error ${props.statusCode}`}</h1>
+			<p class="mt-3 font-mono text-[13px] leading-relaxed text-muted-foreground">{props.offline ? "You're offline. Check your connection and try again." : message}</p>
+			if (showStack) {
+				<pre class="mt-6 max-h-64 overflow-auto bg-surface border border-border p-4 font-mono text-[12px] leading-relaxed text-muted-foreground">{props.stack}</pre>
+			}
 			<p class="mt-6 font-mono text-[11px] text-muted-foreground">{props.url}</p>
 		</div>
 	</div>
