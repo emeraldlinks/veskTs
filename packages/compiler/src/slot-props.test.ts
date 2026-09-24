@@ -166,6 +166,44 @@ describe('HTML elements — JSX in attributes stays a compile error', () => {
   });
 });
 
+describe('slot props with a renamed props parameter', () => {
+  // Slot detection used to hardcode the literal identifier `props`, so a
+  // `Component`-typed prop read through any other parameter name degraded to a
+  // text binding and rendered the JSX escaped.
+  it('threads a Component-typed prop through any parameter name', () => {
+    for (const param of ['props', 'p', 'ctx']) {
+      const src = `
+component Child(${param}: { trigger: Component }) { return <div>{${param}.trigger}</div>; }
+component App() { return <Child trigger={<em>plain</em>} />; }
+`;
+      expect(render(src, 'App', {})).toBe('<div><em>plain</em></div>');
+    }
+  });
+
+  it('threads a Component-typed prop in statement mode through any parameter name', () => {
+    for (const param of ['props', 'p', 'ctx']) {
+      const src = `
+component Child(${param}: { trigger: Component }) {
+\t<div>{${param}.trigger}</div>
+}
+component App() {
+\t<Child trigger={<em>plain</em>} />
+}
+`;
+      expect(render(src, 'App', {})).toBe('<div><em>plain</em></div>');
+    }
+  });
+
+  it('threads a component-valued slot through a renamed parameter', () => {
+    const src = `
+component Button(p: { label: string }) { return <button>{p.label}</button>; }
+component Child(p: { trigger: Component }) { return <div>{p.trigger}</div>; }
+component App() { return <Child trigger={<Button label="Go"/>} />; }
+`;
+    expect(render(src, 'App', {})).toBe('<div><button>Go</button></div>');
+  });
+});
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

@@ -44,6 +44,14 @@ let __vskAnnotations: VeskAnnotation[] = [];
  */
 let __slotProps: Set<string> | null = null;
 
+/**
+ * The identifier a component binds its props to (`props` by convention, but
+ * any first-parameter name is legal). Slot detection used to hardcode the
+ * literal `props`, so a `Component`-typed prop read through a differently
+ * named parameter was treated as a plain value and stringified.
+ */
+let __propsParam: string | null = null;
+
 function parseExprNode(text: string): ESTreeNode | null {
   try {
     const ParserClass = createBaseParser();
@@ -442,7 +450,7 @@ function containsJSX(node: any): boolean {
 function slotReadPropName(expr: any): string | null {
   if (
     expr.type === 'MemberExpression' && !expr.computed &&
-    expr.object.type === 'Identifier' && expr.object.name === 'props' &&
+    expr.object.type === 'Identifier' && expr.object.name === (__propsParam || 'props') &&
     expr.property.type === 'Identifier'
   ) {
     return expr.property.name;
@@ -698,7 +706,7 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
 
       if (
         (expr.type === 'MemberExpression' && !expr.computed &&
-          expr.object.type === 'Identifier' && expr.object.name === 'props' &&
+          expr.object.type === 'Identifier' && expr.object.name === (__propsParam || 'props') &&
           expr.property.type === 'Identifier' && expr.property.name === 'children')
         || (expr.type === 'Identifier' && expr.name === 'children')
       ) {
@@ -797,7 +805,7 @@ function exprToIR(source: string, expr: any): IRNode[] {
   // the fragment (`String(props.children)` → "[object DocumentFragment]").
   if (
     (expr.type === 'MemberExpression' && !expr.computed &&
-      expr.object.type === 'Identifier' && expr.object.name === 'props' &&
+      expr.object.type === 'Identifier' && expr.object.name === (__propsParam || 'props') &&
       expr.property.type === 'Identifier' && expr.property.name === 'children')
     || (expr.type === 'Identifier' && expr.name === 'children')
   ) {
@@ -1443,6 +1451,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     // value bindings for THIS component only.
     const prevSlotProps: Set<string> | null = __slotProps;
     __slotProps = slotPropNamesFromType(propsType);
+    __propsParam = propsAlias || null;
 
     if (isStatementMode(bodyStmts)) {
       const raw = processStatementModeBody(source, bodyStmts, file);
@@ -1489,7 +1498,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       const guardBody = buildGuardChain(source, guardClauses, mainReturn);
       const { body, css } = extractStyle([...preamble, ...guardBody]);
       validateBlocks(name, isClientComp, body, file, source);
-      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType });
+      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType, propsAlias });
       comp.style = css;
       components.push(comp);
       __slotProps = prevSlotProps;

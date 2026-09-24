@@ -1,6 +1,7 @@
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR, getPropsType } from '@vesk/compiler/src/ir-generator';
 import { generateVskDts } from '@vesk/compiler/src/vsk-tsx';
+import { render } from '@vesk/compiler/src/server-render';
 
 let passed = 0;
 let failed = 0;
@@ -98,6 +99,35 @@ test('statement vs expression mode both expose propsType', () => {
   const irStmt = irFor(stmt);
   expect(irExpr.propsType).toBe('{ x: number }');
   expect(irStmt.propsType).toBe('{ x: number }');
+});
+
+// React-style props parameter: a component may bind props to any name, so the
+// IR has to record that name in BOTH body modes and emit `const <name> = props`
+// instead of destructuring the parameter off the props object.
+test('propsAlias is recorded for a renamed params parameter in both body modes', () => {
+  const expr = `component App(p) { return <p>{p.x}</p>; }`;
+  const stmt = `component App(p) { <p>{p.x}</p> }`;
+  expect(irFor(expr).propsAlias).toBe('p');
+  expect(irFor(stmt).propsAlias).toBe('p');
+});
+
+test('propsAlias tracks the conventional `props` name and is null when destructured', () => {
+  // `props` is recorded too, but buildParamInit treats it as "already bound"
+  // and emits no alias, so the parameter name is the identity here.
+  expect(irFor(`component App(props) { return <p>{props.x}</p>; }`).propsAlias).toBe('props');
+  expect(irFor(`component App({ x }) { return <p>{x}</p>; }`).propsAlias).toBe(null);
+});
+
+test('destructured and conventional props parameters both render', () => {
+  expect(render(`component App(props: { c: number }) { return <span>{props.c}</span>; }`, 'App', { c: 7 })).toBe('<span>7</span>');
+  expect(render(`component App({ c }) { return <span>{c}</span>; }`, 'App', { c: 7 })).toBe('<span>7</span>');
+});
+
+test('a renamed props parameter renders its fields in both body modes', () => {
+  const expr = `component App(p: { c: number }) { return <span>{p.c}</span>; }`;
+  const stmt = `component App(p: { c: number }) {\n\t<span>{p.c}</span>\n}`;
+  expect(render(expr, 'App', { c: 7 })).toBe('<span>7</span>');
+  expect(render(stmt, 'App', { c: 7 })).toBe('<span>7</span>');
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed+failed} total`);
