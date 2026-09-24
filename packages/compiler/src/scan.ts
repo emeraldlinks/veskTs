@@ -147,22 +147,28 @@ export function skipComment(text: string, i: number): number {
 }
 
 /**
- * Blanks out `//` line comments that begin a line, overwriting the comment
- * characters with spaces so every source offset (and therefore every
- * diagnostic line/column) is preserved.
+ * Blanks comments in the source, overwriting the comment characters with
+ * spaces so every source offset (and therefore every diagnostic line/column)
+ * is preserved. Newlines inside a comment are kept so line numbers hold.
  *
- * In JSX-children position acorn reads `//` as JSXText rather than a
- * comment, so `//<span>old</span>` inside a component still rendered the
- * element and `//{count + 1}` still emitted a live binding. Blanking a
- * line-leading `//` before the parse makes a commented-out line behave like
+ * In JSX-children position acorn reads both `//` and `/* ... *​/` as JSXText
+ * rather than a comment, so commented-out code still ran: `//<span>old</span>`
+ * inside a component rendered the element, `//{count + 1}` emitted a live
+ * binding, and `/* <span>old</span> *​/` leaked the markup as visible text.
+ * Blanking comments before the parse makes a commented-out line behave like
  * a comment in every position of a `.vsk` file.
  *
- * Only line-leading `//` is blanked: a trailing `// note` after code is a
- * real comment acorn already ignores, and blanking a mid-line `//` would
- * corrupt regex literals (`/https:\/\//`) and intentional JSX text. Strings
- * and template literals are skipped, so a `//` inside them is never touched.
+ * `/* ... *​/` is blanked wherever it appears (outside a string) because a
+ * block comment is inert everywhere in JS — and an unescaped `/*` cannot occur
+ * inside a regex literal, since it would terminate the regex there.
+ *
+ * `//` is blanked only when it is the first non-whitespace token on its line: a
+ * trailing `// note` after code is a real comment acorn already ignores, and
+ * blanking a mid-line `//` would corrupt regex literals (`/https:\/\//`) and
+ * intentional JSX text such as `ratio 1//2`. Strings and template literals are
+ * skipped throughout, so a comment marker inside them is never touched.
  */
-export function blankLeadingLineComments(text: string): string {
+export function blankComments(text: string): string {
   const chars = text.split('');
   const n = text.length;
   let lineStart = true;
@@ -181,10 +187,20 @@ export function blankLeadingLineComments(text: string): string {
       i = end;
       continue;
     }
-    if (ch === '/' && text[i + 1] === '/' && lineStart) {
+    if (ch === '/' && text[i + 1] === '/') {
+      if (!lineStart) { i += 2; continue; }
       let j = i;
       while (j < n && text[j] !== '\n') { chars[j] = ' '; j++; }
       i = j;
+      continue;
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      let j = i;
+      while (j < n && !(text[j] === '*' && text[j + 1] === '/')) j++;
+      const end = Math.min(j + 2, n);
+      for (let k = i; k < end; k++) if (text[k] !== '\n') chars[k] = ' ';
+      lineStart = false;
+      i = end;
       continue;
     }
     lineStart = false;

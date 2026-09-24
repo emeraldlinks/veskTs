@@ -329,6 +329,44 @@ test('stmt commented-out statement is skipped', () => {
   expect(html).toEqual('<p>7</p>');
 });
 
+test('stmt block comment in JSX children does not leak markup', () => {
+  const html = render(stmt(`
+    <div>
+      /* <span class="old">OLD</span> */
+      <span>new</span>
+    </div>
+  `), 'App', {});
+  expect(html).toEqual('<div><span>new</span></div>');
+});
+
+test('stmt block comment in JSX children does not evaluate its expression', () => {
+  const html = render(stmt(`
+    <div>
+      <span>{props.count}</span>
+      /* {props.count + 100} */
+    </div>
+  `), 'App', { count: 5 });
+  expect(html).toEqual('<div><span>5</span></div>');
+});
+
+test('stmt multi-line block comment in JSX children renders nothing', () => {
+  const html = render(stmt(`
+    <div>
+      /* <span>a</span>
+         <span>b</span> */
+      <span>new</span>
+    </div>
+  `), 'App', {});
+  expect(html).toEqual('<div><span>new</span></div>');
+});
+
+test('stmt a string containing a block-comment marker is preserved', () => {
+  const html = render(stmt(`
+    <p>{props.s}</p>
+  `), 'App', { s: '/* not a comment */' });
+  expect(html).toEqual('<p>/* not a comment */</p>');
+});
+
 test('stmt a URL in JSX text is not treated as a comment', () => {
   const html = render(stmt(`
     <p>see https://vesk.dev/a//b now</p>

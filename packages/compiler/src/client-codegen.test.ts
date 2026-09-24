@@ -2723,6 +2723,33 @@ describe('commented-out code never compiles (issue #1/#2)', () => {
 		expect(code).not.toContain('999');
 	});
 
+	bothModes('block comment in JSX children emits no markup and no text', `component App(props) {
+	<div>
+		/* <span class="old">OLD</span> */
+		<span>{props.label}</span>
+	</div>
+}`, (code) => {
+		expect(code).not.toContain('OLD');
+		expect(code).not.toContain('"old"');
+		expect(code).toContain('props.label');
+	});
+
+	bothModes('block comment in JSX children emits no live binding', `component App(props) {
+	<div>
+		<span>{props.count}</span>
+		/* {props.count + 100} */
+	</div>
+}`, (code) => {
+		expect(code).toContain('props.count');
+		expect(code).not.toContain('props.count + 100');
+	});
+
+	bothModes('a string containing a block-comment marker survives', `component App() {
+	<p>{'/* keep */'}</p>
+}`, (code) => {
+		expect(code).toContain('/* keep */');
+	});
+
 	bothModes('a URL in an attribute is not treated as a comment', `component App(props) {
 	<a href="https://vesk.dev/a//b">{props.label}</a>
 }`, (code) => {

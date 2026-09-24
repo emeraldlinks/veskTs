@@ -3,7 +3,7 @@ import type { Options } from 'acorn';
 import type { Program } from 'estree';
 import { tsPlugin } from './acorn-ts-plugin/index.js';
 import { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
-import { blankLeadingLineComments, containsForOfIn } from '@vesk/compiler/src/scan';
+import { blankComments, containsForOfIn } from '@vesk/compiler/src/scan';
 import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
 
 export interface ParseOptions {
@@ -257,7 +257,7 @@ export function createBaseParser(): typeof acorn.Parser {
 
 export function parse(source: string, options: ParseOptions = {}): Program {
   const ParserClass = createBaseParser();
-  const { code, annotations } = preprocessForClauses(blankLeadingLineComments(source));
+  const { code, annotations } = preprocessForClauses(blankComments(source));
   try {
     const ast = (ParserClass as unknown as { parse(input: string, opts: Options): Program }).parse(code, {
       ecmaVersion: 'latest',

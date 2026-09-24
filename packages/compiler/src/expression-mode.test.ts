@@ -261,6 +261,37 @@ test('expr multi-line commented-out if block compiles and renders nothing', () =
   expect(html).toEqual('<div><span>shown</span></div>');
 });
 
+test('expr block comment in JSX children does not leak markup', () => {
+  const html = render(`component App(props) {
+    return (
+      <div>
+        /* <span class="old">OLD</span> */
+        <span>new</span>
+      </div>
+    );
+  }`, 'App', {});
+  expect(html).toEqual('<div><span>new</span></div>');
+});
+
+test('expr block comment in JSX children does not evaluate its expression', () => {
+  const html = render(`component App(props) {
+    return (
+      <div>
+        <span>{props.count}</span>
+        /* {props.count + 100} */
+      </div>
+    );
+  }`, 'App', { count: 5 });
+  expect(html).toEqual('<div><span>5</span></div>');
+});
+
+test('expr a string containing a block-comment marker is preserved', () => {
+  const html = render(`component App(props) {
+    return <p>{props.s}</p>;
+  }`, 'App', { s: '/* keep */' });
+  expect(html).toEqual('<p>/* keep */</p>');
+});
+
 test('expr a URL in JSX text is not treated as a comment', () => {
   const html = render(`component App(props) {
     return <p>see https://vesk.dev/a//b now</p>;
