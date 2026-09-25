@@ -3,7 +3,7 @@
  * Vesk skill installer — agent-agnostic.
  *
  * One source file, every major AI coding tool's native skill-discovery
- * location. Installs the `vesk` and `react-to-vesk` skills
+ * location. Installs the `vesk`, `react-to-vesk`, and `nuxt-to-vesk` skills
  * (skills/<name>/SKILL.md) so every agent loads the *current* authoritative
  * copy (including Recipe G's VeskRequest/VeskResponse API conversions).
  * Zero dependencies, ESM-only (Node >= 20, no `node:` imports needed).
@@ -36,6 +36,7 @@ import { fileURLToPath } from 'node:url';
 const SKILLS = [
 	{ name: 'vesk', src: 'skills/vesk/SKILL.md' },
 	{ name: 'react-to-vesk', src: 'skills/react-to-vesk/SKILL.md' },
+	{ name: 'nuxt-to-vesk', src: 'skills/nuxt-to-vesk/SKILL.md' },
 ];
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CWD = process.cwd();
