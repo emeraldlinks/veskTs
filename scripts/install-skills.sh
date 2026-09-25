@@ -9,7 +9,7 @@
 # *current* authoritative copy of the Vesk API reference instead of whatever
 # was in their training data. One source file, every tool's native skill
 # discovery location: opencode, Claude Code, Copilot, Codex, Gemini
-# (antigravity), Cursor, Windsurf.
+# (antigravity), Cursor, Windsurf, Pi, Kilo Code.
 #
 # Options:
 #   VESK_REPO             git source used for the raw file base
@@ -53,6 +53,8 @@ PLATFORMS=(
   "antigravity|global|$PREFIX/.gemini/antigravity/skills"
   "cursor|project|$PWD/.cursor/skills"
   "windsurf|project|$PWD/.windsurf/skills"
+  "pi|global|$PREFIX/.pi/skills"
+  "kilocode|global|$PREFIX/.kilo/skills"
 )
 
 platform_dir() { printf '%s' "$1" | awk -F'|' '{print $3}'; }

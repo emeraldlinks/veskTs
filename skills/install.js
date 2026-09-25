@@ -24,6 +24,8 @@
  *   antigravity    ~/.gemini/antigravity/skills/<name>/SKILL.md       (global; Gemini)
  *   cursor         .cursor/skills/<name>/SKILL.md                     (project)
  *   windsurf       .windsurf/skills/<name>/SKILL.md                   (project)
+ *   pi             ~/.pi/skills/<name>/SKILL.md                       (global)
+ *   kilocode       ~/.kilo/skills/<name>/SKILL.md                     (global)
  *
  * Project-scoped skills are written into the current working directory so
  * the skill ships with the repo. Global-scoped skills use `$HOME`.
@@ -80,6 +82,16 @@ const PLATFORMS = [
 		name: 'windsurf',
 		scope: 'project',
 		dir: () => join(CWD, '.windsurf', 'skills'),
+	},
+	{
+		name: 'pi',
+		scope: 'global',
+		dir: () => join(homedir(), '.pi', 'skills'),
+	},
+	{
+		name: 'kilocode',
+		scope: 'global',
+		dir: () => join(homedir(), '.kilo', 'skills'),
 	},
 ];
 
