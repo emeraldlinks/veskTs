@@ -78,8 +78,8 @@ require("cmp").setup({
 The LSP server must be built before use:
 
 ```bash
-cd /path/to/vesk
-node scripts/build-lsp.js
+cd /path/to/vesk/extension/vsk-neovim
+node scripts/build-lsp.cjs
 ```
 
 This produces `extension/vsk-vscode/lsp-server/index.mjs`.

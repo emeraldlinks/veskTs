@@ -43,7 +43,7 @@ local function find_lsp_server()
   vim.notify(
     "[vesk] LSP server not found. Build it first:\n"
       .. "  cd " .. vim.fn.fnamemodify(plugin_root, ":h:h")
-      .. " && node scripts/build-lsp.js",
+      .. " && node scripts/build-lsp.cjs",
     (vim.log and vim.log.levels and vim.log.levels.WARN) or "WARN"
   )
   return {}

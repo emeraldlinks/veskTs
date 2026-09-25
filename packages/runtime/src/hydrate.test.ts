@@ -1,5 +1,6 @@
 import { needsHydration, hydrationCount, createHydrateWalker, createHydrateChildWalker, hydrateOnInteraction, hydrateIdle, hydrate, assertFullyHydrated, auditHydration, setHydrateDevMode, setHydrateStrict, onHydrationMismatch, bumpNavEpoch, isVskMarkerText, parseVskMarker } from '@vesk/runtime/src/hydrate';
 import { reconcileHydrated } from '@vesk/runtime/src/reconcile';
+import { Form } from '@vesk/runtime/src/form';
 import { effect } from '@vesk/runtime/src/ripple-blocks';
 import { flush_sync, get, set, track } from '@vesk/runtime/src/ripple-runtime';
 
@@ -166,6 +167,7 @@ function mockDocument() {
     cookie: '',
     head: { appendChild() {} },
     createElement(tag) { return makeNode(1, tag); },
+    createDocumentFragment() { return makeNode(11, '#document-fragment'); },
     createComment(text) { const c = makeNode(8); c.data = text; return c; },
     createTextNode(text) { const t = makeNode(3); t.data = text; return t; },
     createTreeWalker(root, _whatToShow, filter) {
@@ -375,7 +377,7 @@ describe('createHydrateWalker', () => {
     const fresh = document.createElement('nav');
     const sr = walker.claimOnly();
     expect(sr).toBe(svg);
-    expect(svg.hasAttribute('data-vsk-claimed')).toBe(true);
+    expect(svg.hasAttribute('data-vsk-claimed')).toBe(false);
     expect(svg.parentNode).toBe(root);
     root.replaceChild(fresh, sr);
     expect(root.contains(fresh)).toBe(true);
@@ -429,7 +431,6 @@ describe('createHydrateWalker', () => {
     const root = document.createElement('div');
     const m1 = document.createComment('vsk');
     const s1 = document.createElement('div');
-    s1.setAttribute('data-vsk-claimed', '');
     root.appendChild(m1); root.appendChild(s1);
 
     const walker = createHydrateWalker(root, [m1]);
@@ -512,9 +513,30 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     // skipK = 1 skips the static residue already retrieved from __vsk_ssrEls.
     const a = walker.nextElement('span', 1);
     expect(a).toBe(target);
-    expect(target.hasAttribute('data-vsk-claimed')).toBe(true);
+    expect(target.hasAttribute('data-vsk-claimed')).toBe(false);
     expect(walker.nextElement('span')).toBe(tail);
     expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('self-claiming Form consumes the preceding static residue before claiming its root', () => {
+    mockDocument();
+    const parent = document.createElement('main');
+    const heading = document.createElement('h1');
+    const form = document.createElement('form');
+    heading.appendChild(document.createTextNode('Actions'));
+    form.setAttribute('action', '/_vesk/action/test');
+    parent.appendChild(heading);
+    parent.appendChild(form);
+
+    const walker = createHydrateChildWalker(parent);
+    walker.injectSkipK(1);
+    const result = Form({}, new Map(), walker);
+
+    expect(parent.contains(heading)).toBe(true);
+    expect(parent.contains(form)).toBe(true);
+    expect(result.nodeType).toBe(11);
+    expect(form.getAttribute('action')).toBe('/_vesk/action/test');
     cleanupDocument();
   });
 
@@ -528,16 +550,24 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     const seen = [];
     onHydrationMismatch((issue) => seen.push(issue));
     const el = walker.nextElement('p');
-    // Divergence: fresh element handed back, the SSR slot consumed.
+    // Divergence: a fresh element is handed back and the mismatched SSR slot
+    // is consumed. The old node is inert and detached because it is provably
+    // the walker's own immediate child slot.
     expect(el.tagName).toBe('P');
     expect(el.parentNode).toBe(null);
-    // The wrong-tag SSR node is never bound, never deleted.
-    expect(parent.contains(wrong)).toBe(true);
-    expect(wrong.textContent).toBe('');
+    expect(parent.contains(wrong)).toBe(false);
     expect(seen.some((i) => i.kind === 'tag-mismatch')).toBe(true);
+    // Simulate the generated region/component placement at the consumed slot.
+    parent.insertBefore(el, right);
     // The walker moved past the consumed slot: next claim hits the real <p>.
     expect(walker.nextElement('p')).toBe(right);
     expect(walker.done()).toBe(true);
+    // WeakMap bookkeeping preserves the recovery report after detachment and
+    // never adds a data-vsk-* annotation to either replacement or sibling.
+    const report = auditHydration(parent);
+    expect(report.unclaimed).toBe(1);
+    expect(report.issues.some((issue) => issue.detail.includes('structural hydration ghost'))).toBe(true);
+    expect(parent.querySelectorAll('[data-vsk-claimed], [data-vsk-fresh]').length).toBe(0);
     onHydrationMismatch(null);
     cleanupDocument();
   });
@@ -741,8 +771,8 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     // Items adopted in place, in order, from the region slots.
     expect(rendered[0]).toBe(item1);
     expect(rendered[1]).toBe(item2);
-    expect(item1.getAttribute('data-vsk-claimed')).toBe('');
-    expect(item2.getAttribute('data-vsk-claimed')).toBe('');
+    expect(item1.getAttribute('data-vsk-claimed')).toBe(null);
+    expect(item2.getAttribute('data-vsk-claimed')).toBe(null);
     // Static siblings are never claimed, renamed, or relocated.
     expect(h1.getAttribute('data-vsk-claimed')).toBe(null);
     expect(h1.textContent).toBe('Empty-state Demo');
@@ -1019,7 +1049,7 @@ describe('SSR element residue capture (text/component ordering)', () => {
     // Component claim keeps the residue root in place.
     const badgeClaim = walker.nextElement('span');
     expect(badgeClaim).toBe(badge);
-    expect(badgeClaim.hasAttribute('data-vsk-claimed')).toBe(true);
+    expect(badgeClaim.hasAttribute('data-vsk-claimed')).toBe(false);
     // Final order: text first, badge root second (the label-order bug).
     const kinds = (label.childNodes).map((n) => (n.nodeType === 3 ? 'T' : n.nodeType === 1 ? 'E' : 'C'));
     expect(kinds.join('')).toBe('TE');
@@ -1113,7 +1143,7 @@ describe('retireDetached sweeps wiped markers', () => {
     walker.retireDetached();
     const claimedC = walker.claimOnly();
     expect(claimedC).toBe(c);
-    expect(claimedC.hasAttribute('data-vsk-claimed')).toBe(true);
+    expect(claimedC.hasAttribute('data-vsk-claimed')).toBe(false);
     expect(root.childNodes.filter((n) => n.nodeType === 8).length).toBe(0);
     cleanupDocument();
   });
@@ -1213,7 +1243,7 @@ describe('walker marker lifecycle state machine', () => {
 		const claim = walker.claimByKey('1');
 		expect(claim.el).toBe(li1);
 		expect(m1.parentNode).toBe(null); // marker removed from the live DOM
-		expect(li1.getAttribute('data-vsk-claimed')).toBe('');
+		expect(li1.getAttribute('data-vsk-claimed')).toBe(null);
 
 		// Cursor did NOT advance past the claimed root — the item's own render
 		// is what consumes the interior markers positionally.
@@ -1351,12 +1381,12 @@ describe('walker marker lifecycle state machine', () => {
 		// First link claims its anchor via the call-site marker.
 		const first = walker.nextElement('a');
 		expect(first).toBe(a1);
-		expect(a1.getAttribute('data-vsk-claimed')).toBe('');
+		expect(a1.getAttribute('data-vsk-claimed')).toBe(null);
 		// The callee's own marker still points at the SAME anchor: it must be
 		// retired, not adopted again.
 		const second = walker.nextElement('a');
 		expect(second).toBe(a2);
-		expect(a2.getAttribute('data-vsk-claimed')).toBe('');
+		expect(a2.getAttribute('data-vsk-claimed')).toBe(null);
 		// Canary: the dead alias is gone (no unclaimed marker survives on a1).
 		expect(mLink1.parentNode).toBe(null);
 		cleanupDocument();
@@ -1438,8 +1468,8 @@ describe('reconcileHydrated claim-by-key adoption', () => {
 		// Adopted — same SSR nodes, no recreation.
 		expect(rendered[0]).toBe(li1);
 		expect(rendered[1]).toBe(li2);
-		expect(li1.getAttribute('data-vsk-claimed')).toBe('');
-		expect(li2.getAttribute('data-vsk-claimed')).toBe('');
+		expect(li1.getAttribute('data-vsk-claimed')).toBe(null);
+		expect(li2.getAttribute('data-vsk-claimed')).toBe(null);
 		// Markers removed from the live DOM (no ghosts).
 		expect(m1.parentNode).toBe(null);
 		expect(m2.parentNode).toBe(null);
@@ -1509,8 +1539,8 @@ describe('reconcileHydrated claim-by-key adoption', () => {
 		expect(elems[1]).toBe(li1);
 		expect(li2.textContent).toBe('B2');
 		expect(li1.textContent).toBe('A2');
-		expect(li1.hasAttribute('data-vsk-claimed')).toBe(true);
-		expect(li2.hasAttribute('data-vsk-claimed')).toBe(true);
+		expect(li1.hasAttribute('data-vsk-claimed')).toBe(false);
+		expect(li2.hasAttribute('data-vsk-claimed')).toBe(false);
 		// Every SSR marker was consumed — the canary stays silent.
 		expect(assertFullyHydrated(ul)).toBe(true);
 		cleanupDocument();
@@ -1581,8 +1611,8 @@ describe('A4: keyed relocate adopts out of order and moves into place', () => {
     expect(ul.childNodes.indexOf(li2)).toBeLessThan(ul.childNodes.indexOf(m1));
     const mine = walker.claimByKey('1', { relocate: true });
     expect(mine.el).toBe(li1);
-    expect(li1.getAttribute('data-vsk-claimed')).toBe('');
-    expect(li2.getAttribute('data-vsk-claimed')).toBe('');
+    expect(li1.getAttribute('data-vsk-claimed')).toBe(null);
+    expect(li2.getAttribute('data-vsk-claimed')).toBe(null);
     expect(assertFullyHydrated(ul)).toBe(true);
     cleanupDocument();
   });
@@ -1707,7 +1737,7 @@ describe('B1: typed marker identity pinpoints divergence', () => {
     expect(hydrationCount(root)).toBe(1);
     const walker = createHydrateWalker(root);
     expect(walker.nextElement('div')).toBe(box);
-    expect(box.getAttribute('data-vsk-claimed')).toBe('');
+    expect(box.getAttribute('data-vsk-claimed')).toBe(null);
     expect(assertFullyHydrated(root)).toBe(true);
     cleanupDocument();
   });
@@ -2005,7 +2035,9 @@ describe('hydration-integrity canary', () => {
 		const m = document.createComment('vsk');
 		const el = document.createElement('span');
 		container.appendChild(m); container.appendChild(el);
-		el.setAttribute('data-vsk-claimed', '');
+		const walker = createHydrateWalker(container, [m]);
+		expect(walker.claimOnly('span')).toBe(el);
+		expect(el.hasAttribute('data-vsk-claimed')).toBe(false);
 		expect(assertFullyHydrated(container)).toBe(true);
 		cleanupDocument();
 	});
@@ -2026,12 +2058,15 @@ describe('hydration-integrity canary', () => {
 	it('a claimed ancestor silences the canary for nested interior markers', () => {
 		mockDocument();
 		const container = document.createElement('div');
+		const outerMarker = document.createComment('vsk');
 		const outer = document.createElement('section');
-		outer.setAttribute('data-vsk-claimed', '');
 		const m = document.createComment('vsk');
 		const el = document.createElement('span');
 		outer.appendChild(m); outer.appendChild(el);
-		container.appendChild(outer);
+		container.appendChild(outerMarker); container.appendChild(outer);
+		const walker = createHydrateWalker(container, [outerMarker]);
+		expect(walker.claimOnly('section')).toBe(outer);
+		expect(outer.hasAttribute('data-vsk-claimed')).toBe(false);
 		expect(assertFullyHydrated(container)).toBe(true);
 		cleanupDocument();
 	});
@@ -2130,12 +2165,14 @@ describe('A1: mismatch telemetry + strict audit (NO DUPLICATION, NO MISMATCH)', 
   it('twin scan flags an adopted node beside an identical unadopted twin', () => {
     mockDocument();
     const container = document.createElement('div');
+    const marker = document.createComment('vsk');
     const adopted = document.createElement('div');
-    adopted.setAttribute('data-vsk-claimed', '');
     adopted.appendChild(document.createTextNode('same'));
     const twin = document.createElement('div');
     twin.appendChild(document.createTextNode('same'));
-    container.appendChild(adopted); container.appendChild(twin);
+    container.appendChild(marker); container.appendChild(adopted); container.appendChild(twin);
+    const walker = createHydrateWalker(container, [marker]);
+    expect(walker.claimOnly('div')).toBe(adopted);
     const report = auditHydration(container);
     expect(report.twins).toBe(1);
     expect(report.issues.some((i) => i.kind === 'twin')).toBe(true);

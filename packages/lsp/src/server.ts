@@ -18,6 +18,7 @@ import { create as createCssService } from 'volar-service-css';
 import { AMBIENT as AMBIENT_CONTENT, RUNTIME_OVERRIDE as RUNTIME_OVERRIDE_CONTENT } from '@vesk/compiler';
 import { createAutoInsertPlugin } from './plugins/autoInsert';
 import { createCompletionPlugin } from './plugins/completion';
+import { createCompletionFilterPlugin } from './plugins/completionFilter';
 import { createCompileErrorDiagnosticPlugin } from './plugins/compileErrors';
 import { createMdHtmlPlugin, setMdPluginWorkspaceRoot } from './plugins/mdHtml';
 import { installStyleShim } from './styleShim';import { createHoverPlugin } from './plugins/hover';
@@ -444,6 +445,7 @@ export function createVeskLanguageServer() {
           stripDocumentFormatting(createCssService()),
           ...createTypeScriptServices(ts).map(stripDocumentFormatting),
           // Must come after TypeScript services to intercept their providers.
+          createCompletionFilterPlugin(),
           createTypeScriptDiagnosticFilterPlugin(),
           createHoverPlugin(),
           // Must come after TypeScript services: its create() disables

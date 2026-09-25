@@ -198,6 +198,22 @@ describe('Client Codegen — Hydrate call-site boundaries', () => {
 		expect(code).not.toContain('subWalker(');
 	});
 
+	bothModes('self-claiming Form children do not consume the caller walker', `
+		import { Form, Field } from '@vesk/runtime';
+		component App() { return <main><h1>Title</h1><Form><Field name="name"><input name="name" /></Field></Form></main>; }
+	`, (code, mode) => {
+		if (mode === 'normal') {
+			expect(code).toContain('Field({');
+			return;
+		}
+		expect(code).toContain('Form({');
+		expect(code).toContain('Field({');
+		// The child argument is fresh-built; it must not claim the h1/form
+		// slots through the page walker before Form adopts its own root.
+		expect(code).not.toContain('__registry, $n5');
+		expect(code).not.toContain('subWalker($n2.nextElement())');
+	});
+
 	bothModes('Md call has no guard and claims its own root', `
 		import { Md } from '@vesk/runtime';
 		component App { return <Md content="# Hi" />; }

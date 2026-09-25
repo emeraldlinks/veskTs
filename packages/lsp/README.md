@@ -16,11 +16,15 @@ Install the `vesk-vscode` extension from the marketplace.
 
 ### Neovim
 
-Use `nvim-lspconfig`:
+Use the bundled `vesk.nvim` plugin:
 
 ```lua
-require('lspconfig').vesk_ls.setup{}
+require('vesk').setup({})
 ```
+
+The plugin starts `lsp-server/index.mjs` with `--stdio`, registers `.vsk`
+filetype detection, and maps the standard LSP actions. It does not require a
+separate `nvim-lspconfig` server definition.
 
 ## License
 

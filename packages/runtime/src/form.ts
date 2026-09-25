@@ -269,7 +269,13 @@ export function Form(props: FormProps, registry?: Map<string, unknown>, hydrate?
 	}
 
 	if (hydrate && hydrate.nextElement) {
-		let form = hydrate.nextElement('form') as HTMLFormElement;
+		// The compiler may deposit the static residue that precedes this
+		// self-claiming component (for example <h1> before <Form>). Consume it
+		// before claiming the form root; otherwise the runtime would inspect
+		// the heading as the form slot, detach it as a mismatch, and only find
+		// the real form through the broad querySelector fallback.
+		const skipK = typeof hydrate.takeSkipK === 'function' ? hydrate.takeSkipK() : 0;
+		let form = hydrate.nextElement('form', skipK) as HTMLFormElement;
 		if (form && !form.parentNode && hydrate.root) {
 			const existing = hydrate.root.querySelector('form');
 			if (existing) form = existing as HTMLFormElement;

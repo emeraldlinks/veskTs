@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.37-ci.1790273233877.tgz",
-    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.37-ci.1790273233877.tgz",
-    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.37-ci.1790273233877.tgz",
-    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.37-ci.1790273233877.tgz",
-    "@vesk/types": "file:./tarballs/vesk-types-0.2.37-ci.1790273233877.tgz",
-    "@vesk/vesk-cli": "file:./tarballs/vesk-vesk-cli-0.2.37-ci.1790273233877.tgz",
-    "lucide-vesk": "file:./tarballs/lucide-vesk-0.2.37-ci.1790273233877.tgz"
+    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.41-ci.1790323548672.tgz",
+    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.41-ci.1790323548672.tgz",
+    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.41-ci.1790323548672.tgz",
+    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.41-ci.1790323548672.tgz",
+    "@vesk/types": "file:./tarballs/vesk-types-0.2.41-ci.1790323548672.tgz",
+    "@vesk/vesk-cli": "file:./tarballs/vesk-vesk-cli-0.2.41-ci.1790323548672.tgz",
+    "lucide-vesk": "file:./tarballs/lucide-vesk-0.2.41-ci.1790323548672.tgz"
   },
   "devDependencies": {
     "tailwindcss": "^4.0.0",

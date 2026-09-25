@@ -1225,7 +1225,7 @@ async function main() {
     '/store/widget': 'Item: widget',
     '/typed': 'Total likes',
     '/portal': 'Portal posts',
-    '/portal/guides': 'Guides layout',
+    '/portal/guides': 'Guides',
     '/root-components': 'Root components via @/ alias',
   };
 
@@ -1286,14 +1286,14 @@ async function main() {
           const guard = await page.evaluate(() => ({
             hidden: document.querySelector('.g-hidden')?.textContent ?? null,
             shown: document.querySelector('.g-shown')?.textContent ?? null,
-            hiddenClaimed: document.querySelector('.g-hidden')?.hasAttribute('data-vsk-claimed') ?? false,
+            annotationCount: document.querySelectorAll('[data-vsk-claimed], [data-vsk-fresh], [data-vsk-key]').length,
             shownPCount: document.querySelectorAll('.g-shown').length,
           }));
           assert(guard.hidden !== null && guard.shown !== null, '/guardtest renders the guard fixture');
           assert((guard.hidden || '').trim() === '', '/guardtest bare-return guard renders nothing when taken');
           assert((guard.shown || '').includes('v0.2.33'), '/guardtest bare-return guard renders root when not taken');
           assert(guard.shownPCount === 1, `/guardtest has exactly one .g-shown <p> (got ${guard.shownPCount})`);
-          assert(guard.hiddenClaimed, '/guardtest .g-hidden is claimed by hydration');
+          assert(guard.annotationCount === 0, '/guardtest hydration adds no DOM bookkeeping annotations');
 
           // Disappearing-nodes regression: an in-element conditional region (the
           // icon-swap ternary inside #icon-btn) must keep re-render content INSIDE
@@ -1689,9 +1689,9 @@ async function main() {
   // Regression (claim-by-key engine): keyed maps were previously re-rendered
   // by `reconcile` on hydrate WITHOUT claiming the SSR elements, so the
   // server-rendered keyed spans stayed on screen next to freshly-built
-  // duplicates. `data-vsk-key` + `claimByKey` must adopt the SSR chips in
-  // place: exact one-to-one membership, no phantoms, and mutation via
-  // reconcile (Add/Remove/Reverse) must keep adopting instead of rebuilding.
+  // duplicates. Markerless structural claiming must adopt the SSR chips in
+  // place: exact one-to-one membership, no phantoms, no DOM key/claim
+  // annotations, and reconcile mutations must preserve node identity.
   {
     console.log('\n=== TEST 22: keyed-map claim-by-key hydration ===');
     const page = await browser.newPage();
@@ -1706,8 +1706,8 @@ async function main() {
       return {
         count: chips.length,
         values: chips.map(c => c.textContent.replace(/\s+/g, '').trim()),
-        keys: chips.map(c => c.getAttribute('data-vsk-key')),
-        claimed: chips.map(c => c.hasAttribute('data-vsk-claimed')),
+        annotationCount: document.querySelectorAll('#rk-list [data-vsk-key], #rk-list [data-vsk-claimed], #rk-list [data-vsk-fresh]').length,
+        identities: chips.map(c => c.__veskTestIdentity || null),
         leftMarkers: vsk,
       };
     });
@@ -1742,30 +1742,37 @@ async function main() {
       assert(vals.every(c => c === 1), '/map SSR chips 10/20/30 each present exactly once (got ' + vals.join(',') + ')');
     }
 
-    // 22b: full load — chips adopted via claim-by-key, markers all claimed.
-    console.log('  22b: full load — chips adopted, markers claimed');
+    // 22b: full load — chips adopted positionally with no DOM annotations.
+    console.log('  22b: full load — chips adopted without DOM annotations');
     await goto(page, BASE + '/map', { waitUntil: 'networkidle0', timeout: 15000 });
     {
       const s = await readChips();
       assert(s.count === 3, 'full load: exactly 3 keyed chips (got ' + s.count + ')');
       assert(JSON.stringify(s.values) === JSON.stringify(['10', '20', '30']),
         'full load: chips 10,20,30 (got ' + s.values.join(',') + ')');
-      assert(s.claimed.every(Boolean), 'full load: every chip adopted via claim (all data-vsk-claimed)');
-      assert(s.leftMarkers === 0, 'full load: all hydration markers claimed (got vsk=' + s.leftMarkers + ')');
+      assert(s.annotationCount === 0, 'full load: markerless hydration adds no key/claim/fresh attributes');
+      assert(s.leftMarkers === 0, 'full load: no legacy SSR marker survives (got vsk=' + s.leftMarkers + ')');
       assert(errors.length === 0, 'full load zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
     }
 
     // 22c: reconcile mutations — append/remove/reorder keep identity, no dupes.
     console.log('  22c: interactions — reconcile appends/removes/reorders without duplication');
     {
+      // Browser-test-only identity sentinels prove that the original SSR nodes
+      // survive mutation. They are ordinary JS expando properties, not Vesk DOM
+      // annotations, and never form part of the framework hydration contract.
+      await page.evaluate(() => {
+        document.querySelectorAll('#rk-list .rk-chip').forEach((chip, index) => {
+          chip.__veskTestIdentity = `ssr-${index}`;
+        });
+      });
       await clickButton('Add');
       let s = await waitChips(4);
       assert(s.count === 4 && JSON.stringify(s.values) === JSON.stringify(['10', '20', '30', '40']),
         'Add -> 4 chips 10,20,30,40 (got ' + s.count + ': ' + s.values.join(',') + ')');
-      assert(s.claimed[0] && s.claimed[1] && s.claimed[2],
-        'Add keeps SSR chips adopted in place (data-vsk-claimed 10,20,30)');
-      assert(s.keys[3] === null && !s.claimed[3],
-        'Add renders the new chip fresh (no stale claim)');
+      assert(JSON.stringify(s.identities.slice(0, 3)) === JSON.stringify(['ssr-0', 'ssr-1', 'ssr-2']),
+        'Add keeps the three original SSR chip nodes in place');
+      assert(s.identities[3] === null, 'Add renders the new chip from a fresh node');
       assert(new Set(s.values).size === s.values.length, 'Add produces no duplicate chip text');
 
       await clickButton('Add');
@@ -1782,8 +1789,8 @@ async function main() {
       s = await waitChips(4);
       assert(JSON.stringify(s.values) === JSON.stringify(['40', '30', '20', '10']),
         'Reverse -> 40,30,20,10 (got ' + s.values.join(',') + ')');
-      assert(s.claimed.filter(Boolean).length === 3,
-        'Reverse keeps SSR chips adopted (3 data-vsk-claimed survive reorder)');
+      assert(s.identities.filter(Boolean).length === 3,
+        'Reverse preserves all three original SSR chip nodes');
       assert(new Set(s.values).size === s.values.length, 'Reverse produces no duplicate chip text');
       assert(errors.length === 0, 'interactions zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
     }
@@ -1950,7 +1957,7 @@ async function main() {
         assert(s.buildBadgeText.startsWith('build '), `${route}: async badge hydrated in place ("${s.buildBadgeText}")`);
         assert(s.markers.vsk === 0 && s.markers.hold === 0,
           `${route}: all hydration markers claimed (vsk=${s.markers.vsk}, hold=${s.markers.hold})`);
-        assert(s.body.includes(route === '/portal' ? 'Portal posts' : 'Guides layout'),
+        assert(s.body.includes(route === '/portal' ? 'Portal posts' : 'Guides'),
           `${route}: renders the right page content`);
         assert(errors.length === 0, `${route} zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
       }
@@ -2035,11 +2042,12 @@ async function main() {
         assert(landed.nav === 1 && landed.main === 1 && landed.footer === 1,
           '24d single nested chrome after nav (nav ' + landed.nav + ', main ' + landed.main + ', footer ' + landed.footer + ')');
         assert(landed.guides === 1, '24d exactly one guides layout in the chain (got ' + landed.guides + ')');
-        const text = await page.evaluate(() => document.getElementById('root').textContent.replace(/\s+/g, ' ').trim());
-        assert(text.includes('Guides layout'), '24d guides content rendered in place');
-        if (new Set(text.split('Guides layout')).size > 1) {
-          assert((text + ' ').split('Guides layout').length - 1 === 1, '24d guides layout label exactly once in #root');
-        }
+        const guideState = await page.evaluate(() => ({
+          heading: document.querySelector('.guides-h1')?.textContent?.trim() || '',
+          count: document.querySelectorAll('.guides-h1').length,
+        }));
+        assert(guideState.heading === 'Guides', '24d guides content rendered in place');
+        assert(guideState.count === 1, '24d guides heading rendered exactly once in #root');
       }
       assert(await page.evaluate(() => window.__spaFlag === true), '24d stayed SPA (no reload)');
 

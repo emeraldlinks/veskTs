@@ -1006,7 +1006,14 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       const frag = ctx.n();
       const wipeMount = ctx.linkNames.has(node.componentName);
       const savedHydrate = ctx.hydrate;
-      if (wipeMount) ctx.hydrate = false;
+      // Self-claiming runtime components (Form/Field/Link/Md/etc.) claim their
+      // own SSR root before their children are useful. Building their children
+      // through the caller's active walker would let a nested Field consume
+      // the component's preceding static sibling (for example <h1> before
+      // <Form>), leaving the real Form slot misaligned. Their hydrate path
+      // deliberately preserves the SSR interior, so construct the argument
+      // fresh and let the runtime component adopt the existing root.
+      if (wipeMount || ctx.selfClaimNames.has(node.componentName)) ctx.hydrate = false;
       ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
       const savedEffects = ctx.effects;
       ctx.effects = [];

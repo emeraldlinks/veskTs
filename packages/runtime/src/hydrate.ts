@@ -47,7 +47,7 @@ export interface ClaimByKeyOptions {
 export interface HydrateWalker {
 	root: HTMLElement | null;
 	done(): boolean;
-	nextElement(tag?: string): Element;
+	nextElement(tag?: string, skipK?: number): Element;
 	/**
 	 * Claim an element like `nextElement` but without stripping its direct text
 	 * children. Used by static-component stubs whose SSR content is preserved
@@ -150,18 +150,44 @@ export function reactiveProps<T extends Record<string, unknown>>(props: T): T {
 // ---------------------------------------------------------------------------
 // Dev-mode hydration-integrity canary (T1)
 //
-// Claiming the SSR DOM is inherently positional: a element claimed from the
-// wrong slot fails silently in production (the SSR node is adopted as-is). To
-// surface SSR/client divergence early, dev mode:
-//   * stamps every adopted node with `data-vsk-claimed`,
-//   * warns with the container fragment when a positional claim misses, and
-//   * runs `assertFullyHydrated()` at the end of every full hydration so
-//     unclaimed phantom markers are reported instead of rotting in the DOM.
+// Claiming the SSR DOM is inherently positional: an element claimed from the
+// wrong slot fails silently in production. Hydration bookkeeping therefore
+// lives in WeakMaps, never in DOM attributes. The canary audits the records at
+// the end of every full hydration and warns when markers or structural claim
+// records remain unresolved.
 // ---------------------------------------------------------------------------
 
 let __hydrateDevMode = true;
 
-const CLAIMED_ATTR = 'data-vsk-claimed';
+type ClaimState = 'adopted' | 'fresh' | 'ghost';
+
+interface ClaimRecord {
+	state: ClaimState;
+	el: Element;
+	owner: Element | null;
+	expectedTag: string;
+	actualTag: string;
+	detached: boolean;
+}
+
+// The first map answers "was this element adopted?" without observable DOM
+// mutation. The second lets auditHydration inspect records even after a safe
+// recovery detached a ghost: walker records stay reachable from their live
+// owner root without keeping an otherwise-unreachable node globally alive.
+const claimRegistry = new WeakMap<Element, ClaimRecord>();
+const walkerClaimRecords = new WeakMap<Element, ClaimRecord[]>();
+
+function recordClaim(root: Element | null, record: ClaimRecord): void {
+	claimRegistry.set(record.el, record);
+	if (!root) return;
+	const records = walkerClaimRecords.get(root);
+	if (records) records.push(record);
+	else walkerClaimRecords.set(root, [record]);
+}
+
+function isAdopted(el: Element): boolean {
+	return claimRegistry.get(el)?.state === 'adopted';
+}
 
 export function setHydrateDevMode(enabled: boolean): void {
 	__hydrateDevMode = enabled;
@@ -243,15 +269,15 @@ function reportMiss(kind: HydrationIssueKind, detail: string, loud: boolean): vo
 	if (loud) devWarn(`${kind}: ${detail}`);
 }
 
-function stampClaimed(el: Element): void {
-	if (__hydrateDevMode) {
-		try {
-			el.setAttribute(CLAIMED_ATTR, '');
-		} catch {
-			// Some hosts restrict attribute writes on special nodes (SVG,
-			// <template> children); claiming is still valid.
-		}
-	}
+function recordAdopted(root: Element | null, el: Element, expectedTag: string): void {
+	recordClaim(root, {
+		state: 'adopted',
+		el,
+		owner: root,
+		expectedTag,
+		actualTag: el.tagName.toLowerCase(),
+		detached: false,
+	});
 }
 
 // Strip the direct text children of a claimed element. Static text inside a
@@ -330,8 +356,8 @@ function scanTwins(container: HTMLElement): { count: number; samples: string[] }
 		let a = false;
 		let b = false;
 		try {
-			a = el.hasAttribute(CLAIMED_ATTR);
-			b = prev.hasAttribute(CLAIMED_ATTR);
+			a = isAdopted(el);
+			b = isAdopted(prev);
 		} catch {
 			continue;
 		}
@@ -386,6 +412,33 @@ export function auditHydration(container: HTMLElement): HydrationReport {
 		}
 		if (!sample && container.outerHTML) sample = String(container.outerHTML).slice(0, 800);
 	}
+	const structuralRecords: ClaimRecord[] = [];
+	const seenRecords = new Set<ClaimRecord>();
+	const collectWalkerRecords = (el: Element): void => {
+		const records = walkerClaimRecords.get(el);
+		if (records) {
+			for (const record of records) {
+				if (!seenRecords.has(record)) {
+					seenRecords.add(record);
+					structuralRecords.push(record);
+				}
+			}
+		}
+		for (let i = 0; i < el.children.length; i++) collectWalkerRecords(el.children[i]);
+	};
+	collectWalkerRecords(container);
+	const structuralGhosts = structuralRecords.filter((record) => record.state === 'ghost');
+	if (structuralGhosts.length > 0) {
+		unclaimed += structuralGhosts.length;
+		if (orphanNames.length < 5) {
+			orphanNames.push(
+				`${structuralGhosts.length} structural hydration ghost(s) (${structuralGhosts
+					.slice(0, 3)
+					.map((record) => `<${record.actualTag}> expected <${record.expectedTag}>`)
+					.join(', ')})`,
+			);
+		}
+	}
 	const twinRes = scanTwins(container);
 	const issues: HydrationIssue[] = [];
 	if (unclaimed > 0) {
@@ -412,6 +465,17 @@ export function auditHydration(container: HTMLElement): HydrationReport {
 				if (el && underClaimedAncestor(el, container)) continue;
 				if (el) el.remove();
 				c.remove();
+			} catch {
+				// Best-effort repair; the report above already recorded it.
+			}
+		}
+		for (const record of structuralGhosts) {
+			try {
+				// Only detach a still-connected ghost whose immediate parent is
+				// the walker's own root. Never sweep arbitrary descendants.
+				if (record.detached || !record.owner || record.el.parentNode !== record.owner) continue;
+				record.el.remove();
+				record.detached = true;
 			} catch {
 				// Best-effort repair; the report above already recorded it.
 			}
@@ -459,7 +523,7 @@ export function assertFullyHydrated(container: HTMLElement): boolean {
 
 function underClaimedAncestor(el: Element, container: HTMLElement): boolean {
 	for (let n: Element | null = el; n && n !== container; n = n.parentElement) {
-		if (n.nodeType === 1 && (n as Element).hasAttribute(CLAIMED_ATTR)) return true;
+		if (n.nodeType === 1 && isAdopted(n)) return true;
 	}
 	return false;
 }
@@ -566,7 +630,7 @@ function checkMarkerIdentity(marker: Comment, el: Element): void {
 	}
 }
 
-function adoptElement(marker: Comment, tag?: string): Element | null {
+function adoptElement(root: HTMLElement | null, marker: Comment, tag?: string): Element | null {
 	const el = marker.nextElementSibling;
 	if (!el) {
 		marker.remove();
@@ -582,13 +646,13 @@ function adoptElement(marker: Comment, tag?: string): Element | null {
 	marker.remove();
 	stripDirectTextNodes(el);
 	captureSsrElementChildren(el);
-	stampClaimed(el);
+	recordAdopted(root, el, tag || el.tagName.toLowerCase());
 	return el;
 }
 
 // Like adoptElement but preserves direct text children. Used by static-component
 // stubs whose SSR content is kept as-is (no client-side re-rendering).
-function adoptElementRaw(marker: Comment, tag?: string): Element | null {
+function adoptElementRaw(root: HTMLElement | null, marker: Comment, tag?: string): Element | null {
 	const el = marker.nextElementSibling;
 	if (!el) {
 		marker.remove();
@@ -598,7 +662,7 @@ function adoptElementRaw(marker: Comment, tag?: string): Element | null {
 	checkMarkerIdentity(marker, el);
 	marker.remove();
 	captureSsrElementChildren(el);
-	stampClaimed(el);
+	recordAdopted(root, el, tag || el.tagName.toLowerCase());
 	return el;
 }
 
@@ -704,7 +768,7 @@ class WalkerEngine implements HydrateWalker {
 				break;
 			}
 			this.idx++;
-			const adopted = adoptElement(tm.comment, tag);
+			const adopted = adoptElement(this.root, tm.comment, tag);
 			if (adopted === null) {
 				// SSR rendered no element after this marker. Fall out to a
 				// fresh element instead of hunting through the remaining
@@ -789,7 +853,7 @@ class WalkerEngine implements HydrateWalker {
 				break;
 			}
 			this.idx++;
-			const adopted = adoptElementRaw(tm.comment, tag);
+			const adopted = adoptElementRaw(this.root, tm.comment, tag);
 			if (adopted === null) {
 				tm.state = 'claimed';
 				break;
@@ -898,7 +962,7 @@ class WalkerEngine implements HydrateWalker {
 		tm.comment.remove();
 		stripDirectTextNodes(el);
 		captureSsrElementChildren(el);
-		stampClaimed(el);
+		recordAdopted(this.root, el, el.tagName.toLowerCase());
 		return { el };
 	}
 
@@ -1027,8 +1091,9 @@ class WalkerEngine implements HydrateWalker {
 // caller already consumed — static residues it retrieved from `__vsk_ssrEls`)
 // and by tag. The compiler emits `nextElement(tag, skipK)` claims with the
 // descriptor implicit in the tag; divergence follows §2.2 step 4: a tag
-// mismatch consumes exactly one slot, reports, and hands back a fresh element
-// that the caller mounts — the SSR node is never bound, never deleted.
+// mismatch consumes exactly one slot, reports, detaches the provably-owned
+// direct-child ghost, and hands back a fresh element that the caller mounts.
+// The SSR node is never bound.
 //
 // The same engine backs `createHydrateChildWalker`, so runtime components that
 // claim offspring positionally (loading stubs, slot content) keep working with
@@ -1133,16 +1198,44 @@ class StructuralWalker implements HydrateWalker {
 			const el = this.els[target];
 			if (tag && el.tagName.toLowerCase() !== tag) {
 				// §2.2 step 4: descriptor failed. Consume exactly ONE slot and
-				// hand back a fresh element — the SSR node is never bound, never
-				// deleted. The caller detaches the fresh node when provably safe
-				// or leaves it inert for the sweep.
+				// hand back a fresh element. The direct-child SSR ghost is
+				// detached below; nested recovery remains owned by its child walker.
 				this.idx = this.advancePastSkippable(target + 1);
+				const ghost: ClaimRecord = {
+					state: 'ghost',
+					el,
+					owner: this.root,
+					expectedTag: tag || 'div',
+					actualTag: el.tagName.toLowerCase(),
+					detached: false,
+				};
+				recordClaim(this.root, ghost);
+				// This is the walker's own immediate child slot, so detachment is
+				// provably boundary-local. Never remove nested content here: a
+				// nested mismatch belongs to the child walker's own recovery.
+				if (this.root && el.parentNode === this.root) {
+					try {
+						el.remove();
+						ghost.detached = true;
+					} catch {
+						// The final sweep will report/repair a still-owned ghost.
+					}
+				}
+				const fresh = document.createElement(tag || 'div');
+				recordClaim(this.root, {
+					state: 'fresh',
+					el: fresh,
+					owner: this.root,
+					expectedTag: tag || 'div',
+					actualTag: fresh.tagName.toLowerCase(),
+					detached: false,
+				});
 				reportMiss(
 					'tag-mismatch',
-					`descriptor wanted <${tag}> but the SSR slot holds <${el.tagName.toLowerCase()}>; consuming one slot and rendering fresh.`,
+					`descriptor wanted <${tag}> but the SSR slot holds <${el.tagName.toLowerCase()}>; consumed one slot, detached the local ghost, and rendered fresh.`,
 					false
 				);
-				return document.createElement(tag || 'div');
+				return fresh;
 			}
 			if (this.adopted.has(el)) {
 				// Double-claim guard: a node already adopted (cross-position
@@ -1154,10 +1247,19 @@ class StructuralWalker implements HydrateWalker {
 			this.adopted.add(el);
 			if (!raw) stripDirectTextNodes(el);
 			captureSsrElementChildren(el);
-			stampClaimed(el);
+			recordAdopted(this.root, el, tag || el.tagName.toLowerCase());
 			return el;
 		}
 		this.idx = this.els.length;
+		const fresh = document.createElement(tag || 'div');
+		recordClaim(this.root, {
+			state: 'fresh',
+			el: fresh,
+			owner: this.root,
+			expectedTag: tag || 'div',
+			actualTag: fresh.tagName.toLowerCase(),
+			detached: false,
+		});
 		reportMiss(
 			'exhausted',
 			`hydration claim missed <${tag || 'element'}>; the client rendered more or different content than SSR.`,
@@ -1166,7 +1268,7 @@ class StructuralWalker implements HydrateWalker {
 			// nodes) — telemetry-only, mirroring the marker engine.
 			false
 		);
-		return document.createElement(tag || 'div');
+		return fresh;
 	}
 
 	nextElement(tag?: string, skipK = 0): Element {
@@ -1238,7 +1340,7 @@ class StructuralWalker implements HydrateWalker {
 			this.adopted.add(el);
 			stripDirectTextNodes(el);
 			captureSsrElementChildren(el);
-			stampClaimed(el);
+			recordAdopted(this.root, el, el.tagName.toLowerCase());
 			return { el };
 		}
 		this.idx = this.els.length;
