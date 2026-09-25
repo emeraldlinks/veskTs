@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, normalize, relative, resolve, sep } from 'node:path';
 import * as ts from 'typescript';
 import { parse } from '@vesk/compiler/src/parser';
-import { vskToTsx, generateVskDts } from '@vesk/compiler/src/vsk-tsx';
+import { compileVskCodegen, generateVskDts } from '@vesk/compiler/src/vsk-tsx';
 import { resolveAliasModule } from '@vesk/compiler/src/module-imports';
 
 export interface TypecheckOptions {
@@ -664,7 +664,7 @@ function createTypecheckHost(projectRoot: string, appDir: string, vskFiles: Map<
       } else if (file.endsWith('.css.d.ts')) {
         content = '';
       } else if (vskFiles.has(file)) {
-        content = vskToTsx(vskFiles.get(file)!);
+        content = compileVskCodegen(vskFiles.get(file)!).code;
       } else if (ts.sys.fileExists(file)) {
         content = ts.sys.readFile(file);
       }
@@ -696,7 +696,7 @@ function createTypecheckHost(projectRoot: string, appDir: string, vskFiles: Map<
         return src !== undefined ? generateVskDts(src) : undefined;
       }
       if (file.endsWith('.css.d.ts')) return '';
-      if (vskFiles.has(file)) return vskToTsx(vskFiles.get(file)!);
+      if (vskFiles.has(file)) return compileVskCodegen(vskFiles.get(file)!).code;
       return ts.sys.readFile(file);
     },
     writeFile: () => {},
@@ -754,6 +754,43 @@ function createTypecheckHost(projectRoot: string, appDir: string, vskFiles: Map<
 export interface TypecheckResult {
   errors: TypecheckError[];
   warnings: TypecheckError[];
+}
+
+type GeneratedMapping = {
+  sourceOffsets: number[];
+  generatedOffsets: number[];
+  lengths: number[];
+};
+
+function mapGeneratedOffset(mappings: GeneratedMapping[], generatedOffset: number): number | null {
+  let nearest: { source: number; generated: number; length: number } | null = null;
+  for (const mapping of mappings) {
+    for (let i = 0; i < mapping.generatedOffsets.length; i++) {
+      const generated = mapping.generatedOffsets[i];
+      const length = mapping.lengths[i] ?? 0;
+      const source = mapping.sourceOffsets[i];
+      if (generated <= generatedOffset && generated + length >= generatedOffset) {
+        return source + (generatedOffset - generated);
+      }
+      if (generated <= generatedOffset && (!nearest || generated > nearest.generated)) {
+        nearest = { source, generated, length };
+      }
+    }
+  }
+  return nearest ? nearest.source + Math.min(nearest.length, Math.max(0, generatedOffset - nearest.generated)) : null;
+}
+
+function sourcePosition(source: string, offset: number): { line: number; character: number } {
+  const bounded = Math.max(0, Math.min(offset, source.length));
+  let line = 1;
+  let lineStart = 0;
+  for (let i = 0; i < bounded; i++) {
+    if (source.charCodeAt(i) === 10) {
+      line++;
+      lineStart = i + 1;
+    }
+  }
+  return { line, character: bounded - lineStart + 1 };
 }
 
 export function typecheckProject(projectRoot: string, opts: TypecheckOptions = {}): TypecheckResult {
@@ -836,12 +873,27 @@ export function typecheckProject(projectRoot: string, opts: TypecheckOptions = {
       filePath = filePath.slice(0, -'.d.ts'.length);
     }
     if (!rootSet.has(filePath) && !vskSet.has(filePath)) continue;
-    const pos = file.getLineAndCharacterOfPosition(diag.start ?? 0);
+    let sourceOffset = diag.start ?? 0;
+    let line: number;
+    let column: number;
+    if (vskFiles.has(filePath)) {
+      const source = vskFiles.get(filePath)!;
+      const generated = compileVskCodegen(source);
+      const mapped = mapGeneratedOffset(generated.mappings, sourceOffset);
+      if (mapped !== null) sourceOffset = mapped;
+      const pos = sourcePosition(source, sourceOffset);
+      line = pos.line;
+      column = pos.character;
+    } else {
+      const pos = file.getLineAndCharacterOfPosition(diag.start ?? 0);
+      line = pos.line + 1;
+      column = pos.character + 1;
+    }
     const code = typeof diag.code === 'number' ? `TS${diag.code}` : String(diag.code);
     errors.push({
       file: relative(projectRoot, filePath),
-      line: pos.line + 1,
-      column: pos.character + 1,
+      line,
+      column,
       code,
       message: ts.flattenDiagnosticMessageText(diag.messageText, '\n'),
     });

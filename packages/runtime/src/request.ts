@@ -1,8 +1,10 @@
+import type { VeskLocals } from '@vesk/types';
+
 interface RequestContext {
 	_request?: Request;
 	params?: Record<string, string>;
 	cookies?: Record<string, string>;
-	locals?: Record<string, unknown>;
+	locals?: VeskLocals;
 	_parsedBody?: unknown;
 	[k: string]: unknown;
 }
@@ -266,7 +268,7 @@ export function cookies(): CookieStore {
  * Request-scoped locals for the current request. Pass your shape to read them
  * back with their declared types: `const { user } = locals<{ user: User }>()`.
  */
-export function locals<L extends object = Record<string, unknown>>(): L {
+export function locals<L extends object = VeskLocals>(): L {
 	const req = getRequest();
 	if (req && req.locals) return req.locals as L;
 	return {} as L;

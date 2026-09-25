@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { resolve, extname, dirname } from 'node:path';
 import type { ImageRef, ImageResult } from '@vesk/adapter/src/types';
 
@@ -16,8 +17,24 @@ interface SharpImage {
 
 let sharpFn: ((src: string) => SharpImage) | null = null;
 try {
-  const mod = await import('sharp') as unknown as { default: (src: string) => SharpImage };
-  sharpFn = mod.default;
+  // Probe in a child before importing sharp in this process. On older CPUs,
+  // importing the native module itself can terminate Node with SIGILL; an
+  // in-process try/catch cannot catch that signal.
+  const probe = spawnSync(
+    process.execPath,
+    [
+      '--input-type=module',
+      '-e',
+      "import sharp from 'sharp'; await sharp({ create: { width: 2, height: 2, channels: 3, background: 'red' } }).png().toBuffer();",
+    ],
+    { stdio: 'ignore' },
+  );
+  if (probe.status === 0) {
+    const mod = await import('sharp') as unknown as { default: (src: string) => SharpImage };
+    sharpFn = mod.default;
+  } else {
+    console.warn('vesk images: sharp native probe failed; using copy-only image pipeline');
+  }
 } catch {
   // sharp not available — fall through to copy-only
 }

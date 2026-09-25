@@ -248,8 +248,8 @@ with these **differences**:
 ```ts
 cookies(): CookieStore           // Proxy over a cookie jar; .get(name), .getAll(), .toString()
 headers(): Record<string, string | Function | undefined>   // Proxy; .get(name), .has(name), .entries()
-locals(): Record<string, unknown>
-class ServerRequest extends Request { get/set cookies: CookieStore; get/set params: Record<string,string>; get/set locals: Record<string,unknown> }
+locals<L extends object = VeskLocals>(): L   // VeskLocals is augmentable from @vesk/types
+class ServerRequest extends Request { get/set cookies: CookieStore; get/set params: Record<string,string>; get/set locals: VeskLocals }
 class ServerResponse extends Response { static json(body, init?); static redirect(url, status=307); static rewrite(url); static next() }
 class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown>; resolveUrl(url: string): string; static from(request: Request, init?: { params?: Record<string,string>; locals?: Record<string,unknown> }): VeskRequest; get host(): string; get origin(): string; get/set query, ip, protocol, hostname, parsedUrl }
 VeskResponse  // Proxy over an internal _VeskResponse Response subclass; static stream(readable: ReadableStream, init?: ResponseInit): VeskResponse — chunked streaming (Transfer-Encoding: chunked, delivered via deliverResponse getReader loop; readable as unknown as BodyInit)
@@ -259,6 +259,7 @@ withValidation(request: Request, schema: { safeParse: (data) => { success: boole
 useBody(): Promise<unknown>
 useParams(): Record<string, string>       // request params (NOT router)
 useRequest(): RequestContext | null
+// VeskLocals is an application-augmentable interface; undeclared keys remain unknown.
 cors(options?: CorsOptions): CorsMiddleware
 defineHook(name: string, fn: Function): void
 removeHook(name: string, fn: Function): void

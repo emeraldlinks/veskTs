@@ -67,11 +67,10 @@ files at the root).
     schema helpers (`ArticleSchema`…`VideoSchema`), `Portal`, `Experiment`,
     `LoadingIndicator`, `useLoadingIndicator`, `getAction`,
     `validateActionInput`, `issuesToFieldMap`, `isFormAction`, `Show`, `For`,
-    `Switch`, `Match`. **Not auto-imported** — you must `import { … } from
-    '@vesk/runtime'` explicitly (every `.vsk` example here includes the import
-    it needs): `track`, `get`, `set`, `Md`,
-    `bindValue`/`bindChecked`/`bindGroup`, `pre_effect`. Router extras come
-    from `@vesk/runtime/router`; server-only helpers (`VeskRequest`,
+    `Switch`, `Match`. `track`, `get`, `set`, `Md`, `pre_effect`, and the
+    binding helpers are runtime exports and are not compiler-auto-imported;
+    import them explicitly when used. Router extras come from
+    `@vesk/runtime/router`; server-only helpers (`VeskRequest`,
     `VeskResponse`, `cookies()`, `headers()`, `locals()`, `useBody`,
     `withValidation`) from `@vesk/runtime/server`. `<Head>` is special-cased
     by the compiler, not an import.
@@ -130,7 +129,9 @@ Follow this exact order. It detects collisions early and prevents rework.
    with `export async function GET(req: VeskRequest)`; `server/api/foo.get.ts`
    suffix methods → the matching `VeskRequest.method` branch or separate
    exported `GET`/`POST`/… handlers; `server/middleware/` → Vesk
-   `middleware.ts` (onion — **always `return await next()`**).
+   `middleware.ts` (onion). Return `await next()` when post-processing the
+     response; `await next()` without returning is also supported. Calling
+     neither `next()` nor returning a response short-circuits the chain.
 5. **Produce a conversion manifest** — a table of source file → target file →
    key transformations — and show it before writing any code. This makes
    every mapping auditable and reduces drift.
@@ -206,7 +207,7 @@ component Widget() {
 			<li>{item.name}</li>
 		}
 	</ul>
-	<input bindValue={nameCell} />
+	<input ref={bindValue(nameCell)} />
 	<button disabled={count > 10} onClick={onSubmit}>Go</button>
 }
 ```
@@ -221,7 +222,7 @@ Here is the full directive conversion table:
 | `v-if` / `v-else-if` / `v-else` | `if (c1) {…}` `else if (c2) {…}` `else {…}` |
 | `v-show` | `if` (no `display: none` attr-flicking in Vesk) — or keep the element and toggle a `class` |
 | `v-for="item in items"` + `:key` | `for (const item of items; key item.id) {…} empty {…}` — the `empty` block is Vesk's `v-for` empty-state |
-| `v-model="x"` | `bindValue={xCell}` on inputs; `bindChecked={xCell}` on checkboxes/radios; `bindGroup` for groups |
+| `v-model="x"` | `ref={bindValue(xCell)}` on inputs; `ref={bindChecked(xCell)}` on checkboxes/radios; `ref={bindGroup(xCell)}` for groups |
 | `v-bind:prop` / `:prop` | `prop={value}` (plain JSX props) |
 | `v-bind="obj"` spread | `{...obj}` JSX spread |
 | `v-on:click` / `@click` | `onClick={handler}` — event-handler attrs are excluded from SSR HTML entirely |
@@ -250,7 +251,7 @@ Here is the full directive conversion table:
 | `onUnmounted(fn)` | `effect(() => { …; return () => fn() })` cleanup return, or `on_destroy(fn)` |
 | `nextTick(fn)` | `tick().then(fn)` / `await tick()` |
 | `provide` / `inject` | `createContext` (default value) — from `@vesk/runtime` |
-| `defineModel` | a `track` cell plus `bindValue={cell}` sharing |
+| `defineModel` | a `track` cell plus `ref={bindValue(cell)}` sharing |
 | `defineProps({…})` | plain TS parameter: `component Foo(props: { title: string })` |
 | `defineEmits` | props that are callbacks: `onSave: (v) => void`; parent passes `onSave={(v) => …}` |
 | `useSlots()` | `props.children` / explicit props (see ground rule 6) |
@@ -310,7 +311,7 @@ named `page.vsk` whose default export is the page component; it receives
 | `app/pages/[...slug].vue` | `app/[...path]/page.vsk` | `props.params.path` is the catch-all value |
 | `app/pages/posts/[[id]].vue` (optional segment) | **flagged**: Vesk has no optional single segment — split into `app/posts/[id]/page.vsk` + `app/posts/page.vsk`, or route both via `app/posts/[...path]/page.vsk` | decision, flag in manifest |
 | `app/pages/(marketing)/home.vue` (route group) | `app/(marketing)/home/page.vsk` | group contributes nothing to the URL |
-| `app/pages/parent.vue` + `app/pages/parent/child.vue` (`<NuxtPage/>`) | `app/parent/page.vsk` + `app/parent/child.lsk` → actually: nested routes become a nested directory — `app/parent/page.vsk` renders shell, `app/parent/` child via its own directory and layout | if the source uses `<NuxtPage/>` for a param-driven child, use `[child]/page.vsk` under a layout directory |
+| `app/pages/parent.vue` + `app/pages/parent/child.vue` (`<NuxtPage/>`) | `app/parent/page.vsk` + `app/parent/child.vsk` — nested routes become a nested directory — `app/parent/page.vsk` renders shell, `app/parent/` child via its own directory and layout | if the source uses `<NuxtPage/>` for a param-driven child, use `[child]/page.vsk` under a layout directory |
 | `app/pages/foo.client.vue` | `app/foo/page.vsk` whose client-only parts live in a `client` island component or `{#client}` blocks | there are no per-file page suffixes — the island-in-page pattern replaces them |
 | `app/pages/foo.server.vue` | `app/foo/page.vsk` (server-rendered by default; per-component `client` islands carve the interactive parts) | |
 | `app/…/foo.vue` component with `<ClientOnly>` inside | wrap the client part in a `client` island component or `{#client}` block |
@@ -453,13 +454,15 @@ to two different Vesk concepts.
 | --- | --- |
 | `defineNuxtRouteMiddleware((to) => …)` in `app/middleware/` | client-side guard registered at app bootstrap: `router.beforeEach((to, from) => { … })` — return `true`/a path/`false` |
 | `definePageMeta({ middleware: ['auth'] })` per page | apply the guard in `beforeEach` by route matcher, or keep it page-local as a guard-clause `if (…) { return redirect('/login') }` |
-| Nitro `server/middleware/*.ts` | `app/middleware.ts` (server onion) — `export async function middleware(ctx, next) { …; return await next() }` |
+| Nitro `server/middleware/*.ts` | `app/middleware.ts` (server onion) — return `await next()` when post-processing; `await next()` without returning is also supported |
 | Nitro middleware mutating `event.context` | set `locals` / fields on the request context between `next()` calls |
 | `setResponseHeader`/auth header in Nitro middleware | `VeskResponse` `setSecurityHeader`/`setCookie` on the way back down the onion |
 | per-page auth for API (Nitro route with `getUserFromSession`) | the `/api` route handler does the same check directly from `req.headers` before responding |
 
-**Never** forget the onion rule: server middleware must `return await next()`
-or the response is swallowed.
+**Never** forget the onion rule: call `next()` exactly once. Return
+`await next()` when post-processing the response; `await next()` without
+returning is also supported. Calling neither `next()` nor returning a response
+short-circuits the chain.
 
 ### Step 12 — Nitro server code
 
@@ -470,7 +473,7 @@ and returning `VeskResponse`.
 
 | Nitro | Vesk |
 | --- | --- |
-| `server/api/hello.ts` → `defineEventHandler((event) => 'hi')` | `app/api/hello/route.ts` → `export async function GET(req: VeskRequest) { return VeskResponse.body('hi') }` |
+| `server/api/hello.ts` → `defineEventHandler((event) => 'hi')` | `app/api/hello/route.ts` → `export async function GET(req: VeskRequest) { return VeskResponse.json({ message: 'hi' }) }` |
 | `server/api/posts.get.ts` (method suffix) | `export async function GET(…)` in `app/api/posts/route.ts` |
 | `server/api/posts.post.ts` + POST body | `export async function POST(req: VeskRequest) { const body = await req.json() }` |
 | `getRouterParam(event, 'id')` | route params are runtime data — in API routes read from `ctx.params` (a `Promise`) or `props.params` on pages |
@@ -505,7 +508,7 @@ globals are unnecessary in Vesk.
 | `devtools`, `modules: ['@nuxt/…']` | drop — no analogue; flag every used Nuxt module explicitly |
 | `app.config.ts` | module-scope `track` cells in a shared TS module (or `createContext`) — no `app.config` analog; flag |
 | `public/` (static assets) | `public/` — same |
-| `.env` | `.env` is read by your tooling (config/scripts); there is no built-in env loader — flag |
+| `.env` | Vesk CLI loads `.env` and then `.env.local`; use `process.env` on the server and never assume client bundles receive secrets |
 | `import.meta.env` / `process.env` | `process.env` on the server; `import.meta.env` as your build exposes |
 | SEO: `sitemap`, `robots`, `og` | `JsonLd` + `<Head>` in layout — plus the runtime's SEO helpers |
 
@@ -586,8 +589,8 @@ const { data: post, pending, error } = await useFetch(`/api/posts/${route.params
 import { track } from '@vesk/runtime'
 
 export default component Post(props: { params: { id: string } }) {
-	let &[post] = track<Post | null>(null)
-	const res = useFetch(`/api/posts/${props.params.id}`, { key: `post-${props.params.id}`, into: post })
+	let &[post, postCell] = track<Post | null>(null)
+	const res = useFetch(`/api/posts/${props.params.id}`, { key: `post-${props.params.id}`, into: postCell })
 	if (res.loading) {
 		<p>Loading…</p>
 	}
@@ -655,8 +658,8 @@ component UserForm() {
 		useNavigate()('/users')
 	}
 	<form onSubmit={onSubmit}>
-		<input bindValue={nameCell} placeholder="Name" />
-		<input bindValue={emailCell} type="email" placeholder="Email" />
+		<input ref={bindValue(nameCell)} placeholder="Name" />
+		<input ref={bindValue(emailCell)} type="email" placeholder="Email" />
 		<button type="submit">Save</button>
 	</form>
 }
@@ -853,7 +856,9 @@ substitutions and flag them in the manifest as "decision":
     `…Cell`.
 13. **`bindValue` on a `derived`** — derived cells are read-only; write into a
     `track` cell pair.
-14. **Middleware that forgets `return await next()`** — response swallowed.
+14. **Middleware** — return `await next()` when post-processing; `await next()`
+    without returning is supported, but calling neither `next()` nor returning
+    a response short-circuits the chain.
 15. **`getQuery`/`readBody`/`defineEventHandler` in Vesk server files** — use
     `req.query` / `req.parsedUrl.searchParams`, `await req.json()` (or
     `await req.body`), and the named-method handlers of `app/api/**/route.ts`.

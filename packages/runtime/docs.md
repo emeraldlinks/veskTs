@@ -441,7 +441,11 @@ tracked path switch propagates (supply `key` when the URL is dynamic). `into` is
 `Tracked<string>`; the `Resource` also exposes `.into` for `Md`'s `streamCellFrom`.
 
 ### Server-only (index-server.ts)
-Request: `cookies`, `headers`, `locals`, `ServerRequest`, `VeskRequest`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`
+Request: `cookies`, `headers`, `locals`, `ServerRequest`, `VeskRequest`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`.
+`locals<L>()` defaults to the application-augmentable `VeskLocals` interface from
+`@vesk/types`; augment it once with `declare module '@vesk/types'` to make
+unparameterized `locals()` and `MiddlewareContext` reads globally typed while
+retaining `unknown` for undeclared keys.
 (`resolveUrl`, `from`, `host`/`origin`, `query`/`parsedUrl`, `getBody`),
 `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream`),
 `withValidation`, `useBody`, `useParams` (request), `useRequest`, `cors`,

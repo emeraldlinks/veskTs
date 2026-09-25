@@ -24,7 +24,8 @@ tiny. **No virtual DOM**: the compiler emits per-cell DOM updates, and
 static subtrees need no hydration runtime at all. Reactivity is fine-grained
 via `track()` cells.
 
-Everything below is grounded in Vesk's official documentation (`docs/guide/`).
+Everything below is grounded in the current Vesk framework source,
+declarations, tests, and the documentation content in this repository.
 Do not invent APIs, options, or behaviors not present here. When in doubt,
 follow the documented surface exactly.
 
@@ -108,8 +109,9 @@ component List<T>(…) { … }              // generic type params supported
 - `on*` event handlers are **excluded from SSR HTML entirely**; they attach
   during hydration. Bubbling events delegate; non-bubbling bind directly —
   both automatic. Handlers receive the native DOM event.
-- `ref={fn}` invokes `fn(element)` on the client after creation; stripped
-  from SSR. Also the attach point for binding helpers.
+- `ref={fn}` invokes `fn(element)` on the client after creation and is stripped
+  from SSR. It is a generic DOM callback attachment point; binding helpers
+  return callbacks that may be passed through it.
 
 ### Auto-imported identifiers (no import needed inside components)
 
@@ -126,9 +128,10 @@ core: `effect`, `derived`, `untrack`, `peek`, `tick`, `flushSync`,
 `on_destroy`, `createContext`.
 
 Everything else needs an explicit import from `@vesk/runtime` or
-`@vesk/runtime/router` / `@vesk/runtime/server`. Notably **NOT** auto-imported:
-`track`, `Show`/`For`/`Switch`/`Match`, `Md`, `bindValue`/`bindChecked`/
-`bindGroup`.
+`@vesk/runtime/router` / `@vesk/runtime/server`. `track`, `get`, `set`,
+`Md`, `pre_effect`, and `bindValue`/`bindChecked`/`bindGroup` are runtime APIs
+but are **not** compiler-auto-imported. `Show`/`For`/`Switch`/`Match` *are*
+auto-imported by the compiler.
 
 ## Body Modes (both first-class, identical output)
 
@@ -213,8 +216,8 @@ catch (e) {
 ## Reactivity
 
 Tracked cells, created with `track()`. Reading subscribes (in body/effect);
-writing schedules an update. No VDOM — the compiler emits per-cell DOM
-updates.
+writing schedules an update. Vesk uses compiler-generated reactive regions
+and fine-grained DOM updates rather than a React-style component VDOM.
 
 ```vsk
 let &[count] = track(0)            // reactive binding; count auto-unwraps
@@ -222,14 +225,15 @@ const &[count] = track(0)          // const works too
 let &[count, rawCell] = track(0)   // also bind the raw cell for APIs
 ```
 
-### Core API (auto-imported; JSDoc is canonical)
+### Core API (runtime APIs; auto-import status is listed explicitly)
 
 - `track(initial)` — cell; `track(() => expr)` → derived; transform hooks
   via `track(v, get?, set?)`. Passing an existing tracked/derived returns it.
+  `track` is a runtime export and is not compiler-auto-imported.
 - `get(cell)` — read, subscribing inside effects/derived. Non-tracked pass
-  through.
+  through. It is a runtime export, not compiler-auto-imported.
 - `set(cell, v)` — write; no-op if `Object.is(next, prev)`; schedules one
-  microtask flush.
+  microtask flush. It is a runtime export, not compiler-auto-imported.
 - `derived(fn)` — lazy, memoized computed; re-runs only when dep clocks move.
   **Writing to tracked state during derived evaluation throws.**
 - `effect(fn)` — run now + on dep change; return cleanup fn from `fn`.
@@ -571,8 +575,9 @@ During SPA navigation the router applies the target route's head via the
 
 ## TypeScript in `.vsk`
 
-Full TS support; compiler strips type-only syntax at build time (AST-based,
-**no regex**). Everything: interfaces/aliases, typed props/destructuring,
+Full TS support; the component parser and syntax transformations are
+AST-based rather than regex-based. Everything: interfaces/aliases, typed
+props/destructuring,
 generics on components, `let &[posts] = track<Post[]>([])`, casts/assertions/
 non-null (`count as number`, `value satisfies Config`, `el!`), enums, mapped/
 conditional/utility types, `keyof typeof`, template literals, optional
@@ -724,12 +729,36 @@ Body parsing: JSON, multipart/form-data, urlencoded, text→JSON; capped
 Plain forms: `<Form action="/api/contact">` POSTs raw FormData to the URL —
 pair with an API route calling `req.formData()`.
 
+## DOM Refs
+
+`ref={callback}` is a generic client-side DOM attachment callback. The
+compiler invokes the callback with the created element on the client and
+removes `ref` from SSR HTML. It is not a value-binding attribute, a React
+`useRef` object, or a `forwardRef` API.
+
+Use a tracked cell when the element must be consumed elsewhere:
+
+```vsk
+component FocusInput() {
+	let &[input, inputCell] = track<HTMLInputElement | null>(null)
+	<input ref={(element) => inputCell.set(element)} />
+	<button onClick={() => inputCell.get()?.focus()}>Focus</button>
+}
+```
+
+`ref` callbacks are for DOM access and attachment. Do not assume React's
+`ref.current` API, `forwardRef`, or callback behavior of receiving `null` on
+unmount. The current compiler invokes the callback when creating the element;
+use `effect()`/`on_destroy()` for explicit lifecycle cleanup.
+
 ## Two-Way Bindings
 
-`bindValue`, `bindChecked`, `bindGroup` — **ref-style callbacks**, attach via
-`ref={…}`. **Import explicitly** (not auto-imported). Always destructure the
-raw cell (`&[v, cell]`) and pass the cell itself — passing a plain value
-throws "not a tracked object" TypeError.
+`bindValue`, `bindChecked`, and `bindGroup` are runtime helper factories, not
+special JSX attributes. They return callbacks that are attached through the
+generic `ref` attribute. **Import them explicitly** (they are not
+compiler-auto-imported). Always destructure the raw cell (`&[v, cell]`) and
+pass the cell itself — passing a plain value throws a "not a tracked object"
+TypeError.
 
 ```vsk
 import { bindValue, bindChecked, bindGroup } from '@vesk/runtime';
@@ -751,6 +780,25 @@ component Toggle() {
   skips redundant state→DOM writes (avoids cursor fights).
 - `bindChecked`: checkbox boolean, `change` event.
 - `bindGroup`: radio (selected string) + checkbox group (array membership).
+
+The valid relationship is:
+
+```vsk
+<input ref={bindValue(nameCell)} />
+```
+
+It is **not**:
+
+```vsk
+<input bindValue={nameCell} />
+```
+
+The second form is an ordinary attribute named `bindValue`; it does not
+install a Vesk binding. The helper functions return callbacks, and `ref` is
+the generic callback attachment point. The binding helpers return cleanup
+functions internally, but the current generated ref invocation does not expose
+React-style callback-ref lifecycle semantics; use `effect()` or `on_destroy()`
+for explicit cleanup.
 
 ## API Routes (`app/api/**/route.ts` or `.js`)
 
@@ -844,6 +892,36 @@ export const POST = stripeHook;        // invalid sig → 401
 `unsignCookie(name, signed, host?)` → original or null;
 `setSignedCookie` / `readSignedCookie`. Sites to a deployment host optionally.
 
+## Typed request locals and global augmentation
+
+`MiddlewareContext<L>` and `locals<L>()` support explicit per-call typing.
+Applications that want the same shape available everywhere can augment the
+public `VeskLocals` registry once:
+
+```ts
+// app/types.d.ts
+import type { User } from './types'
+
+declare module '@vesk/types' {
+  interface VeskLocals {
+    user: User | null
+    requestId: string
+  }
+}
+```
+
+After augmentation, unparameterized `MiddlewareContext`, `ServerEventContext`,
+`locals()`, and `ctx.get('user')` use the declared types. Unaugmented projects
+retain the historical arbitrary-key `unknown` behavior. For an isolated call,
+the context also supports `ctx.set<MyLocals>('user', value)` as a
+compile-time escape hatch; it does not change runtime behavior. A later
+`ctx.get('user')` is typed from the globally augmented `VeskLocals`, not from
+the previous call's type argument. The registry is a compile-time type contract; it does not
+validate runtime values.
+
+`createLocals<T>()` is a separate standalone typed store. It is not the same
+object as the framework request locals returned by `locals()`.
+
 ## Middleware (onion model)
 
 `app/middleware.ts` applies globally; a `middleware.ts` in any route dir
@@ -860,8 +938,11 @@ export async function middleware(ctx: MiddlewareContext, next: () => Promise<voi
 ```
 
 Rules:
-- **Always `return await next()`** (or its response) — dropping it discards
-  the rendered response.
+- `return await next()` (or its response) when middleware needs to
+  post-process or return the downstream response. The framework also preserves
+  the response when middleware does `await next()` without returning it.
+- A middleware that neither calls `next()` nor returns a response short-circuits
+  the chain.
 - Return a `Response` to short-circuit (never reaches page).
 - `next('/new-path')` rewrites the URL for the rest of the chain.
 - Locals set via `ctx.set()` visible during SSR (`locals()`) and API routes.
@@ -917,7 +998,7 @@ export default defineConfig({
 	publicDir: './public',      // default './public'
 
 	security: preset('production', { trustProxy: true }),  // see below
-	// security: false                                    // everything off
+	// security: false                                    // ambient protections off; autoEscape remains on
 
 	plugins: [ tailwindcss({ entry: 'src/global.css', appDir: 'app' }) ],
 
@@ -929,18 +1010,20 @@ export default defineConfig({
 });
 ```
 
-### VeskSecurity (defaults = strict preset)
+### VeskSecurity (strict preset)
 
 `autoEscape:true`, `csrf:true`, `xFrameOptions:'DENY'`,
 `contentSecurityPolicy` (self-only + style-src 'unsafe-inline' for component
 styles), `hsts:'max-age=31536000; includeSubDomains'`,
-`referrerPolicy:'strict-origin-when-cross-origin'`, `cors`, `trustProxy`,
-`rateLimit:{windowMs:60000,max:100}`, `redactLogs:true`.
+`referrerPolicy:'strict-origin-when-cross-origin'`, and `redactLogs:true`.
+`cors`, `trustProxy`, and rate-limit settings are separate server/security
+configuration concerns and are not preset fields.
 
-Presets: `preset('production')` (='strict'; everything above),
-`preset('development')` (strict minus CSP, HMR-friendly),
-`preset('minimal')` (autoEscape only; SAMEORIGIN; no CSRF/HSTS/CSP), or
-`security: false`. Compose: `preset('production', { trustProxy: true })`.
+Presets: `preset('production')` (the strict security defaults),
+`preset('development')` (strict minus CSP), `preset('minimal')`
+(autoEscape only; SAMEORIGIN framing; no CSRF/HSTS/CSP), or `security: false`.
+`security: false` disables ambient protections but keeps `autoEscape: true`.
+Compose: `preset('production', { trustProxy: true })`.
 
 Normalization: unknown preset names throw; `md.html` ∈
 escape|allow|allowlist; plugins must have name + ≥1 hook (`onCSS`,
@@ -959,8 +1042,9 @@ API: `defineConfig`, `preset(name, overrides)`, `definePlugin`, `validateConfig`
   `Origin`/`Referer` authority equal to request `Host`; cross-site browser
   submissions → 403. Applies to server actions + API routes (opt out per-route
   with `export const config = { csrf: false }`).
-- **Rate limiting**: keyed by client IP (proxy headers honored only when
-  trustProxy); 429 + Retry-After. Applied automatically by `vesk start`.
+- **Rate limiting**: server protection is available and can be configured in
+  the server/security layer; it is not a field in the compiler's strict
+  security preset. Proxy headers are honored only when `trustProxy` is enabled.
 - **Body limit**: `maxBodyBytes` default 1 MiB → 413.
 - **Error exposure**: detailed errors render only outside production
   (`vesk start` sets `NODE_ENV=production`).
@@ -1006,8 +1090,10 @@ export const isrTags = ['posts']
 
 ## Built-In Headless Primitives (`Show`/`For`/`Switch`/`Match`)
 
-**Import explicitly** (not auto-imported). **Call as expressions** inside
-`{…}` — a bare statement call compiles but renders nothing. Object-literal
+These are compiler-auto-imported inside component bodies. They may also be
+imported explicitly from `@vesk/runtime` in ordinary modules. **Call as
+expressions** inside `{…}` — a bare statement call compiles but renders
+nothing. Object-literal
 props can't contain literal JSX — pass strings/numbers/nested arrays or
 precomputed values.
 
@@ -1046,7 +1132,9 @@ import { Show, For, Switch, Match } from '@vesk/runtime';
 - **Form values are property bindings**, not attributes.
 - **No `<slot/>`** — only `{props.children}`.
 - **Search params are not props** — use `useSearchParams()`/`useRouter().search`.
-- **Middleware must `return await next()`** or the response is discarded.
+- **Middleware:** return `await next()` when post-processing the response;
+  `await next()` without returning is also supported. Calling neither
+  `next()` nor returning a response short-circuits the chain.
 - **Islands capture browser-only APIs** (`window`/`document`) inside
   `client` components or effects/`{#client}` blocks — never at top level of a
   server-rendered body.

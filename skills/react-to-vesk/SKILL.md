@@ -277,10 +277,12 @@ Mirror the Next `app/` directory 1:1. Same names, `.vsk` extension.
 `{children}`. Nested layouts compose the same file tree. Route groups
 `(marketing)/` keep their meaning (nesting without URL impact).
 
-**Middleware conversion** is the one with a footgun: Vesk requires
-`return await next()` (or its response); a middleware that returns
-`undefined` after calling `next()` drops the response. Keep the same
-augmentation logic but restructure the tail. `ctx.set`/`ctx.get`/`ctx.locals`
+**Middleware conversion** requires preserving the onion chain. Return
+`await next()` (or its response) when middleware needs to post-process or
+return the downstream response. The framework also preserves the response when
+middleware does `await next()` without returning it. A middleware that calls
+neither `next()` nor returns a response short-circuits the chain. Keep the
+same augmentation logic but restructure the tail. `ctx.set`/`ctx.get`/`ctx.locals`
 map onto Next's request context.
 
 **API routes**: Next `export async function GET(req: NextRequest)` →
@@ -507,7 +509,7 @@ component Signup() {
 const ThemeCtx = createContext('light');
 export function Pane() {
   const theme = useContext(ThemeCtx);
-  return <div className={`pane-${theme}`}>…</div>;
+  return <div class={`pane-${theme}`}>…</div>;
 }
 export function App() {
   return <ThemeCtx.Provider value="dark"><Pane/></ThemeCtx.Provider>;
@@ -687,7 +689,9 @@ substitutions and flag them in the manifest as "decision":
    dead on SSR hydration.
 8. **Passing the unwrapped value to `bindValue`** — `bindValue(name)` throws;
    pass `nameCell`.
-9. **Middleware that forgets `return await next()`** — response lost.
+9. **Middleware** — return `await next()` when post-processing the response;
+   `await next()` without returning is supported, but calling neither `next()`
+   nor returning a response short-circuits the chain.
 10. **Assuming `useParams` in a server-only module** — the server re-exports
     it as `routerParams`; request-side `useParams()` exists too. Match the
     import point to the context.

@@ -11,7 +11,8 @@ function test(name: string, fn: () => void) {
   catch (e) { failed++; console.log(`  ✗ ${name} — ${(e as Error).message}`); }
 }
 
-const RUNTIME_DTS = `export interface Tracked<T> { get(): T; set(value: T): void; }
+const RUNTIME_DTS = `import type { VeskLocals } from '@vesk/types';
+export interface Tracked<T> { get(): T; set(value: T): void; }
 export interface Derived<T> { get(): T; set(value: T): void; }
 export declare function track<T>(initialValue: T): Tracked<T>;
 export declare function track<T>(fn: () => T): Derived<T>;
@@ -32,6 +33,7 @@ export interface VeskLocals<T extends object> {
   all(): T;
 }
 export declare function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
+export declare function locals<L extends object = VeskLocals>(): L;
 `;
 
 const CLEAN_PAGE = `component Page() {\n  const ok: string = 'fine'\n  <p>{ok}</p>\n}\n`;
@@ -141,6 +143,76 @@ export component Page() {
     const { errors } = typecheckProject(f.root);
     const msgs = formatTypecheckErrors(errors);
     if (msgs !== '') throw new Error(`expected a clean typecheck, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: diagnostics map generated TSX positions back to .vsk source lines', () => {
+  const f = fixture({
+    'app/page.vsk': `component Page() {
+  const count: number = 'wrong'
+  <p>{count}</p>
+}
+`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (!msgs.includes('app/page.vsk(2,9): TS2322')) {
+      throw new Error(`expected source-mapped .vsk diagnostic, got:\\n${msgs || '(no errors)'}`);
+    }
+    if (msgs.includes('__vesk_ambient.d.ts')) {
+      throw new Error(`ambient shim leaked into diagnostic output:\\n${msgs}`);
+    }
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: augmented VeskLocals types ambient locals globally', () => {
+  const f = fixture({
+    'app/types.d.ts': `declare module '@vesk/types' {
+  interface VeskLocals {
+    user: { name: string } | null
+    requestId: string
+  }
+  interface MiddlewareContext<L extends Record<string, unknown> = VeskLocals> {
+    set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void
+    set<K extends keyof L & string>(key: K, value: L[K]): void
+    get<K extends keyof L & string>(key: K): L[K]
+  }
+}
+`,
+    'app/middleware.ts': `import type { MiddlewareContext } from '@vesk/types'
+
+export async function middleware(ctx: MiddlewareContext, next: () => Promise<Response>) {
+	ctx.set('requestId', 'abc')
+	const id: string = ctx.get('requestId')
+	type AppLocals = { user: { name: string } | null }
+	ctx.set<AppLocals>('user', { name: 'Ada' })
+	const user: { name: string } | null = ctx.get('user')
+	return next()
+}
+`,
+    'app/page.vsk': `import { locals } from '@vesk/runtime'
+
+export component Page() {
+	const requestLocals = locals()
+	const id: string = requestLocals.requestId
+	const user: { name: string } | null = requestLocals.user
+	<p>{id}{user?.name}</p>
+}
+`,
+  });
+  mkdirSync(join(f.root, 'node_modules', '@vesk', 'types'), { recursive: true });
+  writeFileSync(join(f.root, 'node_modules', '@vesk', 'types', 'index.d.ts'), `export interface VeskLocals extends Record<string, unknown> {}
+export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocals> {
+  set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void
+  set<K extends keyof L & string>(key: K, value: L[K]): void
+  get<K extends keyof L & string>(key: K): L[K]
+}
+`);
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected a clean augmented typecheck, got:\\n${msgs}`);
   } finally { f.cleanup(); }
 });
 

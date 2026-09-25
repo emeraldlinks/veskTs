@@ -21,6 +21,52 @@ Framework packages (`@vesk/compiler`, `@vesk/adapter`, `@vesk/runtime` re-export
 via `src/types.ts`) re-export these types so existing deep imports keep working,
 but new code should import from here.
 
+## Global request locals
+
+Applications can augment `VeskLocals` once to make the default request and
+server context types globally aware of their application values. Unaugmented
+projects retain the historical arbitrary-key `unknown` behavior.
+
+```ts
+// app/types.d.ts
+import type { User } from './types'
+
+declare module '@vesk/types' {
+  interface VeskLocals {
+    user: User | null
+    requestId: string
+  }
+}
+```
+
+After augmentation, unparameterized context reads are typed:
+
+```ts
+import type { MiddlewareContext } from '@vesk/types'
+import { locals } from '@vesk/runtime/server'
+
+async function middleware(ctx: MiddlewareContext, next: () => Promise<Response>) {
+  ctx.set('requestId', crypto.randomUUID())
+  const user = ctx.get('user') // User | null
+  return next()
+}
+
+const requestLocals = locals() // VeskLocals
+const id = requestLocals.requestId // string
+```
+
+For an isolated module, the context also supports an explicit per-call shape:
+
+```ts
+type AppLocals = { user: User | null }
+ctx.set<AppLocals>('user', user)
+const user = ctx.get('user') // User | null when AppLocals is globally augmented
+```
+
+Explicit `MiddlewareContext<MyLocals>` and `locals<MyLocals>()` remain
+supported as well. The runtime behavior is unchanged; the set overload only
+improves compile-time key/value checking for that call.
+
 ## Resources — useFetch
 
 Canonical shapes for `@vesk/runtime/src/resource.ts`:

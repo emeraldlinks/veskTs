@@ -60,9 +60,9 @@ export async function middleware(
           ["`url`", "The parsed `URL` of the request. Updated to the rewrite target when `next(rewrite)` is called."],
           ["`locals`", "The shared per-request store — seeded from server events and visible to later middleware and the page."],
           ["`cookies`", "Request cookies parsed as `Record<string, string>`."],
-          ["`set(key, value)`", "Writes a value into `locals`."],
-          ["`get(key)`", "Reads a value from `locals`."],
-          ["`[key: string]`", "Any other property access proxies straight to `locals`, so `ctx.user = ...` and `ctx.user` work directly."],
+          ["`set(key, value)`", "Writes a value into `locals`. Key and value types come from `VeskLocals` or from `MiddlewareContext<L>`."],
+          ["`get(key)`", "Reads a value from `locals` with the same key-aware typing."],
+          ["`ctx[key]`", "The runtime proxy falls back to `locals`, but undeclared TypeScript index properties are `unknown`; prefer `ctx.get('key')` in typed code."],
         ],
       },
       {
@@ -71,11 +71,74 @@ export async function middleware(
         text:
           "The context has no `next()`, `setHeader()`, `redirect()` or `rewrite()` methods. `next` is the second parameter of the middleware function; headers, redirects and rewrites are expressed through returned `Response` objects (see next section).",
       },
+      { kind: "h2", text: "Global typed locals" },
+      {
+        kind: "p",
+        text:
+          "Vesk applications can declare their request/server locals once by augmenting `VeskLocals` from `@vesk/types`. The default `MiddlewareContext`, `ServerEventContext`, and `locals()` then use those key/value types everywhere. Unaugmented projects keep arbitrary keys as `unknown`, preserving existing behavior.",
+      },
+      {
+        kind: "code",
+        filename: "app/types.d.ts",
+        language: "ts",
+        code: `import type { User } from './types'
+
+declare module '@vesk/types' {
+  interface VeskLocals {
+    user: User | null
+    requestId: string
+  }
+}`,
+      },
+      {
+        kind: "code",
+        filename: "app/middleware.ts",
+        language: "ts",
+        code: `import type { MiddlewareContext } from '@vesk/types'
+
+export async function middleware(
+  ctx: MiddlewareContext,
+  next: () => Promise<Response>,
+) {
+  ctx.set('requestId', crypto.randomUUID())
+  ctx.set('user', { id: '1', name: 'Ada' })
+
+  const user = ctx.get('user')
+  // user: User | null
+
+  return next()
+}`,
+      },
+      {
+        kind: "p",
+        text:
+          "The generic is compile-time only; it does not validate runtime values. For an isolated module, use `MiddlewareContext<MyLocals>` or the per-call form `ctx.set<MyLocals>('user', value)`. A later `ctx.get('user')` is typed from the globally augmented `VeskLocals`, not from the previous call's type argument. `createLocals<T>()` is a separate standalone store, not the ambient request locals object.",
+      },
+      { kind: "h2", text: "ServerEventContext" },
+      {
+        kind: "p",
+        text:
+          "`app/_events.ts` lifecycle handlers receive a `ServerEventContext`. It has the same typed locals/set/get surface, plus optional `server`, `port`, and `host` fields on persistent Node servers. Values set during `onStart` are server/isolate-wide and are pre-seeded into subsequent request locals.",
+      },
+      {
+        kind: "code",
+        filename: "app/_events.ts",
+        language: "ts",
+        code: `import type { ServerEventContext } from '@vesk/types'
+
+export async function onStart(ctx: ServerEventContext) {
+  ctx.set('requestId', 'server-boot-id')
+}
+
+export async function onRequest(ctx: ServerEventContext) {
+  const requestId = ctx.get('requestId')
+}`,
+      },
       { kind: "h2", text: "next(), responses and rewriting" },
       {
         kind: "p",
         text:
-          "`next()` continues the chain into the following middleware (and finally the page render). It returns a `Promise<Response>`, so you can `await next()` and post-process the rendered response, or `const response = await next()` and return it yourself. HTTP headers are plain `Headers` on that response; to add to them you construct a new `Response` from it or use the fluent `VeskResponse` builders from `@vesk/runtime`.",
+          "`next()` continues the chain into the following middleware (and finally the page render). It returns a `Promise<Response>`, not a guaranteed `VeskResponse`: downstream middleware, SSR, redirects, and native responses may all return a standard `Response`. You can `await next()` and post-process the rendered response, or return it yourself. HTTP headers are plain `Headers`; construct a new `Response` or use `VeskResponse` from `@vesk/runtime/server` when building an enhanced response.",
       },
       {
         kind: "p",
@@ -103,7 +166,7 @@ export default async function middleware(
       {
         kind: "p",
         text:
-          "Returning a `Response` — instead of calling `next()` — short-circuits the chain: whatever you return is the final response. Returning `next()` (or `await next()`) passes the rest of the chain through. Creating a response is done with the standard `Response` API or the `VeskResponse` helpers from `@vesk/runtime`.",
+          "Returning a `Response` — instead of calling `next()` — short-circuits the chain: whatever you return is the final response. Returning `next()` (or `await next()`) passes the rest of the chain through. Creating a response is done with the standard `Response` API or the `VeskResponse` helpers from `@vesk/runtime/server`.",
       },
       { kind: "h2", text: "Response headers, cookies and redirects" },
       {
@@ -133,7 +196,7 @@ export async function middleware(ctx: MiddlewareContext, next: () => Promise<Res
       {
         kind: "p",
         text:
-          "To redirect, throw `redirect(url, status)` — still from `@vesk/runtime` — which raises a `Redirect` error the runner turns into a `Location` response. `Response.redirect(url, status)` and `VeskResponse.redirect(url)` are drop-in alternatives.",
+          "To redirect, throw `redirect(url, status)` from `@vesk/runtime/server` — it raises a `Redirect` error that the runner turns into a `Location` response. `Response.redirect(url, status)` and `VeskResponse.redirect(url)` are alternatives.",
       },
       { kind: "h2", text: "Examples" },
       {
@@ -145,7 +208,7 @@ export async function middleware(ctx: MiddlewareContext, next: () => Promise<Res
         filename: "app/dashboard/middleware.ts",
         language: "ts",
         code: `import type { MiddlewareContext } from '@vesk/types';
-import { redirect } from '@vesk/runtime';
+import { redirect } from '@vesk/runtime/server';
 
 export async function middleware(ctx: MiddlewareContext, next: () => Promise<Response>) {
   const token = ctx.cookies.session;
@@ -162,7 +225,7 @@ export async function middleware(ctx: MiddlewareContext, next: () => Promise<Res
       {
         kind: "p",
         text:
-          "The page reads that user back through `locals()` from `@vesk/runtime`, keeping the pipeline server-side only — it renders once during SSR and never runs on the client, so the account data never crosses the wire.",
+          "The page reads that user back through `locals()` from `@vesk/runtime/server`, keeping the pipeline server-side only — it renders once during SSR and never runs on the client, so the account data never crosses the wire.",
       },
       {
         kind: "tabs",
@@ -170,12 +233,12 @@ export async function middleware(ctx: MiddlewareContext, next: () => Promise<Res
           {
             label: "statement mode",
             filename: "app/dashboard/page.vsk",
-            code: `import { locals } from '@vesk/runtime';
+            code: `import { locals } from '@vesk/runtime/server';
 
 component UserBanner() {
   const user = locals().user;
 
-  <p>Signed in as {user.name}</p>
+  <p>Signed in as {user?.name}</p>
 }
 
 export default component Page() {
@@ -188,12 +251,12 @@ export default component Page() {
           {
             label: "expression mode",
             filename: "app/dashboard/page.vsk",
-            code: `import { locals } from '@vesk/runtime';
+            code: `import { locals } from '@vesk/runtime/server';
 
 component UserBanner() {
   const user = locals().user;
 
-  return <p>Signed in as {user.name}</p>;
+  return <p>Signed in as {user?.name}</p>;
 }
 
 export default component Page() {
@@ -210,14 +273,14 @@ export default component Page() {
       {
         kind: "p",
         text:
-          "CORS: the `cors()` helper from `@vesk/runtime` returns a small middleware that answers `OPTIONS` preflights with a 204 and exposes `applyCors(response)` to stamp the CORS headers onto the rendered response.",
+          "CORS: the `cors()` helper from `@vesk/runtime/server` returns a small middleware that answers `OPTIONS` preflights with a 204 and exposes `applyCors(response)` to stamp the CORS headers onto the rendered response.",
       },
       {
         kind: "code",
         filename: "app/middleware.ts",
         language: "ts",
         code: `import type { MiddlewareContext } from '@vesk/types';
-import { cors } from '@vesk/runtime';
+import { cors } from '@vesk/runtime/server';
 
 const handle = cors({
   origin: 'https://app.example.com',

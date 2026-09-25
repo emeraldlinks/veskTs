@@ -55,6 +55,24 @@ export interface ApiRouteNode {
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
+ * Application-wide request/server locals registry.
+ *
+ * Augment this interface from an application to make the default context
+ * types globally aware of its locals while preserving the historical
+ * arbitrary-key `unknown` behavior for keys that are not declared.
+ *
+ * ```ts
+ * declare module '@vesk/types' {
+ *   interface VeskLocals {
+ *     user: User | null
+ *     requestId: string
+ *   }
+ * }
+ * ```
+ */
+export interface VeskLocals extends Record<string, unknown> {}
+
+/**
  * A typed key/value store for request-scoped values. Keys and values are
  * linked through the shape `T`, so `set('user', u)` is only allowed when `u`
  * matches `T['user']` and `get('user')` returns exactly that type.
@@ -79,12 +97,14 @@ export interface Locals<T extends object> {
  * }
  * ```
  */
-export interface MiddlewareContext<L extends Record<string, unknown> = Record<string, unknown>> {
+export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocals> {
   request: Request;
   params: Record<string, string>;
   url: URL;
   locals: L;
   cookies: Record<string, string>;
+  /** Explicit per-call shape escape hatch: ctx.set<MyLocals>('user', value). */
+  set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void;
   set<K extends keyof L & string>(key: K, value: L[K]): void;
   get<K extends keyof L & string>(key: K): L[K];
   [key: string]: unknown;
@@ -122,7 +142,7 @@ export interface MiddlewareChainItem {
  * ctx is available to `onRequest`, and `onStart`/`onStop` additionally see the
  * server object on long-running Node servers.
  */
-export interface ServerEventContext {
+export interface ServerEventContext<L extends Record<string, unknown> = VeskLocals> {
   /**
    * The running Node `http.Server`. `null` on serverless/edge targets and at
    * build time — those platforms have no persistent server process.
@@ -135,15 +155,16 @@ export interface ServerEventContext {
   request?: Request;
   params?: Record<string, string>;
   url?: URL;
-  locals: Record<string, unknown>;
+  locals: L;
   cookies: Record<string, string>;
   /**
    * Process/isolate-wide context shared across every request. Sets performed
    * here are visible via `locals()` on every subsequent request.
    */
-  serverLocals: Record<string, unknown>;
-  set(key: string, value: unknown): void;
-  get(key: string): unknown;
+  serverLocals: L;
+  set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void;
+  set<K extends keyof L & string>(key: K, value: L[K]): void;
+  get<K extends keyof L & string>(key: K): L[K];
   [key: string]: unknown;
 }
 

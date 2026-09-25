@@ -4,7 +4,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/emeraldlinks/veskTs/main/scripts/install-skills.sh | bash
 #
-# Installs the `vesk` and `react-to-vesk` skills (skills/<name>/SKILL.md)
+# Installs all maintained Vesk migration skills (skills/<name>/SKILL.md)
 # into every AI coding tool that speaks Agent Skills, so agents load the
 # *current* authoritative copy of the Vesk API reference instead of whatever
 # was in their training data. One source file, every tool's native skill
@@ -30,7 +30,7 @@ RAW_BASE="${VESK_RAW_BASE:-https://raw.githubusercontent.com/emeraldlinks/veskTs
 PREFIX="${VESK_DIR:-$HOME}"
 FORCE="${VESK_FORCE:-0}"
 
-SKILLS=(vesk react-to-vesk)
+SKILLS=(vesk react-to-vesk nuxt-to-vesk bun-to-vesk)
 
 log()  { printf '\033[1;36m[vesk-skills]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[vesk-skills]\033[0m %s\n' "$*"; }
