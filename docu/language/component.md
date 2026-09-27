@@ -32,6 +32,63 @@ export default async component App() { }
   `component` — both positions parse to the same `client: true` flag.
   See [client-boundary.md](client-boundary.md).
 
+## Cross-file components
+
+A component can live in its own `.vsk` file and be used from any other. Import
+it by name, optionally renamed:
+
+```vsk
+import { Card } from './card.vsk'
+import { Card as Post } from './card.vsk'
+
+<Card />
+<Post />
+```
+
+A namespace import also works, and resolves the same way:
+
+```vsk
+import * as UI from './card.vsk'
+
+<UI.Card />
+```
+
+`<UI.Card />` looks the component up in the component registry under its
+exported name (`Card`), which is exactly what `<Card />` does. No module object
+is ever constructed at runtime — the namespace is a compile-time shorthand, not
+a value.
+
+Two forms do **not** work, and raise `V0410`:
+
+- `<UI.Sub.Card />` — a `.vsk` namespace is flat; there is no nested object to
+  walk into.
+- `UI.max` read as a **value** (e.g. in `{UI.max}`) — only component tags
+  resolve. Import the value by name, or keep it in a `.ts` module.
+
+Both apply only to `.vsk` targets. A namespace import from a `.ts`/`.js` module
+is a real module object, so `<NS.Icon />` there is an ordinary member
+expression.
+
+### `export` and the name registry
+
+Components resolve through **one global registry keyed by declared name**, not
+through per-module bindings. Two consequences worth knowing:
+
+- A component is importable whether or not its file writes `export`. `export` is
+  meaningful for *renaming* (`export { A as B }`) and for barrels
+  (`export * from './x.vsk'`), not for hiding.
+- Two files that both declare `component Helper` land on the same registry key,
+  and only one of them wins. The build warns:
+
+  ```
+  [vesk] client bundle: component "Helper" is declared in 2 files and resolves
+  to only one of them — .../a.vsk, .../b.vsk.
+  ```
+
+  The warning matters because the client registry keeps the *last* registration
+  while SSR keeps the *first*, so a collision can render a different component
+  in the browser than in the SSR HTML. Rename one of them.
+
 ## Body modes
 
 A component body is either:
@@ -100,4 +157,11 @@ ComponentDeclaration {
 - `packages/compiler/src/vesk-plugin.ts` — `parseComponentDeclaration`
 - `packages/compiler/src/parser.test.ts` — `client keyword`, generics,
   `export [default] [async] component` suites
+- `packages/compiler/src/ir-generator.ts` — `collectVskNamespaceLocals`,
+  `processJSXElement` (namespace tag → registry lookup)
+- `packages/compiler/src/vsk-collision.ts` — same-name registry-key warning
+- `packages/compiler/src/vsk-exports.test.ts` — `a .vsk namespace import
+  resolves component tags` suite
+- `packages/compiler/src/vsk-collision.test.ts` — collision detection suite
+- `tests/hydration-test.mjs` — namespace component SSR + reactivity
 - Commit `2a5b19d`

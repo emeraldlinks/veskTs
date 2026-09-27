@@ -1572,6 +1572,193 @@ component TodoList(props: { items: Todo[] }) {
     ],
   },
   {
+    slug: "primitives",
+    title: "Primitives and Leaves",
+    description:
+      "Author components outside .vsk files: primitive() for presentational components that return markup, leaf() for stateful and async widgets — both callable as <Badge/> or Badge().",
+    group: "Runtime",
+    blocks: [
+      {
+        kind: "p",
+        text: "Every component call in Vesk — including a bare `<Badge/>` with no attributes — is invoked as `callee(props, registry, scope)`. The compiler always passes an object literal at the call site (`{}` when there are no attributes). `primitive()` and `leaf()` are the two authoring wrappers for that ABI, for components you write by hand in a `.ts` module instead of a `.vsk` file.",
+      },
+      {
+        kind: "note",
+        tone: "info",
+        text: "`primitive` and `leaf` are auto-imported inside `.vsk` components, like `track` and `effect`. In a plain `.ts` module, import them from `@vesk/runtime`.",
+      },
+      { kind: "h2", text: "primitive()" },
+      {
+        kind: "p",
+        text: "A component exported from a module is an ordinary function, and an ordinary function can be called with no arguments at all — from a helper, a test, a render callback, or a manual registry probe. A hand-written `function Badge(props) { return props.children }` throws `Cannot read properties of undefined` in that case. `primitive()` closes that whole failure class by normalizing nullish props to a frozen empty object before your function ever sees them.",
+      },
+      {
+        kind: "code",
+        filename: "app/lib/badge.ts",
+        language: "ts",
+        code: `import { primitive } from '@vesk/runtime'
+
+export const Badge = primitive((props: { label?: string; tone?: string }) => {
+  const tone = props.tone ?? 'neutral'
+  return \`<span class="badge badge--\${tone}">\${props.label ?? ''}</span>\`
+})`,
+      },
+      {
+        kind: "code",
+        filename: "app/page.vsk",
+        code: `import { Badge } from './lib/badge'
+
+<Badge label="new" tone="green" />
+<Badge />
+
+// both call styles are safe:
+Badge()             // '<span class="badge badge--neutral"></span>'
+Badge({ label: 'x' })`,
+      },
+      {
+        kind: "list",
+        items: [
+          "The wrapper forwards `props`, `registry` and scope **untouched** — it is not a copy of your function. Identity-sensitive behavior (scope preference, `__veskScope`) is unchanged.",
+          "A real props object is never cloned, merged or stripped. That matters on the client, where `props.children` can be a live reactive container that must arrive by reference.",
+          "Only a nullish `props` is substituted, with a frozen `{}`. Mutating props by mistake then fails loudly in strict mode instead of leaking state between unrelated zero-arg calls.",
+        ],
+      },
+      { kind: "h2", text: "leaf()" },
+      {
+        kind: "p",
+        text: "`leaf()` is the behavioural counterpart to `primitive()`: stateful widgets, own click handlers, async components. It implements the same `(props, registry, scope)` ABI and behaves as a no-op wrapper — the only thing it adds is the marker that lets tooling tell a behavioural leaf apart from a presentational primitive.",
+      },
+      {
+        kind: "code",
+        filename: "app/lib/stepper.ts",
+        language: "ts",
+        code: `import { leaf, get } from '@vesk/runtime'
+
+// A tracked cell arrives as a prop; \`get\` unwraps it to its value.
+export const Stepper = leaf((props: { count: unknown }) =>
+  \`<button class="stepper">count: \${get(props.count)}</button>\`,
+)`,
+      },
+      {
+        kind: "note",
+        tone: "warn",
+        text: "Do not reach for `leaf()` to give a primitive behavior it cannot support. The marker is documentation plus a runtime discriminator, nothing more. If you need extra behavior, write it inside `fn`.",
+      },
+      { kind: "h2", text: "One function, both sides" },
+      {
+        kind: "p",
+        text: "A string-returning component is rendered by concatenating its markup on the server and by parsing it into real DOM on the client. You do not branch on the environment — return the string either way and the runtime normalizes it. The same function serves both:",
+      },
+      {
+        kind: "code",
+        filename: "the two outputs",
+        language: "ts",
+        code: `// server: returned as a string and concatenated into the HTML
+Stepper({ count: 3 })
+// '<button class="stepper">count: 3</button>'
+
+// client: parsed into a real <button>, then updated in place as
+// \`count\` changes — never re-appended, never duplicated`,
+      },
+      { kind: "h2", text: "Returning a string" },
+      {
+        kind: "p",
+        text: "A compiled `.vsk` component returns a DOM `Node`, and the runtime components (`Image`, `Form`, `Md`, …) build one when `document` exists. A `primitive()` or `leaf()` written as a template string returns a string on **both** sides, which is the point of the terse form. The server concatenates it into the HTML; the client would otherwise hand a string to `appendChild` and throw `parameter 1 is not of type 'Node'`, taking the page's error boundary with it. `toDomNode()` is the normalizer that prevents that:",
+      },
+      {
+        kind: "list",
+        items: [
+          "A `Node` passes through untouched.",
+          "A string is parsed into its root node — a single root becomes that node, several roots stay a `DocumentFragment` so the caller can splice them in without inventing a wrapper that was never in the SSR markup.",
+          "An empty string becomes an empty fragment. `null`, `undefined` and `false` are returned as-is, so callers can still test for them.",
+          "On the server there is nothing to normalize into, so strings pass through unchanged.",
+        ],
+      },
+      { kind: "h2", text: "Reactive primitives" },
+      {
+        kind: "p",
+        text: "A compiled `.vsk` component is re-invoked by its bindings, so a tracked value it reads always refreshes the markup. A string component has no bindings: it is called once and its markup converted once, so a tracked value it reads would subscribe nobody — a later write updated the cell and left the DOM stale. The runtime closes that gap at the **call site**, where the tracked props are known: it subscribes to them and, on a change, re-runs the component and swaps the produced nodes in place.",
+      },
+      {
+        kind: "p",
+        text: "In a `.vsk` file this is invisible — write the component and it just works:",
+      },
+      {
+        kind: "code",
+        filename: "app/page.vsk",
+        code: `import { Stepper } from './lib/stepper'
+
+export component Demo {
+  const &[count] = track(1)
+
+  <Stepper count={count} />
+  <button onClick={() => count = count + 1}>increment</button>
+}
+
+// count is a tracked cell; the call site subscribes to it, so the
+// <button> inside Stepper re-renders on every change — in place.`,
+      },
+      {
+        kind: "code",
+        filename: "when you call it by hand",
+        language: "ts",
+        code: `// Outside a .vsk call site nothing subscribes for you, so the
+// dependency has to be declared explicitly. Both helpers are public:
+import { reactiveProps, rerenderNode, toDomNode } from '@vesk/runtime'
+
+const node = toDomNode(Stepper(reactiveProps({ count })))
+host.appendChild(node)
+rerenderNode(node, [count], () => Stepper(reactiveProps({ count })))`,
+      },
+      {
+        kind: "list",
+        items: [
+          "`reactiveProps(props)` wraps props in a Proxy so tracked cells handed in as props are unwrapped *at read time*, exactly as generated code passes them. This is why a component sees `42` rather than a cell object — without it, `${'{props.count}'}` would interpolate the cell.",
+          "`rerenderNode(node, deps, call)` subscribes to `deps` and re-runs `call` only when one of them actually changed (`Object.is`). The first effect run performs no re-render: it compares against the values captured at mount, which also covers a write that lands between mount and the first flush.",
+          "Re-render is skipped when the node has been detached, so a stale effect can never graft nodes back into the document after its owner is torn down.",
+          "A multi-root component is tracked as a **range**: a later render can add, drop or reorder roots without leaving an orphan. Call this by hand only for a single root — pass the list of roots for several, since a multi-root string is parsed into a `DocumentFragment` that is drained as soon as it is appended.",
+        ],
+      },
+      { kind: "h2", text: "Introspection" },
+      {
+        kind: "p",
+        text: "Three type guards separate the kinds of callable, mostly for tooling and the runtime itself:",
+      },
+      {
+        kind: "table",
+        head: ["Function", "True when", "Use it for"],
+        rows: [
+          ["`isPrimitive(v)`", "`v` was produced by `primitive()`", "Presentational components"],
+          ["`isLeaf(v)`", "`v` was tagged by `leaf()`", "Stateful / async widgets"],
+          ["`isVeskComponent(v)`", "`v` is a function at all", "Registry membership checks"],
+        ],
+      },
+      {
+        kind: "note",
+        tone: "info",
+        text: "`isVeskComponent` is deliberately broad: every registry entry satisfies it, since compiled `.vsk` components are functions too. The distinction that matters when authoring is `isPrimitive` vs `isLeaf`.",
+      },
+      { kind: "h2", text: "Complete API" },
+      {
+        kind: "table",
+        head: ["Export", "Signature", "Notes"],
+        rows: [
+          ["`primitive`", "`primitive<P>(fn) => VeskPrimitiveComponent<P>`", "Nullish-props normalizer"],
+          ["`leaf`", "`leaf<P>(fn) => VeskTaggedLeafComponent<P>`", "Behavioural marker"],
+          ["`isPrimitive`", "`(v: unknown) => v is VeskPrimitiveComponent`", "Marker check"],
+          ["`isLeaf`", "`(v: unknown) => v is VeskTaggedLeafComponent`", "Marker check"],
+          ["`isVeskComponent`", "`(v: unknown) => v is VeskLeafComponent`", "Any callable"],
+          ["`toDomNode`", "`(value) => value | Node | DocumentFragment`", "String → DOM, no-op on server"],
+          ["`rerenderNode`", "`(node, deps, call) => node`", "In-place re-render on dep change"],
+        ],
+      },
+      {
+        kind: "p",
+        text: "All seven are exported from both `@vesk/runtime` barrels (`index-client.ts` and `index-server.ts`), so the same import works in a server module and a browser bundle. The wrappers are pure: no `document`/`window` access and no top-level side effects.",
+      },
+    ],
+  },
+  {
     slug: "reactive-core",
     title: "Reactive Core",
     description:
@@ -1913,6 +2100,7 @@ const docSlugOrder = [
   "bindings",
   "built-in-components",
   "headless",
+  "primitives",
   "reactive-core",
   "reconcile",
   "deployment",
