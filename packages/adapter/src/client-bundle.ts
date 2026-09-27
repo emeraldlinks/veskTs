@@ -208,6 +208,51 @@ function isModuleLevel(node: CompiledNode): boolean {
 }
 
 /**
+ * When a chunk's esbuild bundle fails to resolve bare specifiers, the
+ * historical fallback strips every import, leaving dangling free identifiers
+ * that surface as a baffling `ReferenceError: X is not defined` at render
+ * time. Native-only `@vesk/*` library imports can NEVER resolve in the
+ * browser dev preview — make that a first-class, readable failure by emitting
+ * a throwing proxy for every binding those imports declare: the binding reads
+ * as a function, so `typeof` stays truthful, and the throw carries the
+ * library, the binding, and the remedy. Other bare specifiers (e.g. `motion`,
+ * dev-preview-provided) are left dangling — genuinely missing packages still
+ * fail as ReferenceErrors, which is honest. AST-only; never a text scan.
+ */
+export function nativeLibraryImportStubs(code: string): string {
+  let ast: unknown;
+  try {
+    ast = parse(code);
+  } catch {
+    return '';
+  }
+  const body = (ast as { body?: Array<CompiledNode> }).body ?? [];
+  const bindings: Array<[string, string]> = [];
+  for (const node of body) {
+    if (node?.type !== 'ImportDeclaration') continue;
+    const src = node.source?.value;
+    if (typeof src !== 'string' || !src.startsWith('@vesk/') || src.startsWith('@vesk/runtime')) continue;
+    for (const spec of (node as { specifiers?: Array<{ local?: { name?: string } }> }).specifiers ?? []) {
+      if (typeof spec?.local?.name === 'string') bindings.push([spec.local.name, src]);
+    }
+  }
+  if (bindings.length === 0) return '';
+  const lines = bindings.map(([local, spec]) => {
+    const message =
+      `web preview: native library "${spec}" has no browser equivalent on the web ` +
+      `(dev-only) — binding "${local}" cannot be provided in vesk dev --web. Build for Android to use it.`;
+    const thrower = `throw Object.assign(new Error(${JSON.stringify(message)}), { __veskPreviewMissing: ${JSON.stringify(spec)} })`;
+    return (
+      `const ${local} = new Proxy(function () {}, { ` +
+      `get: function () { ${thrower}; }, ` +
+      `apply: function () { ${thrower}; }, ` +
+      `construct: function () { ${thrower}; } });`
+    );
+  });
+  return lines.join('\n') + '\n\n';
+}
+
+/**
  * Demotes surviving value exports to plain declarations (`export const x`
  * becomes `const x`) and drops bare re-export lists (`export { x }`,
  * `export default …`). Code-split chunks execute as classic scripts inside
@@ -692,7 +737,7 @@ export async function generateClientBundle(
     // One parse/IR pass feeds both client modes AND the component-name
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
-    const { comp: rawComp, hyd: rawHyd, name: actualName } = compileClientBoth(src, null, filePath);
+    const { comp: rawComp, hyd: rawHyd, name: actualName, aliases, reexportPaths } = compileClientBoth(src, null, filePath);
     // Cache keeps the import-carrying codes so a warm build can re-fold them
     // into its own fresh accumulator; the emitted codes are import-stripped.
     // The bodies/specs/scoped artifacts are cached too so warm replay never
@@ -724,6 +769,16 @@ export async function generateClientBundle(
       output.push(`Object.defineProperty(__components, ${JSON.stringify(resolvedName)}, { get: () => __components[${JSON.stringify(actualName)}], configurable: true });`);
       output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(resolvedName)}, { get: () => __hydrators[${JSON.stringify(actualName)}], configurable: true });`);
     }
+    // `.vsk` export/import aliases (`export { A as B }`, `import { A as B }`):
+    // nothing is emitted for them, so register lazy getters that resolve to
+    // the canonical name. Lazy because the target may be contributed later.
+    for (const alias of aliases || []) {
+      output.push(`Object.defineProperty(__components, ${JSON.stringify(alias.exported)}, { get: () => __components[${JSON.stringify(alias.local)}], configurable: true });`);
+      output.push(`Object.defineProperty(__hydrators, ${JSON.stringify(alias.exported)}, { get: () => __hydrators[${JSON.stringify(alias.local)}], configurable: true });`);
+    }
+    // `export * from './x.vsk'` / `export { A } from './x.vsk'`: the target is
+    // not reachable through an import statement, so compile it here.
+    for (const reexportPath of reexportPaths || []) compileFile(reexportPath, null, output, imports);
 
     if (cache && namesBefore) {
       const st = statSync(filePath);
@@ -876,15 +931,22 @@ export async function generateClientBundle(
           const err = e as { errors?: Array<{ text: string }>; message?: string };
           console.error('[vesk] chunk bundle failed', entry.name, err?.errors?.map((x) => x.text).join(' | ') || err?.message || String(e));
           // Fall back to the historical behavior: strip every import so the
-          // classic script at least parses (referenced values will surface as
-          // ReferenceErrors at runtime — the pre-existing failure mode).
+          // classic script at least parses. Bindings imported from native-only
+          // `@vesk/*` libraries get throwing stubs (a readable degradation
+          // instead of a baffling `X is not defined`); every other stripped
+          // name stays dangling, which is the pre-existing failure mode.
           const stripped = demoteExports(removeCompiledNodes(entry.code, isAnyImport));
-          finalCode = chunkIIFE(stripped);
+          finalCode = chunkIIFE(nativeLibraryImportStubs(entry.code) + stripped);
         } finally {
           try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
         }
       } else {
-        finalCode = chunkIIFE(entry.code);
+        // No-import chunk: wrap the compiled source in the registry IIFE. The
+        // compiler still emits module-level `export const pageProps` / re-export
+        // lists, and a classic script cannot carry an `export` — demote value
+        // exports to bindings and drop bare re-export lists (components resolve
+        // via the __components / __hydrators registries, matching the mono path).
+        finalCode = chunkIIFE(demoteExports(entry.code));
       }
       chunks.push({ name: entry.name, code: finalCode });
     }
@@ -1153,7 +1215,7 @@ async function buildMainBundle(
   runtimeImportNames?: Set<string>,
   routeDataCache?: number,
 ): Promise<string> {
-  const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps', 'matchRoute', 'ensureChunk'];
+  const baseRuntimeImports = ['createFileRouter', 'get', 'set', 'effect', 'track', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'NavLink', 'Link', 'reactiveProps', 'matchRoute', 'ensureChunk', 'toDomNode', 'rerenderNode'];
   const allRuntimeImports = runtimeImportNames && runtimeImportNames.size > 0
     ? [...new Set([...baseRuntimeImports, ...runtimeImportNames])]
     : baseRuntimeImports;

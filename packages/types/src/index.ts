@@ -39,6 +39,8 @@ export interface RouteNode {
   /** Client-bundle chunk URL for this node (code-split dev/prod builds). */
   chunk?: string;
   chunkError?: string;
+  /** Static props for this route's page component (from config.screens[path].props merged over the page's own pageProps defaults). */
+  props?: Record<string, unknown>;
 }
 
 export interface ApiRouteNode {
@@ -613,6 +615,78 @@ export type Component = string | number | boolean | null | undefined | Component
  */
 export interface LayoutProps {
 	children?: Component;
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// Component ABI — primitive vs leaf
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Every component call in Vesk — including a bare `<Badge/>` with no
+// attributes — is invoked through the same three-argument signature:
+//
+//     callee(props, __registry, __veskScope)
+//
+// `props` is a plain object (the compiler always emits an object literal, `{}`
+// when there are no attributes — see `server-jsgen.ts` / `client-codegen.ts`).
+// `__registry` is the component-name → component map, and the third argument is
+// the caller's reactive scope, preferred from the callee's own `__veskScope`
+// when it has one.
+//
+// Two authoring styles target that one ABI:
+//
+//  - **primitive** — presentational, stateless, no hooks: a direct function
+//    from props to markup. `primitive()` wraps it so it is also safe to call
+//    with zero arguments (`Badge()` as well as `<Badge/>`), and tags the
+//    result so `isPrimitive()` can tell the two kinds apart at runtime.
+//  - **leaf** — behavioural: owns tracked state, attaches its own event
+//    handlers, and may return a `Promise` (async components are awaited by
+//    both the server renderer and the client). These implement
+//    {@link VeskLeafComponent} directly and are tagged with `leaf()`.
+//
+// `props` is *not* optional in {@link VeskLeafComponent}: the framework always
+// passes an object. Only the primitive wrapper relaxes that, because primitives
+// are also called directly as plain functions.
+
+/** A `__veskScope` carrier: the reactive scope a component call runs under. */
+export type VeskScope = Record<string, unknown> | undefined;
+
+/** The component-name → component map threaded through every component call. */
+export type VeskComponentRegistry = Map<string, VeskLeafComponent | VeskPrimitiveComponent>;
+
+/**
+ * The full Vesk component ABI, as implemented by `component` declarations in
+ * `.vsk` and by any stateful/async widget.
+ *
+ * `props` is required: the compiler always passes an object literal at every
+ * call site, so a leaf component can read `props.children` without a guard.
+ */
+export interface VeskLeafComponent<P extends object = Record<string, unknown>> {
+	(props: P, registry: VeskComponentRegistry, scope?: VeskScope): unknown | Promise<unknown>;
+	/** Own-file scope, preferred over the caller's when set (see `server-render.ts`). */
+	__veskScope?: VeskScope;
+}
+
+/**
+ * A presentational component produced by `primitive()`.
+ *
+ * Callable with no arguments at all — `Badge()` and `<Badge/>` are both legal —
+ * and always receives an object as `props`, so `props.children` reads
+ * `undefined` instead of throwing. Marked by `__veskPrimitive` for runtime
+ * introspection via `isPrimitive()`.
+ */
+export interface VeskPrimitiveComponent<P extends object = Record<string, unknown>> {
+	(props?: P, registry?: VeskComponentRegistry, scope?: VeskScope): unknown | Promise<unknown>;
+	/** Always `true` — the runtime marker `primitive()` stamps on its result. */
+	readonly __veskPrimitive: true;
+	/** Own-file scope, when the primitive is also a compiled component. */
+	__veskScope?: VeskScope;
+}
+
+/** A behavioural component produced by `leaf()` — the `VeskLeafComponent` ABI, tagged. */
+export interface VeskTaggedLeafComponent<P extends object = Record<string, unknown>>
+	extends VeskLeafComponent<P> {
+	/** Always `true` — the runtime marker `leaf()` stamps on its result. */
+	readonly __veskLeaf: true;
 }
 
 // ────────────────────────────────────────────────────────────────────────────

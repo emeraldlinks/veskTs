@@ -5,7 +5,7 @@ import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { setVskHydrate } from '@vesk/compiler/src/server-utils';
 import { buildComponentEntries } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
-import { collectVskImportPaths } from '@vesk/compiler/src/vsk-imports';
+import { collectVskImportPaths, collectVskReexportPaths } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import {
   collectModuleBundle,
@@ -68,7 +68,11 @@ function precompileFileInternal(
 
   const subFiles: PrecompileSubFilePlan[] = [];
   if (sourcePath !== undefined) {
-    for (const importPath of collectVskImportPaths(ir.imports, sourcePath)) {
+    const vskPaths = [
+      ...collectVskImportPaths(ir.imports, sourcePath),
+      ...collectVskReexportPaths(ir.reexportSources, sourcePath),
+    ];
+    for (const importPath of vskPaths) {
       if (seenImportFiles.has(importPath)) continue;
       seenImportFiles.add(importPath);
       try {

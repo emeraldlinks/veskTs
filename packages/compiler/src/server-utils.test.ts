@@ -637,6 +637,47 @@ describe('evalTopLevelCode', () => {
 		evalTopLevelCode(['const broken = (;'], scope);
 		expect(scope.broken).toBeUndefined();
 	});
+
+	// A top-level TrackDecl (`const &[count] = track(0)`) is parser-only syntax:
+	// the `&` marker is still in the text, so the raw slice is invalid JS and
+	// `new Function` throws — which the eval's `catch` used to swallow, leaving
+	// the binding permanently undefined in the scope.
+	it('evaluates a top-level TrackDecl initializer', () => {
+		const scope = { track: () => [7, () => {}] };
+		evalTopLevelCode(['const &[count] = track(0)'], scope);
+		expect(scope.count).toBe(7);
+	});
+
+	it('evaluates a TrackDecl nested inside a top-level initializer', () => {
+		const scope = {
+			track: () => [3, () => {}],
+			leaf: (fn: any) => fn,
+		};
+		evalTopLevelCode(
+			['const Widget = leaf((props) => {\n\tconst &[count] = track(0)\n\treturn `${props.tag}:${count}`\n})'],
+			scope,
+		);
+		expect(typeof scope.Widget).toBe('function');
+		expect(scope.Widget({ tag: 'b' })).toBe('b:3');
+	});
+
+	it('evaluates a top-level function whose body uses TrackDecl', () => {
+		const scope = { track: () => [5, () => {}] };
+		evalTopLevelCode(['function make() {\n\tconst &[n] = track(0)\n\treturn n\n}'], scope);
+		expect(scope.make()).toBe(5);
+	});
+
+	it('evaluates several TrackDecls in one initializer', () => {
+		const scope = {
+			track: (n: number) => [n, () => {}],
+			leaf: (fn: any) => fn,
+		};
+		evalTopLevelCode(
+			['const W = leaf((p) => {\n\tconst &[a] = track(1)\n\tconst &[b] = track(2)\n\treturn a + b\n})'],
+			scope,
+		);
+		expect(scope.W({})).toBe(3);
+	});
 });
 
 // ── Script-safe serialization (XSS regression) ───────────────────

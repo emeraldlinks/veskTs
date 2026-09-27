@@ -4,7 +4,7 @@ import * as __defaultRuntimeModule from '@vesk/runtime/src/index-server';
 import { parse } from '@vesk/compiler/src/parser';
 import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { htmlTagName, htmlTagEnd } from '@vesk/compiler/src/scan';
-import { importModuleTarget, extractImportNames } from '@vesk/compiler/src/tokens';
+import { importModuleTarget, extractImportNames, stripTrackDeclMarkers } from '@vesk/compiler/src/tokens';
 
 const VOID_ELEMENTS = new Set([
   'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
@@ -1119,6 +1119,15 @@ export function loadRuntimeImports(importStrs: string[]): Record<string, unknown
   return {};
 }
 
+/** Binding name of one TrackDecl pattern element, or null for a hole. */
+function patternElementName(element: any): string | null {
+  if (!element) return null;
+  if (element.type === 'Identifier') return element.name;
+  if (element.type === 'AssignmentPattern' && element.left) return patternElementName(element.left);
+  if (element.type === 'RestElement' && element.argument) return patternElementName(element.argument);
+  return null;
+}
+
 export function evalTopLevelCode(topLevelCode: string[], __vesk: Record<string, unknown>): void {
   for (const code of topLevelCode) {
     const ast = tryParseTopLevel(code);
@@ -1129,8 +1138,17 @@ export function evalTopLevelCode(topLevelCode: string[], __vesk: Record<string, 
         if (!target) continue;
         if (target.type === 'VariableDeclaration') {
           for (const d of target.declarations) {
-            if (!d.id || d.id.type !== 'Identifier') continue;
-            const initSrc = d.init ? code.slice(d.init.start, d.init.end) : 'undefined';
+            if (!d.id) continue;
+            // A TrackDecl declarator's `id` is the parser's `lazy` ArrayPattern
+            // (`const &[count, rawCell] = track(0)`), not an Identifier. Its
+            // initializer yields a TUPLE, so each name takes its own index —
+            // the whole value is not bound to every name.
+            const isTrack = d.id.type === 'ArrayPattern' && d.id.lazy === true;
+            const names: (string | null)[] = isTrack
+              ? (d.id.elements || []).map(patternElementName)
+              : d.id.type === 'Identifier' ? [d.id.name] : [];
+            if (names.every((n) => n === null)) continue;
+            const initSrc = d.init ? stripTrackDeclMarkers(code.slice(d.init.start, d.init.end), d.init.start, d.init) : 'undefined';
             try {
               const keys = Object.keys(__vesk);
               const params = [...keys, '__vesk', 'result'];
@@ -1138,7 +1156,12 @@ export function evalTopLevelCode(topLevelCode: string[], __vesk: Record<string, 
               const fn = new Function(...params, body);
               const result = { value: undefined as unknown };
               fn(...keys.map(k => __vesk[k]), __vesk, result);
-              __vesk[d.id.name] = result.value;
+              names.forEach((name, i) => {
+                if (name === null) return;
+                __vesk[name] = isTrack
+                  ? (Array.isArray(result.value) ? (result.value as unknown[])[i] : undefined)
+                  : result.value;
+              });
             } catch {
               // skip evaluation errors
             }
@@ -1151,7 +1174,7 @@ export function evalTopLevelCode(topLevelCode: string[], __vesk: Record<string, 
             const paramSrc = target.params.length
               ? code.slice(target.params[0].start, target.params[target.params.length - 1].end)
               : '';
-            const bodySrc = code.slice(target.body.start, target.body.end);
+            const bodySrc = stripTrackDeclMarkers(code.slice(target.body.start, target.body.end), target.body.start, target.body);
             const asyncKw = target.async ? 'async ' : '';
             const fn = new Function(...params, `__vesk['${target.id.name}'] = ${asyncKw}function ${target.id.name}(${paramSrc}) ${bodySrc};`);
             fn(...keys.map(k => __vesk[k]), __vesk);

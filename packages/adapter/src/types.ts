@@ -53,4 +53,9 @@ export type {
   MdHtmlMode,
   MarkdownOptions,
   MdHtmlWarning,
+  VeskLeafComponent,
+  VeskPrimitiveComponent,
+  VeskTaggedLeafComponent,
+  VeskComponentRegistry,
+  VeskScope,
 } from '@vesk/types';

@@ -707,6 +707,48 @@ async function main() {
     const afterThree = await page.evaluate(() => document.querySelector('.helper-label')?.textContent?.trim() || '');
     assert(afterThree === 'Helper says 8', 'imported component persists state across clicks: "' + afterThree + '"');
 
+    // ── primitive() / leaf() component ABI ──
+    // A primitive is presentational and must survive the production hydration
+    // path: SSR'd, claimed, and re-rendered on the client without duplication.
+    const primBadges = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('.prim-badge')).map(b => b.textContent.trim())
+    );
+    assert(primBadges.length === 2, 'expected 2 SSR+hydrated prim-badge nodes, got ' + primBadges.length + ' — duplicate or missing nodes');
+    assert(primBadges[0] === 'no-label', 'primitive with no attributes rendered its fallback: "' + primBadges[0] + '"');
+    assert(primBadges[1] === 'with-label', 'primitive with an attribute rendered it: "' + primBadges[1] + '"');
+
+    // The zero-arg direct call — the case a hand-written component cannot survive.
+    const zeroArg = await page.evaluate(() => document.querySelector('.prim-zeroarg')?.textContent?.trim() || '');
+    assert(zeroArg === 'zero-arg:ok', 'zero-arg direct call did not throw: ' + JSON.stringify(zeroArg));
+
+    // A leaf() widget owns its own state and event handler; it must be live
+    // after hydration.
+    const suffix = await page.evaluate(() => document.querySelector('.prim-suffix')?.textContent?.trim() || '');
+    assert(suffix === '!', 'leaf component received its prop: "' + suffix + '"');
+    const beforeInc = await page.evaluate(() => document.querySelector('.prim-count')?.textContent?.trim() || '');
+    assert(beforeInc === '0', 'leaf component starts at 0: "' + beforeInc + '"');
+    await clickEl(page, '.prim-inc');
+    await new Promise(r => setTimeout(r, 200));
+    const afterInc = await page.evaluate(() => document.querySelector('.prim-count')?.textContent?.trim() || '');
+    assert(afterInc === '1', 'leaf component is reactive after hydration: "' + afterInc + '"');
+
+    // A multi-root primitive re-renders into a DIFFERENT root count. Every
+    // update has to splice a fresh range and drop the old one, repeatedly — a
+    // unit test's root only survives a single swap, so this is the real proof.
+    const pairRoots = () => page.evaluate(() =>
+      Array.from(document.querySelectorAll('.pair-host > *')).map(n => n.tagName + ':' + n.textContent.trim())
+    );
+    const pair0 = await pairRoots();
+    assert(pair0.length === 2 && pair0[0] === 'I:a0' && pair0[1] === 'B:b0',
+      'multi-root primitive rendered 2 roots: ' + JSON.stringify(pair0));
+    for (const [step, expected] of [[1, ['I:a1']], [2, ['I:a2', 'B:b2']], [3, ['I:a3']]]) {
+      await clickEl(page, '.pair-inc');
+      await new Promise(r => setTimeout(r, 200));
+      const got = await pairRoots();
+      assert(JSON.stringify(got) === JSON.stringify(expected),
+        `multi-root re-render #${step} expected ${JSON.stringify(expected)}, got ${JSON.stringify(got)}`);
+    }
+
     assert(errors.length === 0, 'zero JS errors (got ' + errors.length + ': ' + errors.join(', ') + ')');
     await page.close();
   }

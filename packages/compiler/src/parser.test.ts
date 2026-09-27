@@ -13,6 +13,7 @@
  * Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  */
 import { parse } from '@vesk/compiler/src/parser';
+import { tokenizeCode, findSpecifierExports, hasTopLevelValueDeclaration } from '@vesk/compiler/src/tokens';
 
 let passed = 0;
 let failed = 0;
@@ -1309,6 +1310,55 @@ describe('For-of key/index clauses and #empty blocks', () => {
 // Results
 // ============================================================
 console.log(`\n${'='.repeat(50)}`);
+// ── Standalone tokenizing must understand JSX ────────────────────────────────
+// `tokenizeCode` drives the tokenizer without the parser, so the plugin cannot
+// count component bodies the way a real parse does. When JSX tags were read as
+// relational operators, tokenizing threw, the `catch` returned null, and every
+// token consumer silently degraded — the visible symptom being
+// `Export 'X' is not defined` for a perfectly valid component file.
+describe('tokenizeCode with JSX in a component body', () => {
+	const withBody = (body) => `import { track } from '@vesk/runtime'\ncomponent App {\n${body}\n}\n`;
+
+	it('tokenizes a JSX element with text content after a declaration', () => {
+		const tokens = tokenizeCode(withBody('\tconst a = 1\n\t<button>x</button>'));
+		expect(tokens === null).toBe(false);
+		expect(Array.isArray(tokens)).toBe(true);
+	});
+
+	it('tokenizes a TrackDecl followed by a JSX element', () => {
+		const tokens = tokenizeCode(withBody('\tconst &[a] = track(0)\n\t<div>x</div>'));
+		expect(tokens === null).toBe(false);
+	});
+
+	it('tokenizes an inline arrow handler in a JSX attribute', () => {
+		const tokens = tokenizeCode(withBody('\tconst &[a] = track(0)\n\t<button onClick={() => a++}>x</button>'));
+		expect(tokens === null).toBe(false);
+	});
+
+	it('finds a same-file specifier export in a file with component bodies', () => {
+		const src = withBody('\tconst a = 1\n\t<button>x</button>') + 'export { App }\n';
+		const found = findSpecifierExports(src);
+		expect(found.length).toBe(1);
+		expect(found[0].local).toBe('App');
+	});
+
+	it('keeps `export { A }` for a local that really is a top-level binding', () => {
+		const src = 'const A = 1\nexport { A }\n';
+		expect(hasTopLevelValueDeclaration(src, 'A')).toBe(true);
+	});
+
+	it('a specifier export of a component parses (the reported symptom)', () => {
+		const src = `import { track } from '@vesk/runtime'\ncomponent App {\n\tconst a = 1\n\t<button>x</button>\n}\nexport { App }\n`;
+		let ok = true;
+		try {
+			parse(src, { filename: 'App.vsk' });
+		} catch {
+			ok = false;
+		}
+		expect(ok).toBe(true);
+	});
+});
+
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) {
 	process.exit(1);

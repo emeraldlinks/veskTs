@@ -9,13 +9,13 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.37-ci.1790272646859.tgz",
-    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.37-ci.1790272646859.tgz",
-    "@vesk/plugin-pwa": "file:./tarballs/vesk-plugin-pwa-0.2.37-ci.1790272646859.tgz",
-    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.37-ci.1790272646859.tgz",
-    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.37-ci.1790272646859.tgz",
-    "@vesk/types": "file:./tarballs/vesk-types-0.2.37-ci.1790272646859.tgz",
-    "vesk": "file:./tarballs/vesk-0.2.37-ci.1790272646859.tgz"
+    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.42-ci.1790490864054.tgz",
+    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.42-ci.1790490864054.tgz",
+    "@vesk/plugin-pwa": "file:./tarballs/vesk-plugin-pwa-0.2.42-ci.1790490864054.tgz",
+    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.42-ci.1790490864054.tgz",
+    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.42-ci.1790490864054.tgz",
+    "@vesk/types": "file:./tarballs/vesk-types-0.2.42-ci.1790490864054.tgz",
+    "vesk": "file:./tarballs/vesk-0.2.42-ci.1790490864054.tgz"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

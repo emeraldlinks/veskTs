@@ -16,7 +16,7 @@ import {
 import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
-import { collectVskImportPaths } from '@vesk/compiler/src/vsk-imports';
+import { collectVskImportPaths, collectVskReexportPaths, vskRegistryAliases, applyVskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { applyLocalModuleImports } from '@vesk/compiler/src/module-imports';
@@ -50,7 +50,11 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
   const __vesk = loadRuntimeImports(ir.imports);
   applyLocalModuleImports(__vesk, ir.imports, sourcePath);
   if (sourcePath) {
-    for (const importPath of collectVskImportPaths(ir.imports, sourcePath)) {
+    const vskPaths = [
+      ...collectVskImportPaths(ir.imports, sourcePath),
+      ...collectVskReexportPaths(ir.reexportSources, sourcePath),
+    ];
+    for (const importPath of vskPaths) {
       if (seenImportFiles.has(importPath)) continue;
       seenImportFiles.add(importPath);
       // Only truly unresolvable imports are skipped. A `.vsk` file that EXISTS
@@ -77,6 +81,9 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
     }
   }
   evalTopLevelCode(transformTopLevelForActions(ir.topLevelCode, 'server'), __vesk);
+  // `export { A as B }` and `import { A as B } from './x.vsk'` are registry
+  // aliases, not emitted JS — register them once every sub-file has merged in.
+  applyVskRegistryAliases(componentMap, vskRegistryAliases(ir.imports, ir.exportAliases));
   // Sub-file components arrive pre-scoped from the recursive call below;
   // scope the remaining (own) components to this file's bindings.
   for (const name of ownComponentNames) {

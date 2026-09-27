@@ -21,6 +21,21 @@ export class IRRoot {
   staticProps: string | null;
   loadFn: string | null;
   topLevelCode: string[];
+  /**
+   * Same-file specifier exports (`export { A }`, `export { A as B }`) as
+   * `{ local, exported }` pairs. These are NOT emitted as JS: components live
+   * in the component registry rather than as top-level bindings, so a raw
+   * `export { A }` would reference an undefined identifier. The pairs become
+   * registry alias entries so the exported name is importable.
+   */
+  exportAliases: Array<{ local: string; exported: string }>;
+  /**
+   * Module specifiers re-exported from this file (`export * from './x.vsk'`,
+   * `export { A } from './x.vsk'`, `export * as ns from './x.vsk'`). The
+   * statements themselves are dropped — the target file is compiled and
+   * merged into this one's component registry instead.
+   */
+  reexportSources: string[];
 
   constructor(
     components: ComponentIR[],
@@ -28,7 +43,9 @@ export class IRRoot {
     importedNames: Set<string> = new Set(),
     staticProps: string | null = null,
     loadFn: string | null = null,
-    topLevelCode: string[] = []
+    topLevelCode: string[] = [],
+    exportAliases: Array<{ local: string; exported: string }> = [],
+    reexportSources: string[] = []
   ) {
     this.components = components;
     this.imports = imports;
@@ -36,6 +53,8 @@ export class IRRoot {
     this.staticProps = staticProps;
     this.loadFn = loadFn;
     this.topLevelCode = topLevelCode;
+    this.exportAliases = exportAliases;
+    this.reexportSources = reexportSources;
   }
 }
 

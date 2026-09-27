@@ -1,0 +1,60 @@
+// Primitive vs leaf — the two component-authoring styles sharing one ABI.
+//
+// `primitive()` builds a presentational component that is also safe to call as
+// a plain function with no arguments; `leaf()` tags a stateful widget that
+// implements the (props, __registry, scope) ABI directly. `primitive` and `leaf`
+// are auto-imported from '@vesk/runtime' inside components, but this file uses
+// them at module top level, so the import is explicit.
+
+import { primitive, leaf, track } from '@vesk/runtime'
+
+// Presentational + zero-arg safe: reading props.children must not throw even
+// when the component is called directly as `PrimBadge()` with no props.
+const PrimBadge = primitive((props) => `<span class="prim-badge">${props.label ?? 'no-label'}</span>`)
+
+// Behavioural: owns its own tracked state, so it implements the leaf ABI rather
+// than the primitive contract.
+//
+// A leaf returns its markup as a string, which is injected verbatim — there is
+// no delegated event layer to bind an inline `onClick` to, and an inline
+// handler in that string would be inert markup (and an SSR-HTML violation).
+// The page therefore drives the leaf through a prop with a normal `onClick`
+// button, and this leaf's own `track` is what makes it re-render reactively.
+const PrimCounter = leaf((props) => {
+	const &[local] = track(0)
+	return `<div class="prim-counter">
+		<span class="prim-count">${local + (props.bump ?? 0)}</span>
+		<span class="prim-suffix">${props.suffix ?? ''}</span>
+	</div>`
+})
+
+// A multi-root primitive: the number of roots changes with the prop, so every
+// re-render has to splice a fresh range and drop the old one. A single-root
+// swap cannot express this, which is why it is worth its own assertion.
+const PrimPair = primitive((props) => {
+	if (props.n % 2 === 0) { return `<i class="pair-a">a${props.n}</i><b class="pair-b">b${props.n}</b>` }
+	return `<i class="pair-a">a${props.n}</i>`
+})
+
+component PrimBadgeUse {
+	// The zero-arg direct call — only safe because of primitive(). A hand-written
+	// `function B(props) { return props.children }` throws here. The result is
+	// reduced to a plain string so the assertion does not depend on raw-HTML
+	// injection (a `{…}` container escapes, by design).
+	const zeroArg = PrimBadge()
+	const &[bump] = track(0)
+	// Called as a component tag with no attributes — the compiler passes `{}`.
+	<PrimBadge />
+	// Called as a component tag WITH an attribute.
+	<PrimBadge label="with-label" />
+	<p class="prim-zeroarg">zero-arg:{zeroArg.includes('no-label') ? 'ok' : 'bad'}</p>
+	<button class="prim-inc" onClick={() => bump++}>+1</button>
+	<PrimCounter bump={bump} suffix="!" />
+	const &[pairN] = track(0)
+	<button class="pair-inc" onClick={() => pairN++}>+1</button>
+	<div class="pair-host">
+		<PrimPair n={pairN} />
+	</div>
+}
+
+export { PrimBadge, PrimCounter, PrimPair, PrimBadgeUse }

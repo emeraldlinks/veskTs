@@ -165,6 +165,25 @@ export class VeskError extends Error {
     });
   }
 
+  static vskNamespaceTag(context: VeskErrorOptions = {}): VeskError {
+    return new VeskError(
+      'Namespace imports are not supported for `.vsk` modules.',
+      {
+        ...context,
+        code: context.code || 'V0410',
+        suggestions: [
+          "Import the component by name: import { MyIcon } from './icons.vsk'",
+          "Rename on import: import { MyIcon as Icon } from './icons.vsk'",
+        ],
+        nextSteps: [
+          'A `.vsk` component is a registry entry keyed by its name, not a module namespace object, so `<ns.Icon />` cannot be resolved.',
+          'If you need a namespace object, import from a `.ts`/`.js` module instead — those are real ES modules.',
+        ],
+        tip: 'A `.vsk` module exposes its components as named exports; use a named or renamed import rather than `import * as ns`.',
+      },
+    );
+  }
+
   static classDecl(context: VeskErrorOptions = {}): VeskError {
     return new VeskError(
       'class declarations are not supported inside Vesk components.',

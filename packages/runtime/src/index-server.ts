@@ -13,6 +13,8 @@ export { Experiment } from '@vesk/runtime/src/experiment';
 export { Form, Field, required, email, minLength, maxLength, pattern, custom } from '@vesk/runtime/src/form';
 export { Md } from '@vesk/runtime/src/md';
 export { Show, For, Switch, Match } from '@vesk/runtime/src/headless';
+export { primitive, leaf, isPrimitive, isLeaf, isVeskComponent, toDomNode, rerenderNode } from '@vesk/runtime/src/primitive';
+export type { VeskLeafComponent, VeskPrimitiveComponent, VeskTaggedLeafComponent, VeskComponentRegistry, VeskScope } from '@vesk/types';
 export { LoadingIndicator, useLoadingIndicator, configureLoadingIndicator, getLoadingProgress, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 export type { LoadingIndicatorHandle, LoadingIndicatorOptions, LoadingIndicatorProps } from '@vesk/runtime/src/loading-indicator';
 export { defineAction, getAction, clearActions, validateActionInput, issuesToFieldMap, isFormAction } from '@vesk/runtime/src/action';

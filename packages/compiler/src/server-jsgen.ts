@@ -15,6 +15,7 @@ import {
   __vskHydrate, __vskMarkerless, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
 import { localValueImportNames } from '@vesk/compiler/src/module-imports';
+import { vskImportValueNames } from '@vesk/compiler/src/vsk-imports';
 
 // Hydrate-mode component-boundary wrapper. Each server-rendered component call
 // is preceded by a `<!--vsk-->` marker and a single container element: the
@@ -579,7 +580,13 @@ export function buildComponentEntries(irRoot: IRRoot): ComponentMapEntry[] {
   const importedNames = new Set([...runtimeNames, ...localValueNames, ...topValueNames]);
   const hasTracked = irRoot.components.some((c) => c.body.some((n) => n instanceof TrackDecl));
   const extraNames = hasTracked ? ['get', 'set', 'track'] : [];
-  const allNames = [...new Set([...runtimeNames, ...topNames, ...extraNames, ...localValueNames])];
+  // Values exported by a `.vsk` module (`export const MAX = 10`) are hoisted
+  // into this file's `__vesk` and must be destructured into component scope.
+  // They are excluded from `importedNames` above: a name imported from a `.vsk`
+  // file may name a component, and components must keep resolving through the
+  // registry rather than a scope local.
+  const vskValueNames = vskImportValueNames(irRoot.imports);
+  const allNames = [...new Set([...runtimeNames, ...topNames, ...extraNames, ...localValueNames, ...vskValueNames])];
   const scopeDecl = allNames.length > 0 ? `const { ${allNames.join(', ')} } = __vesk;\n` : '';
   setVskImportedNames(importedNames);
   const entries: ComponentMapEntry[] = [];

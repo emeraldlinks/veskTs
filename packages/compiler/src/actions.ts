@@ -3,6 +3,7 @@ import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
 import { parse } from '@vesk/compiler/src/parser';
 import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement, stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { stripTrackDeclMarkers } from '@vesk/compiler/src/tokens';
 
 export interface ActionInfo {
   id: string;
@@ -117,10 +118,25 @@ function printWithTypesStripped(ast: any, code: string, hadTs = hasTsSyntax(ast)
 export function transformTopLevelForActions(topLevelCode: string[], mode: 'server' | 'client'): string[] {
   const out: string[] = [];
   for (const c of topLevelCode) {
-    const rewritten = rewriteTopLevelActions(c, mode);
+    // A top-level TrackDecl (`const &[count] = track(0)`) is parser-only syntax:
+    // the `&` is still in this text, and both consumers are plain JavaScript
+    // engines — `new Function` on the server, a browser module parse for the
+    // client. Blank the markers before either sees the code.
+    const rewritten = rewriteTopLevelActions(stripTopLevelTrackDecls(c), mode);
     if (rewritten !== '') out.push(rewritten);
   }
   return out;
+}
+
+/** Remove TrackDecl `&` markers from a top-level code chunk. */
+function stripTopLevelTrackDecls(code: string): string {
+  let ast: any;
+  try {
+    ast = parse(code);
+  } catch {
+    return code;
+  }
+  return stripTrackDeclMarkers(code, 0, ast);
 }
 
 /** Collect the stable action ids defined by a page source (for the manifest). */

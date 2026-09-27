@@ -5,6 +5,7 @@ import { tsPlugin } from './acorn-ts-plugin/index.js';
 import { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
 import { blankComments, containsForOfIn } from '@vesk/compiler/src/scan';
 import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
+import { findSpecifierExports, hasTopLevelValueDeclaration } from '@vesk/compiler/src/tokens';
 
 export interface ParseOptions {
   filename?: string;
@@ -258,8 +259,28 @@ export function createBaseParser(): typeof acorn.Parser {
 export function parse(source: string, options: ParseOptions = {}): Program {
   const ParserClass = createBaseParser();
   const { code, annotations } = preprocessForClauses(blankComments(source));
+  // Acorn validates that every `export { X }` names a real top-level binding.
+  // A `.vsk` component is a registry entry, not a binding, so acorn rejects
+  // `export { MyComponent }`. Remove only those specifier lists — one whose
+  // local IS a real declaration keeps native module semantics — and carry the
+  // pairs on the AST; the IR generator turns them into registry aliases.
+  const vskSource = !options.filename || String(options.filename).endsWith('.vsk');
+  const specifierExports = vskSource
+    ? findSpecifierExports(code).filter((e) => !hasTopLevelValueDeclaration(code, e.local))
+    : [];
+  let parseable = code;
+  if (specifierExports.length > 0) {
+    const edits = specifierExports
+      .map((e) => code.slice(e.start, e.end))
+      .map((text) => text.split('').map((ch) => (ch === '\n' ? '\n' : ' ')).join(''));
+    let cut = 0;
+    for (const spec of specifierExports) {
+      const blanked = edits[cut++];
+      parseable = parseable.slice(0, spec.start) + blanked + parseable.slice(spec.end);
+    }
+  }
   try {
-    const ast = (ParserClass as unknown as { parse(input: string, opts: Options): Program }).parse(code, {
+    const ast = (ParserClass as unknown as { parse(input: string, opts: Options): Program }).parse(parseable, {
       ecmaVersion: 'latest',
       sourceType: 'module',
       locations: true,
@@ -268,6 +289,11 @@ export function parse(source: string, options: ParseOptions = {}): Program {
     } as Options);
     if (annotations.length > 0) {
       (ast as unknown as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations = annotations;
+    }
+    if (specifierExports.length > 0) {
+      (ast as unknown as { __vskSpecifierExports?: Array<{ local: string; exported: string }> }).__vskSpecifierExports = specifierExports.map(
+        (e) => ({ local: e.local, exported: e.exported })
+      );
     }
     return ast;
   } catch (e) {

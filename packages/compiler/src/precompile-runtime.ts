@@ -25,6 +25,7 @@ import {
   HeadBlock,
 } from '@vesk/compiler/src/ir';
 import { loadRuntimeImports, evalTopLevelCode } from '@vesk/compiler/src/server-utils';
+import { applyVskRegistryAliases, vskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
 import type { BundledModuleData, ModuleBindingData } from '@vesk/compiler/src/module-imports';
 
 type ScopedFn = Function & { __veskScope?: Record<string, unknown> };
@@ -264,6 +265,10 @@ function hydrateFile(plan: PrecompileFilePlan, seen: Set<string>): CompileFileRe
       __vesk[key] = subResult.__vesk[key];
     }
   }
+
+  // `export { A as B }` / `import { A as B } from './x.vsk'` are registry
+  // aliases, not emitted JS — register them once every sub-file has merged in.
+  applyVskRegistryAliases(componentMap, vskRegistryAliases(plan.runtimeImports || [], ir.exportAliases));
 
   return { ir, componentMap, __vesk };
 }

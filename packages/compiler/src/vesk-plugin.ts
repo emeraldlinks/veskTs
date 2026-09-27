@@ -186,6 +186,25 @@ function matchKeywordSequence(input: string, words: string[]): boolean {
   return isWsChar(c) || c === 123;
 }
 
+/**
+ * True only while `tokenizeCode` drives the tokenizer directly. Acorn's
+ * `getOptions` copies only known option keys, so the request cannot travel on
+ * the options object — it is scoped here instead. Tokenizing is synchronous,
+ * so the save/restore is safe.
+ */
+let standaloneTokens = false;
+
+/** Runs `fn` with JSX tag recognition enabled without a parser driving it. */
+export function withStandaloneTokens<T>(fn: () => T): T {
+  const prev = standaloneTokens;
+  standaloneTokens = true;
+  try {
+    return fn();
+  } finally {
+    standaloneTokens = prev;
+  }
+}
+
 export function VeskParserPlugin(config: VeskPluginConfig = {}) {
   return (Parser: typeof acorn.Parser): typeof acorn.Parser => {
     const tt = (Parser as any).tokTypes || acorn.tokTypes;
@@ -203,6 +222,16 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
 
       constructor(options: Options, input: string) {
         super(options, input);
+        // The standalone tokenizer (`tokenizeCode`) drives `getToken()` without
+        // ever running the parser, so `component X { … }` never raises
+        // #componentDepth and every JSX tag would be read as relational
+        // operators. Callers that only need a token stream still need JSX, so
+        // they opt in explicitly; parser-driven parses are unaffected.
+      }
+
+      /** True when JSX tags are recognised without parser-driven componentDepth. */
+      #jsxAllowed(): boolean {
+        return this.#componentDepth > 0 || standaloneTokens;
       }
 
       #isBlockContext(): boolean {
@@ -412,7 +441,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           }
           return super.readToken(this.input.codePointAt(this.pos) as number);
         }
-        if (this.#componentDepth > 0 && code === 60 && this.#isBlockContext()) {
+        if (this.#jsxAllowed() && code === 60 && this.#isBlockContext()) {
           const next = this.input.charCodeAt(this.pos + 1);
           const startsNewStatement = (this as any).hasPrecedingLineBreak();
           const inType = (this as any).inType;

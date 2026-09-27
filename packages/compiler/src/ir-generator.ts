@@ -381,6 +381,37 @@ function getJSXTagName(nameNode: { type: string; name?: string; object?: any; pr
   return 'unknown';
 }
 
+/** Root identifier of a dotted JSX tag: `NS.Icon` -> `NS`. */
+function jsxTagRootName(nameNode: any): string {
+  let node = nameNode;
+  while (node && node.type === 'JSXMemberExpression') node = node.object;
+  return node && node.type === 'JSXIdentifier' ? node.name! : '';
+}
+
+// Set for the duration of one `generateIR` call so `processJSXElement` — which
+// is reached from eleven call sites and would otherwise need a context
+// parameter threaded through all of them — can reject `<ns.Tag />` for a
+// `import * as ns from './x.vsk'`.
+let currentVskNamespaceLocals: Set<string> | null = null;
+let currentSourceFile: string | undefined;
+
+/**
+ * Local names bound by `import * as ns from './x.vsk'`. Only `.vsk` targets are
+ * collected — a namespace import from a real module (`./x.ts`, a package) is a
+ * genuine object and `<ns.Tag />` works there.
+ */
+function collectVskNamespaceLocals(ast: any): Set<string> {
+  const out = new Set<string>();
+  for (const node of (ast.body || []) as any[]) {
+    if (node.type !== 'ImportDeclaration') continue;
+    if (typeof node.source?.value !== 'string' || !node.source.value.endsWith('.vsk')) continue;
+    for (const spec of node.specifiers || []) {
+      if (spec.type === 'ImportNamespaceSpecifier' && spec.local?.name) out.add(spec.local.name);
+    }
+  }
+  return out;
+}
+
 function isHTMLTag(name: string): boolean {
   return name.length > 0 && name[0] === name[0].toLowerCase();
 }
@@ -860,7 +891,6 @@ function processJSXElement(source: string, element: any): IRNode[] {
   const nameNode = element.openingElement.name;
   const tagName = getJSXTagName(nameNode);
   const selfClosing = element.openingElement.selfClosing;
-
   if (tagName === 'Head') {
     const children = selfClosing ? [] : processJSXChildren(source, element.children || []);
     return [new HeadBlock(children)];
@@ -872,6 +902,11 @@ function processJSXElement(source: string, element: any): IRNode[] {
   // actual in-scope value instead of `document.createElement("it.icon")` or a
   // registry lookup by dotted string.
   if (nameNode && nameNode.type === 'JSXMemberExpression') {
+    const root = jsxTagRootName(nameNode);
+    if (currentVskNamespaceLocals && currentVskNamespaceLocals.has(root)) {
+      const { line, column } = offsetToLineCol(source, (nameNode as unknown as { start: number }).start ?? 0);
+      throw VeskError.vskNamespaceTag({ file: currentSourceFile, line, column, code: codeFrame(source, line, column) });
+    }
     const { props, spreadProps, slots } = extractProps(source, element);
     const children = selfClosing ? [] : processJSXChildren(source, element.children || []);
     return [new ComponentCall(tagName, props, [...children, ...slots.map((s) => new PropSlot(s.name, s.nodes))], spreadProps, element.start, getSource(source, nameNode))];
@@ -1353,8 +1388,29 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
   let staticProps: string | null = null;
   let loadFn: string | null = null;
   const topLevelCode: string[] = [];
+  const exportAliases: Array<{ local: string; exported: string }> = [];
+  const reexportSources: string[] = [];
 
-  for (const node of ast.body) {
+  // `export { A }` / `export { A as B }` are stripped by the parser (acorn
+  // rejects a module export that names no top-level binding, and a `.vsk`
+  // component is a registry entry, not a binding). The pairs ride along on the
+  // AST and become registry aliases below.
+  for (const pair of ((ast as unknown as { __vskSpecifierExports?: Array<{ local: string; exported: string }> })
+    .__vskSpecifierExports) || []) {
+    exportAliases.push({ local: pair.local, exported: pair.exported });
+  }
+
+  // `import * as ns from './x.vsk'` has no runtime binding: a `.vsk` component
+  // is a registry entry, not a module namespace object. Pre-scan the import
+  // declarations so a `<ns.Tag />` can be reported clearly instead of failing
+  // later as an opaque "ns is not defined".
+  const vskNamespaceLocals = collectVskNamespaceLocals(ast);
+  const prevNamespaceLocals = currentVskNamespaceLocals;
+  const prevSourceFile = currentSourceFile;
+  currentVskNamespaceLocals = vskNamespaceLocals;
+  currentSourceFile = file;
+  try {
+    for (const node of ast.body) {
     if (node.type === 'ImportDeclaration') {
       const raw = getSource(source, node);
       let cleaned = stripTypeImport(raw);
@@ -1408,6 +1464,47 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
           continue;
         }
       }
+    }
+
+    if (node.type === 'ExportNamedDeclaration' && !node.declaration) {
+      // A specifier-only export (`export { A }`, `export { A as B }`) or a
+      // re-export (`export { A } from './x.vsk'`, `export { default as A } from …`).
+      // Never emit the raw statement: components are registry entries, not
+      // top-level bindings, so emitting it yields `Export 'A' is not defined`.
+      if (node.source) {
+        if (typeof node.source.value === 'string') reexportSources.push(node.source.value);
+        // `export { A as B } from './x.vsk'`: the target's components merge into
+        // this file's registry under their own names, so the specifier is the
+        // same canonical -> alias mapping a same-file export would produce.
+        for (const spec of node.specifiers || []) {
+          if (spec.type === 'ExportSpecifier') {
+            const localName = spec.local && (spec.local as unknown as { name?: string }).name;
+            const exportedName = spec.exported && (spec.exported as unknown as { name?: string }).name;
+            if (typeof localName === 'string' && typeof exportedName === 'string') {
+              exportAliases.push({ local: localName, exported: exportedName });
+            }
+          }
+        }
+        continue;
+      }
+      for (const spec of node.specifiers || []) {
+        if (spec.type === 'ExportSpecifier') {
+          const localName = spec.local && (spec.local as any).name;
+          const exportedName = spec.exported && (spec.exported as any).name;
+          if (typeof localName === 'string' && typeof exportedName === 'string') {
+            exportAliases.push({ local: localName, exported: exportedName });
+          }
+        }
+      }
+      continue;
+    }
+
+    if (node.type === 'ExportAllDeclaration') {
+      // `export * from './x.vsk'` / `export * as ns from './x.vsk'`: resolve the
+      // target into this file's component registry instead of emitting a bare
+      // re-export that no bundler can satisfy for `.vsk` modules.
+      if (node.source && typeof node.source.value === 'string') reexportSources.push(node.source.value);
+      continue;
     }
 
     let inner = node;
@@ -1532,6 +1629,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     'redirect', 'permanentRedirect', 'notFound', 'NotFoundError',
     'createResource', 'getAction', 'validateActionInput', 'issuesToFieldMap', 'isFormAction',
     'Show', 'For', 'Switch', 'Match',
+    'primitive', 'leaf',
   ];
   // One walk of the already-parsed tree finds every auto-importable call
   // target and JSX element name. Every IR raw the old per-fragment scan
@@ -1563,5 +1661,9 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     }
   }
 
-  return new IRRoot(components, imports, importedNames, staticProps, loadFn, topLevelCode);
+  return new IRRoot(components, imports, importedNames, staticProps, loadFn, topLevelCode, exportAliases, reexportSources);
+  } finally {
+    currentVskNamespaceLocals = prevNamespaceLocals;
+    currentSourceFile = prevSourceFile;
+  }
 }

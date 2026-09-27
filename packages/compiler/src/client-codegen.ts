@@ -32,6 +32,7 @@ import { extractRuntimeNames, extractTopLevelNames } from '@vesk/compiler/src/se
 import { importBindingPairs, localValueImportNames } from '@vesk/compiler/src/module-imports';
 import { stripTrackGeneric } from '@vesk/compiler/src/scan';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
+import { collectVskReexportPaths, vskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdImportsFrom } from '@vesk/compiler/src/md-inline';
 import { stripTsTypes, hasTsSyntax } from '@vesk/compiler/src/strip-ts';
 
@@ -63,6 +64,62 @@ function simpleGetName(expr: string): string | null {
     if (!ok) return null;
   }
   return inner;
+}
+
+const BINDING_REF_CALLS = ['bindValue', 'bindChecked', 'bindGroup'];
+
+/**
+ * A binding ref (`bindValue`/`bindChecked`/`bindGroup`) two-way-binds the raw
+ * tracked CELL — the web runtime expects the cell object, never its current
+ * value. transformTracked rewrites a virtual tracked name read to
+ * `get(cell)`, so `ref={bindValue(name)}` would compile to
+ * `bindValue(get(cell))` and hand the binding the cell's value. Untrack the
+ * first argument back to the bare cell name (`bindValue(cell)`), mirroring
+ * how a plain `ref={cell}` emits `set(cell, el)`. Function-form bindings
+ * (`bindValue(() => get(x), v => set(x, v))`) never start with `get(` and
+ * pass through unchanged. String scan only — no regex.
+ */
+function untrackBindingArg(expr: string): string {
+  let head = -1;
+  for (const name of BINDING_REF_CALLS) {
+    if (expr.startsWith(`${name}(`)) {
+      head = name.length;
+      break;
+    }
+  }
+  if (head < 0) return expr;
+  const rest = expr.slice(head + 1);
+  if (rest[0] !== 'g' || rest[1] !== 'e' || rest[2] !== 't' || rest[3] !== '(') return expr;
+  let i = 4;
+  let word = '';
+  for (; i < rest.length; i++) {
+    const c = rest.charCodeAt(i);
+    const ok = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c === 95 || c === 36;
+    if (!ok) break;
+    word += rest[i];
+  }
+  if (word.length === 0 || rest[i] !== ')') return expr;
+  const after = i + 1;
+  if (rest[after] !== ',' && rest[after] !== ')') return expr;
+  return expr.slice(0, head + 1) + word + rest.slice(after);
+}
+
+/**
+ * For a `ref=` binding whose expression resolves to a tracked cell — either a
+ * virtual name (`ref={box}` → emitted `get(boxCell)`) or the raw cell
+ * (`ref={boxCell}` → emitted `boxCell`) — the compiled mount must SET the cell
+ * to the element, not call the cell's current value. The old `(get(x))(el)`
+ * call form is only correct for function refs (`ref={el => x = el}`).
+ * Returns the cell name to assign, or null to keep the call form.
+ */
+function trackedRefTarget(expr: string, tracked: Map<string, TrackedInfo>): string | null {
+  const cell = simpleGetName(expr);
+  if (cell !== null) return cell;
+  if (/^[A-Za-z_$][\w$]*$/.test(expr)) {
+    const info = tracked.get(expr);
+    if (info && info.kind === 'cell' && info.cellName === expr) return expr;
+  }
+  return null;
 }
 
 export interface TrackedInfo {
@@ -184,6 +241,25 @@ export function transformTracked(irNode: Expression | RuntimeStatement | Dynamic
       }
       return context.next();
     },
+    Property(node: any, context: any) {
+      // Shorthand `{ bump }` shares ONE node for key and value, so the key
+      // skip below cannot apply. Rewriting the value makes the property
+      // non-shorthand, and the shorthand flag has to go with it — otherwise
+      // the printer emits `get(cell): get(cell)`, which is not parseable.
+      if (node.shorthand && node.value && node.value.type === 'Identifier' && !node.computed) {
+        const info = context.state.get(node.value.name);
+        if (info && info.kind === 'virtual') {
+          return {
+            ...node,
+            shorthand: false,
+            value: callExpr({ type: 'Identifier', name: 'get' } as const, [
+              { type: 'Identifier', name: info.cellName },
+            ]),
+          };
+        }
+      }
+      return context.next();
+    },
     Identifier(node: any, context: any) {
       const parent = context.path.at(-1);
       if (parent) {
@@ -212,6 +288,18 @@ export function transformTracked(irNode: Expression | RuntimeStatement | Dynamic
           parent.key &&
           parent.key.type === 'Identifier' &&
           parent.key.name === 'into'
+        )
+          return context.next();
+        // A non-computed, non-shorthand property KEY is a name, not a read:
+        // `{ bump: bump }` must keep the key `bump` even when `bump` is a
+        // tracked cell — rewriting it yields the unparseable
+        // `{ get(bump): get(bump) }`. Shorthand keys are the value node, so
+        // they fall through to the rewrite below (with `shorthand` cleared).
+        if (
+          parent.type === 'Property' &&
+          parent.key === node &&
+          !parent.computed &&
+          !parent.shorthand
         )
           return context.next();
         if (
@@ -250,6 +338,42 @@ export function collectTrackedNames(body: IRNode[]): Map<string, TrackedInfo> {
     }
   }
   return names;
+}
+
+/**
+ * Collect the tracked bindings a prop expression READS, so a string-returning
+ * component call can be re-rendered when one of them changes.
+ *
+ * `primitive()` / `leaf()` bodies run once and their markup is converted once,
+ * so a tracked read inside them subscribes nothing. The call site passes the
+ * deps to {@link rerenderNode}, which re-reads them inside an effect.
+ *
+ * Property keys and member properties (`obj.bump`, `x.set(...)`) are not
+ * tracked reads — only the object positions are, matching `transformTracked`.
+ */
+export function collectTrackedDeps(value: unknown, tracked: Map<string, TrackedInfo>): string[] {
+  const ast = (value as { ast?: unknown } | null | undefined)?.ast;
+  if (!ast || typeof ast !== 'object' || tracked.size === 0) return [];
+  const found: string[] = [];
+  const seen = new Set<string>();
+  walk(ast as ESTreeNode, tracked, {
+    Identifier(node, context) {
+      const parent = context.path.at(-1) as
+        | { type: string; computed?: boolean; property?: unknown; key?: unknown }
+        | undefined;
+      if (parent) {
+        if (parent.type === 'MemberExpression' && !parent.computed && parent.property === node) return context.next();
+        if (parent.type === 'Property' && parent.key === node) return context.next();
+      }
+      const info = context.state.get(node.name);
+      if (info && !seen.has(node.name)) {
+        seen.add(node.name);
+        found.push(node.name);
+      }
+      return context.next();
+    },
+  });
+  return found;
 }
 
 /**
@@ -606,8 +730,9 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
         const target = attr.target || '';
         const isEvent = target.startsWith('on') && target.length > 2;
         if (target === 'ref') {
-          const expr = transformTracked(attr.expression as any, tracked);
-          ctx.push(`(${expr})(${ssrEl});`);
+          const expr = untrackBindingArg(transformTracked(attr.expression as any, tracked));
+          const cell = trackedRefTarget(expr, tracked);
+          ctx.push(cell !== null ? `set(${cell}, ${ssrEl});` : `(${expr})(${ssrEl});`);
         } else if (isEvent) {
           const eventName = target.slice(2).toLowerCase();
           const handler = transformTracked(attr.expression as any, tracked);
@@ -688,8 +813,9 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     const target = attr.target || '';
     const isEvent = target.startsWith('on') && target.length > 2;
     if (target === 'ref') {
-      const expr = transformTracked(attr.expression as any, tracked);
-      ctx.push(`(${expr})(${el});`);
+      const expr = untrackBindingArg(transformTracked(attr.expression as any, tracked));
+      const cell = trackedRefTarget(expr, tracked);
+      ctx.push(cell !== null ? `set(${cell}, ${el});` : `(${expr})(${el});`);
     } else if (isEvent) {
       const eventName = target.slice(2).toLowerCase();
       const handler = transformTracked(attr.expression as any, tracked);
@@ -944,7 +1070,31 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
   // as `children`: a fresh DocumentFragment per slot hoisted from the IR.
   const slotChildren = node.children.filter((c): c is PropSlot => c instanceof PropSlot);
   const regChildren = node.children.filter((c) => !(c instanceof PropSlot));
-  const callArgs = () => `{ ${propsEntries.join(', ')} }`;
+  // Call targets that are not known compiled components (imported values,
+  // member-expression tags) cannot claim, so the caller adopts their SSR root
+  // itself. They also do not run the `props = reactiveProps(props)` prologue
+  // that compiled components carry, so tracked cells passed as props would
+  // reach them raw — the server unwraps them, so a `primitive()`/`leaf()`
+  // reading `props.bump` would render `0[object Object]` on the client only.
+  // Wrap the literal here to keep both sides reading values.
+  const plainTarget = !!(calleeExpr || ctx.importedNames.has(node.componentName)) && !ctx.selfClaimNames.has(node.componentName);
+  // Tracked bindings this call's markup is derived from. Only a plain target
+  // needs them: a compiled component re-runs its own bindings, but a
+  // `primitive()`/`leaf()`/imported helper that READS a cell through
+  // `reactiveProps` would otherwise leave its markup stale forever.
+  const trackedDeps: string[] = [];
+  if (plainTarget) {
+    for (const p of node.props) {
+      if (typeof p.value === 'string') continue;
+      for (const d of collectTrackedDeps(p.value, tracked)) if (!trackedDeps.includes(d)) trackedDeps.push(d);
+    }
+    for (const sp of node.spreadProps) {
+      for (const d of collectTrackedDeps(sp, tracked)) if (!trackedDeps.includes(d)) trackedDeps.push(d);
+    }
+  }
+  const callArgs = () => (plainTarget
+    ? `reactiveProps({ ${propsEntries.join(', ')} })`
+    : `{ ${propsEntries.join(', ')} }`);
   if (ctx.hydrate) {
     const access = calleeExpr
       ?? (ctx.importedNames.has(node.componentName)
@@ -964,7 +1114,6 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     // compiled components (imported values, member-expression tags) cannot
     // claim, so after the call we adopt their SSR root ourselves and replace it
     // with the fresh node they returned — never a duplicate, never a box.
-    const plainTarget = !!(calleeExpr || ctx.importedNames.has(node.componentName)) && !ctx.selfClaimNames.has(node.componentName);
     const walkerArg = ctx.walker;
     // Markerless value-thread offset (Phase 3.c): the residue that precedes THIS
     // call site — a static sibling the walker never claimed (`skipK`), or a
@@ -982,13 +1131,21 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       : null;
     const maybeReplace = (v: string) => {
       if (!plainTarget) return;
-      // nodeType 11 = DocumentFragment: self-claiming imports (Link/Md/Form)
+      // nodeType 11 = DocumentFragment. Self-claiming imports (Link/Md/Form)
       // return a fragment when they adopted their SSR root, so there is nothing
-      // to replace — claiming here would steal the NEXT sibling's root.
+      // to replace — claiming here would steal the NEXT sibling's root. Those
+      // are excluded by `plainTarget` above, so a fragment reaching this branch
+      // is a plain target that returned SEVERAL roots (a leaf/primitive string
+      // with siblings in it) and its children must be spliced in. Branch on the
+      // runtime nodeType rather than guessing at the target's authoring style.
       const claim = promptExpr
         ? `${walkerArg}.claimOnly(undefined, ${promptExpr})`
         : `${walkerArg}.claimOnly()`;
-      ctx.push(`if (${v} && ${v}.parentNode == null && ${v}.nodeType !== 11) { const __sr = ${claim}; if (__sr && __sr.parentNode) __sr.parentNode.replaceChild(${v}, __sr); }`);
+      // A several-root render owns as many SSR slots as it has roots. Claiming
+      // one and splicing the rest in front of it left the unclaimed SSR
+      // siblings in place, duplicating them; the extra claims are removed with
+      // the first so the fresh roots land exactly where the SSR range sat.
+      ctx.push(`if (${v} && ${v}.parentNode == null) { if (${v}.nodeType === 11) { const __cnt = ${v}.childNodes.length; let __sr = null; for (let __i = 0; __i < __cnt; __i++) { const __c = ${claim}; if (__c && __c.parentNode) { if (__sr) { __c.remove(); } else { __sr = __c; } } } if (__sr) { const __p = __sr.parentNode; while (${v}.firstChild) __p.insertBefore(${v}.firstChild, __sr); __p.removeChild(__sr); } } else { const __sr = ${claim}; if (__sr && __sr.parentNode) __sr.parentNode.replaceChild(${v}, __sr); } }`);
       // A plain target consumes the region budget at adoption; subsequent
       // claims in the enclosing branch must resolve positionally from here.
       if (regionBudget && ctx.markerless) ctx.push(`${regionBudget} = 0;`);
@@ -1035,7 +1192,12 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     }
     ctx.push(`let ${v} = undefined;`);
     ctx.push(`if (__hydrate) __hydrate.childFrame = (__hydrate.childFrame || 0) + 1;`);
-    ctx.push(`try { ${v} = ${awaitKw}${access}(${callArgs()}, __registry, ${walkerArg}); } finally { if (__hydrate) __hydrate.childFrame--; }`);
+    ctx.push(`try { ${v} = toDomNode(${awaitKw}${access}(${callArgs()}, __registry, ${walkerArg})); } finally { if (__hydrate) __hydrate.childFrame--; }`);
+    // Snapshot a several-root render's roots HERE, while the fragment still
+    // holds them: adoption drains it, and an emptied fragment is no handle for
+    // `rerenderNode` to follow on the next update.
+    const rootsVar = trackedDeps.length > 0 ? ctx.n() : null;
+    if (rootsVar) ctx.push(`const ${rootsVar} = ${v} && ${v}.nodeType === 11 ? Array.from(${v}.childNodes) : [${v}];`);
     // Spend the region budget only once the call RETURNS: a self-claiming child
     // that throws before claiming (the try/catch fallback in / with fail:true)
     // consumed the takeSkipK deposit but never advanced the walker cursor, so the
@@ -1045,6 +1207,9 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     if (ctx.markerless && promptExpr && !plainTarget && regionBudget) ctx.push(`${regionBudget} = 0;`);
     maybeReplace(v);
     maybeRetire();
+    if (trackedDeps.length > 0) {
+      ctx.push(`rerenderNode(${rootsVar}, [${trackedDeps.join(', ')}], () => ${awaitKw}${access}(${callArgs()}, __registry, ${walkerArg}));`);
+    }
     return v;
   } else {
     for (const slot of slotChildren) {
@@ -1066,12 +1231,22 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       propsEntries.push(`children: ${frag}`);
     }
     if (calleeExpr) {
-      ctx.push(`const ${v} = ${calleeExpr}(${callArgs()});`);
+      ctx.push(`const ${v} = toDomNode(${calleeExpr}(${callArgs()}));`);
     } else if (ctx.importedNames.has(node.componentName)) {
-      ctx.push(`const ${v} = ${awaitKw}${node.componentName}(${callArgs()});`);
+      ctx.push(`const ${v} = toDomNode(${awaitKw}${node.componentName}(${callArgs()}));`);
     } else {
       ctx.push(`if (${compPrefix}[${JSON.stringify(node.componentName)}] == null) throw new Error(${JSON.stringify(`Component "${node.componentName}" was not found while rendering. Declare it with the \`component\` keyword, import it, or register it in the component registry.`)});`);
-      ctx.push(`const ${v} = ${awaitKw}${compPrefix}[${JSON.stringify(node.componentName)}](${callArgs()});`);
+      ctx.push(`const ${v} = toDomNode(${awaitKw}${compPrefix}[${JSON.stringify(node.componentName)}](${callArgs()}));`);
+    }
+    if (trackedDeps.length > 0) {
+      const calleeRef = calleeExpr
+        ?? (ctx.importedNames.has(node.componentName)
+          ? node.componentName
+          : `${compPrefix}[${JSON.stringify(node.componentName)}]`);
+      // Snapshot the roots while the fragment still holds them — see above.
+      const rootsVar2 = ctx.n();
+      ctx.push(`const ${rootsVar2} = ${v} && ${v}.nodeType === 11 ? Array.from(${v}.childNodes) : [${v}];`);
+      ctx.push(`rerenderNode(${rootsVar2}, [${trackedDeps.join(', ')}], () => ${awaitKw}${calleeRef}(${callArgs()}));`);
     }
   }
   return v;
@@ -2422,7 +2597,9 @@ function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?
   }
   const exportCode = exportLines.join('\n');
 
-  const runtimeNames: string[] = ['track', 'get', 'set', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'reactiveProps', 'applyStyle'];
+  // `toDomNode` normalizes a component call's return (a primitive/leaf string)
+  // into a Node; it is emitted at every call site, so it is always needed.
+  const runtimeNames: string[] = ['track', 'get', 'set', 'destroy_block', 'getActiveComponent', 'setActiveComponent', 'reactiveProps', 'applyStyle', 'toDomNode', 'rerenderNode'];
   if (ir.components.some(c => !isStaticIR(c.body))) runtimeNames.push('effect');
   for (const name of usedRuntimeBindings(ir)) runtimeNames.push(name);
   for (const name of ['derived']) {
@@ -2489,7 +2666,7 @@ export function compileClientBoth(
   _componentName: string | null,
   sourcePath?: string,
   opts?: { skipHyd?: boolean; markerless?: boolean },
-): { comp: string; hyd: string; name: string | null } {
+): { comp: string; hyd: string; name: string | null; aliases: Array<{ local: string; exported: string }>; reexportPaths: string[] } {
   const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
   // Downstream type-stripping mutates AST nodes in place (stripTsTypes),
   // so each emit mode needs its own tree. Cloning is far cheaper than the
@@ -2509,11 +2686,22 @@ export function compileClientBoth(
   // allocator: hyd continues after the names comp already consumed.
   const alloc = nameAllocFor(sourcePath);
   const comp = emitClientFromIR(ir, { forceClient: true, nameAllocator: alloc });
-  if (opts?.skipHyd) return { comp, hyd: '', name };
+  // `.vsk` modules are registry-keyed, not real ES modules: `export { A as B }`
+  // and `import { A as B } from './x.vsk'` are aliases the client bundle must
+  // register on `__components`, since nothing is emitted for them.
+  const aliases = vskRegistryAliases(ir.imports, ir.exportAliases);
+  // `export * from './x.vsk'` targets must be compiled and registered in this
+  // file's chunk too, exactly like `.vsk` imports.
+  const reexportPaths = sourcePath
+    ? collectVskReexportPaths(ir.reexportSources, sourcePath)
+    : [];
+  if (opts?.skipHyd) return { comp, hyd: '', name, aliases, reexportPaths };
   return {
     comp,
     hyd: emitClientFromIR(irHyd!, { forceClient: true, hydrate: true, includeTopLevel: false, nameAllocator: alloc, markerless: opts?.markerless !== false }),
     name,
+    aliases,
+    reexportPaths,
   };
 }
 

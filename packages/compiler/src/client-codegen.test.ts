@@ -8,6 +8,7 @@
  * Run with: node --experimental-vm-modules packages/compiler/src/client-codegen.test.js
  */
 import { compileClient } from '@vesk/compiler/src/client-codegen';
+import { parse } from 'acorn';
 
 let passed = 0;
 let failed = 0;
@@ -170,10 +171,10 @@ describe('Client Codegen — Hydrate call-site boundaries', () => {
 		component App { <div><Icon /></div> }
 	`, (code, mode) => {
 		if (mode === 'normal') {
-			expect(code).toContain('Icon({');
+			expect(code).toContain('Icon(reactiveProps({');
 			expect(code).not.toContain('claimOnly');
 		} else {
-			expect(code).toContain('Icon({');
+			expect(code).toContain('Icon(reactiveProps({');
 			expect(code).toContain('claimOnly()');
 		}
 	});
@@ -310,6 +311,30 @@ describe('Client Codegen — Reactivity', () => {
 		component App { let &[count] = track(0); return <div>{count}</div>; }
 	`, (code) => {
 		expect(code).toContain('get(count)');
+	});
+
+	bothModes('binding ref with virtual tracked name passes the raw cell', `
+		component App {
+			const &[note] = track('hi');
+			return <input ref={bindValue(note)} />
+		}
+	`, (code) => {
+		// transformTracked turns the read into get(noteCell); the binder must
+		// receive the raw cell, not its value.
+		expect(code).not.toContain('bindValue(get(');
+		expect(code).toContain('bindValue(note)');
+	});
+
+	bothModes('binding ref with raw cell name passes the raw cell', `
+		component App {
+			const &[note, noteCell] = track('hi');
+			return <input ref={bindValue(note)} />
+		}
+	`, (code) => {
+		// &[name, cell] binds a distinct cell name; the read get(name) compiles
+		// to get(noteCell), and the binder must receive noteCell untouched.
+		expect(code).not.toContain('bindValue(get(');
+		expect(code).toContain('bindValue(noteCell)');
 	});
 
 	// Tracks reads inside a `derived(...)` init and makes an `if (derived)` region
@@ -2327,7 +2352,7 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 			return <div>{items.map((it) => <it.icon class="size-4" />)}</div>;
 		}
 	`, (code) => {
-		expect(code).toContain('(it.icon)({');
+		expect(code).toContain('(it.icon)(reactiveProps({');
 		expect(code).not.toContain('createElement("it.icon")');
 		expect(code).not.toContain('__components["it.icon"]');
 		expect(code).not.toContain('__hydrators["it.icon"]');
@@ -2341,7 +2366,7 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 			</div>
 		}
 	`, (code) => {
-		expect(code).toContain('(it.icon)({');
+		expect(code).toContain('(it.icon)(reactiveProps({');
 		expect(code).not.toContain('createElement("it.icon")');
 		expect(code).not.toContain('__components["it.icon"]');
 		expect(code).not.toContain('__hydrators["it.icon"]');
@@ -2352,7 +2377,7 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 			return <div><NS.Foo bar="1" /></div>;
 		}
 	`, (code) => {
-		expect(code).toContain('(NS.Foo)({');
+		expect(code).toContain('(NS.Foo)(reactiveProps({');
 		expect(code).not.toContain('__components["NS.Foo"]');
 		expect(code).not.toContain('__hydrators["NS.Foo"]');
 	});
@@ -2364,7 +2389,7 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 		const MyIcon = Cpu;
 		component App { return <div><MyIcon class="size-4" /></div>; }
 	`, (code) => {
-		expect(code).toContain('MyIcon({');
+		expect(code).toContain('MyIcon(reactiveProps({');
 		expect(code).not.toContain('__components["MyIcon"]');
 		expect(code).not.toContain('__hydrators["MyIcon"]');
 	});
@@ -2373,7 +2398,7 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 		const MyIcon = Cpu;
 		component App { <div><MyIcon class="size-4" /></div> }
 	`, (code) => {
-		expect(code).toContain('MyIcon({');
+		expect(code).toContain('MyIcon(reactiveProps({');
 		expect(code).not.toContain('__components["MyIcon"]');
 		expect(code).not.toContain('__hydrators["MyIcon"]');
 	});
@@ -2805,6 +2830,132 @@ describe('commented-out code never compiles (issue #1/#2)', () => {
 	});
 });
 
+
+// ── String components (primitive()/leaf()) re-render on tracked props ─────────
+// A primitive/leaf body runs once and its markup is converted once, so a
+// tracked read inside it subscribes nothing. Plain targets therefore get their
+// props wrapped (matching what SSR unwraps) and their tracked deps handed to
+// `rerenderNode`, which re-runs the call and swaps the DOM.
+describe('string component tracked props', () => {
+	// A top-level binding holding a `primitive()`/`leaf()` value is a plain
+	// target: the tag calls it directly, so the call site owns its props.
+	const imported = `
+		const Counter = leaf((props) => '<i>' + props.bump + '</i>');
+		component App() {
+			const &[bump] = track(0)
+			<button onClick={() => bump++}>+</button>
+			<Counter bump={bump} />
+		}`;
+
+	bothModes('a plain target with a tracked prop is wired to re-render', imported, (code) => {
+		expect(code).toContain('rerenderNode(');
+		// The re-render closure must re-invoke the same callee with the same
+		// props, or the swap would render a different component's markup.
+		expect(code).toContain('[bump], () => Counter(reactiveProps(');
+	});
+
+	bothModes('plain-target props go through reactiveProps', imported, (code) => {
+		expect(code).toContain('Counter(reactiveProps({');
+	});
+
+	bothModes('a plain target with only static props registers no effect', `
+		const Counter = leaf((props) => '<i>' + props.bump + '</i>');
+		component App() { <Counter bump={3} /> }
+	`, (code) => {
+		expect(code).not.toContain('rerenderNode(');
+	});
+
+	bothModes('a compiled component keeps its own bindings (no rerenderNode)', `component Child(props) { <i>{props.n}</i> }
+		component App() {
+			const &[n] = track(0)
+			<Child n={n} />
+		}`, (code) => {
+		expect(code).not.toContain('rerenderNode(');
+	});
+
+	bothModes('a tracked value nested in a template prop is still a dep', `
+		const Counter = leaf((props) => '<i>' + props.label + '</i>');
+		component App() {
+			const &[bump] = track(0)
+			<Counter label={'n=' + bump} />
+		}`, (code) => {
+		expect(code).toContain('rerenderNode(');
+	});
+
+	bothModes('a spread carrying a tracked value is a dep', `
+		const Counter = leaf((props) => '<i>' + props.bump + '</i>');
+		component App(props) {
+			const &[bump] = track(0)
+			<Counter {...{ bump }} />
+		}`, (code) => {
+		expect(code).toContain('rerenderNode(');
+	});
+});
+
+describe('generated code is valid ESM', () => {
+	// A stray brace in an emitted statement makes the whole file unparseable.
+	// The bundle then silently keeps its `import` statements, the chunk fails
+	// to evaluate, and the page loses ALL hydration — a single typo escalating
+	// into a dead page. Every emission path must therefore parse.
+	const sources = {
+		'multi-root plain target': `
+		const Pair = primitive((props) => props.n % 2 === 0 ? '<i>a</i><b>b</b>' : '<i>a</i>')
+		component App() {
+			const &[n] = track(0)
+			<Pair n={n} />
+		}`,
+		'single-root plain target': `
+		const Counter = leaf((props) => '<i>' + props.bump + '</i>')
+		component App() {
+			const &[bump] = track(0)
+			<Counter bump={bump} />
+		}`,
+		'plain target with a spread prop': `
+		const Counter = leaf((props) => '<i>' + props.bump + '</i>')
+		component App(props) {
+			const &[bump] = track(0)
+			<Counter {...{ bump }} />
+		}`,
+		'leaf with its own tracked state': `
+		const Counter = leaf(() => {
+			const &[local] = track(0)
+			return '<i>' + local + '</i>'
+		})
+		component App() { <Counter /> }`,
+		'module-level runtime import': `
+		import { primitive, track } from '@vesk/runtime'
+		const Pair = primitive((props) => '<i>' + props.n + '</i>')
+		component App() { <Pair n={1} /> }`,
+	};
+	for (const [label, source] of Object.entries(sources)) {
+		for (const mode of ['normal', 'hydrate']) {
+			it(`[${mode}] ${label} parses`, () => {
+				const code = compileClient(source, null, { forceClient: true, hydrate: mode === 'hydrate' });
+				try {
+					parse(code, { ecmaVersion: 'latest', sourceType: 'module' });
+				} catch (e) {
+					throw new Error(`emitted code is not valid ESM: ${e.message}`);
+				}
+			});
+		}
+	}
+
+	// A several-root render owns as many SSR slots as it has roots: claiming
+	// one and splicing the rest in front of it left the unclaimed SSR siblings
+	// behind, duplicating every root past the first on hydration.
+	it('[hydrate] a multi-root plain target claims one slot per root', () => {
+		const code = compileClient(sources['multi-root plain target'], null, { forceClient: true, hydrate: true });
+		expect(code).toContain('const __cnt =');
+		expect(code).toContain('__i < __cnt');
+	});
+
+	// The element branch adopts through a single `replaceChild` — a one-root
+	// render must keep consuming exactly one walker slot.
+	it('[hydrate] a single-root plain target adopts through one replaceChild', () => {
+		const code = compileClient(sources['single-root plain target'], null, { forceClient: true, hydrate: true });
+		expect(code).toContain('__sr.parentNode.replaceChild(');
+	});
+});
 
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);

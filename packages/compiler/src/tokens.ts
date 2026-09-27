@@ -9,6 +9,7 @@
  */
 
 import { createBaseParser } from '@vesk/compiler/src/parser';
+import { withStandaloneTokens } from '@vesk/compiler/src/vesk-plugin';
 import {
   skipString,
   skipComment,
@@ -32,26 +33,31 @@ export interface CodeToken {
  * their span so callers can read the actual character via `code[start]`.
  */
 export function tokenizeCode(code: string): CodeToken[] | null {
-  try {
-    const ParserClass = createBaseParser();
-    const tok = (ParserClass as unknown as { tokenizer(input: string, opts: unknown): { getToken(): any } }).tokenizer(code, {
-      ecmaVersion: 'latest',
-      sourceType: 'module',
-    });
-    const out: CodeToken[] = [];
-    let t: any;
-    while ((t = tok.getToken()) && t.type && t.type.label !== 'eof') {
-      out.push({
-        label: t.type.label,
-        value: typeof t.value === 'string' ? t.value : '',
-        start: t.start,
-        end: t.end,
+  // No parser runs here, so the plugin cannot infer component bodies from its
+  // own component-depth counter and every JSX tag would be read as relational
+  // operators. `withStandaloneTokens` asks it to read JSX tags directly.
+  return withStandaloneTokens(() => {
+    try {
+      const ParserClass = createBaseParser();
+      const tok = (ParserClass as unknown as { tokenizer(input: string, opts: unknown): { getToken(): any } }).tokenizer(code, {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
       });
+      const out: CodeToken[] = [];
+      let t: any;
+      while ((t = tok.getToken()) && t.type && t.type.label !== 'eof') {
+        out.push({
+          label: t.type.label,
+          value: typeof t.value === 'string' ? t.value : '',
+          start: t.start,
+          end: t.end,
+        });
+      }
+      return out;
+    } catch {
+      return null;
     }
-    return out;
-  } catch {
-    return null;
-  }
+  });
 }
 
 /**
@@ -321,4 +327,161 @@ function manualExtractImportNames(importText: string): string[] {
     names.push(importText.slice(i, j));
   }
   return names;
+}
+
+/**
+ * True when `code` declares `name` as a real top-level value (`const`/`let`/
+ * `var`/`function`/`class`). Used to tell a `.vsk` component — a registry entry
+ * with no binding — apart from an ordinary JS/TS declaration, whose
+ * `export { name }` must keep native module semantics.
+ */
+export function hasTopLevelValueDeclaration(code: string, name: string): boolean {
+  const tokens = tokenizeCode(code);
+  if (tokens === null) return false;
+  const declWords = ['const', 'let', 'var', 'function', 'class'];
+  for (let i = 1; i < tokens.length; i++) {
+    if (tokens[i].label !== 'name' || tokens[i].value !== name) continue;
+    const prev = tokens[i - 1];
+    // Declaration keywords carry their own token label (`const`, `var`,
+    // `function`, `class`); `let` arrives as a plain name. Match on value.
+    if (!prev || !declWords.includes(prev.value)) continue;
+    // `export const X` / `export function X` are preceded by `export`.
+    if (i >= 2) {
+      const pp = tokens[i - 2];
+      if (pp && pp.label === 'name' && pp.value === 'export') continue;
+    }
+    return true;
+  }
+  return false;
+}
+
+/** One entry of a same-file `export { A, B as C }` specifier list. */
+export interface VskSpecifierExport {
+  local: string;
+  exported: string;
+  /** Byte span of the whole `export { … }` statement, including any `;`. */
+  start: number;
+  end: number;
+}
+
+/**
+ * Finds same-file export *specifier lists* — `export { A }`, `export { A as B }`
+ * — and returns them with their source spans so the caller can remove them.
+ *
+ * A `.vsk` component is a registry entry keyed by its declared name, not a
+ * top-level binding, so acorn's module validator rejects `export { A }` with
+ * `Export 'A' is not defined`. Export *declarations* (`export component A`,
+ * `export const A = 1`) and re-exports (`export … from '…'`) are left alone:
+ * those parse fine and are handled in the IR generator.
+ */
+export function findSpecifierExports(code: string): VskSpecifierExport[] {
+  const tokens = tokenizeCode(code);
+  if (tokens === null) return [];
+  const out: VskSpecifierExport[] = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].label !== 'export') continue;
+    // A specifier list starts with `{`. `export default`, `export const` and
+    // `export *` take another route and are left for the IR generator.
+    if (!tokens[i + 1] || tokens[i + 1].label !== '{') continue;
+    // Find this statement's `}` and note any module source, which makes it a
+    // re-export (`export { A } from './x.vsk'`) rather than a specifier list.
+    let k = i + 2;
+    let depth = 1;
+    for (; k < tokens.length; k++) {
+      const lbl = tokens[k].label;
+      if (lbl === 'string') { continue; }
+      if (lbl === '{') depth++;
+      else if (lbl === '}') { depth--; if (depth === 0) break; }
+    }
+    // A re-export puts `from '…'` AFTER the closing brace, so check past it.
+    let isReexport = false;
+    for (let j = k + 1; j < tokens.length; j++) {
+      const lbl = tokens[j].label;
+      if (lbl === 'string') { isReexport = true; break; }
+      if (lbl === ';' || lbl === 'export' || lbl === 'import' || lbl === '}') break;
+    }
+    if (depth !== 0 || isReexport) continue;
+    const pairs = readSpecifierPairs(code, tokens[i + 1].end, tokens[k].end);
+    if (pairs === null) continue;
+    const stmtEnd = tokens[k].end;
+    for (const [local, exported] of pairs) out.push({ local, exported, start: tokens[i].start, end: stmtEnd });
+    i = k;
+  }
+  return out;
+}
+
+/**
+ * Reads `A, B as C` pairs from the text between a `{` and its matching `}`.
+ * Returns `null` for anything that is not a plain (optionally `as`-aliased)
+ * identifier list, so unusual forms are left to the normal parser.
+ */
+function readSpecifierPairs(code: string, from: number, to: number): Array<[string, string]> | null {
+  // Wrapped in parens so a leading `{` is a block, not the start of an object.
+  const tokens = tokenizeCode(`(${code.slice(from, to)})`);
+  if (tokens === null || tokens.length < 2) return null;
+  const pairs: Array<[string, string]> = [];
+  let i = 1; // skip the '('
+  while (i < tokens.length) {
+    const local = tokens[i];
+    if (!local || local.label === ')' || local.label === ';') break;
+    if (local.label !== 'name') return null;
+    const asTok = tokens[i + 1];
+    if (asTok && asTok.label === 'name' && asTok.value === 'as') {
+      const exported = tokens[i + 2];
+      if (!exported || exported.label !== 'name') return null;
+      pairs.push([local.value, exported.value]);
+      i += 3;
+    } else {
+      pairs.push([local.value, local.value]);
+      i += 1;
+    }
+    const sep = tokens[i];
+    if (!sep || sep.label !== ',') break;
+    i += 1;
+  }
+  return pairs.length > 0 ? pairs : null;
+}
+
+/**
+ * The Vesk TrackDecl form `const &[count] = track(0)` exists only for the
+ * parser: `VeskParserPlugin` consumes the `&` and returns an `ArrayPattern`
+ * tagged `lazy: true` whose `start` points at the `[`. The marker character
+ * itself survives in the source text, so every raw slice of that text is
+ * invalid JavaScript — `new Function` rejects it, and a browser rejects the
+ * whole module.
+ *
+ * Blank exactly those marker characters. Offsets come from the already parsed
+ * AST (each `lazy` pattern's `start - 1`), never from a text scan.
+ */
+function collectTrackDeclMarkers(node: any, out: Set<number>): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const child of node) collectTrackDeclMarkers(child, out);
+    return;
+  }
+  if (node.type === 'ArrayPattern' && node.lazy === true && typeof node.start === 'number') {
+    out.add(node.start - 1);
+    return;
+  }
+  for (const key of Object.keys(node)) {
+    const value = node[key];
+    if (value && typeof value === 'object') collectTrackDeclMarkers(value, out);
+  }
+}
+
+/** `text` must be `source.slice(base, …)`; `node` is AST parsed from `source`. */
+export function stripTrackDeclMarkers(text: string, base: number, node: any): string {
+  const offsets = new Set<number>();
+  collectTrackDeclMarkers(node, offsets);
+  if (offsets.size === 0) return text;
+  const sorted = [...offsets].sort((a, b) => a - b);
+  let out = '';
+  let prev = 0;
+  for (const offset of sorted) {
+    const i = offset - base;
+    if (i < prev || i >= text.length) continue;
+    out += text.slice(prev, i) + ' ';
+    prev = i + 1;
+  }
+  return out + text.slice(prev);
 }
