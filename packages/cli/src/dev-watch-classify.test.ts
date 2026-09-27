@@ -7,6 +7,7 @@
  * file in a vesk project regardless of path — only `node_modules`, build
  * outputs and VCS internals are excluded.
  */
+import { statSync } from 'node:fs';
 import { classifyHmrWatchPath, shouldRescanRoutes, ROUTE_STRUCTURAL_VSK } from './dev-server';
 
 let passed = 0;
@@ -27,9 +28,41 @@ const ignored: string[] = [
   'tarballs/pkg.tgz',
   'tmp-vesk-chunk-abc.js',
   'node_modules/.pnpm/idx',
+  // Generated output: a `.js`/`.ts` file here classifies as `script`, so a
+  // `vesk build` running alongside `vesk dev` would write dist/server.js and
+  // retrigger a full rebuild on every write. Top-level and nested.
+  'dist/server.js',
+  'dist/client.js',
+  'build/out.js',
+  'coverage/lcov-report/prettify.js',
+  '.next/build/webpack.js',
+  '.nuxt/dev/index.mjs',
+  '.output/server/index.mjs',
+  '.svelte-kit/generated/root.js',
+  '.turbo/cache/x.js',
+  '.cache/vesk/x.js',
+  '.vercel/output/functions/api.js',
+  '.netlify/functions-internal/x.js',
+  'packages/foo/dist/index.js',
+  'packages/foo/build/index.js',
+  'packages/foo/out/index.js',
+  'vendor/lib/.next/x.js',
 ];
 for (const p of ignored) {
   assert(classifyHmrWatchPath(p) === 'ignored', `ignored: ${p}`);
+}
+
+// A directory merely STARTING with a skipped name is real source, not output.
+const notConfusedByPrefix: Array<[string, string]> = [
+  ['distribution/index.ts', 'script'],
+  ['builder.ts', 'script'],
+  ['app/distribute/page.vsk', 'vsk'],
+  ['src/building/rules.ts', 'script'],
+  ['src/caching.ts', 'script'],
+  ['app/output-format.ts', 'script'],
+];
+for (const [p, kind] of notConfusedByPrefix) {
+  assert(classifyHmrWatchPath(p) === kind, `not confused by prefix (${kind}): ${p}`);
 }
 
 // --- Coverage: every real file kind anywhere in the project ---
@@ -118,6 +151,44 @@ for (const [p, kind] of windowsHandled) {
 }
 assert(shouldRescanRoutes('app\\page.vsk', 'change') === true, 'windows structural .vsk rescans');
 assert(shouldRescanRoutes('app\\components\\Button.vsk', 'change') === false, 'windows component edit skips scan');
+
+// --- SSR cache keying: why an outside-app edit needs a wholesale clear ---
+// The SSR compile cache is keyed on the mtime+size of the PAGE file. A page
+// that renders data imported from `src/` therefore keeps its cached result
+// when only the imported file changes — which is why the watcher must drop
+// the whole cache for outside-app edits instead of invalidating the edited
+// path (that path is not a key in the cache). This test pins the mechanism
+// so a future cache re-keying is a deliberate change.
+{
+  const { mkdtempSync, writeFileSync, utimesSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const { cachedSsrCompile } = await import('./dev-server');
+
+  const dir = mkdtempSync(join(tmpdir(), 'vesk-ssr-cache-'));
+  const pageFile = join(dir, 'page.vsk');
+  const helperFile = join(dir, 'helper.ts');
+  writeFileSync(pageFile, 'component Page { <div>old</div> }');
+  writeFileSync(helperFile, 'export const label = "old";');
+
+  const cache: Map<string, { mtimeMs: number; size: number; result: unknown }> = new Map();
+  const first = cachedSsrCompile(cache as never, 'component Page { <div>old</div> }', pageFile);
+  assert(cache.has(pageFile), 'SSR cache is keyed on the PAGE file path');
+  assert(cache.size === 1, 'editing a helper adds no separate cache entry');
+
+  // The page file itself is untouched: same mtime, same size.
+  const before = statSync(pageFile).mtimeMs;
+  utimesSync(helperFile, new Date(), new Date());
+  const second = cachedSsrCompile(cache as never, 'component Page { <div>old</div> }', pageFile);
+  assert(statSync(pageFile).mtimeMs === before, 'helper edit left the page mtime untouched');
+  assert(second === (first as unknown), 'stale-by-design: helper edit alone does NOT invalidate the page entry');
+
+  // The watcher's remedy: drop the cache wholesale, then recompile.
+  cache.clear();
+  assert(cache.size === 0, 'cache.clear() drops every page entry');
+  const third = cachedSsrCompile(cache as never, 'component Page { <div>new</div> }', pageFile);
+  assert(third !== (first as unknown), 'after a clear the page recompiles from the new source');
+}
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total\n`);
 process.exit(failed > 0 ? 1 : 0);

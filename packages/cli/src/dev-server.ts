@@ -493,8 +493,26 @@ export const ROUTE_STRUCTURAL_VSK = new Set([
   'page.vsk', 'layout.vsk', 'loading.vsk', 'error.vsk', 'not-found.vsk', 'offline.vsk', 'network.vsk',
 ]);
 
-const HMR_SKIP_DIRS = new Set(['node_modules', '.vesk', 'tarballs', '.git']);
-const HMR_SKIP_MARKERS = ['node_modules/', '.vesk/', 'tmp-vesk-chunk-'];
+// The watch root is the project dir, so the dev server covers the WHOLE
+// project — every `.ts`/`.js`/`.vsk`/`.md`/`.css` file anywhere in it, not
+// just `app/`. Excluded are `node_modules`, VCS internals and generated
+// output. Generated output matters as much as node_modules: a `.js` file in
+// `dist/` classifies as `script`, so a `vesk build` running alongside
+// `vesk dev` would write `dist/server.js`, the watcher would see it, and each
+// write would kick off another full rebuild.
+const HMR_SKIP_DIRS = new Set([
+  'node_modules', '.vesk', 'tarballs', '.git',
+  'dist', 'build', 'coverage', 'out', '.next', '.nuxt', '.output',
+  '.svelte-kit', '.turbo', '.cache', '.vercel', '.netlify',
+]);
+// First-segment matching only catches these at the project root. A nested
+// `packages/foo/dist/index.js` is the same hazard, so the directory names are
+// also matched as path segments.
+const HMR_SKIP_MARKERS = [
+  'node_modules/', '.vesk/', 'tmp-vesk-chunk-',
+  '/dist/', '/build/', '/coverage/', '/out/', '/.next/', '/.nuxt/', '/.output/',
+  '/.svelte-kit/', '/.turbo/', '/.cache/', '/.vercel/', '/.netlify/',
+];
 const HMR_SCRIPT_EXTS = ['.mts', '.ts', '.tsx', '.mjs', '.js', '.cjs'];
 const HMR_CONFIG_NAMES = new Set([
   'vesk.config.ts', 'vesk.config.js', 'vesk.config.mjs', 'vesk.config.mts',
@@ -1153,6 +1171,17 @@ export async function startDevServer(port: number, projectDir: string, config: R
               const isOutsideApp = !fullPath.startsWith(appDirPath + '/') && fullPath !== appDirPath;
               const fileDeleted = eventType === 'rename' && !fileExists;
 
+              // The SSR compile cache is keyed on the mtime+size of the PAGE
+              // file (see cachedSsrCompile), so a page that renders stale data
+              // imported from a file outside `app/` keeps its cached result
+              // even though the client bundle was just rebuilt — the browser
+              // then rehydrates against HTML that no longer matches the
+              // source. The dependents of an outside-app file are unknown
+              // without a module graph, so drop the whole cache. For an
+              // in-app `.vsk` edit the edited file IS the cache key and
+              // queueClientChunksRefresh invalidates it precisely.
+              if (isOutsideApp) ssrCompileCache.clear();
+
               // CSS rescan runs concurrently with the JS build (a .vsk edit
               // cannot change app/global.css) so the hot-swap broadcast is
               // not queued behind a second compile pass.
@@ -1327,6 +1356,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
             const t0 = Date.now();
             try {
               bcast({ type: 'compiling' });
+              // A `.ts`/`.js`/config file is read indirectly — bundled into the
+              // page module — so the SSR cache holds a result derived from it
+              // under the PAGE's mtime. Nothing about the page changed, so the
+              // cache must be dropped wholesale or SSR keeps serving the old
+              // module. invalidateSsrCompile(fullPath) is a no-op here: this
+              // path is not a key in the cache.
+              ssrCompileCache.clear();
               await fullRebuild();
               LOG.info(`${kind === 'config' ? 'config' : 'script'} changed, full rebuild + reload (${filename}) — ${Date.now() - t0}ms`);
             } catch (e) {
@@ -2091,7 +2127,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
     LOG.info(`${projectDir}`);
     LOG.info(`${pageCount} page${pageCount === 1 ? '' : 's'}: ${routes.join(', ') || '(none)'}`);
     if (apiCount > 0) LOG.info(`${apiCount} api route${apiCount === 1 ? '' : 's'} (app/api)`);
-    LOG.info('hmr enabled — edit app/ to hot reload');
+    LOG.info(`hmr enabled — watching the whole project (excluding node_modules and build output); edit app/, src/ or a root script to hot reload`);
   });
 
   updateSourceMapping();
