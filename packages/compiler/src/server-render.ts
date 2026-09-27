@@ -20,6 +20,7 @@ import { collectVskImportPaths, collectVskReexportPaths, vskRegistryAliases, app
 import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { applyLocalModuleImports } from '@vesk/compiler/src/module-imports';
+import { VskComponentOwners } from '@vesk/compiler/src/vsk-collision';
 
 type ScopedFn = Function & { __veskScope?: Record<string, unknown> };
 
@@ -35,10 +36,13 @@ function scopedVesk(fn: Function, fallback: Record<string, unknown>): Record<str
 
 
 export function compileFile(source: string, options?: { sourcePath?: string }): CompileFileResult {
-  return compileFileInternal(source, options?.sourcePath, new Set());
+  const owners = new VskComponentOwners();
+  const result = compileFileInternal(source, options?.sourcePath, new Set(), owners);
+  owners.report('SSR');
+  return result;
 }
 
-function compileFileInternal(source: string, sourcePath: string | undefined, seenImportFiles: Set<string>): CompileFileResult {
+function compileFileInternal(source: string, sourcePath: string | undefined, seenImportFiles: Set<string>, owners?: VskComponentOwners): CompileFileResult {
   if (sourcePath) {
     const dir = dirname(sourcePath);
     source = inlineMdImportsFrom(source, sourcePath, guessProjectRoots(dir));
@@ -47,6 +51,10 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
   const ir = generateIR(ast, source, sourcePath);
   const componentMap = buildComponentMap(ir, true);
   const ownComponentNames = ir.components.map((c) => c.name);
+  // Every component shares one registry, so a name declared in two files
+  // resolves to one of them. SSR keeps the FIRST, the client keeps the LAST —
+  // report it rather than letting the two sides render different components.
+  if (sourcePath && owners) for (const n of ownComponentNames) owners.claim(n, sourcePath);
   const __vesk = loadRuntimeImports(ir.imports);
   applyLocalModuleImports(__vesk, ir.imports, sourcePath);
   if (sourcePath) {
@@ -67,7 +75,7 @@ function compileFileInternal(source: string, sourcePath: string | undefined, see
       } catch {
         continue;
       }
-      const sub = compileFileInternal(importedSrc, importPath, seenImportFiles);
+      const sub = compileFileInternal(importedSrc, importPath, seenImportFiles, owners);
       for (const [name, fn] of sub.componentMap) {
         if (!componentMap.has(name)) componentMap.set(name, fn);
       }

@@ -11,3 +11,5 @@ component Helper(props: HelperProps) {
 		<button onClick={() => n++}> + </button>
 	</div>
 }
+
+export { Helper }

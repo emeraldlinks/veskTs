@@ -1,11 +1,17 @@
 import { Helper } from './helper.vsk'
 import { Badge } from '../components/Badge.vsk'
 import { PrimBadgeUse } from '../components/primitives.vsk'
+// Namespace import of a .vsk module. `<NS.Helper />` resolves through the
+// component registry by exported name — no module object is ever built — so it
+// renders and hydrates exactly like the named `Helper` import above. The
+// `base` differs (7 vs 5) so the two are told apart by index below.
+import * as NS from './helper.vsk'
 
 component CompTest {
 	<Head> <title> CompTest </title></Head>
 	<h1>Component import test</h1>
 	<Helper base={5} />
+	<NS.Helper base={7} />
 	<Badge />
 	<PrimBadgeUse />
 }

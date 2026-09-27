@@ -388,6 +388,27 @@ function jsxTagRootName(nameNode: any): string {
   return node && node.type === 'JSXIdentifier' ? node.name! : '';
 }
 
+/** The final property of a dotted JSX tag: `NS.A.B` → `B`. */
+function jsxTagMemberName(nameNode: any): string {
+  let node = nameNode;
+  while (node && node.type === 'JSXMemberExpression') {
+    node = node.property;
+    if (node && node.type === 'JSXIdentifier') return node.name!;
+  }
+  return '';
+}
+
+/** How many member hops a dotted tag has: `NS.A` → 1, `NS.A.B` → 2. */
+function jsxTagDepth(nameNode: any): number {
+  let depth = 0;
+  let node = nameNode;
+  while (node && node.type === 'JSXMemberExpression') {
+    depth++;
+    node = node.object;
+  }
+  return depth;
+}
+
 // Set for the duration of one `generateIR` call so `processJSXElement` — which
 // is reached from eleven call sites and would otherwise need a context
 // parameter threaded through all of them — can reject `<ns.Tag />` for a
@@ -396,20 +417,128 @@ let currentVskNamespaceLocals: Set<string> | null = null;
 let currentSourceFile: string | undefined;
 
 /**
- * Local names bound by `import * as ns from './x.vsk'`. Only `.vsk` targets are
- * collected — a namespace import from a real module (`./x.ts`, a package) is a
- * genuine object and `<ns.Tag />` works there.
+ * Local names bound by `import * as ns from './x.vsk'` that are NOT shadowed by
+ * any other binding in the file. A `.vsk` namespace is only special when the
+ * name still refers to the import: if a parameter or a local shadows it, the
+ * tag is an ordinary member expression on a real object and must keep the
+ * `calleeExpr` path. Names the file re-binds are therefore dropped here, which
+ * also keeps the value-position check from rejecting valid shadowed code.
  */
 function collectVskNamespaceLocals(ast: any): Set<string> {
-  const out = new Set<string>();
+  const namespaceLocals = new Map<string, { path: string; shadowed: boolean }>();
   for (const node of (ast.body || []) as any[]) {
     if (node.type !== 'ImportDeclaration') continue;
     if (typeof node.source?.value !== 'string' || !node.source.value.endsWith('.vsk')) continue;
     for (const spec of node.specifiers || []) {
-      if (spec.type === 'ImportNamespaceSpecifier' && spec.local?.name) out.add(spec.local.name);
+      if (spec.type === 'ImportNamespaceSpecifier' && spec.local?.name) {
+        namespaceLocals.set(spec.local.name, { path: node.source.value, shadowed: false });
+      }
     }
   }
+  if (namespaceLocals.size === 0) return new Set();
+  markShadowedBindings(ast, namespaceLocals);
+  return new Set([...namespaceLocals].filter(([, v]) => !v.shadowed).map(([k]) => k));
+}
+
+/**
+ * Flags every namespace local that the file also binds by some other means.
+ * The namespace import itself is the only declaration that does NOT shadow —
+ * everything else (var/let/const, function and class declarations, any
+ * parameter list, catch bindings) means the name is a plain local from here on.
+ */
+function markShadowedBindings(node: any, namespaceLocals: Map<string, { path: string; shadowed: boolean }>): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const child of node) markShadowedBindings(child, namespaceLocals);
+    return;
+  }
+  if (typeof node.type === 'string') {
+    if (node.type === 'ImportNamespaceSpecifier') return; // the import itself
+    for (const name of declaredBindingNames(node)) {
+      const entry = namespaceLocals.get(name);
+      if (entry) entry.shadowed = true;
+    }
+  }
+  for (const key of Object.keys(node)) {
+    if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') continue;
+    markShadowedBindings(node[key], namespaceLocals);
+  }
+}
+
+/** Names a single binding-bearing node introduces. */
+function declaredBindingNames(node: any): string[] {
+  const out: string[] = [];
+  const pushPattern = (id: any): void => {
+    if (!id) return;
+    if (id.type === 'Identifier') { out.push(id.name); return; }
+    if (id.type === 'ObjectPattern') {
+      for (const prop of id.properties || []) {
+        if (prop.type === 'RestElement') pushPattern(prop.argument);
+        else pushPattern(prop.value);
+      }
+      return;
+    }
+    if (id.type === 'ArrayPattern') {
+      for (const el of id.elements || []) if (el) pushPattern(el.type === 'RestElement' ? el.argument : el);
+      return;
+    }
+    if (id.type === 'AssignmentPattern') pushPattern(id.left);
+    if (id.type === 'RestElement') pushPattern(id.argument);
+  };
+  switch (node.type) {
+    case 'VariableDeclarator':
+      pushPattern(node.id);
+      break;
+    case 'FunctionDeclaration':
+    case 'FunctionExpression':
+    case 'ArrowFunctionExpression':
+      if (node.id) pushPattern(node.id);
+      for (const param of node.params || []) pushPattern(param);
+      break;
+    case 'ClassDeclaration':
+    case 'ClassExpression':
+      if (node.id) pushPattern(node.id);
+      break;
+    case 'CatchClause':
+      pushPattern(node.param);
+      break;
+    default:
+      break;
+  }
   return out;
+}
+
+/**
+ * Rejects reading a member off a `.vsk` namespace in *value* position. A
+ * namespace is resolved only for component tags, so `ns.max` in an expression
+ * has nothing bound to it at runtime — say so here instead of failing later
+ * with a bare `ReferenceError: ns is not defined`.
+ */
+function assertNoVskNamespaceValue(source: string, expr: { start?: number } | null | undefined): void {
+  if (!currentVskNamespaceLocals || currentVskNamespaceLocals.size === 0) return;
+  const hit = findNamespaceValueUse(expr, currentVskNamespaceLocals);
+  if (!hit) return;
+  const { line, column } = offsetToLineCol(source, hit.start ?? 0);
+  throw VeskError.vskNamespaceMember({ file: currentSourceFile, line, column, code: codeFrame(source, line, column), form: 'value' });
+}
+
+function findNamespaceValueUse(node: any, locals: Set<string>): any | null {
+  if (!node || typeof node !== 'object') return null;
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findNamespaceValueUse(child, locals);
+      if (hit) return hit;
+    }
+    return null;
+  }
+  if (typeof node.type !== 'string') return null;
+  if (node.type === 'MemberExpression' && node.object?.type === 'Identifier' && locals.has(node.object.name)) return node;
+  for (const key of Object.keys(node)) {
+    if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') continue;
+    const hit = findNamespaceValueUse(node[key], locals);
+    if (hit) return hit;
+  }
+  return null;
 }
 
 function isHTMLTag(name: string): boolean {
@@ -427,6 +556,7 @@ function isMapCall(expr: any): boolean {
 }
 
 function toExpression(source: string, expr: { start: number; end: number }): Expression {
+  assertNoVskNamespaceValue(source, expr);
   return new Expression(getSource(source, expr), [], expr as unknown as ESTreeNode, source);
 }
 
@@ -903,12 +1033,24 @@ function processJSXElement(source: string, element: any): IRNode[] {
   // registry lookup by dotted string.
   if (nameNode && nameNode.type === 'JSXMemberExpression') {
     const root = jsxTagRootName(nameNode);
-    if (currentVskNamespaceLocals && currentVskNamespaceLocals.has(root)) {
+    const isVskNamespace = !!currentVskNamespaceLocals && currentVskNamespaceLocals.has(root);
+    if (isVskNamespace && jsxTagDepth(nameNode) > 1) {
+      // A `.vsk` module's exports are flat component names, so there is no
+      // nested namespace object to walk into.
       const { line, column } = offsetToLineCol(source, (nameNode as unknown as { start: number }).start ?? 0);
-      throw VeskError.vskNamespaceTag({ file: currentSourceFile, line, column, code: codeFrame(source, line, column) });
+      throw VeskError.vskNamespaceMember({ file: currentSourceFile, line, column, code: codeFrame(source, line, column), form: 'nested' });
     }
     const { props, spreadProps, slots } = extractProps(source, element);
     const children = selfClosing ? [] : processJSXChildren(source, element.children || []);
+    if (isVskNamespace) {
+      // `<ns.Icon />` after `import * as ns from './lib.vsk'` resolves to the
+      // same registry entry `import { Icon }` would, keyed by the EXPORTED name.
+      // Deliberately carries no `calleeExpr`: both codegen paths must take the
+      // registry branch so `<ns.Icon />` keeps the "component was not found"
+      // guard and hydrates like any other compiled component. The namespace
+      // object itself is never built.
+      return [new ComponentCall(jsxTagMemberName(nameNode), props, [...children, ...slots.map((s) => new PropSlot(s.name, s.nodes))], spreadProps, element.start)];
+    }
     return [new ComponentCall(tagName, props, [...children, ...slots.map((s) => new PropSlot(s.name, s.nodes))], spreadProps, element.start, getSource(source, nameNode))];
   }
 

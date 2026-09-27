@@ -76,6 +76,24 @@ function irOf(source: string, file?: string) {
   return generateIR(parse(source, file ? { filename: file } : {}), source, file);
 }
 
+/** Every ComponentCall reachable from a component IR, in source order. */
+function collectCalls(comp: any): any[] {
+  const out: any[] = [];
+  const visit = (n: any): void => {
+    if (!n || typeof n !== 'object') return;
+    if (n.constructor?.name === 'ComponentCall') {
+      out.push(n);
+      return;
+    }
+    for (const k of Object.keys(n)) {
+      if (k === 'loc' || k === 'range') continue;
+      visit(n[k]);
+    }
+  };
+  visit(comp.body);
+  return out;
+}
+
 function renderComponent(source: string, name: string): string {
   return render(source, name, {}, new Map(), {}) as string;
 }
@@ -186,22 +204,118 @@ describe('a .ts/.js module keeps native export semantics', () => {
   });
 });
 
-describe('namespace imports from a .vsk module are rejected clearly', () => {
-  it('throws a helpful error for `<ns.Tag />` after `import * as ns`', () => {
+describe('a .vsk namespace import resolves component tags', () => {
+  // `<ns.Icon />` needs no module object: the tag resolves through the same
+  // registry entry `import { Icon }` would, keyed by the EXPORTED name. The
+  // namespace object is never built and NO calleeExpr is carried, so both
+  // codegen paths take the registry branch and keep their not-found guard.
+
+  it('statement mode: resolves the tag to the exported name', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon label=\"a\" /></div> }\n";
+    const ir = irOf(src, 'page.vsk');
+    const calls = collectCalls(ir.components[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].componentName).toBe('Icon');
+    expect(calls[0].calleeExpr).toBe(null);
+  });
+
+  it('expression mode: resolves identically', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { return <div><NS.Icon /></div> }\n";
+    const ir = irOf(src, 'page.vsk');
+    const calls = collectCalls(ir.components[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].componentName).toBe('Icon');
+    expect(calls[0].calleeExpr).toBe(null);
+  });
+
+  it('passes props and children through', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon label=\"a\"><span>kid</span></NS.Icon></div> }\n";
+    const ir = irOf(src, 'page.vsk');
+    const calls = collectCalls(ir.components[0]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].props.map((p: any) => p.name)).toEqual(['label']);
+    expect(calls[0].children.length).toBe(1);
+  });
+
+  it('client codegen emits a registry lookup, not a namespace deref', () => {
     const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon /></div> }\n";
+    const code = compileClient(src, 'Page', { sourcePath: 'page.vsk' });
+    expect(code).toContain('__components["Icon"]');
+    expect(code.includes('(NS.Icon)')).toBe(false);
+  });
+
+  it('client hydrate codegen emits a registry lookup plus the not-found guard', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon /></div> }\n";
+    const code = compileClient(src, 'Page', { sourcePath: 'page.vsk', hydrate: true });
+    expect(code).toContain('__components["Icon"]');
+    expect(code).toContain('was not found while rendering');
+  });
+
+  it('SSR raises the not-found message for an unregistered namespace tag', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon /></div> }\n";
+    let err: any = null;
+    try {
+      renderComponent(src, 'Page');
+    } catch (e) {
+      err = e;
+    }
+    if (!err) throw new Error('Expected SSR to raise the not-found message');
+    // Same wording a missing named import produces — proof the tag took the
+    // registry path rather than being invoked as a namespace deref.
+    expect(err.message).toContain('Component "Icon" was not found');
+  });
+
+  it('resolves an ALIASED export name (the target registers the alias getter)', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.PostCard /></div> }\n";
+    const ir = irOf(src, 'page.vsk');
+    const calls = collectCalls(ir.components[0]);
+    expect(calls[0].componentName).toBe('PostCard');
+    expect(calls[0].calleeExpr).toBe(null);
+  });
+
+  it('renders a real cross-file namespace tag on the SSR path', () => {
+    withProject(
+      {
+        'lib.vsk': 'component Icon { <b class="ic">i</b> }\ncomponent Panel { <section><p>p</p></section> }\n',
+        'page.vsk': "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Panel /></div> }\n",
+      },
+      'page.vsk',
+      (dir) => {
+        const out = render(readPage(dir, 'page.vsk'), 'Page', {}, new Map(), { sourcePath: join(dir, 'page.vsk') });
+        expect(out).toContain('<section>');
+        expect(out).toContain('<p>p</p>');
+      },
+    );
+  });
+
+  it('rejects the nested form `<ns.Sub.Icon />` — a .vsk namespace is flat', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Sub.Icon /></div> }\n";
     let err: any = null;
     try {
       irOf(src, 'page.vsk');
     } catch (e) {
       err = e;
     }
-    if (!err) throw new Error('Expected an error for a .vsk namespace tag');
-    expect(err.message).toContain('Namespace imports are not supported');
-    expect(err.suggestions.join(' ')).toContain("import { MyIcon } from './icons.vsk'");
+    if (!err) throw new Error('Expected an error for a nested .vsk namespace tag');
+    expect(err.message).toContain('namespace is flat');
+    expect(err.suggestions.join(' ')).toContain("import { Icon } from './icons.vsk'");
   });
 
-  it('rejects the nested form `<ns.Sub.Icon />` too', () => {
-    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Sub.Icon /></div> }\n";
+  it('rejects reading a namespace member as a VALUE (nothing binds ns at runtime)', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><p>{NS.MAX}</p></div> }\n";
+    let err: any = null;
+    try {
+      irOf(src, 'page.vsk');
+    } catch (e) {
+      err = e;
+    }
+    if (!err) throw new Error('Expected an error for a .vsk namespace value read');
+    expect(err.message).toContain('resolves component tags only');
+    expect(err.suggestions.join(' ')).toContain("import { MAX } from './constants.vsk'");
+  });
+
+  it('rejects a namespace value read used as a prop', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon label={NS.LABEL} /></div> }\n";
     let threw = false;
     try {
       irOf(src, 'page.vsk');
@@ -213,7 +327,10 @@ describe('namespace imports from a .vsk module are rejected clearly', () => {
 
   it('allows a namespace import from a .ts module (a real module object)', () => {
     const src = "import * as NS from './lib.ts'\ncomponent Page { <div><NS.Icon /></div> }\n";
-    irOf(src, 'page.vsk');
+    const ir = irOf(src, 'page.vsk');
+    const calls = collectCalls(ir.components[0]);
+    // A real module object: the member expression is carried verbatim.
+    expect(calls[0].calleeExpr).toBe('NS.Icon');
   });
 
   it('does not fire for an unused namespace import', () => {
@@ -224,6 +341,27 @@ describe('namespace imports from a .vsk module are rejected clearly', () => {
 
   it('does not fire for a dotted tag bound to a plain local object', () => {
     const src = 'const ui = { Icon: null }\ncomponent Page { <div><ui.Icon /></div> }\n';
+    const ir = irOf(src, 'page.vsk');
+    expect(ir.components).toHaveLength(1);
+  });
+
+  // A name the file re-binds is not a namespace any more, so the tag is an
+  // ordinary member expression and value reads are legitimate.
+  it('falls back to the member path when a local shadows the namespace', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { const NS = { Icon: null }\n<div><NS.Icon /></div> }\n";
+    const ir = irOf(src, 'page.vsk');
+    const calls = collectCalls(ir.components[0]);
+    expect(calls[0].calleeExpr).toBe('NS.Icon');
+  });
+
+  it('allows a value read off a shadowing local object', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { const NS = { MAX: 3 }\n<div><p>{NS.MAX}</p></div> }\n";
+    const ir = irOf(src, 'page.vsk');
+    expect(ir.components).toHaveLength(1);
+  });
+
+  it('allows a value read when a PARAMETER shadows the namespace', () => {
+    const src = "import * as NS from './lib.vsk'\ncomponent Page { const el = (NS: any) => <p>{NS.MAX}</p>\n<div>{el({ MAX: 1 })}</div> }\n";
     const ir = irOf(src, 'page.vsk');
     expect(ir.components).toHaveLength(1);
   });

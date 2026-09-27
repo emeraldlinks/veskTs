@@ -2666,7 +2666,7 @@ export function compileClientBoth(
   _componentName: string | null,
   sourcePath?: string,
   opts?: { skipHyd?: boolean; markerless?: boolean },
-): { comp: string; hyd: string; name: string | null; aliases: Array<{ local: string; exported: string }>; reexportPaths: string[] } {
+): { comp: string; hyd: string; name: string | null; aliases: Array<{ local: string; exported: string }>; reexportPaths: string[]; componentNames: string[] } {
   const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
   // Downstream type-stripping mutates AST nodes in place (stripTsTypes),
   // so each emit mode needs its own tree. Cloning is far cheaper than the
@@ -2695,14 +2695,29 @@ export function compileClientBoth(
   const reexportPaths = sourcePath
     ? collectVskReexportPaths(ir.reexportSources, sourcePath)
     : [];
-  if (opts?.skipHyd) return { comp, hyd: '', name, aliases, reexportPaths };
+  if (opts?.skipHyd) return { comp, hyd: '', name, aliases, reexportPaths, componentNames: ir.components.map((c) => c.name) };
   return {
     comp,
     hyd: emitClientFromIR(irHyd!, { forceClient: true, hydrate: true, includeTopLevel: false, nameAllocator: alloc, markerless: opts?.markerless !== false }),
     name,
     aliases,
     reexportPaths,
+    // Every component NAME this file registers, not just the resolved one —
+    // the bundle needs the full list to spot same-name declarations across
+    // files (see findVskComponentCollisions).
+    componentNames: ir.components.map((c) => c.name),
   };
+}
+
+/**
+ * The component names a `.vsk` file declares. Used by the bundle to spot
+ * same-name declarations across files, which collide on the single global
+ * registry. Prefer the free `componentNames` from `compileClientBoth`; this
+ * exists for call sites that already have the source but no IR to hand.
+ */
+export function vskComponentNames(source: string, sourcePath?: string): string[] {
+  const ast = parse(source, sourcePath ? { filename: sourcePath } : {});
+  return generateIR(ast, source, sourcePath).components.map((c) => c.name);
 }
 
 export { compileClient as compile, isStaticIR };

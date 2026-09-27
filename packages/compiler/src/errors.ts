@@ -165,21 +165,42 @@ export class VeskError extends Error {
     });
   }
 
-  static vskNamespaceTag(context: VeskErrorOptions = {}): VeskError {
+  /**
+   * A `.vsk` namespace is resolved at the JSX-tag level: `<ns.Icon />` looks
+   * the component up in the registry by its exported name, exactly like
+   * `import { Icon }`, and no module object is ever built. The two forms that
+   * genuinely need a real module object are reported here.
+   *
+   * - `nested` — `<ns.Sub.Icon />`. A `.vsk` module's exports are flat
+   *   component names, so there is no object to walk into.
+   * - `value` — `ns.max` read as a value. Component tags resolve; plain value
+   *   reads do not, because nothing binds `ns` at runtime.
+   */
+  static vskNamespaceMember(context: VeskErrorOptions & { form?: 'nested' | 'value' } = {}): VeskError {
+    const nested = context.form === 'nested';
     return new VeskError(
-      'Namespace imports are not supported for `.vsk` modules.',
+      nested
+        ? 'A `.vsk` namespace is flat, so `<ns.Sub.Icon />` cannot be resolved.'
+        : 'A `.vsk` namespace resolves component tags only, so `ns.value` is not available.',
       {
         ...context,
         code: context.code || 'V0410',
-        suggestions: [
-          "Import the component by name: import { MyIcon } from './icons.vsk'",
-          "Rename on import: import { MyIcon as Icon } from './icons.vsk'",
-        ],
+        suggestions: nested
+          ? [
+            "Import the component by name: import { Icon } from './icons.vsk'",
+            "Import from the module that owns Sub: import * as Sub from './sub.vsk'",
+          ]
+          : [
+            "Import the value by name: import { MAX } from './constants.vsk'",
+            'Move the value into a .ts module and import it from there — those are real ES modules with live bindings.',
+          ],
         nextSteps: [
-          'A `.vsk` component is a registry entry keyed by its name, not a module namespace object, so `<ns.Icon />` cannot be resolved.',
-          'If you need a namespace object, import from a `.ts`/`.js` module instead — those are real ES modules.',
+          'A `.vsk` tag resolves by component name in the global registry, not by module exports, so `import * as ns` + `<ns.Icon />` needs no module object.',
+          nested
+            ? 'Re-export with a flat name (`export { Icon }`) or import the component directly.'
+            : 'Re-export the value under a flat name and import it directly, or keep the value in a .ts module.',
         ],
-        tip: 'A `.vsk` module exposes its components as named exports; use a named or renamed import rather than `import * as ns`.',
+        tip: '`<ns.Icon />` works; only nested paths and value reads need a real module namespace.',
       },
     );
   }

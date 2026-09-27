@@ -5,7 +5,8 @@ import { tmpdir } from 'node:os';
 import { build } from './esbuild-fallback.js';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { parse } from '@vesk/compiler/src/parser';
-import { compileClient, compileClientBoth, nameAllocFor } from '@vesk/compiler/src/client-codegen';
+import { compileClient, compileClientBoth, nameAllocFor, vskComponentNames } from '@vesk/compiler/src/client-codegen';
+import { VskComponentOwners } from '@vesk/compiler/src/vsk-collision';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
@@ -737,7 +738,8 @@ export async function generateClientBundle(
     // One parse/IR pass feeds both client modes AND the component-name
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
-    const { comp: rawComp, hyd: rawHyd, name: actualName, aliases, reexportPaths } = compileClientBoth(src, null, filePath);
+    const { comp: rawComp, hyd: rawHyd, name: actualName, aliases, reexportPaths, componentNames } = compileClientBoth(src, null, filePath);
+    for (const cn of componentNames || []) componentOwners.claim(cn, filePath);
     // Cache keeps the import-carrying codes so a warm build can re-fold them
     // into its own fresh accumulator; the emitted codes are import-stripped.
     // The bodies/specs/scoped artifacts are cached too so warm replay never
@@ -807,6 +809,12 @@ export async function generateClientBundle(
 
   const codeSplit = !!(options?.codeSplit);
   const transformPlugins = options?.plugins || [];
+
+  // Every `.vsk` component in the bundle shares ONE registry keyed by declared
+  // name, so two files declaring `component X` silently resolve to whichever
+  // compiled last. Warn once per build — see vsk-collision.ts for why this is
+  // a warning and not an error.
+  const componentOwners = new VskComponentOwners();
 
   /** Run every active plugin's `onTransformJS` over an emitted bundle/chunk source. */
   async function applyTransformPlugins(code: string, filePath: string): Promise<string> {
@@ -974,6 +982,7 @@ export async function generateClientBundle(
     for (const chunk of chunks) {
       transformedChunks.push({ ...chunk, code: await applyTransformPlugins(chunk.code, chunk.name) });
     }
+    componentOwners.report('client bundle');
     return { main: await applyTransformPlugins(main, 'client.js'), chunks: transformedChunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
   } else {
     let componentLines: string[] = [];
@@ -987,6 +996,8 @@ export async function generateClientBundle(
       const src = readFileSync(filePath, 'utf-8');
 
       resolveVskImports(filePath, (p, n) => compileFileMono(p, n || ''));
+
+      for (const cn of vskComponentNames(src, filePath)) componentOwners.claim(cn, filePath);
 
       // Share one name allocator so the comp and hyd contributions (which are
       // joined into a single scoped block below) never reuse `$n` names.
@@ -1038,6 +1049,7 @@ export async function generateClientBundle(
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
     }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
     // Mono (non-codeSplit) builds are the production path — no incremental cache.
+    componentOwners.report('client bundle');
     return { main: await applyTransformPlugins(main, 'client.js'), chunks: [] };
   }
 }

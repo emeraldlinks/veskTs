@@ -707,6 +707,40 @@ async function main() {
     const afterThree = await page.evaluate(() => document.querySelector('.helper-label')?.textContent?.trim() || '');
     assert(afterThree === 'Helper says 8', 'imported component persists state across clicks: "' + afterThree + '"');
 
+    // Namespace import (`import * as NS from './helper.vsk'` + `<NS.Helper />`)
+    // must SSR, hydrate and stay reactive exactly like the named import. The
+    // second box is the namespace one (base 7, not 5).
+    const nsBox = await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll('.helper-box')];
+      if (boxes.length < 2) return null;
+      return {
+        count: boxes.length,
+        secondLabel: boxes[1].querySelector('.helper-label')?.textContent?.trim() || '',
+        hasButton: !!boxes[1].querySelector('button'),
+      };
+    });
+    assert(nsBox !== null, 'namespace-rendered component present (second .helper-box)');
+    assert(nsBox.count === 2, 'namespace import renders exactly one extra component, got ' + nsBox.count);
+    assert(nsBox.secondLabel === 'Helper says 7', 'SSR namespace label: "' + nsBox.secondLabel + '"');
+    assert(nsBox.hasButton, 'namespace-rendered component has its own button');
+
+    // The namespace component owns its own tracked state, and clicking it must
+    // not disturb the named-import instance next to it.
+    await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll('.helper-box')];
+      boxes[1].querySelector('button').click();
+    });
+    await new Promise(r => setTimeout(r, 200));
+    const nsAfter = await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll('.helper-box')];
+      return {
+        first: boxes[0].querySelector('.helper-label')?.textContent?.trim() || '',
+        second: boxes[1].querySelector('.helper-label')?.textContent?.trim() || '',
+      };
+    });
+    assert(nsAfter.second === 'Helper says 8', 'namespace component is reactive after hydration: "' + nsAfter.second + '"');
+    assert(nsAfter.first === 'Helper says 8', 'named-import sibling kept its own state: "' + nsAfter.first + '"');
+
     // ── primitive() / leaf() component ABI ──
     // A primitive is presentational and must survive the production hydration
     // path: SSR'd, claimed, and re-rendered on the client without duplication.
