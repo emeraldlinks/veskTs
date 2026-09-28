@@ -28,18 +28,22 @@ let sharpProbed = false;
  * that dies with SIGILL — and the kernel writes a core dump on the way out, so
  * the "no" case is the expensive one: measured at 25-100s per build on a
  * loaded 2-core box. Without this, every build of an app that has images pays
- * it again. The key folds in sharp's own package.json mtime, so installing or
+ * it again. The key folds in the resolved sharp entry's mtime, so installing or
  * upgrading sharp invalidates the memo and the next build probes for real.
  */
 function probeMemoPath(): string | null {
   try {
     const req = createRequire(import.meta.url);
-    const pkg = req.resolve('sharp/package.json');
-    const stamp = statSync(pkg).mtimeMs;
-    return join(tmpdir(), `vesk-sharp-probe-${process.platform}-${process.arch}-${Math.round(stamp)}.json`);
+    // `sharp/package.json` is NOT an exported subpath (sharp's exports map
+    // rejects it with ERR_PACKAGE_PATH_NOT_EXPORTED), so key on the resolved
+    // ENTRY file: its mtime changes on install/upgrade, which is exactly when
+    // the answer has to be re-measured.
+    const entry = req.resolve('sharp');
+    const stamp = Math.round(statSync(entry).mtimeMs);
+    return join(tmpdir(), `vesk-sharp-probe-${process.platform}-${process.arch}-${stamp}.json`);
   } catch {
     // sharp not installed: the answer is "unavailable" and cannot change
-    // without an install, which would not invalidate a stamp we cannot read.
+    // without an install.
     return null;
   }
 }

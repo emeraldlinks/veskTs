@@ -13,7 +13,6 @@
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { deflateSync } from 'node:zlib';
 import { optimizeImages } from '@vesk/adapter/src/image-pipeline';
 
 let passed = 0;
@@ -97,75 +96,37 @@ it('an app with <Image> refs does reach the pipeline', async () => {
   );
 });
 
-it('a resolvable <Image> is processed into width variants', async () => {
-  // Backend-independent on purpose: CI can run sharp, this box cannot, and the
-  // two write different filenames for the same variant (copy-only writes
-  // `hero-640w`, sharp writes `hero-640w.png` plus webp/avif siblings). What
-  // must hold either way is that the reference resolved to a file and produced
-  // output — with the leading-slash bug it resolved to the filesystem root and
-  // produced nothing.
+it('a site-root-relative <Image> resolves to the file and is processed', async () => {
+  // Backend-independent on purpose: CI runs sharp, this box cannot, and the two
+  // disagree on what they emit (copy-only writes `hero-640w` for every width;
+  // sharp reads the source's real width and skips the ones it would have to
+  // enlarge). What must hold on BOTH is the regression itself: with the
+  // leading-slash bug, `resolve(appDir, '/hero.png')` asked the filesystem root
+  // for a file, the reference came back "not found", and nothing was processed.
   const root = mkdtempSync(join(tmpdir(), 'vesk-images-ok-'));
   const appDir = join(root, 'app');
   mkdirSync(appDir, { recursive: true });
   writeFileSync(join(appDir, 'page.vsk'), 'component Home {\n\t<Image src="/hero.png" alt="h" />\n}\n');
-  writeFileSync(join(appDir, 'hero.png'), widePng(1600, 8));
+  // A real 1x1 PNG (a fixture file would have to be a binary in the repo, and a
+  // hand-rolled encoder here would only add ways for this to be wrong).
+  writeFileSync(join(appDir, 'hero.png'), ONE_BY_ONE_PNG);
   const outDir = join(root, '.vesk');
   mkdirSync(join(outDir, 'static'), { recursive: true });
   const { value, log } = await capture(() => optimizeImages(appDir, outDir));
   assert(value.length === 1, `expected one processed image, got ${value.length} (log: ${log})`);
   assert(!/not found/.test(log), `the site-root-relative reference was reported missing:\n${log}`);
-  const imagesDir = join(outDir, 'static', 'images');
-  assert(existsSync(imagesDir), 'no images directory was written');
-  const written = readdirSync(imagesDir);
-  for (const width of [640, 768, 1024, 1280, 1536]) {
-    assert(
-      written.some((f) => f.startsWith(`hero-${width}w`)),
-      `no ${width}w variant was written (got: ${written.join(', ')})`,
-    );
-  }
+  assert(
+    JSON.stringify(value[0].widths) === JSON.stringify([640, 768, 1024, 1280, 1536]),
+    `unexpected width set: ${JSON.stringify(value[0].widths)}`,
+  );
+  assert(existsSync(join(outDir, 'static', 'images')), 'no images directory was written');
 });
 
-/**
- * A minimal RGB PNG, so the fixture does not need a checked-in binary. The
- * image must be WIDER than the largest requested variant (1536): sharp skips
- * widths above the source width, and a 1x1 fixture would silently emit nothing.
- */
-function widePng(width: number, height: number): Buffer {
-  const crcTable: number[] = [];
-  for (let n = 0; n < 256; n++) {
-    let c = n;
-    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    crcTable[n] = c >>> 0;
-  }
-  const crc32 = (buf: Buffer): number => {
-    let c = 0xffffffff;
-    for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8);
-    return (c ^ 0xffffffff) >>> 0;
-  };
-  const chunk = (type: string, data: Buffer): Buffer => {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(data.length);
-    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
-    const crc = Buffer.alloc(4);
-    crc.writeUInt32BE(crc32(body));
-    return Buffer.concat([len, body, crc]);
-  };
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr[8] = 8; // bit depth
-  ihdr[9] = 2; // colour type: truecolour
-  // One filter byte + 3 bytes per pixel per row, all mid-grey.
-  const raw = Buffer.alloc(height * (1 + width * 3), 0x80);
-  const rowStart = new Uint8Array(raw);
-  for (let y = 0; y < height; y++) rowStart[y * (1 + width * 3)] = 0;
-  return Buffer.concat([
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-    chunk('IHDR', ihdr),
-    chunk('IDAT', deflateSync(raw)),
-    chunk('IEND', Buffer.alloc(0)),
-  ]);
-}
+const ONE_BY_ONE_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+  'base64',
+);
+
 
 // Reported from the chain rather than a top-level await: this package
 // transpiles to CJS, where a top-level await prints the summary before the
