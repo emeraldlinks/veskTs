@@ -1309,6 +1309,9 @@ async function main() {
     // 18a: Fresh full load of every route. The response must be HTML, the
     // status 200, and the ssr-data script must appear ONLY on data-fetching
     // routes (regression: data payloads/scripts leaking into other pages).
+    // The script count is read from the SERVED document: the runtime prunes a
+    // handoff script once the client has consumed it, so counting in the
+    // hydrated DOM races that removal and misreports data routes.
     console.log('  18a: fresh SSR per route — html + data-script isolation');
     const leakChecks = [];
     for (const route of FULL_ROUTES) {
@@ -1320,12 +1323,9 @@ async function main() {
         const ct = resp ? (resp.headers()['content-type'] || '') : '';
         assert(resp && resp.status() === 200, `${route} full load is HTTP 200 (got ${resp?.status()})`);
         assert(ct.includes('text/html'), `${route} serves HTML not JSON (content-type: ${ct})`);
-        const scriptCount = await page.evaluate(() => {
-          const html = document.documentElement.outerHTML;
-          // CLI dev server uses /_vesk/ssr-data.js, adapter uses /ssr-data.js
-          const matches = html.match(/(?:\/_vesk\/)?ssr-data\.js/g) || [];
-          return matches.length;
-        });
+        const servedHtml = resp ? await resp.text() : '';
+        // CLI dev server uses /_vesk/ssr-data.js, adapter uses /ssr-data.js
+        const scriptCount = (servedHtml.match(/(?:\/_vesk\/)?ssr-data\.js/g) || []).length;
         const expected = DATA_ROUTES.has(route) ? 1 : 0;
         if (scriptCount !== expected) {
           const dbg = await page.evaluate(() => ({
@@ -1470,11 +1470,15 @@ async function main() {
     // 18d: View-source integrity — the fresh document of a non-data route must
     // never reference the ssr-data script; data routes must reference it exactly
     // once. Mirrors the reported "script leaks into other pages' view-source".
+    // Asserted on the SERVED document, not the hydrated DOM: once the client
+    // has fetched the handoff the runtime prunes the now-spent script tag
+    // (hydrate.ts orphan repair), so reading page.content() races that removal
+    // and reports a false negative on data routes.
     console.log('  18d: fresh-document data-script isolation');
     for (const [route, expected] of [['/', 1], ['/about', 0], ['/async', 1], ['/posts', 1], ['/map', 0], ['/portal', 1], ['/portal/guides', 1]]) {
       const page = await browser.newPage();
-      await goto(page, BASE + route, { waitUntil: 'networkidle0' });
-      const html = await page.content();
+      const resp = await goto(page, BASE + route, { waitUntil: 'networkidle0' });
+      const html = resp ? await resp.text() : '';
       // CLI dev server uses /_vesk/ssr-data.js, adapter uses /ssr-data.js
       const count = (html.match(/(?:\/_vesk\/)?ssr-data\.js/g) || []).length;
       assert(count === expected, `${route} view-source has ${count} ssr-data refs (expected ${expected})`);
