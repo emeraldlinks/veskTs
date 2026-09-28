@@ -6,6 +6,7 @@ import { setSsrSink } from '@vesk/runtime/src/index-server';
 import type { SsrDataSink } from '@vesk/runtime/src/resource';
 
 const TOKEN_KEY = '__vsk_ssr_token';
+const IMPL_KEY = '__vsk_ssr_store_impl';
 
 export interface SsrStore {
   /** Per-request token. Keyed data slots hang off this, so it must be unique
@@ -16,7 +17,35 @@ export interface SsrStore {
   data: Record<string, unknown>;
 }
 
-const storage = new AsyncLocalStorage<SsrStore>();
+/**
+ * The request-scope state, pinned to `globalThis` so it survives duplicate
+ * module copies.
+ *
+ * A server bundle can end up with this module evaluated twice (an app build
+ * that reaches it through two different specifiers, a dev server that loads a
+ * generated function plus the CLI's own copy, ...). Two copies means two
+ * AsyncLocalStorages and two liveness maps, and the request scope opened by
+ * one is invisible to the other: the reaper then sees zero live slots and
+ * deletes concurrent requests' data slots, so their documents ship without the
+ * ssr-data handoff. Sharing one implementation makes a duplicate copy
+ * harmless instead of a data-loss bug.
+ */
+interface SsrStoreImpl {
+  storage: AsyncLocalStorage<SsrStore>;
+  liveSlots: Map<string, number>;
+  ownsAccessor: boolean;
+}
+
+const g = globalThis as unknown as Record<string, unknown> & { [IMPL_KEY]?: SsrStoreImpl };
+const impl: SsrStoreImpl = g[IMPL_KEY] ?? (g[IMPL_KEY] = {
+  storage: new AsyncLocalStorage<SsrStore>(),
+  liveSlots: new Map<string, number>(),
+  // Only the copy that created the implementation installs the token
+  // accessor; a later copy must not redefine it over the shared storage.
+  ownsAccessor: true,
+});
+
+const storage = impl.storage;
 
 /**
  * Tokens whose `__vsk_ssr_data_<token>` slot a live render still owns, with a
@@ -26,7 +55,7 @@ const storage = new AsyncLocalStorage<SsrStore>();
  * first inner release revoke the claim the document render still depends on,
  * so the reaper could reap a live request's handoff. Counts balance instead.
  */
-const liveSlots = new Map<string, number>();
+const liveSlots = impl.liveSlots;
 
 function newSsrToken(): string {
   return Math.random().toString(36).slice(2);
@@ -170,6 +199,9 @@ export const ssrSink: SsrDataSink = {
   },
 };
 
+// `setSsrSink` is safe to call from every copy: each copy's sink reads and
+// writes the same shared store, so whichever one the runtime ends up holding
+// behaves identically.
 setSsrSink(ssrSink);
 
 // The generated server code reads `globalThis.__vsk_ssr_token` synchronously
@@ -190,13 +222,15 @@ setSsrSink(ssrSink);
 // process-global token, reintroducing the race for every later request. Clear
 // a token by assigning through `globalThis` inside a scope, or with
 // `resetSsrToken`.
-Object.defineProperty(globalThis, TOKEN_KEY, {
-  configurable: true,
-  get() {
-    return storage.getStore()?.token;
-  },
-  set(value: string | undefined) {
-    const store = storage.getStore();
-    if (store) store.token = value;
-  },
-});
+if (impl.ownsAccessor) {
+  Object.defineProperty(globalThis, TOKEN_KEY, {
+    configurable: true,
+    get() {
+      return storage.getStore()?.token;
+    },
+    set(value: string | undefined) {
+      const store = storage.getStore();
+      if (store) store.token = value;
+    },
+  });
+}

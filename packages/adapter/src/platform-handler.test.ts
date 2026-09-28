@@ -185,7 +185,7 @@ export async function handle(request) {
 
     await it('serves the SSR-data handoff for /ssr-data.js?t=<token> (edge hydration parity)', async () => {
       const g = globalThis as Record<string, unknown>;
-      const store = (g.__vsk_ssr_data_store || (g.__vsk_ssr_data_store = {})) as Record<string, Record<string, unknown>> ;
+      const store = (g.__vsk_ssr_payload_store || (g.__vsk_ssr_payload_store = {})) as Record<string, Record<string, unknown>> ;
       store['tok123'] = { ssrData: { 'vesk-compiler-latest': { version: '0.2.36' } }, props: { a: 1 } };
       const res = await handleRequest(new Request('http://test.local/ssr-data.js?t=tok123'));
       assert(res.status === 200, `expected 200, got ${res.status}`);

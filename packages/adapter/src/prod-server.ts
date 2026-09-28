@@ -314,7 +314,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
 
     if (url.pathname === '/ssr-data.js') {
       const token = url.searchParams.get('t') || '';
-      const store = (globalThis as Record<string, unknown>).__vsk_ssr_data_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
+      const store = (globalThis as Record<string, unknown>).__vsk_ssr_payload_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
       const payload = store?.[token];
       if (payload) delete store[token];
       const lines: string[] = [];

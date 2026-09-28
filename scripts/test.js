@@ -84,7 +84,11 @@ const e2eProcess = spawn('npx', ['tsx', 'scripts/e2e-setup.js'], {
 
 let e2eOutput = ''
 const ready = new Promise((resolve, reject) => {
-  const timeout = setTimeout(() => reject(new Error('Timeout waiting for E2E servers')), 60000)
+  // 60s was measured against one fast machine and left no headroom: the setup
+  // builds the app twice (production ~25s, dev ~25s) before the first request
+  // can be served, so a slower box timed out here and killed the whole suite
+  // before a single assertion ran.
+  const timeout = setTimeout(() => reject(new Error('Timeout waiting for E2E servers')), 300000)
   e2eProcess.stdout.on('data', (data) => {
     e2eOutput += data.toString()
     if (e2eOutput.includes('E2E_SERVERS_READY')) {
@@ -188,6 +192,39 @@ for (const dir of testDirs) {
       console.error(e.message.slice(0, 300))
       if (e.stdout) console.log(e.stdout.slice(-500))
     }
+  }
+}
+
+// Run tests/ssr-handoff-concurrency-test.mjs: the SSR data handoff under 48
+// concurrent requests, on both servers. Runs before the browser suites because
+// it is fast and it catches the request-scope regressions those suites can only
+// see as a client-side refetch.
+const handoffPath = resolve(root, 'tests', 'ssr-handoff-concurrency-test.mjs')
+if (existsSync(handoffPath)) {
+  totalFiles++
+  process.stdout.write('tests/ssr-handoff-concurrency-test.mjs ... ')
+  try {
+    const output = runTestFile(handoffPath, e2eEnv)
+    const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
+    if (match) {
+      const passed = parseInt(match[1])
+      const failed = parseInt(match[2])
+      totalPassed += passed
+      totalFailed += failed
+      if (failed > 0) {
+        console.log(`FAIL (${failed} failure${failed > 1 ? 's' : ''})`)
+        console.log(output)
+      } else {
+        console.log(`OK (${passed} tests)`)
+      }
+    } else {
+      console.log('OK')
+    }
+  } catch (e) {
+    totalFailed++
+    console.log('ERROR')
+    console.error(e.message.slice(0, 300))
+    if (e.stdout) console.log(e.stdout.slice(-500))
   }
 }
 

@@ -597,7 +597,7 @@ await doBuild().catch(() => {});
     // the tag was never emitted and this was unreachable. Mirrors prod-server.
     if (url.pathname === '/ssr-data.js') {
       const token = url.searchParams.get('t') || '';
-      const store = (globalThis as Record<string, unknown>).__vsk_ssr_data_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
+      const store = (globalThis as Record<string, unknown>).__vsk_ssr_payload_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
       const payload = store?.[token];
       if (payload) delete store[token];
       console.error(`[ssr-data-trace] ${url.pathname} token=${token.slice(0,6)} referer=${req.headers['referer'] || req.headers['referrer'] || '-'} payload=${payload ? JSON.stringify({ props: Object.keys(payload.props || {}), data: Object.keys(payload.ssrData || {}) }) : 'NONE'}`);
@@ -712,7 +712,7 @@ let finalBody = body;
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: message }));
+            res.end(JSON.stringify({ ok: false, error: message }));
           }
           return;
         }
@@ -728,8 +728,6 @@ let finalBody = body;
             const t0 = process.hrtime.bigint();
             const tImport0 = process.hrtime.bigint();
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const _origFetch = globalThis.fetch;
-            globalThis.fetch = function _fetchDebug(u: string | URL | Request, init?: RequestInit) { console.error('FETCH-DEBUG', typeof u === 'string' ? u : String(u), (new Error()).stack); return _origFetch(u, init); };
             const tImport1 = process.hrtime.bigint();
             const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
@@ -747,7 +745,7 @@ let finalBody = body;
             res.end(finalBody);
             console.error(`[vdtime] ${url.pathname} ssrVersion=${ssrVersion} total=${Number(tHandle1 - t0) / 1e6 | 0}ms import=${Number(tImport1 - tImport0) / 1e6 | 0}ms handle=${Number(tHandle1 - tImport1) / 1e6 | 0}ms text=${Number(tText1 - tHandle1) / 1e6 | 0}ms`);
           } catch (e) {
-            console.error('[nbsp-debug] DEV-SSR-ERROR', e instanceof Error ? (e.stack || e.message) : String(e));
+            console.error('[vesk dev] SSR render failed:', e instanceof Error ? (e.stack || e.message) : String(e));
             res.writeHead(500, { 'Content-Type': 'text/html' });
             res.end(renderSsrErrorPage(e, url.pathname));
           }

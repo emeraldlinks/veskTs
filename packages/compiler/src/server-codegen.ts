@@ -82,3 +82,21 @@ export {
   applyHeadInjects,
   applyHtmlPlugins,
 } from '@vesk/compiler/src/server-render';
+
+// Re-exported so bundlers reach the request-scope store through THIS module
+// rather than a second specifier for the same file. A bundle that resolved
+// `@vesk/compiler/src/ssr-store` on its own (as the server-runtime entry used
+// to) could end up with two copies of the module — two AsyncLocalStorages and
+// two liveness maps — and the scope one copy opens is invisible to the other.
+export {
+  withSsrStore,
+  withSsrStoreOf,
+  createSsrStore,
+  adoptSsrStore,
+  currentSsrToken,
+  resetSsrToken,
+  keepSsrSlot,
+  dropSsrSlot,
+  isSsrSlotLive,
+  ssrSink,
+} from '@vesk/compiler/src/ssr-store';
