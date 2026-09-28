@@ -257,17 +257,30 @@ export function generateSsrFunction(
   // the next full-page render can't reuse the stale token and serialize the
   // previous nav's SSR data into its page (ssr-data leak).
   const dataNavCleanup = [
-    '  } finally {',
-    '    const __dnToken = globalThis.__vsk_ssr_token;',
-    '    delete globalThis.__vsk_ssr;',
-    '    if (__dnToken) delete globalThis[`__vsk_ssr_data_${__dnToken}`];',
-    '    delete globalThis.__vsk_ssr_token;',
-    '    delete globalThis.__vsk_ssr_data;',
-    '  }',
+    '    } finally {',
+    '      const __dnToken = globalThis.__vsk_ssr_token;',
+    '      delete globalThis.__vsk_ssr;',
+    '      if (__dnToken) delete globalThis[`__vsk_ssr_data_${__dnToken}`];',
+    // NOT `delete globalThis.__vsk_ssr_token`: that global is a
+    // configurable AsyncLocalStorage accessor (ssr-store.ts), so `delete`
+    // removes the property definition and the process silently reverts to a
+    // process-global token — the cross-request data-slot race, for good. The
+    // token dies with the withSsrStore scope wrapped around this block instead.
+    '      delete globalThis.__vsk_ssr_data;',
+    '    }',
+  ];
+  // The data-nav branch never runs renderFullPage/renderPageStream, so it needs
+  // its own request scope — otherwise its renderPage mints a token that is
+  // still live when the full-page render starts and the two share a data slot.
+  const dataNavWrap = (body: string[]) => [
+    '  return withSsrStore(async () => {',
+    ...body.map((l) => (l ? '  ' + l : l)),
+    '  });',
   ];
   if (layoutDecls.length > 0) {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
+      ...dataNavWrap([
       '    try {',
       '      let dataPage;',
       '      try {',
@@ -286,12 +299,14 @@ export function generateSsrFunction(
       "        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },",
       '      });',
       ...dataNavCleanup,
+      ]),
       '  }',
       '  return __renderHtml(params, url.href);',
     ].join('\n');
   } else {
     dataCode = [
       "  if (request.headers.get('x-vesk-data') === '1') {",
+      ...dataNavWrap([
       '    try {',
       '      let dataPage;',
       '      try {',
@@ -305,6 +320,7 @@ export function generateSsrFunction(
       "        headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' },",
       '      });',
       ...dataNavCleanup,
+      ]),
       '  }',
       '  return __renderHtml(params, url.href);',
     ].join('\n');

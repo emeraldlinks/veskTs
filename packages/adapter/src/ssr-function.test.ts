@@ -128,6 +128,34 @@ function runFor(node, ancestorLayouts) {
   assert(code.includes('"Layout", "StoreLayout"'), 'SSR fn uses whatever ancestors are passed (caller responsibility)');
 }
 
+console.log('\n\u2550\u2550\u2550 Request-scoped SSR token (data-nav) \u2550\u2550\u2550\n');
+
+{ // `__vsk_ssr_token` is an AsyncLocalStorage-backed accessor (ssr-store.ts).
+  // `delete globalThis.__vsk_ssr_token` removes a configurable property
+  // definition outright — it does NOT route through the setter — so a single
+  // SPA data-nav request would strip the accessor process-wide and every
+  // later request would fall back to a shared, racy token.
+  const withLayout = runFor({ sourceDir: 'app', fullPath: '/', layout: 'Layout' }, []);
+  assert(
+    !/delete\s+globalThis\.__vsk_ssr_token/.test(withLayout),
+    'layout route must never `delete globalThis.__vsk_ssr_token` (it would destroy the request-scoped accessor)',
+  );
+  assert(
+    withLayout.includes('delete globalThis[`__vsk_ssr_data_${__dnToken}`]'),
+    'data-nav still clears its own per-token data slot',
+  );
+  const pageOnly = runFor({ sourceDir: 'app', fullPath: '/', layout: null }, []);
+  assert(
+    !/delete\s+globalThis\.__vsk_ssr_token/.test(pageOnly),
+    'page-only route must never `delete globalThis.__vsk_ssr_token`',
+  );
+  // The data-nav branch renders through renderPage only, so it needs its own
+  // request scope or its token is still live when the full-page render starts.
+  const navIdx = withLayout.indexOf("x-vesk-data");
+  const navBody = withLayout.slice(navIdx, withLayout.indexOf('return __renderHtml', navIdx));
+  assert(navBody.includes('withSsrStore('), 'data-nav branch runs in its own withSsrStore scope');
+}
+
 rmSync(appDir, { recursive: true, force: true });
 rmSync(outDir, { recursive: true, force: true });
 

@@ -6,7 +6,7 @@ import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES, applyHeadInjects, applyHtmlPlugins, compileFile, resetVskState } from '@vesk/compiler/src/server-codegen';
-import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
+import { withSsrStore, withSsrStoreOf, createSsrStore, resetSsrToken, dropSsrSlot, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources, scanComponents } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
@@ -1696,11 +1696,14 @@ export async function startDevServer(port: number, projectDir: string, config: R
       // request; deleted below so the next request starts clean. Mirrors the
       // adapter ssr-function.ts dataNavCleanup contract.
       const ssg = globalThis as Record<string, unknown>;
-      const freshToken = Math.random().toString(36).slice(2);
-      ssg.__vsk_ssr_token = freshToken;
       ssg.__vsk_ssr_data = {};
+      // Fresh token per request, minted INSIDE the render scope: the token is
+      // request-scoped (ssr-store.ts backs the global with AsyncLocalStorage),
+      // so minting it out here would be dropped.
+      let freshToken: string | undefined;
       try {
       return await withSsrStore(async () => {
+      freshToken = resetSsrToken();
       const chain = cleanChain;
       let body = '';
       let head = '';
@@ -1769,10 +1772,13 @@ export async function startDevServer(port: number, projectDir: string, config: R
       return { html, props: props || { params: matched.params }, head };
       });
       } finally {
-        delete ssg[`__vsk_ssr_data_${freshToken}`];
-        delete ssg[`__vsk_ssr_promises_${freshToken}`];
-        delete ssg[`__vsk_ssr_failures_${freshToken}`];
-        if (ssg.__vsk_ssr_token === freshToken) delete ssg.__vsk_ssr_token;
+        const token = freshToken;
+        dropSsrSlot(token);
+        delete ssg[`__vsk_ssr_data_${token}`];
+        delete ssg[`__vsk_ssr_promises_${token}`];
+        delete ssg[`__vsk_ssr_failures_${token}`];
+        // No token cleanup: the store is request-scoped and dies with the
+        // scope, and deleting the global would drop its accessor.
         // Flat store is this request's scratch space (setSsrData mirrors here
         // because ALS writes can land forked). Drop it so the next request
         // can never settle from it via getSsrData's flat-mirror fallback.
@@ -1789,8 +1795,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
       // ssr-data script. Token lives across the stream's yields; scoped()
       // below deletes it once iteration ends.
       const sst = globalThis as Record<string, unknown>;
-      const streamToken = Math.random().toString(36).slice(2);
-      sst.__vsk_ssr_token = streamToken;
       sst.__vsk_ssr_data = {};
       async function* raw() {
       const chain = cleanChain;
@@ -1864,18 +1868,29 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
 
       const gen = raw();
+      // One store for the whole stream, not one per chunk: `next()` is driven by
+      // the consumer, so a fresh withSsrStore per pull would mint a new token
+      // each time, orphan the slots written by earlier chunks, and make the
+      // currentSsrData() merge above read an untouched slot — the page would
+      // stream with an empty ssr-data script.
+      const streamStore = createSsrStore();
       async function* scoped() {
         try {
         let result: IteratorResult<string, void>;
         do {
-          result = (await withSsrStore(() => gen.next())) as IteratorResult<string, void>;
+          result = (await withSsrStoreOf(streamStore, () => gen.next())) as IteratorResult<string, void>;
           if (!result.done) yield result.value;
         } while (!result.done);
         } finally {
-          delete sst[`__vsk_ssr_data_${streamToken}`];
-          delete sst[`__vsk_ssr_promises_${streamToken}`];
-          delete sst[`__vsk_ssr_failures_${streamToken}`];
-          if (sst.__vsk_ssr_token === streamToken) delete sst.__vsk_ssr_token;
+          const token = streamStore.token;
+          dropSsrSlot(token);
+          if (token) {
+            delete sst[`__vsk_ssr_data_${token}`];
+            delete sst[`__vsk_ssr_promises_${token}`];
+            delete sst[`__vsk_ssr_failures_${token}`];
+          }
+          // No token cleanup: it lives in the stream's store, and deleting the
+          // global would drop the request-scoped accessor.
           delete sst.__vsk_ssr_data;
         }
       }

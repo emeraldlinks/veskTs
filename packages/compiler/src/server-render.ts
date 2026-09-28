@@ -18,7 +18,16 @@ import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { collectVskImportPaths, collectVskReexportPaths, vskRegistryAliases, applyVskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-inline';
-import { withSsrStore, ssrSink } from '@vesk/compiler/src/ssr-store';
+import {
+  withSsrStore,
+  withSsrStoreOf,
+  createSsrStore,
+  adoptSsrStore,
+  ssrSink,
+  keepSsrSlot,
+  dropSsrSlot,
+  isSsrSlotLive
+} from '@vesk/compiler/src/ssr-store';
 import { applyLocalModuleImports } from '@vesk/compiler/src/module-imports';
 import { VskComponentOwners } from '@vesk/compiler/src/vsk-collision';
 
@@ -119,10 +128,16 @@ export function render(
   const isAsyncComp = !!(targetComp && (targetComp.isAsync || targetComp.ssrAwait));
 
   (globalThis as any).__vsk_ssr = true;
+  // Resolve the token INSIDE the render scope. The global is an AsyncLocalStorage
+  // accessor (see ssr-store.ts), so outside a scope it reads undefined and any
+  // assignment is dropped — reading it first would leave renderToken undefined
+  // and silently skip the settle/cleanup below.
+  return withSsrStore(() => {
   if (!(globalThis as any).__vsk_ssr_token) (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
-  const renderToken = (globalThis as any).__vsk_ssr_token;
+  const renderToken = (globalThis as any).__vsk_ssr_token as string;
+  keepSsrSlot(renderToken);
   if (isAsyncComp) {
-    return withSsrStore(() => (async () => {
+    return (async () => {
       let bodyHtml: string;
       try {
         bodyHtml = await renderFn(props, fullRegistry, scopedVesk(renderFn, __vesk));
@@ -132,16 +147,17 @@ export function render(
         clearSsrCells(renderToken);
       }
       return bodyHtml;
-    })());
+    })();
   }
   let bodyHtml: unknown;
   try {
-    bodyHtml = withSsrStore(() => renderFn(props, fullRegistry, scopedVesk(renderFn, __vesk)));
+    bodyHtml = renderFn(props, fullRegistry, scopedVesk(renderFn, __vesk));
   } finally {
     delete (globalThis as any).__vsk_ssr;
     clearSsrCells(renderToken);
   }
   return bodyHtml as string;
+  });
 }
 
 export function renderPage(
@@ -177,10 +193,11 @@ export function renderPage(
     // them must share a single data slot so the final renderFullPage merge can
     // serialize the whole handoff. Only create when no render began yet.
     if (!(globalThis as any).__vsk_ssr_token) (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
-    const renderToken = (globalThis as any).__vsk_ssr_token;
+    const renderToken = (globalThis as any).__vsk_ssr_token as string;
+    keepSsrSlot(renderToken);
     pruneSsrDataSlots();
     if (targetComp && (targetComp.isAsync || targetComp.ssrAwait)) {
-      return withSsrStore(() => (async () => {
+      return (async () => {
         let bodyHtml: string;
         try {
           bodyHtml = await renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk));
@@ -198,11 +215,11 @@ export function renderPage(
           head: renderHeadHtml(targetComp, ssrProps),
           props: ssrProps
         };
-      })());
+      })();
     }
     let bodyHtml: unknown;
     try {
-      bodyHtml = withSsrStore(() => renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk)));
+      bodyHtml = renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk));
     } finally {
       delete (globalThis as any).__vsk_ssr;
     }
@@ -211,11 +228,11 @@ export function renderPage(
     if (pending && pending.length > 0) {
       // A sync component still started server resources (useFetch): settle them
       // before returning so the handoff serializes real data, not loading state.
-      return withSsrStore(() => (async () => {
+      return (async () => {
         await settleSsrPromises(renderToken);
         clearSsrCells(renderToken);
         return { body: bodyHtml as string, head: headHtml, props: ssrProps };
-      })());
+      })();
     }
     clearSsrCells(renderToken);
     return { body: bodyHtml as string, head: headHtml, props: ssrProps };
@@ -241,6 +258,10 @@ function clearSsrCells(token: string | undefined): void {
   if (!token) return;
   delete (globalThis as any)[`__vsk_ssr_promises_${token}`];
   delete (globalThis as any)[`__vsk_ssr_failures_${token}`];
+  // This render is done with the token: release the slot so the reaper below
+  // can collect paths that never run renderFullPage (a bare renderPage/render
+  // leaves its data slot behind for the full-page merge).
+  dropSsrSlot(token);
   const cells = (globalThis as any).__vsk_ssr_cells;
   if (!cells || !(cells instanceof Map)) return;
   for (const k of cells.keys()) {
@@ -275,15 +296,26 @@ async function settleSsrPromises(token: string | undefined): Promise<void> {
 /**
  * Bound the per-token SSR data slots against abandonment (dev-partial
  * renderPage / render() that never runs renderFullPage). Slots are keyed by
- * Math.random tokens, so deleted-slot accounting by token can't be cleaned by
+ * per-request tokens, so deleted-slot accounting by token can't be cleaned by
  * an owning render; cap the map instead. RenderFullPage/RenderPageStream delete
  * their own slot + token in every path, so this only guards the untracked ones.
+ *
+ * Live renders are exempt. Slots are only reapable once no render owns them
+ * (see isSsrSlotLive) — a cap that ignored ownership would delete a
+ * *concurrent* request's handoff, which is the empty-ssr-data bug again, just
+ * triggered by load rather than by interleaving.
  */
 function pruneSsrDataSlots(): void {
   const g = globalThis as any;
-  const keys = Object.keys(g).filter((k) => typeof k === 'string' && k.startsWith('__vsk_ssr_data_'));
-  if (keys.length <= 40) return;
-  keys.sort().slice(0, keys.length - 40).forEach((k) => {
+  const prefix = '__vsk_ssr_data_';
+  const stale: string[] = [];
+  for (const k of Object.keys(g)) {
+    if (typeof k !== 'string' || !k.startsWith(prefix)) continue;
+    if (isSsrSlotLive(k.slice(prefix.length))) continue;
+    stale.push(k);
+  }
+  if (stale.length <= 40) return;
+  stale.sort().slice(0, stale.length - 40).forEach((k) => {
     delete g[k];
   });
 }
@@ -480,7 +512,8 @@ export async function renderFullPage(
   // generated adapter handler renders page -> layouts -> document within one
   // process), otherwise start fresh. One request = one token = one data slot.
   if (!(globalThis as any).__vsk_ssr_token) (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
-  const renderToken = (globalThis as any).__vsk_ssr_token;
+  const renderToken = (globalThis as any).__vsk_ssr_token as string;
+  keepSsrSlot(renderToken);
   pruneSsrDataSlots();
   // Start this render's handoff store fresh: setSsrData mirrors into
   // globalThis.__vsk_ssr_data (see resource.ts) because the AsyncLocalStorage
@@ -578,7 +611,10 @@ ${dataScriptBlock}${clientScript}</body>
   } finally {
     delete (globalThis as any).__vsk_ssr;
     delete (globalThis as any)[`__vsk_ssr_data_${renderToken}`];
-    delete (globalThis as any).__vsk_ssr_token;
+    // The token lives in the AsyncLocalStorage store now (see ssr-store.ts);
+    // it goes away with the scope. Deleting the global would destroy the
+    // request-scoped accessor that generated render code reads.
+    dropSsrSlot(renderToken);
     pruneSsrDataSlots();
   }
   });
@@ -591,6 +627,16 @@ export function renderPageStream(
   registry: Map<string, Function> = new Map(),
   options: FullPageOptions = {}
 ): AsyncGenerator<string> {
+  // One store for the whole stream. `next()` is driven by the consumer, so a
+  // per-`next()` scope would mint a new token every chunk, orphan the slots
+  // written by earlier chunks, and leave the tail merge reading an untouched
+  // slot (the page then streams with no ssr-data script). Adopting the ambient
+  // store keeps the chunks, the promise tracker and that merge on the request's
+  // single token; every pull below runs through `withSsrStoreOf(streamStore)`.
+  const streamStore = adoptSsrStore();
+  keepSsrSlot(streamStore.token);
+  const streamToken = streamStore.token as string;
+
   async function* raw(): AsyncGenerator<string> {
   const cached = (options.cached as CompileFileResult | undefined) || undefined;
   const ir = cached ? cached.ir : generateIR(parse(source, options.sourcePath ? { filename: options.sourcePath as string } : {}), source, options.sourcePath as string | undefined);
@@ -667,8 +713,7 @@ export function renderPageStream(
   (globalThis as any).__vsk_ssr = true;
   // Fresh handoff store per render; see renderFullPage note.
   (globalThis as any).__vsk_ssr_data = {};
-  if (!(globalThis as any).__vsk_ssr_token) (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
-  const renderToken = (globalThis as any).__vsk_ssr_token;
+  const renderToken = streamToken;
   pruneSsrDataSlots();
   let bodyHtml: string;
   try {
@@ -690,7 +735,7 @@ export function renderPageStream(
     console.error(`[render-trace] renderPageStream comp=${componentName} keys=${Object.keys(ssrData).join(',') || '∅'} slot=${Object.keys(slot).join(',') || '∅'} sink=${Object.keys(ssrSink.snapshot()).join(',') || '∅'}`);
   }
   delete (globalThis as any)[`__vsk_ssr_data_${renderToken}`];
-  delete (globalThis as any).__vsk_ssr_token;
+  dropSsrSlot(renderToken);
   pruneSsrDataSlots();
 
   const dataScripts = buildDataScripts(ssrProps, ssrData, options.externalDataScript);
@@ -704,12 +749,27 @@ export function renderPageStream(
   }
 
   const gen = raw();
+  // Drive every pull in the stream's own store. `gen.next()` is called by the
+  // consumer, so it runs in the consumer's context — without this the render
+  // would see whatever token the caller's request happens to hold (or none),
+  // while the merge above reads `streamToken`.
   async function* scoped(): AsyncGenerator<string> {
-    let result: IteratorResult<string, void>;
-    do {
-      result = (await withSsrStore(() => gen.next())) as IteratorResult<string, void>;
-      if (!result.done) yield result.value;
-    } while (!result.done);
+    try {
+      let result: IteratorResult<string, void>;
+      do {
+        result = (await withSsrStoreOf(streamStore, () => gen.next())) as IteratorResult<string, void>;
+        if (!result.done) yield result.value;
+      } while (!result.done);
+    } finally {
+      // Release the claim `raw()`'s own clearSsrCells already balanced, then
+      // sweep anything the stream left behind.
+      dropSsrSlot(streamToken);
+      delete (globalThis as any)[`__vsk_ssr_data_${streamToken}`];
+      delete (globalThis as any)[`__vsk_ssr_promises_${streamToken}`];
+      delete (globalThis as any)[`__vsk_ssr_failures_${streamToken}`];
+      delete (globalThis as any).__vsk_ssr_data;
+      pruneSsrDataSlots();
+    }
   }
   return scoped();
 }

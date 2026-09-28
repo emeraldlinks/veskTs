@@ -389,6 +389,14 @@ function regenerateSsrFunction(
   let renderCode: string;
   if (layoutDecls.length > 0) {
     renderCode = [
+      // One store per request, mirroring ssr-function.ts. The page, every
+      // nested layout and the document must share a single SSR token: each
+      // `renderPage`/`renderFullPage` call below resolves
+      // `globalThis.__vsk_ssr_token` for its data slot, and outside a scope that
+      // global is undefined — so `useFetch` settled under one token would be
+      // serialized by `renderFullPage` under another and the page would ship
+      // with no ssr-data script.
+      '  return withSsrStore(async () => {',
       '  let page;',
       '  let caughtError = null;',
       '  try {',
@@ -402,21 +410,23 @@ function regenerateSsrFunction(
       '  }',
       "  let _body = (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(String(caughtError.message)) : '') + '-->' : '') + page.body;",
       "  let _head = page.head || '';",
-      "  for (let _i = _layoutSrcList.length - 1; _i > 0; _i--) {",
+      '  for (let _i = _layoutSrcList.length - 1; _i > 0; _i--) {',
       "    const _inner = await renderPage(_layoutSrcList[_i], _layoutCompList[_i], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i], sourcePath: _layoutPathList[_i] });",
       '    _body = _inner.body;',
       "    if (_inner.head) _head = _inner.head + _head;",
       '  }',
       "  const html = await renderFullPage(_layoutSrcList[0], _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: _head, sourcePath: _layoutPathList[0] });',
       "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
+      '  });',
     ].join('\n');
   } else {
     renderCode = [
+      '  return withSsrStore(async () => {',
       '  let stream;',
       '  try {',
       '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });",
       '  } catch (err) {',
-      '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
+      "    if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;",
       '    if (!_errorSrc) throw err;',
       "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
@@ -432,8 +442,10 @@ function regenerateSsrFunction(
       '      controller.close();',
       '    },',
       "  }), { headers: { 'Content-Type': 'text/html' } });",
+      '  });',
     ].join('\n');
   }
+
 
   const errorBodyFnCode = [
     'async function __renderErrorBody(props) {',
@@ -448,7 +460,7 @@ function regenerateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, storeDataScriptGlobal } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, storeDataScriptGlobal, withSsrStore } from '../runtime.js';",
     '', registryCode, src, '',
     errorBodyFnCode,
     '',
