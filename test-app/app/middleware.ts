@@ -1,4 +1,4 @@
-import type { MiddlewareContext } from '@vesk/compiler';
+import type { MiddlewareContext } from '@vesk/types';
 
 
 
