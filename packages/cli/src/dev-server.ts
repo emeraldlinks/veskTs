@@ -2127,7 +2127,6 @@ export async function startDevServer(port: number, projectDir: string, config: R
     LOG.info(`${projectDir}`);
     LOG.info(`${pageCount} page${pageCount === 1 ? '' : 's'}: ${routes.join(', ') || '(none)'}`);
     if (apiCount > 0) LOG.info(`${apiCount} api route${apiCount === 1 ? '' : 's'} (app/api)`);
-    LOG.info(`hmr enabled — watching the whole project (excluding node_modules and build output); edit app/, src/ or a root script to hot reload`);
   });
 
   updateSourceMapping();
