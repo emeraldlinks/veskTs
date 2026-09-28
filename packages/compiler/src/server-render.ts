@@ -255,9 +255,21 @@ function clearSsrCells(token: string | undefined): void {
  */
 async function settleSsrPromises(token: string | undefined): Promise<void> {
   if (!token) return;
-  const pending = (globalThis as any)[`__vsk_ssr_promises_${token}`];
-  if (!pending || pending.length === 0) return;
-  await Promise.allSettled(pending);
+  const key = `__vsk_ssr_promises_${token}`;
+  // Drain until the queue stops growing. The runtime only ever pushes onto
+  // this array, and settling one promise can register another: an async
+  // component body re-runs after its previous await and starts the next
+  // fetch. A single allSettled over a snapshot returns before that lands, so
+  // the render serializes an empty data slot and ships without its ssr-data
+  // script — the client then refetches what SSR already had.
+  for (let round = 0; round < 10; round++) {
+    const pending = (globalThis as any)[key];
+    if (!pending || pending.length === 0) return;
+    const before = pending.length;
+    await Promise.allSettled(pending.slice());
+    const after = (globalThis as any)[key];
+    if (!after || after.length <= before) return;
+  }
 }
 
 /**
