@@ -33,6 +33,22 @@ function runTestFile(filePath, env) {
   return output
 }
 
+// Test files report in three shapes, and the harness has to read all of them
+// or it silently drops a file's assertions from the totals:
+//   `Results: 12 passed, 0 failed, 12 total`
+//   `module-imports: 41 passed, 0 failed`
+//   `59 passing, 0 failing`
+// A file that prints no counts at all (some suites print per-case PASS lines)
+// still counts as passing when it exits 0 — execSync throws otherwise — so
+// this returns null and the caller reports the file without a count.
+function parseCounts(output) {
+  const m =
+    output.match(/Results:\s*(\d+)\s*pass(?:ed|ing),\s*(\d+)\s*fail(?:ed|ing)/) ||
+    output.match(/(\d+)\s*pass(?:ed|ing),\s*(\d+)\s*fail(?:ed|ing)/)
+  if (!m) return null
+  return { passed: parseInt(m[1], 10), failed: parseInt(m[2], 10) }
+}
+
 let totalPassed = 0
 let totalFailed = 0
 let totalFiles = 0
@@ -48,10 +64,10 @@ for (const dir of testDirs) {
     process.stdout.write(`${file} ... `)
     try {
       const output = runTestFile(filePath)
-      const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
-      if (match) {
-        const passed = parseInt(match[1])
-        const failed = parseInt(match[2])
+      const counts = parseCounts(output)
+      if (counts) {
+        const passed = counts.passed
+        const failed = counts.failed
         totalPassed += passed
         totalFailed += failed
         if (failed > 0) {
@@ -61,8 +77,9 @@ for (const dir of testDirs) {
           console.log(`OK (${passed} tests)`)
         }
       } else {
-        console.log(`OK (no Results line, checking output)`)
-        console.log(output.slice(-200))
+        // No counts, but the file exited 0: some suites report per-case PASS
+        // lines only (plugin-pwa). The count is simply unavailable.
+        console.log('OK (no count line)')
       }
     } catch (e) {
       totalFailed++
@@ -171,10 +188,10 @@ for (const dir of testDirs) {
     process.stdout.write(`${file} ... `)
     try {
       const output = runTestFile(filePath, e2eEnv)
-      const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
-      if (match) {
-        const passed = parseInt(match[1])
-        const failed = parseInt(match[2])
+      const counts = parseCounts(output)
+      if (counts) {
+        const passed = counts.passed
+        const failed = counts.failed
         totalPassed += passed
         totalFailed += failed
         if (failed > 0) {
@@ -205,10 +222,10 @@ if (existsSync(handoffPath)) {
   process.stdout.write('tests/ssr-handoff-concurrency-test.mjs ... ')
   try {
     const output = runTestFile(handoffPath, e2eEnv)
-    const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
-    if (match) {
-      const passed = parseInt(match[1])
-      const failed = parseInt(match[2])
+    const counts = parseCounts(output)
+    if (counts) {
+      const passed = counts.passed
+      const failed = counts.failed
       totalPassed += passed
       totalFailed += failed
       if (failed > 0) {
@@ -235,10 +252,10 @@ if (existsSync(prodHydrationPath)) {
   process.stdout.write('tests/production-hydration-test.mjs ... ')
   try {
     const output = runTestFile(prodHydrationPath, e2eEnv)
-    const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
-    if (match) {
-      const passed = parseInt(match[1])
-      const failed = parseInt(match[2])
+    const counts = parseCounts(output)
+    if (counts) {
+      const passed = counts.passed
+      const failed = counts.failed
       totalPassed += passed
       totalFailed += failed
       if (failed > 0) {
@@ -265,10 +282,10 @@ if (existsSync(edgeTestPath)) {
   process.stdout.write('tests/edge-test.mjs ... ')
   try {
     const output = runTestFile(edgeTestPath)
-    const match = output.match(/Results:\s*(\d+)\s*passed,\s*(\d+)\s*failed/)
-    if (match) {
-      const passed = parseInt(match[1])
-      const failed = parseInt(match[2])
+    const counts = parseCounts(output)
+    if (counts) {
+      const passed = counts.passed
+      const failed = counts.failed
       totalPassed += passed
       totalFailed += failed
       if (failed > 0) {
