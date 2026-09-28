@@ -212,7 +212,9 @@ export function renderPage(
         }
         return {
           body: bodyHtml,
-          head: renderHeadHtml(targetComp, ssrProps),
+          // The component's own scope, so head expressions that read an import
+          // resolve (see renderHeadHtml).
+          head: renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk)),
           props: ssrProps
         };
       })();
@@ -223,7 +225,7 @@ export function renderPage(
     } finally {
       delete (globalThis as any).__vsk_ssr;
     }
-    const headHtml = targetComp ? renderHeadHtml(targetComp, ssrProps) : '';
+    const headHtml = targetComp ? renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk)) : '';
     const pending = (globalThis as any)[`__vsk_ssr_promises_${renderToken}`];
     if (pending && pending.length > 0) {
       // A sync component still started server resources (useFetch): settle them
@@ -680,7 +682,7 @@ export function renderPageStream(
   }
   let streamHeadHtml: string | null = null;
   if (targetComp) {
-    let headHtml = renderHeadHtml(targetComp, ssrProps);
+    let headHtml = renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk));
     if (options.pageHead) {
       const merged = mergeHeadHtml(options.pageHead, headHtml);
       headHtml = merged.html;

@@ -1,8 +1,12 @@
-import type { IRNode } from '@vesk/compiler/src/ir';
-import { StaticNode, TextNode, DynamicBinding, HeadBlock, RuntimeStatement } from '@vesk/compiler/src/ir';
+import type { IRNode, Expression } from '@vesk/compiler/src/ir';
+import { StaticNode, TextNode, DynamicBinding, HeadBlock, RuntimeStatement, TrackDecl } from '@vesk/compiler/src/ir';
 import type { ComponentIR } from '@vesk/compiler/src/ir';
 import { tryEvalExpr, escapeHtml } from '@vesk/compiler/src/server-utils';
 import { isWhitespaceChar } from '@vesk/compiler/src/scan';
+import { parse } from '@vesk/compiler/src/parser';
+import { collectTrackedNames, transformTracked, transformTrackedInit, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
+import { walk } from 'zimmerframe';
+import type { Node as ESTreeNode } from 'estree';
 
 function isHtmlNameChar(ch: string): boolean {
   const code = ch.charCodeAt(0);
@@ -19,21 +23,235 @@ function isValueBoundaryChar(ch: string): boolean {
   return isWhitespaceChar(ch) || ch === '/' || ch === '>';
 }
 
-function evaluateLocals(comp: ComponentIR, props: Record<string, unknown>): Record<string, unknown> {
-  const locals: Record<string, unknown> = {};
+/**
+ * Value stand-ins for the reactivity primitives, so the head pass can read a
+ * tracked binding without creating a real cell.
+ *
+ * The head pass must not allocate cells: the component already ran and its
+ * cells are registered per render token in `__vsk_ssr_cells`; a second,
+ * throwaway cell would be invisible to the real render and to its cleanup. So
+ * `track`/`derived` here produce a plain holder of the value and `get` unwraps
+ * it — which is all a head expression can observe. `toString` covers a head
+ * expression that interpolates the cell itself instead of reading `get(x)`.
+ */
+interface HeadCell { __vskHeadValue: unknown }
+
+function headCell(value: unknown): HeadCell {
+  const cell = {
+    __vskHeadValue: value,
+    toString() { return String(cell.__vskHeadValue); },
+    // Present so `+count` / `String(count)` on the cell itself still yields the
+    // value; the return type is widened because `valueOf` must return `this`.
+    valueOf() { return cell as unknown; },
+  };
+  return cell as unknown as HeadCell;
+}
+
+const headRuntimeShims = (): Record<string, unknown> => ({
+  track: (init: unknown) => headCell(init),
+  derived: (fn: unknown) => headCell(typeof fn === 'function' ? (fn as () => unknown)() : fn),
+  get: (cell: unknown) =>
+    cell && typeof cell === 'object' && '__vskHeadValue' in (cell as Record<string, unknown>)
+      ? (cell as unknown as HeadCell).__vskHeadValue
+      : cell,
+  peek: (cell: unknown) =>
+    cell && typeof cell === 'object' && '__vskHeadValue' in (cell as Record<string, unknown>)
+      ? (cell as unknown as HeadCell).__vskHeadValue
+      : cell,
+  untrack: (fn: unknown) => (typeof fn === 'function' ? (fn as () => unknown)() : fn),
+});
+
+/**
+ * Everything one head-expression evaluation needs: props, the component's
+ * imports, the locals evaluated so far, and the tracked names so a read is
+ * rewritten to `get(x)` exactly as the client codegen rewrites it.
+ */
+interface HeadEvalCtx {
+  props: Record<string, unknown>;
+  locals: Record<string, unknown>;
+  tracked: Map<string, TrackedInfo>;
+  scope: Record<string, unknown>;
+}
+
+function headEvalScope(ctx: HeadEvalCtx): Record<string, unknown> {
+  // The shims come LAST: they must win over the component's real `track`/`get`
+  // from `__vesk`, which would otherwise allocate real cells.
+  return { ...ctx.scope, ...ctx.locals, ...headRuntimeShims() };
+}
+
+function evalHeadExpression(expression: Expression, ctx: HeadEvalCtx): unknown {
+  // `{count}` must resolve to the VALUE, not the cell: rewrite tracked reads the
+  // same way the client codegen does, then evaluate with the shims bound.
+  const code = transformTracked(expression, ctx.tracked);
+  return tryEvalExpr(code, ctx.props, headEvalScope(ctx));
+}
+
+/**
+ * Evaluate `raw` with `props` plus every name in `scope` bound to its value.
+ *
+ * The head pass re-evaluates a component's top-level declarations outside the
+ * component's own call frame, so it has to rebuild that frame. Passing the
+ * component's `__vesk` bindings as named parameters is what makes imports
+ * visible: a docs page's `const doc = getDoc(props.params.slug)` needs
+ * `getDoc`, which lives in `__vesk` (the generated body destructures it from
+ * there), and without it the head silently degraded to empty strings.
+ */
+function evalWithScope(raw: string, props: Record<string, unknown>, scope: Record<string, unknown>): unknown {
+  const names = Object.keys(scope);
+  const fn = new Function('props', ...names, 'return (' + raw + ')') as (...a: unknown[]) => unknown;
+  return fn(props, ...names.map((n) => scope[n]));
+}
+
+/** Identifier reads of an ESTree expression (not property keys, not `obj.prop`). */
+function identifiersOf(ast: unknown, into: Set<string>): void {
+  if (!ast || typeof ast !== 'object') return;
+  walk(ast as ESTreeNode, null, {
+    Identifier(n: any, context: any) {
+      const parent = context.path.at(-1);
+      if (parent) {
+        if (parent.type === 'MemberExpression' && !parent.computed && parent.property === n) return context.next();
+        if (parent.type === 'Property' && parent.key === n) return context.next();
+      }
+      into.add(n.name);
+      return context.next();
+    },
+  } as any);
+}
+
+/** Every interpolated/attribute expression inside a `<Head>` subtree. */
+function collectHeadExprs(node: IRNode, out: Expression[]): void {
+  if (node instanceof StaticNode) {
+    for (const child of node.children) {
+      if (child instanceof DynamicBinding) out.push(child.expression);
+      else collectHeadExprs(child, out);
+    }
+  }
+}
+
+interface DeclEntry {
+  kind: 'track' | 'const';
+  initSrc: string;
+  initAst: unknown;
+  names: string[];
+}
+
+/** Top-level declarations of a component: tracked cells and `const` locals. */
+function declaredNames(comp: ComponentIR): Map<string, DeclEntry> {
+  const out = new Map<string, DeclEntry>();
   for (const node of comp.body) {
+    if (node instanceof TrackDecl) {
+      const cellName = node.rawName || node.name;
+      let initAst: unknown = null;
+      try {
+        initAst = parse(node.init);
+      } catch { /* unparsable init: no deps to follow */ }
+      const entry: DeclEntry = { kind: 'track', initSrc: node.init, initAst, names: [cellName] };
+      out.set(cellName, entry);
+      if (node.name !== cellName) {
+        out.set(node.name, entry);
+        entry.names.push(node.name);
+      }
+    } else if (node instanceof RuntimeStatement && node.ast) {
+      const stmt = node.ast as any;
+      if (stmt.type !== 'VariableDeclaration') continue;
+      for (const decl of stmt.declarations) {
+        if (decl.id.type !== 'Identifier' || !decl.init || !node.source) continue;
+        out.set(decl.id.name, {
+          kind: 'const',
+          initSrc: node.source.slice(decl.init.start, decl.init.end),
+          initAst: decl.init,
+          names: [decl.id.name],
+        });
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * The transitive closure of top-level names the `<Head>` block reads.
+ *
+ * THE head pass must evaluate only what the head uses. Evaluating every
+ * top-level declaration (which is what it used to do) means re-running the
+ * component's SIDE EFFECTS in the rebuilt frame: a page whose body does
+ * `const data = useFetch('/api/fail')` fetched twice per render, because the
+ * head pass called `useFetch` a second time now that the runtime names are in
+ * scope. Imports and tracked reads are still resolved — just the declarations
+ * the head actually needs, plus the ones those depend on.
+ */
+function headNeededNames(comp: ComponentIR): Set<string> {
+  const wanted = new Set<string>();
+  for (const node of comp.body) {
+    if (!(node instanceof HeadBlock)) continue;
+    const exprs: Expression[] = [];
+    for (const child of node.children) collectHeadExprs(child, exprs);
+    for (const e of exprs) identifiersOf(e.ast, wanted);
+  }
+  const declared = declaredNames(comp);
+  const needed = new Set<string>();
+  const queue = [...wanted].filter((n) => declared.has(n));
+  while (queue.length > 0) {
+    const name = queue.shift() as string;
+    if (needed.has(name)) continue;
+    needed.add(name);
+    const entry = declared.get(name);
+    if (!entry) continue;
+    const deps = new Set<string>();
+    identifiersOf(entry.initAst, deps);
+    for (const d of deps) {
+      // A tracked init reads other cells through the runtime, so follow the
+      // tracked names the init mentions.
+      if (declared.has(d) && !needed.has(d)) queue.push(d);
+    }
+  }
+  return needed;
+}
+
+function evaluateLocals(
+  comp: ComponentIR,
+  props: Record<string, unknown>,
+  scope: Record<string, unknown> = {},
+  tracked: Map<string, TrackedInfo> = new Map(),
+  needed: Set<string> | null = null,
+): Record<string, unknown> {
+  const locals: Record<string, unknown> = {};
+  const wanted = (name: string): boolean => needed === null || needed.has(name);
+  for (const node of comp.body) {
+    if (node instanceof TrackDecl) {
+      // `const [count, setCount] = track(0)`: bind every name the declaration
+      // introduces to a head cell, so a later local or head expression that
+      // reads it sees the current value through the shims.
+      const cellName = node.rawName || node.name;
+      if (!wanted(cellName) && !wanted(node.name)) continue;
+      const init = transformTrackedInit(node.init, tracked);
+      let value: unknown;
+      try {
+        value = evalWithScope(init, props, { ...scope, ...locals, ...headRuntimeShims() });
+      } catch {
+        value = undefined;
+      }
+      const cell = headCell(value);
+      if (node.name !== cellName) locals[node.name] = cell;
+      locals[cellName] = cell;
+      continue;
+    }
     if (node instanceof RuntimeStatement && node.ast) {
       const stmt = node.ast as any;
       if (stmt.type === 'VariableDeclaration') {
         for (const decl of stmt.declarations) {
           if (decl.id.type === 'Identifier' && decl.init && node.source) {
             const name = decl.id.name;
+            if (!wanted(name)) continue;
             const initSrc = node.source.slice(decl.init.start, decl.init.end);
             try {
-              const fn = new Function('props', 'return (' + initSrc + ')');
-              locals[name] = fn(props);
+              locals[name] = evalWithScope(initSrc, props, {
+                ...scope,
+                ...locals,
+                ...headRuntimeShims(),
+              });
             } catch {
-              // expression can't be evaluated — skip
+              // expression can't be evaluated — skip (its dependents degrade
+              // to empty, exactly as they did before the scope was passed)
             }
           }
         }
@@ -43,7 +261,7 @@ function evaluateLocals(comp: ComponentIR, props: Record<string, unknown>): Reco
   return locals;
 }
 
-function headElementKey(node: IRNode, props: Record<string, unknown>, locals: Record<string, unknown>): string | null {
+function headElementKey(node: IRNode, ctx: HeadEvalCtx): string | null {
   if (!(node instanceof StaticNode)) return null;
   const tag = node.tag;
   if (tag === 'title') return 'title';
@@ -53,7 +271,7 @@ function headElementKey(node: IRNode, props: Record<string, unknown>, locals: Re
   for (const child of node.children) {
     if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target && child.target !== 'ref') {
       try {
-        attrMap.set(child.target, String(tryEvalExpr(child.expression.raw, props, locals)));
+        attrMap.set(child.target, String(evalHeadExpression(child.expression, ctx)));
       } catch { /* skip */ }
     }
   }
@@ -87,33 +305,30 @@ function headIsReconcilable(tag: string, attrMap: Map<string, string>): boolean 
   return true;
 }
 
-function irNodeToHeadHtml(node: IRNode, props: Record<string, unknown>, locals: Record<string, unknown> = {}, reconcileable = false): string {
+function irNodeToHeadHtml(node: IRNode, ctx: HeadEvalCtx, reconcileable = false): string {
   if (node instanceof StaticNode) {
     const attrMap = new Map(node.attributes.map((a) => [a.name, a.value]));
     for (const child of node.children) {
       if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target && child.target !== 'ref') {
         try {
-          const val = tryEvalExpr(child.expression.raw, props, locals);
-          attrMap.set(child.target, String(val));
+          attrMap.set(child.target, String(evalHeadExpression(child.expression, ctx)));
         } catch { /* skip */ }
       }
-    }
-    const marker = reconcileable && headIsReconcilable(node.tag, attrMap) ? ` ${HEAD_RECONCILE_MARKER}` : '';
+    }    const marker = reconcileable && headIsReconcilable(node.tag, attrMap) ? ` ${HEAD_RECONCILE_MARKER}` : '';
     const attrs = [...attrMap.entries()]
       .map(([k, v]) => ` ${k}="${escapeHtml(v)}"`)
       .join('');
     if (node.selfClosing) return `<${node.tag}${attrs}${marker} />`;
     const inner = node.children
       .filter((c) => !(c instanceof DynamicBinding && c.kind === 'attribute' && c.target !== 'ref'))
-      .map((c) => irNodeToHeadHtml(c, props, locals, false))
+      .map((c) => irNodeToHeadHtml(c, ctx, false))
       .join('');
     return `<${node.tag}${attrs}${marker}>${inner}</${node.tag}>`;
   }
   if (node instanceof TextNode) return node.value;
   if (node instanceof DynamicBinding) {
     try {
-      const val = tryEvalExpr(node.expression.raw, props, locals);
-      return escapeHtml(String(val));
+      return escapeHtml(String(evalHeadExpression(node.expression, ctx)));
     } catch {
       return '';
     }
@@ -121,17 +336,37 @@ function irNodeToHeadHtml(node: IRNode, props: Record<string, unknown>, locals: 
   return '';
 }
 
-export function renderHeadHtml(comp: ComponentIR, props: Record<string, unknown> = {}): string {
-  const locals = evaluateLocals(comp, props);
+/**
+ * Serialize one component's `<Head>` block.
+ *
+ * `scope` is the component's `__vesk` bindings (imports, runtime names, the
+ * sub-components its body destructures). The head is assembled by re-walking
+ * the IR and re-evaluating the expressions rather than by capturing the real
+ * render, so the re-evaluation needs the same bindings the component had —
+ * without them every expression that touched an import threw and was swallowed,
+ * and the served document shipped an empty `<title>`/`<meta>` while the page
+ * body rendered fine (and the client corrected it on hydration, which is why
+ * this only ever showed up in view-source, in crawlers, and after an SPA nav
+ * re-applied the server head).
+ */
+export function renderHeadHtml(
+  comp: ComponentIR,
+  props: Record<string, unknown> = {},
+  scope: Record<string, unknown> = {},
+): string {
+  const tracked = collectTrackedNames(comp.body);
+  const needed = headNeededNames(comp);
+  const locals = evaluateLocals(comp, props, scope, tracked, needed);
+  const ctx: HeadEvalCtx = { props, locals, tracked, scope };
   const seen = new Set<string>();
   const parts: string[] = [];
   for (const node of comp.body) {
     if (node instanceof HeadBlock) {
       for (const child of node.children) {
-        const key = headElementKey(child, props, locals);
+        const key = headElementKey(child, ctx);
         if (key !== null && seen.has(key)) continue;
         if (key !== null) seen.add(key);
-        parts.push(irNodeToHeadHtml(child, props, locals, true));
+        parts.push(irNodeToHeadHtml(child, ctx, true));
       }
     }
   }
