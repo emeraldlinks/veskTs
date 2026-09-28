@@ -46,6 +46,10 @@ async function main() {
   }
 
   browser = await puppeteer.launch({
+    // Chrome's own 30s default is the tightest step in the suite on a loaded
+    // machine (measured 16s to launch on a 2-core box), which turned slow
+    // hardware into a red suite. The budget is for STARTUP only.
+    timeout: 120000,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
     executablePath: process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser',

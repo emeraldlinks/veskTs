@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { build } from './esbuild-fallback.js';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { parse } from '@vesk/compiler/src/parser';
+import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
 import { compileClient, compileClientBoth, nameAllocFor, vskComponentNames } from '@vesk/compiler/src/client-codegen';
 import { VskComponentOwners } from '@vesk/compiler/src/vsk-collision';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
@@ -63,13 +63,11 @@ function findRuntimeSrc(appDir: string): string {
  */
 export function extractRuntimeImportNames(code: string): string[] {
   const names: string[] = [];
-  let ast: unknown;
-  try {
-    ast = parse(code);
-  } catch {
-    return names;
-  }
-  const body = (ast as { body?: Array<unknown> }).body ?? [];
+  // Shares the parse with the strip passes (same generated string, read-only
+  // AST) — see parseForStrip.
+  const ast = parseForStrip(code) as { body?: Array<unknown> } | null;
+  if (!ast) return names;
+  const body = ast.body ?? [];
   for (const raw of body) {
     const node = raw as {
       type?: string;
@@ -500,13 +498,9 @@ function scopeFileContribution(code: string): string {
  * hot path used to run on every edit.
  */
 export function stripAndDemoteInOnePass(code: string): string {
-  let ast: unknown;
-  try {
-    ast = parse(code);
-  } catch {
-    return code;
-  }
-  const body = (ast as { body?: Array<unknown> }).body ?? [];
+  const ast = parseForStrip(code);
+  if (!ast) return code;
+  const body = ast.body ?? [];
   type Edit = { start: number; end: number; text?: string };
   const edits: Edit[] = [];
   for (const raw of body) {
@@ -558,13 +552,10 @@ export function buildHmrEvalSnippet(code: string): string {
   if (!body) return '';
   const scoped = `{\n${body}\n}`;
   // Never trade a potential duplicate-binding error for a certain syntax
-  // error: if the scoped form does not parse, keep the unscoped body.
-  try {
-    parse(scoped);
-    return scoped;
-  } catch {
-    return body;
-  }
+  // error: if the scoped form does not parse, keep the unscoped body. The body
+  // is generated JS, so plain acorn is the right tool (parseGeneratedJs) and
+  // it must not go through the cache: this string is unique per call.
+  return parseGeneratedJs(scoped) !== null ? scoped : body;
 }
 
 /**
@@ -574,15 +565,46 @@ export function buildHmrEvalSnippet(code: string): string {
  * If the module cannot be parsed it is returned untouched (the compiler's own
  * output is always valid ESM, so that branch is unreachable in practice).
  */
-export function removeCompiledNodes(code: string, isTarget: (node: CompiledNode) => boolean): string {
-  let ast: unknown;
-  try {
-    ast = parse(code);
-  } catch {
-    return code;
+/**
+ * Parsed-AST cache for the strip passes over GENERATED code.
+ *
+ * Every compiled file goes through several `removeCompiledNodes` passes with
+ * different predicates (`isVskImport`, `isRuntimeImport`, `isComponentExport`,
+ * ...) and each one used to re-parse the same string with the full `.vsk`
+ * pipeline. On a CPU profile of a 28-route build, parsing was ~70% of the
+ * whole build and the generated-code strips were the bulk of it. The ASTs are
+ * only read here (node.start/end plus the caller's predicate), so one parse can
+ * serve every pass over the same string.
+ *
+ * Bounded: cleared wholesale past the cap, because a watch session keeps
+ * calling this with new strings forever.
+ */
+const stripAstCache = new Map<string, { body?: unknown[] } | null>();
+const STRIP_AST_CACHE_MAX = 512;
+
+function parseForStrip(code: string): { body?: unknown[] } | null {
+  const hit = stripAstCache.get(code);
+  if (hit !== undefined) return hit;
+  // Plain acorn for generated JS (see parseGeneratedJs); the `.vsk` pipeline
+  // only for the rare module it cannot read.
+  let ast = parseGeneratedJs(code) as { body?: unknown[] } | null;
+  if (!ast) {
+    try {
+      ast = parse(code) as { body?: unknown[] };
+    } catch {
+      ast = null;
+    }
   }
+  if (stripAstCache.size >= STRIP_AST_CACHE_MAX) stripAstCache.clear();
+  stripAstCache.set(code, ast);
+  return ast;
+}
+
+export function removeCompiledNodes(code: string, isTarget: (node: CompiledNode) => boolean): string {
+  const ast = parseForStrip(code);
+  if (!ast) return code;
   const ranges: Array<[number, number]> = [];
-  for (const raw of (ast as { body?: Array<unknown> }).body ?? []) {
+  for (const raw of ast.body ?? []) {
     const node = raw as CompiledNode;
     if (isTarget(node) && typeof node.start === 'number' && typeof node.end === 'number') {
       ranges.push([node.start, node.end]);
@@ -609,6 +631,7 @@ export async function generateClientBundle(
   const runtimeDir = findRuntimeSrc(appDir);
 
   let seen = new Set<string>();
+  const __stats = { chunks: 0, compiled: 0, distinct: new Set<string>(), parseMs: 0 };
   const chunks: ChunkEntry[] = [];
   const runtimeImportNames = new Set<string>();
   const cache = options?.cache;
@@ -727,6 +750,7 @@ export async function generateClientBundle(
     }
 
     compiledFiles++;
+    __stats.compiled++; __stats.distinct.add(filePath);
     let src = readFileSync(filePath, 'utf-8');
     if (/content=["'][^"']*\.md["']/i.test(src)) {
       src = inlineMdContentAttrs(src, dirname(filePath), guessProjectRoots(appDir));
@@ -738,7 +762,9 @@ export async function generateClientBundle(
     // One parse/IR pass feeds both client modes AND the component-name
     // lookup — the dev hot path pays the acorn+TS parse once per edit
     // instead of three times.
+    const __p0 = performance.now();
     const { comp: rawComp, hyd: rawHyd, name: actualName, aliases, reexportPaths, componentNames } = compileClientBoth(src, null, filePath);
+    __stats.parseMs += performance.now() - __p0;
     for (const cn of componentNames || []) componentOwners.claim(cn, filePath);
     // Cache keeps the import-carrying codes so a warm build can re-fold them
     // into its own fresh accumulator; the emitted codes are import-stripped.
@@ -983,6 +1009,7 @@ export async function generateClientBundle(
       transformedChunks.push({ ...chunk, code: await applyTransformPlugins(chunk.code, chunk.name) });
     }
     componentOwners.report('client bundle');
+    if (process.env.VESK_BUILD_PROFILE) console.error(`  [client] chunks=${chunks.length} compiled=${__stats.compiled} distinct=${__stats.distinct.size} parseMs=${__stats.parseMs.toFixed(0)}`);
     return { main: await applyTransformPlugins(main, 'client.js'), chunks: transformedChunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
   } else {
     let componentLines: string[] = [];

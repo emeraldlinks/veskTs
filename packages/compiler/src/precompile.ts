@@ -29,7 +29,35 @@ import { irToJSON } from '@vesk/compiler/src/precompile-runtime';
  * access and no `.vsk` source embedded in the deployment.
  */
 export function precompileFile(source: string, sourcePath?: string): PrecompileFilePlan {
-  return precompileFileInternal(source, sourcePath, new Set());
+  if (sourcePath === undefined) return precompileFileInternal(source, sourcePath, new Set());
+  const hit = precompileCache.get(sourcePath);
+  // Compare the source, not just the path: the dev server rebuilds in-process
+  // and a stale plan would silently ship yesterday's component.
+  if (hit !== undefined && hit.source === source) return hit.plan;
+  const plan = precompileFileInternal(source, sourcePath, new Set());
+  // Bound it: plans are sizeable on a large app, and a watch session can
+  // outlive many builds.
+  if (precompileCache.size >= 512) precompileCache.clear();
+  precompileCache.set(sourcePath, { source, plan });
+  return plan;
+}
+
+/**
+ * Compiled plans, keyed by absolute path.
+ *
+ * Every generated SSR function precompiles its own page, its layout chain, its
+ * error boundary and every shared component it pulls in, so a build compiled
+ * the same `layout.vsk` once per route and each shared `components/*.vsk` once
+ * per route that used it — 25x the root layout and 28x a shared counter on the
+ * 28-route test-app, i.e. work growing as routes x shared files. The plan is a
+ * pure function of (source, path) and callers only JSON.stringify it into the
+ * generated function, so one compile per file per build is enough.
+ */
+const precompileCache = new Map<string, { source: string; plan: PrecompileFilePlan }>();
+
+/** Drop the plan cache (tests, and any caller that compiles outside a build). */
+export function clearPrecompileCache(): void {
+  precompileCache.clear();
 }
 
 function precompileFileInternal(

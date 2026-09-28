@@ -1,4 +1,7 @@
-# SSR request-scope handoff — resolved
+# SSR request-scope handoff (resolved) + build duration (8x faster)
+
+> Two work items from one session. The first is done and merged; the second is
+> the `vesk build` duration work, profiled and fixed below.
 
 ## The bug that remained
 

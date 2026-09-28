@@ -114,7 +114,31 @@ async function collectPluginHeadExtra(pluginsPipelines: VeskPlugin[]): Promise<s
   return parts.join('\n');
 }
 
+/**
+ * `VESK_BUILD_PROFILE=1 vesk build` prints a per-phase millisecond breakdown.
+ *
+ * Builds are parse-bound and used to be hard to reason about: a 28-route app
+ * spent its time in a sharp capability probe, in per-route recompiles of the
+ * same shared files, and in re-parsing generated JS through the `.vsk` parser,
+ * and none of that is visible in the phase log lines. This makes it visible.
+ */
+const profileEnabled = (): boolean => process.env.VESK_BUILD_PROFILE === '1';
+let phaseMarks: Array<[string, number]> = [];
+let phaseStarted = 0;
+let buildStarted = 0;
+function markPhase(name: string): void {
+  if (!profileEnabled()) return;
+  const now = performance.now();
+  if (phaseStarted > 0) phaseMarks.push([name, now - phaseStarted]);
+  phaseStarted = now;
+}
+
 export async function build(appDir: string, options?: BuildOptions): Promise<BuildResult | undefined> {
+  if (profileEnabled()) {
+    buildStarted = Date.now();
+    phaseMarks = [];
+    phaseStarted = performance.now();
+  }
   appDir = resolve(appDir);
   const outDir = resolve(options?.outDir || resolve(appDir, '..', '.vesk'));
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
@@ -186,6 +210,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   ];
   for (const d of dirs) mkdirSync(d, { recursive: true });
 
+  markPhase('config+dirs');
   const cssSourcePath = resolveUserCssPath(appDir);
   if (cssSourcePath !== null) {
     const cssContent = readFileSync(cssSourcePath, 'utf-8');
@@ -210,6 +235,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
+  markPhase('css/tailwind');
   const { scanRoutes, scanComponents } = await resolveCompilerApi<{
     scanRoutes: (appDir: string, options?: Record<string, unknown>) => RouteNode[];
     scanComponents: (componentsDir: string) => Map<string, string>;
@@ -239,6 +265,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
 
   console.error(`vesk build: ${routeTree.length} root routes, ${apiTree.length} API routes`);
 
+  markPhase('scan routes');
   console.error('vesk build: bundling server runtime...');
   await bundleRuntime(appDir, outDir);
 
@@ -296,6 +323,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
   walk(routeTree);
 
+  markPhase('server runtime + ssr functions');
   const apiRoutes: ApiRouteNode[] = [];
   function walkApi(nodes: ApiRouteNode[]): void {
     for (const node of nodes) {
@@ -324,6 +352,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   const hasEvents = await compileEvents(appDir, outDir);
   if (hasEvents) console.error('vesk build: evt  → server/events.js (onStart/onRequest/onStop)');
 
+  markPhase('api functions');
   console.error('vesk build: bundling client runtime...');
   const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[] } = {};
   if (options?.codeSplit) bundleOpts.codeSplit = true;
@@ -343,6 +372,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
 
   copyStaticAssets(publicDir, outDir);
+  markPhase('client runtime + chunks');
   console.error('vesk build: static → static/public/');
 
   let prerenderedRoutes: Array<{ path: string; html: string; static: boolean; params?: Record<string, string> }> = [];
@@ -369,11 +399,6 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
 
   {
-    const { optimizeImages } = await import('./image-pipeline.js') as { optimizeImages: typeof import('./image-pipeline.js').optimizeImages };
-    await optimizeImages(appDir, outDir);
-  }
-
-  {
     const { generateSitemap, generateRobotsTxt } = await import('./static.js') as {
       generateSitemap: typeof import('./static.js').generateSitemap;
       generateRobotsTxt: typeof import('./static.js').generateRobotsTxt;
@@ -396,6 +421,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
+  markPhase('ssg+images+seo');
   const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra, hasEvents);
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
@@ -430,6 +456,14 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
+  markPhase('manifest+platform');
+  markPhase('tail');
+  if (profileEnabled()) {
+    for (const [name, ms] of phaseMarks) {
+      console.error(`  phase ${name.padEnd(30)} ${ms.toFixed(0).padStart(6)}ms`);
+    }
+    console.error(`  TOTAL ${(Date.now() - buildStarted).toFixed(0)}ms`);
+  }
   console.error(`\nvesk build: done (${outDir})`);
   return { routeTree, apiTree, ssrRoutes, apiRoutes, manifest };
 }

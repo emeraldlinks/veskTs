@@ -178,6 +178,10 @@ const BROWSER_TITLES = {
 async function main() {
   console.log(`[vesk-doc hydration] target=${IS_PROD ? 'production' : 'dev'} base=${BASE} chromium=${CHROMIUM_PATH}`);
   browser = await puppeteer.launch({
+    // Chrome's own 30s default is the tightest step in the suite on a loaded
+    // machine (measured 16s to launch on a 2-core box), which turned slow
+    // hardware into a red suite. The budget is for STARTUP only.
+    timeout: 120000,
     executablePath: CHROMIUM_PATH,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],

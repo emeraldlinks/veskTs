@@ -1,6 +1,8 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { resolve, extname, dirname } from 'node:path';
+import { resolve, extname, dirname, join } from 'node:path';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import type { ImageRef, ImageResult } from '@vesk/adapter/src/types';
 
 const SUPPORTED = new Set(['.jpg', '.jpeg', '.png', '.webp', '.avif', '.tiff']);
@@ -16,27 +18,90 @@ interface SharpImage {
 }
 
 let sharpFn: ((src: string) => SharpImage) | null = null;
-try {
-  // Probe in a child before importing sharp in this process. On older CPUs,
-  // importing the native module itself can terminate Node with SIGILL; an
-  // in-process try/catch cannot catch that signal.
-  const probe = spawnSync(
-    process.execPath,
-    [
-      '--input-type=module',
-      '-e',
-      "import sharp from 'sharp'; await sharp({ create: { width: 2, height: 2, channels: 3, background: 'red' } }).png().toBuffer();",
-    ],
-    { stdio: 'ignore' },
-  );
-  if (probe.status === 0) {
-    const mod = await import('sharp') as unknown as { default: (src: string) => SharpImage };
-    sharpFn = mod.default;
-  } else {
-    console.warn('vesk images: sharp native probe failed; using copy-only image pipeline');
+let sharpProbed = false;
+
+/**
+ * Remember a failed probe on disk.
+ *
+ * The probe's answer is a property of the MACHINE (CPU instruction set, the
+ * installed sharp binary) and not of the project, but it costs a child process
+ * that dies with SIGILL — and the kernel writes a core dump on the way out, so
+ * the "no" case is the expensive one: measured at 25-100s per build on a
+ * loaded 2-core box. Without this, every build of an app that has images pays
+ * it again. The key folds in sharp's own package.json mtime, so installing or
+ * upgrading sharp invalidates the memo and the next build probes for real.
+ */
+function probeMemoPath(): string | null {
+  try {
+    const req = createRequire(import.meta.url);
+    const pkg = req.resolve('sharp/package.json');
+    const stamp = statSync(pkg).mtimeMs;
+    return join(tmpdir(), `vesk-sharp-probe-${process.platform}-${process.arch}-${Math.round(stamp)}.json`);
+  } catch {
+    // sharp not installed: the answer is "unavailable" and cannot change
+    // without an install, which would not invalidate a stamp we cannot read.
+    return null;
   }
-} catch {
-  // sharp not available — fall through to copy-only
+}
+
+function readProbeMemo(): boolean | null {
+  const path = probeMemoPath();
+  if (path === null) return null;
+  try {
+    return JSON.parse(readFileSync(path, 'utf-8'))?.usable === true;
+  } catch {
+    return null;
+  }
+}
+
+function writeProbeMemo(usable: boolean): void {
+  const path = probeMemoPath();
+  if (path === null) return;
+  try {
+    writeFileSync(path, JSON.stringify({ usable, at: Date.now() }), 'utf-8');
+  } catch { /* a read-only tmpdir just means we probe again next build */ }
+}
+
+/**
+ * Load sharp, or decide we cannot. LAZY on purpose: the probe spawns a child
+ * Node that imports the native module, and on a CPU without the instructions
+ * sharp's binary needs that child dies with SIGILL after tens of seconds. Doing
+ * it at module scope charged every build — including builds of apps with no
+ * `<Image>` at all — for a capability the build may never use. Callers reach
+ * this only after finding image refs, and the answer is memoized per machine.
+ */
+async function ensureSharp(): Promise<void> {
+  if (sharpProbed) return;
+  sharpProbed = true;
+  const memo = readProbeMemo();
+  if (memo === false) {
+    console.warn('vesk images: sharp unusable on this machine (cached); using copy-only image pipeline');
+    return;
+  }
+  try {
+    // Probe in a child before importing sharp in this process. On older CPUs,
+    // importing the native module itself can terminate Node with SIGILL; an
+    // in-process try/catch cannot catch that signal.
+    const probe = spawnSync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        "import sharp from 'sharp'; await sharp({ create: { width: 2, height: 2, channels: 3, background: 'red' } }).png().toBuffer();",
+      ],
+      { stdio: 'ignore' },
+    );
+    if (probe.status === 0) {
+      const mod = await import('sharp') as unknown as { default: (src: string) => SharpImage };
+      sharpFn = mod.default;
+      writeProbeMemo(true);
+    } else {
+      console.warn('vesk images: sharp native probe failed; using copy-only image pipeline');
+      writeProbeMemo(false);
+    }
+  } catch {
+    // sharp not available — fall through to copy-only
+  }
 }
 
 async function processImage(srcPath: string, outDir: string, baseName: string): Promise<string[]> {
@@ -113,13 +178,21 @@ export async function optimizeImages(appDir: string, outDir: string): Promise<Im
     return [];
   }
 
+  await ensureSharp();
+
   const results: ImageResult[] = [];
   for (const ref of refs) {
+    // `src` is site-root-relative in every documented form (`<Image
+    // src="/hero.png" />`), and `path.resolve` treats a leading-slash argument
+    // as an ABSOLUTE path — so `resolve(appDir, '/hero.png')` asks the filesystem
+    // for `/hero.png` and every image reference in the app is reported missing.
+    // Strip the leading slash for every candidate base.
+    const rel = ref.src.replace(/^\//, '');
     const possiblePaths = [
-      resolve(appDir, ref.src),
-      resolve(appDir, '..', 'public', ref.src.replace(/^\//, '')),
-      resolve(appDir, '..', 'src', ref.src.replace(/^\//, '')),
-      resolve(outDir, 'static', 'public', ref.src.replace(/^\//, '')),
+      resolve(appDir, rel),
+      resolve(appDir, '..', 'public', rel),
+      resolve(appDir, '..', 'src', rel),
+      resolve(outDir, 'static', 'public', rel),
     ];
 
     let srcPath: string | null = null;

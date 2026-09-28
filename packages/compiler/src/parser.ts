@@ -256,6 +256,31 @@ export function createBaseParser(): typeof acorn.Parser {
   return acorn.Parser.extend(tsPlugin({}) as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser, VeskParserPlugin() as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser);
 }
 
+/**
+ * Parse GENERATED JavaScript with plain acorn — no TypeScript plugin, no
+ * `{#clause}` preprocessing, no comment blanking.
+ *
+ * The build parses every emitted module several times over (strip imports,
+ * strip exports, collect runtime names, fold chunk imports), and on a CPU
+ * profile of a 28-route build that parsing was two thirds of the whole build.
+ * None of those passes need the `.vsk` pipeline: they only read top-level
+ * import/export nodes out of code the code generator just produced, and acorn
+ * reports the same offsets either way (blankComments and friends preserve
+ * length). Measured on a 43 KB emitted chunk: 180 ms with the `.vsk` parser,
+ * 36 ms here.
+ *
+ * Returns `null` when the source is not plain ES — anything with JSX, type
+ * syntax or `{#clause}` markers — so callers fall back to `parse()` and keep
+ * exactly the behaviour they had.
+ */
+export function parseGeneratedJs(source: string): Program | null {
+  try {
+    return acorn.parse(source, { ecmaVersion: 'latest', sourceType: 'module' }) as unknown as Program;
+  } catch {
+    return null;
+  }
+}
+
 export function parse(source: string, options: ParseOptions = {}): Program {
   const ParserClass = createBaseParser();
   const { code, annotations } = preprocessForClauses(blankComments(source));
