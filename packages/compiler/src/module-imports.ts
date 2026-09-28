@@ -312,14 +312,69 @@ function depsFresh(cachedVal: CachedModule): boolean {
   return true;
 }
 
-export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
+/**
+ * Raw file contents, keyed by path and validated by mtime.
+ *
+ * `readSsrSource` is on the hot path of every `.vsk` compile: a page's module
+ * bundle pulls in its `.ts`/`.js` imports, and a docs-style app where 26 pages
+ * all import one content module read and re-parsed that module 26 times. The
+ * parsed AST is deliberately NOT shared (callers mutate it — `stripTsTypes`,
+ * `stripped.body = ...`) and is still produced per call; only the immutable
+ * text is reused, and only while the file's mtime is unchanged, so an edit in
+ * a watch session is picked up immediately.
+ */
+const rawSourceCache = new Map<string, { mtimeMs: number; raw: string }>();
+
+/**
+ * Bounded, insertion-ordered eviction.
+ *
+ * The cap has to clear the OLDEST entries, not the whole map: an app that
+ * imports an icon barrel walks 1,600+ modules, and a 512-entry cap with
+ * `clear()` on overflow thrashed itself into a 0% hit rate (11,235 reads of
+ * 1,620 distinct files on vesk-doc). Draining the front keeps the hot modules
+ * resident and bounds memory.
+ */
+const BUILD_CACHE_MAX = 8192;
+const BUILD_CACHE_EVICT = 2048;
+
+function evict<T>(cache: Map<string, T>): void {
+  if (cache.size <= BUILD_CACHE_MAX) return;
+  let dropped = 0;
+  for (const key of cache.keys()) {
+    cache.delete(key);
+    if (++dropped >= BUILD_CACHE_EVICT) break;
+  }
+}
+
+function readSourceCached(absPath: string): string | null {
+  let mtimeMs: number;
+  try {
+    mtimeMs = statSync(absPath).mtimeMs;
+  } catch {
+    return null;
+  }
+  const hit = rawSourceCache.get(absPath);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.raw;
   let raw: string;
   try {
     raw = readFileSync(absPath, 'utf-8');
-  } catch (err) {
-    console.warn(`[vesk] SSR: failed to read ${absPath}: ${(err as Error)?.message ?? String(err)}`);
+  } catch {
     return null;
   }
+  rawSourceCache.set(absPath, { mtimeMs, raw });
+  evict(rawSourceCache);
+  return raw;
+}
+
+export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
+  const cachedRaw = readSourceCached(absPath);
+  if (cachedRaw === null) {
+    // Keep the original warning: a missing module is a build-time signal, not
+    // a cache miss to swallow.
+    console.warn(`[vesk] SSR: failed to read ${absPath}`);
+    return null;
+  }
+  const raw = cachedRaw;
   let ast: ReturnType<typeof parse> | null = null;
   try {
     ast = parse(raw, { filename: absPath });
@@ -1216,28 +1271,53 @@ export function collectModuleBundled(absPath: string, collector: ModuleCollector
     return key;
   }
 
-  const src = readSsrSource(absPath);
-  if (!src || !src.ast) {
-    const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
-    collector.modules.push({ key, code: raw, dir, deps: {} });
-    return key;
+  // The transpiled code and the relative specifiers of a module do not depend
+  // on which collector is asking, only on the file — and every `.vsk` compile
+  // builds its own collector, so a docs-style app whose 26 pages all import one
+  // content module read, parsed, stripped and re-transpiled that module 26
+  // times (51s of a 95s build). Cache the result against the file's mtime and
+  // skip the read AND the parse on a hit: callers mutate the AST they get
+  // (`stripTsTypes`, `stripped.body = ...`), so the AST itself stays private to
+  // the call that created it.
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(absPath).mtimeMs;
+  } catch { /* unreadable: fall through to the uncached path */ }
+  const cached = mtimeMs >= 0 ? bundledCodeCache.get(absPath) : undefined;
+  let code: string;
+  let specifiers: string[];
+  if (cached && cached.mtimeMs === mtimeMs) {
+    code = cached.code;
+    specifiers = cached.specifiers;
+  } else {
+    const src = readSsrSource(absPath);
+    if (!src || !src.ast) {
+      const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
+      collector.modules.push({ key, code: raw, dir, deps: {} });
+      return key;
+    }
+    let stripped = src.ast;
+    if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
+    stripped.body = (stripped.body || []).filter((n: unknown) => (n ? !isTypeOnlyStatement(n) : false));
+    specifiers = [...collectModuleSpecifiers(src.ast)];
+    code = esmToCjs(stripped.body as Array<{ type: string }>);
+    bundledCodeCache.set(absPath, { mtimeMs, code, specifiers });
+    evict(bundledCodeCache);
   }
 
-  let stripped = src.ast;
-  if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
-  stripped.body = (stripped.body || []).filter((n: unknown) => (n ? !isTypeOnlyStatement(n) : false));
-
   const deps: Record<string, string> = {};
-  for (const spec of collectModuleSpecifiers(src.ast)) {
+  for (const spec of specifiers) {
     if (!isRelativeSpec(spec)) continue;
     const depPath = resolveSsrModule(spec, dir);
     if (!depPath) continue;
     deps[spec] = collectModuleBundled(depPath, collector);
   }
 
-  collector.modules.push({ key, code: esmToCjs(stripped.body as Array<{ type: string }>), dir, deps });
+  collector.modules.push({ key, code, dir, deps });
   return key;
 }
+
+const bundledCodeCache = new Map<string, { mtimeMs: number; code: string; specifiers: string[] }>();
 
 /**
  * Builds the module bundle + local-binding list for a set of import lines
