@@ -77,15 +77,15 @@ component Statements {
 	}
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">guard clause (bare return)</h2>
-	<p class="guarded-hidden"><GuardBadge latest={null} /></p>
-	<p class="guarded-shown"><GuardBadge latest={{ version: '0.2.33' }} /></p>
+	<p class="guarded-hidden"><StatementGuardBadge latest={null} /></p>
+	<p class="guarded-shown"><StatementGuardBadge latest={{ version: '0.2.33' }} /></p>
 
 	<h2 class="text-xl font-semibold mt-6 mb-2">runtime statements</h2>
 	const total: number = items.length * 2
 	<p>items.length * 2 = {total}</p>
 }
 
-component GuardBadge(props: { latest: { version: string } | null }) {
+component StatementGuardBadge(props: { latest: { version: string } | null }) {
 	if (props.latest === null) return
 	<span class="badge-shown">v{props.latest.version}</span>
 }
