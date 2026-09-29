@@ -1,0 +1,10 @@
+{
+  "iconDefinitions": {
+    "_vsk_file": {
+      "iconPath": "./vsk-file-icon.png"
+    }
+  },
+  "fileExtensions": {
+    "vsk": "_vsk_file"
+  }
+}

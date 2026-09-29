@@ -2,7 +2,7 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.3.14",
+  "version": "0.3.15",
   "private": true,
   "license": "MIT",
   "publisher": "vesk",
@@ -55,8 +55,16 @@
       }
     }
   },
+  "icon": "icons/vsk-file-icon.png",
   "main": "./dist/extension.js",
   "contributes": {
+    "iconThemes": [
+      {
+        "id": "vesk-file-icons",
+        "label": "Vesk File Icons",
+        "path": "./icons/vsk-icon-theme.json"
+      }
+    ],
     "configurationDefaults": {
       "emmet.includeLanguages": {
         "vsk": "html"

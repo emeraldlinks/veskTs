@@ -49,6 +49,22 @@ local function find_lsp_server()
   return {}
 end
 
+-- nvim-web-devicons (and the explorers built on it) key icons off filetype
+-- names. `.vsk` is not part of its default table, so register it here; this is
+-- a no-op when the user does not have the plugin installed.
+function M._register_devicon()
+  local ok, devicons = pcall(require, "nvim-web-devicons")
+  if not ok then return end
+  devicons.set_icon({
+    vsk = {
+      icon = "󰘚",
+      color = "#c678dd",
+      cterm_color = "magenta",
+      name = "Vesk",
+    },
+  })
+end
+
 function M.setup(opts)
   opts = opts or {}
   -- ftdetect/vsk.vim only fires when the plugin dir is on runtimepath during
@@ -56,6 +72,7 @@ function M.setup(opts)
   -- (e.g. LazyVim, or this installer's rtp:append) miss that phase, so also
   -- register the filetype here — setup() runs before any buffer is opened.
   vim.filetype.add({ extension = { vsk = "vsk" } })
+  M._register_devicon()
   local lsp_cmd = opts.cmd
     or (opts.lsp_cmd and { "node", opts.lsp_cmd, "--stdio" })
     or find_lsp_server()

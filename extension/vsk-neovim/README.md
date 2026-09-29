@@ -7,6 +7,7 @@ Vesk language support for Neovim — full syntax highlighting and LSP integratio
 - **Syntax highlighting**: Components, JSX, `<style>` blocks, reactive `&[...]`, imports, type annotations, comments, strings, numbers, Vesk intrinsics (`track`, `effect`, `Link`, `Outlet`, etc.)
 - **LSP client**: Completion, hover, go-to-definition, references, rename, document/workspace symbols, code actions, formatting, organize imports, diagnostics, semantic tokens, color picker
 - **Filetype detection**: `.vsk` files auto-detected as `vsk`
+- **File icons**: registers a `vsk` icon with `nvim-web-devicons` (no-op if not installed); the logo is also shipped at `icons/vsk-file-icon.png` for explorers that render image icons
 - **Keymaps**: `gd`, `K`, `gr`, `gR`, `<leader>ca`, `<leader>f`, `<leader>oi`, etc.
 
 ## Installation
@@ -17,7 +18,7 @@ Vesk language support for Neovim — full syntax highlighting and LSP integratio
 -- From the vesk monorepo (development)
 {
   dir = "/path/to/vesk/extension/vsk-neovim",
-  build = "node scripts/build-lsp.cjs",
+  build = "node scripts/build-lsp.js",
   opts = {},
 }
 
@@ -27,7 +28,7 @@ Vesk language support for Neovim — full syntax highlighting and LSP integratio
 -- Neovim (pack/start) or Vim (runtime files). For a manual clone, use:
 {
   dir = "~/.local/share/vesk/extension/vsk-neovim",
-  build = "node scripts/build-lsp.cjs",
+  build = "node scripts/build-lsp.js",
   opts = {},
 }
 ```
@@ -79,7 +80,7 @@ The LSP server must be built before use:
 
 ```bash
 cd /path/to/vesk/extension/vsk-neovim
-node scripts/build-lsp.cjs
+node scripts/build-lsp.js
 ```
 
 This produces `extension/vsk-vscode/lsp-server/index.mjs`.
