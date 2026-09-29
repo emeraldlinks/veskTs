@@ -572,8 +572,11 @@ export async function renderFullPage(
     const bodyHtml = prettifyHtml(rendered.body);
     const cssUrls: string[] = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
     const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
+    // `crossorigin` is required for SRI to be enforced on a module script; a
+    // same-origin module is fetched in CORS mode, so the attribute is harmless
+    // and makes the digest meaningful.
     const clientScript = options.clientScriptUrl
-      ? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
+      ? `\t<script type="module" src="${options.clientScriptUrl}"${options.clientScriptIntegrity ? ` integrity="${options.clientScriptIntegrity}" crossorigin="anonymous"` : ''}></script>\n`
       : '';
 
     const dataScripts = buildDataScripts(ssrProps, ssrData, options.externalDataScript);
@@ -745,7 +748,7 @@ export function renderPageStream(
   // Mirror renderFullPage: a full document must carry the client bundle or
   // the page can never hydrate (dev-server streams hit this path).
   const clientScript = options.clientScriptUrl
-    ? `\t<script type="module" src="${options.clientScriptUrl}"></script>\n`
+    ? `\t<script type="module" src="${options.clientScriptUrl}"${options.clientScriptIntegrity ? ` integrity="${options.clientScriptIntegrity}" crossorigin="anonymous"` : ''}></script>\n`
     : '';
   yield `\n</div>${dataScriptBlock}${clientScript}</body>\n</html>\n`;
   }

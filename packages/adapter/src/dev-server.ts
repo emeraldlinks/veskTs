@@ -1,10 +1,11 @@
 import { readFileSync, existsSync, watch, statSync } from 'node:fs';
-import { resolve, extname, dirname } from 'node:path';
+import { resolve, extname, dirname, basename } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { DEFAULT_MAX_BODY_BYTES, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
+import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { buildErrorPayload, createHmrServer } from './hmr';
 import * as hmrApi from './hmr';
 import type { HmrErrorPayload } from './hmr';
@@ -617,7 +618,9 @@ await doBuild().catch(() => {});
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
         const ext = extname(staticPath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        // Dev names are stable so HMR can rewrite them, which means they must
+        // never be cached: the same URL has to serve the newest bytes.
+        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cacheControlFor(basename(staticPath), true) });
         res.end(readFileSync(staticPath));
         return;
       }

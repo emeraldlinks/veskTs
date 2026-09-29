@@ -49,6 +49,13 @@ export interface FullPageOptions {
   cssUrl?: string;
   cssUrls?: string[];
   clientScriptUrl?: string;
+  /**
+   * SRI digest for `clientScriptUrl` (`sha384-<base64>`). A production build
+   * passes the digest of the exact bundle it emitted, so the tag cannot execute
+   * anything but the built bytes. Omitted in dev, where the URL is rewritten on
+   * every edit and a digest would block it.
+   */
+  clientScriptIntegrity?: string;
   pageHead?: string;
   security?: import('@vesk/types').VeskSecurity;
   __vesk?: Record<string, unknown>;

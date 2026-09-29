@@ -6,6 +6,7 @@ import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
 import { resolveUserCssPath, isTailwindPlugin, resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { collectActionIds } from '@vesk/compiler/src/actions';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
+import { describeAsset, type AssetDigest } from '@vesk/adapter/src/asset-hash';
 import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import { compileEvents } from '@vesk/adapter/src/events';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
@@ -266,6 +267,38 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   console.error(`vesk build: ${routeTree.length} root routes, ${apiTree.length} API routes`);
 
   markPhase('scan routes');
+  console.error('vesk build: bundling client runtime...');
+  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[] } = {};
+  if (options?.codeSplit) bundleOpts.codeSplit = true;
+  if (options?.hmr) bundleOpts.hmr = true;
+  if (options?.routeDataCache !== undefined) bundleOpts.routeDataCache = options.routeDataCache;
+  if (pluginsPipelines.length > 0) bundleOpts.plugins = pluginsPipelines;
+  const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);
+  markPhase('client runtime + chunks');
+
+  // Content-hash every emitted browser asset. A hashed name can be served
+  // immutable and can never be stale in a CDN; the digest rides along as the
+  // SRI attribute, so a tag can only execute the bytes this build produced.
+  // Dev keeps the plain name — the dev server rewrites it on every edit and HMR
+  // needs a stable URL.
+  const staticDir = resolve(outDir, 'static');
+  const hashed = !options?.hmr;
+  const clientAsset = describeAsset('client.js', main);
+  const clientFileName = hashed ? clientAsset.fileName : 'client.js';
+  writeFileSync(resolve(staticDir, clientFileName), main, 'utf-8');
+  const clientUrl = `/_vesk/static/${clientFileName}`;
+  const mode = chunks.length > 0 ? 'code-split' : 'monolithic';
+  console.error(`vesk build: client → static/${clientFileName}  (${main.length} bytes, ${mode}${hashed ? `, ${clientAsset.hash}` : ''})`);
+
+  const emittedAssets: AssetDigest[] = [clientAsset];
+  for (const chunk of chunks) {
+    const asset = describeAsset(chunk.name, chunk.code);
+    emittedAssets.push(asset);
+    writeFileSync(resolve(staticDir, hashed ? asset.fileName : chunk.name), chunk.code, 'utf-8');
+    console.error(`vesk build: chunk → static/${hashed ? asset.fileName : chunk.name}  (${chunk.code.length} bytes${hashed ? `, ${asset.hash}` : ''})`);
+  }
+  const clientIntegrity = hashed ? clientAsset.integrity : undefined;
+
   console.error('vesk build: bundling server runtime...');
   await bundleRuntime(appDir, outDir);
 
@@ -291,7 +324,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         // For standalone routes the layout chain is cleared — only the
         // standalone node's own layout (if any) applies, no root ancestors.
         const ssrAncestorLayouts = isStandalone ? [] : ancestorLayouts;
-        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra });
+        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra, clientScriptUrl: clientUrl, clientScriptIntegrity: clientIntegrity });
         writeFileSync(funcPath, funcCode, 'utf-8');
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (existsSync(pagePath)) {
@@ -352,25 +385,6 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   const hasEvents = await compileEvents(appDir, outDir);
   if (hasEvents) console.error('vesk build: evt  → server/events.js (onStart/onRequest/onStop)');
 
-  markPhase('api functions');
-  console.error('vesk build: bundling client runtime...');
-  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[] } = {};
-  if (options?.codeSplit) bundleOpts.codeSplit = true;
-  if (options?.hmr) bundleOpts.hmr = true;
-  if (options?.routeDataCache !== undefined) bundleOpts.routeDataCache = options.routeDataCache;
-  if (pluginsPipelines.length > 0) bundleOpts.plugins = pluginsPipelines;
-  const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);
-  writeFileSync(resolve(outDir, 'static', 'client.js'), main, 'utf-8');
-  const mode = chunks.length > 0 ? 'code-split' : 'monolithic';
-  console.error(`vesk build: client → static/client.js  (${main.length} bytes, ${mode})`);
-  if (chunks.length > 0) {
-    const staticDir = resolve(outDir, 'static');
-    for (const chunk of chunks) {
-      writeFileSync(resolve(staticDir, chunk.name), chunk.code, 'utf-8');
-      console.error(`vesk build: chunk → static/${chunk.name}  (${chunk.code.length} bytes)`);
-    }
-  }
-
   copyStaticAssets(publicDir, outDir);
   markPhase('client runtime + chunks');
   console.error('vesk build: static → static/public/');
@@ -423,6 +437,13 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
 
   markPhase('ssg+images+seo');
   const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra, hasEvents);
+  // The asset map is what makes a deploy auditable: sizes, content hashes and
+  // the SRI digests a page can carry.
+  manifest.assets = {
+    hashed,
+    client: { file: clientFileName, url: clientUrl, hash: clientAsset.hash, bytes: clientAsset.bytes, integrity: clientAsset.integrity },
+    chunks: emittedAssets.slice(1).map((a) => ({ file: a.fileName, hash: a.hash, bytes: a.bytes, integrity: a.integrity })),
+  };
   writeFileSync(resolve(outDir, 'config.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
   console.error('vesk build: config → config.json');
 

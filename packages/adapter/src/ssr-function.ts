@@ -149,7 +149,11 @@ export function generateSsrFunction(
   const paramExprs = buildParamExtraction(routeNode, urlParts);
   const paramsCode = `function __paramsFor(pathname) {\n  const urlParts = pathname.split('/').filter(Boolean);\n  return { ${paramExprs.join(', ')} };\n}\n`;
 
-  const clientScriptOption = ', clientScriptUrl: "/_vesk/static/client.js"';
+  // Content-hashed in production (the build computes it before generating the
+  // functions), the stable name in dev.
+  const clientScriptOption =
+    `, clientScriptUrl: ${JSON.stringify(options?.clientScriptUrl || '/_vesk/static/client.js')}` +
+    (options?.clientScriptIntegrity ? `, clientScriptIntegrity: ${JSON.stringify(options.clientScriptIntegrity)}` : '');
   const dataScriptOption = ', externalDataScript: storeDataScriptGlobal';
 
   let registryCode = '';

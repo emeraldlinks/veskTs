@@ -277,9 +277,10 @@ async function fullLoad(entry) {
       ctype = resp.headers()['content-type'] || '';
       body = await resp.text().catch(() => '');
     }
-    // Only pages that load client.js hydrate (404/error-simple pages render
-    // static SSR without a bundle); those have no hydration to wait for.
-    if (!loadError && body.includes('_vesk/static/client.js')) {
+    // Only pages that load the client bundle hydrate (404/error-simple pages
+    // render static SSR without one); those have no hydration to wait for.
+    // Production names are content-hashed, hence the pattern.
+    if (!loadError && /_vesk\/static\/client(\.[0-9a-f]{10})?\.js/.test(body)) {
       hydrationMs = await measureHydration(page);
     } else if (!loadError) {
       hydrationMs = 'n/a';

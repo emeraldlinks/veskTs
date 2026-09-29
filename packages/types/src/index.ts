@@ -375,6 +375,15 @@ export interface SsrFunctionOptions {
    * SSR function at request time.
    */
   headExtra?: string;
+  /**
+   * URL of the emitted client bundle, content-hashed in production
+   * (`/_vesk/static/client.a1b2c3d4e5.js`) and a stable `client.js` in dev.
+   * The client bundle is generated BEFORE the SSR functions so the hash is
+   * known here rather than patched in afterwards.
+   */
+  clientScriptUrl?: string;
+  /** SRI digest for `clientScriptUrl`; omitted in dev. */
+  clientScriptIntegrity?: string;
 }
 
 export interface ApiFunctionOptions {
@@ -517,6 +526,16 @@ export interface Manifest {
   headExtra?: string;
   /** True when the app declares a server-events file (`_events.ts`). */
   events?: boolean;
+  /**
+   * Emitted browser assets with their content hashes and SRI digests. Present
+   * on every production build; `hashed` is false for a dev build, where names
+   * stay stable so HMR can rewrite them.
+   */
+  assets?: {
+    hashed: boolean;
+    client: { file: string; url: string; hash: string; bytes: number; integrity: string };
+    chunks: Array<{ file: string; hash: string; bytes: number; integrity: string }>;
+  };
 }
 
 export interface SsgRouteResult {

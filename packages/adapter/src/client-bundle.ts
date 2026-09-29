@@ -3,6 +3,7 @@ import { resolve, join, dirname, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { build } from './esbuild-fallback.js';
+import { hashedName } from '@vesk/adapter/src/asset-hash';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
 import { compileClient, compileClientBoth, nameAllocFor, vskComponentNames } from '@vesk/compiler/src/client-codegen';
@@ -988,8 +989,17 @@ export async function generateClientBundle(
     function annotate(nodes: RouteNode[]): void {
       for (const node of nodes) {
         const chunkName = `page-${buildChunkName(node)}.js`;
-        const hasEntry = chunkEntries.some(e => e.name === chunkName && e.code.trim());
-        if (hasEntry) node.chunk = `/_vesk/static/${chunkName}`;
+        // Production chunk names are content-hashed, and the ROUTER asks for
+        // chunks by the URL baked here — so the hash has to be applied to this
+        // reference, not just to the file on disk. Getting it wrong is silent
+        // and total: every chunk 404s, the server answers those requests with
+        // the SPA fallback (text/html), the browser refuses the script, and the
+        // page never hydrates at all.
+        const emitted = chunks.find((c) => c.name === chunkName && c.code.trim());
+        if (emitted) {
+          const fileName = options?.hmr ? chunkName : hashedName(chunkName, emitted.code);
+          node.chunk = `/_vesk/static/${fileName}`;
+        }
         annotate(node.children || []);
       }
     }

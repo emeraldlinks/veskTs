@@ -1,9 +1,10 @@
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { resolve, extname, dirname } from 'node:path';
+import { resolve, extname, dirname, basename } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
+import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { loadVeskConfig } from '@vesk/adapter/src/load-config';
@@ -137,6 +138,8 @@ interface BuildConfig {
     dir: string;
   };
   actions?: Array<{ id: string; function: string }>;
+  /** Emitted assets with content hashes (see Manifest.assets). */
+  assets?: { hashed: boolean; client: { file: string; url: string; hash: string; bytes: number; integrity: string } };
   /** Build-time-baked onHead-plugin head snippet for not-found/error pages. */
   headExtra?: string;
 }
@@ -326,10 +329,16 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       return;
     }
 
+    // Stable alias for the client runtime: the file on disk is content-hashed in
+    // production, so the name is resolved from the manifest rather than assumed.
     if (url.pathname === '/_vesk/runtime.js') {
-      const clientPath = resolve(staticDir, 'client.js');
+      const clientFile = buildConfig?.assets?.client?.file || 'client.js';
+      const clientPath = resolve(staticDir, clientFile);
       if (existsSync(clientPath)) {
-        res.writeHead(200, { 'Content-Type': 'application/javascript' });
+        res.writeHead(200, {
+          'Content-Type': 'application/javascript',
+          'Cache-Control': cacheControlFor(clientFile, false),
+        });
         res.end(readFileSync(clientPath));
         return;
       }
@@ -343,7 +352,13 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
         const ext = extname(staticPath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        res.writeHead(200, {
+          'Content-Type': MIME[ext] || 'application/octet-stream',
+          // A content-hashed name can never change meaning, so it is immutable
+          // for a year; anything unhashed must be revalidated or a deploy would
+          // serve stale JS forever.
+          'Cache-Control': cacheControlFor(basename(staticPath), false),
+        });
         res.end(readFileSync(staticPath));
         return;
       }
@@ -543,7 +558,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                   const compName = resolveComponentName(src) || 'Error';
                   // never leak stack traces / internal messages to prod error pages
                   const expose = process.env.NODE_ENV !== 'production';
-                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: pageCssUrls, clientScriptUrl: '/_vesk/static/client.js', security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath, headExtra: bakedHeadExtra });
+                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: pageCssUrls, clientScriptUrl: buildConfig?.assets?.client?.url || '/_vesk/static/client.js', clientScriptIntegrity: buildConfig?.assets?.client?.integrity, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath, headExtra: bakedHeadExtra });
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });
