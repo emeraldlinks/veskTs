@@ -897,6 +897,19 @@ export function resolveSsrModule(specifier: string, fromDir: string): string | n
     // resolver so app-local aliases win over any same-named package.
     const aliased = resolveAliasModule(specifier, fromDir);
     if (aliased) return toRealPath(aliased);
+    // Bare specifier. A package's `exports` map is consulted BEFORE Node's own
+    // resolver: `createRequire.resolve` applies the CJS conditions, so it picks
+    // a `.cjs` build for a package that also ships ESM — and fails outright on
+    // an `import`-only package. Vesk emits ESM, so the `import` condition is
+    // the correct one. Node's resolver stays as the fallback (builtins, exotic
+    // conditions), and the node_modules walk after that.
+    const viaExports = resolveViaPackageExports(specifier, fromDir);
+    if (viaExports) return viaExports;
+    // Same reasoning for the legacy fields: a package declaring both `module`
+    // and `main` wants the ESM build (Vesk emits ESM), while `createRequire`
+    // would take `main` and hand us the CJS one.
+    const viaModuleField = resolveViaPackageModuleField(specifier, fromDir);
+    if (viaModuleField) return viaModuleField;
     // Bare specifier — prefer the native resolver (exports map, conditions,
     // builtins, symlinks), then fall back to a node_modules walk-up.
     const native = nativeResolve(specifier, fromDir);
@@ -976,6 +989,132 @@ function statOrNull(p: string): { isFile: () => boolean; isDirectory: () => bool
   }
 }
 
+/**
+ * Resolve a subpath through a package's `exports` map.
+ *
+ * This is what makes a Vesk app work inside an existing pnpm/npm/yarn
+ * workspace. A modern workspace package declares `exports` and often NO `main`
+ * (or points `main` at a CJS build while the app imports ESM), and subpath
+ * imports (`@acme/ui/button`) resolve through the map rather than through the
+ * directory layout. Without this, such a package simply does not resolve, and
+ * the app has to vendor it.
+ *
+ * Conditions are tried in import order: `import`, `module`, `node`, `default`.
+ * A pattern (`./dist/*.js`) is matched with the single `*` capture.
+ */
+export function resolveExports(exportsField: unknown, subpath: string): string | null {
+  const conditions = ['import', 'module', 'node', 'default'];
+  const target = (value: unknown): string | null => {
+    if (typeof value === 'string') return value;
+    if (!value || typeof value !== 'object') return null;
+    for (const cond of conditions) {
+      if (cond in (value as Record<string, unknown>)) {
+        const got = target((value as Record<string, unknown>)[cond]);
+        if (got) return got;
+      }
+    }
+    return null;
+  };
+
+  if (typeof exportsField === 'string') return subpath === '.' ? exportsField : null;
+  if (!exportsField || typeof exportsField !== 'object') return null;
+  const map = exportsField as Record<string, unknown>;
+
+  if (subpath in map) {
+    const direct = target(map[subpath]);
+    if (direct) return direct;
+    return null;
+  }
+  // Longest-prefix match for `./*` patterns, as Node does.
+  let best: { key: string; star: string } | null = null;
+  for (const key of Object.keys(map)) {
+    const star = key.indexOf('*');
+    if (star === -1) continue;
+    const prefix = key.slice(0, star);
+    const suffix = key.slice(star + 1);
+    if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) continue;
+    if (subpath.length < prefix.length + suffix.length) continue;
+    if (best === null || prefix.length > best.key.length) {
+      best = { key: prefix, star: subpath.slice(prefix.length, subpath.length - suffix.length) };
+    }
+  }
+  if (!best) return null;
+  const pattern = target(map[Object.keys(map).find((k) => k.startsWith(best.key + '*') && k.endsWith(best.key.slice(0, -1)) + '*') as string] ?? map[`${best.key}*`]);
+  if (pattern === null) return null;
+  return pattern.split('*').join(best.star);
+}
+
+/**
+ * Resolve a bare specifier through a package's `module` field (the ESM entry
+ * in a package that also has a CJS `main`).
+ */
+export function resolveViaPackageModuleField(specifier: string, fromDir: string): string | null {
+  const firstSlash = specifier.indexOf('/');
+  const splitAt = specifier.startsWith('@') ? specifier.indexOf('/', firstSlash + 1) : firstSlash;
+  const pkgName = splitAt > 0 ? specifier.slice(0, splitAt) : specifier;
+  if (splitAt > 0) return null; // a subpath import needs the exports map
+  let dir = fromDir;
+  for (let depth = 0; depth < 64; depth++) {
+    const pkgPath = join(dir, 'node_modules', pkgName, 'package.json');
+    if (statOrNull(pkgPath) !== null) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { module?: unknown };
+        if (typeof pkg.module === 'string' && pkg.module.length > 0) {
+          const found = probeFile(resolve(join(dir, 'node_modules', pkgName), pkg.module));
+          if (found) return toRealPath(found);
+        }
+      } catch {
+        // malformed package.json — fall through
+      }
+      return null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Resolve a bare specifier through its package's `exports` map, walking
+ * node_modules upwards. Returns null when the package has no map, does not
+ * export the subpath, or cannot be read.
+ */
+export function resolveViaPackageExports(specifier: string, fromDir: string): string | null {
+  // A scoped name (`@acme/ui`) has its slash INSIDE the package name — taking
+  // the first slash as the subpath separator turns it into package `@acme` +
+  // subpath `./ui`, which no `exports` map matches, and the lookup silently
+  // falls through to Node's resolver.
+  const firstSlash = specifier.indexOf('/');
+  const splitAt = specifier.startsWith('@') ? specifier.indexOf('/', firstSlash + 1) : firstSlash;
+  const pkgName = splitAt > 0 ? specifier.slice(0, splitAt) : specifier;
+  const subpath = splitAt > 0 ? '.' + specifier.slice(splitAt) : '.';
+  let dir = fromDir;
+  for (let depth = 0; depth < 64; depth++) {
+    const pkgDir = join(dir, 'node_modules', pkgName);
+    const pkgPath = join(pkgDir, 'package.json');
+    if (statOrNull(pkgPath) !== null) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { exports?: unknown };
+        if (pkg.exports !== undefined) {
+          const target = resolveExports(pkg.exports, subpath);
+          if (target) {
+            const found = probeFile(resolve(pkgDir, target));
+            if (found) return toRealPath(found);
+          }
+        }
+      } catch {
+        // malformed package.json — fall through to the resolvers below
+      }
+      return null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 function probeFile(base: string): string | null {
   const st = statOrNull(base);
   if (st && st.isFile()) return base;
@@ -984,10 +1123,23 @@ function probeFile(base: string): string | null {
     const pkgSt = statOrNull(pkgPath);
     if (pkgSt && pkgSt.isFile()) {
       try {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { main?: unknown; exports?: unknown };
-        if (typeof pkg.main === 'string' && pkg.main.length > 0) {
-          const viaMain = probeFile(resolve(base, pkg.main));
-          if (viaMain) return viaMain;
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { main?: unknown; module?: unknown; exports?: unknown };
+        // `exports` first: it is what the package author intends and what a
+        // workspace package usually ships. `main`/`module` are the legacy
+        // fallbacks.
+        if (pkg.exports !== undefined) {
+          const viaExports = resolveExports(pkg.exports, '.');
+          if (viaExports) {
+            const found = probeFile(resolve(base, viaExports));
+            if (found) return found;
+          }
+        }
+        for (const field of ['module', 'main'] as const) {
+          const value = pkg[field];
+          if (typeof value === 'string' && value.length > 0) {
+            const found = probeFile(resolve(base, value));
+            if (found) return found;
+          }
         }
       } catch {
         // ignore malformed package.json
