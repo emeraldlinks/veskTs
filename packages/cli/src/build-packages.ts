@@ -35,6 +35,8 @@ const PACKAGES: Record<string, PackageBuild> = {
   // servers on fresh checkouts (CI).
   'plugin-pwa': { name: '@vesk/plugin-pwa', entry: 'index' },
   'plugin-tailwind': { name: '@vesk/plugin-tailwind', entry: 'index' },
+  // testing last — it depends on the compiler.
+  testing: { name: '@vesk/testing', entry: 'index' },
 };
 
 function newestSourceMtime(srcDir: string): number {

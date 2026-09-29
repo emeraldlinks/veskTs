@@ -14,6 +14,7 @@ const testDirs = [
   resolve(root, 'packages/runtime/src'),
   resolve(root, 'packages/adapter/src'),
   resolve(root, 'packages/plugin-pwa/src'),
+  resolve(root, 'packages/testing/src'),
   resolve(root, 'packages/plugin-tailwind/src'),
 ]
 

@@ -10,6 +10,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGES_DIR = join(ROOT, 'packages');
 
 const INTERNAL_NAMES = new Set([
+  '@vesk/testing',
   '@vesk/adapter',
   '@vesk/agentic',
   '@vesk/compiler',
@@ -40,6 +41,7 @@ const PUBLISH_ORDER = [
   '@vesk/vesk-cli',
   'lucide-vesk',
   'create-vesk',
+  '@vesk/testing',
 ];
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -146,6 +148,7 @@ const BUILD_ORDER = [
   '@vesk/vesk-cli',
   'lucide-vesk',
   'create-vesk',
+  '@vesk/testing',
 ];
 for (const name of BUILD_ORDER) {
   const p = byName.get(name);
