@@ -78,18 +78,27 @@ if (!existsSync(BUDGET_FILE)) {
 }
 
 const budget = JSON.parse(readFileSync(BUDGET_FILE, 'utf-8'));
+// 2% drift allowance. The same app built from the workspace packages and from a
+// pinned tarball install is not byte-identical (different esbuild/runtime
+// builds get linked in), and an exact-byte gate turns that difference into a red
+// suite — the same trap as a hard-coded millisecond budget. Growth beyond 2% is
+// a real regression; anything under it is toolchain drift.
+const DRIFT = 0.02;
+const slackFor = (allowed) => Math.ceil(allowed * DRIFT);
 const checks = [
-  ['total client JS', measured.totalBytes, budget.totalBytes, 0],
-  ['client runtime', measured.clientBytes, budget.clientBytes, 0],
-  ['largest chunk', measured.largestChunkBytes, budget.largestChunkBytes, 0],
+  ['total client JS', measured.totalBytes, budget.totalBytes, slackFor(budget.totalBytes)],
+  ['client runtime', measured.clientBytes, budget.clientBytes, slackFor(budget.clientBytes)],
+  ['largest chunk', measured.largestChunkBytes, budget.largestChunkBytes, slackFor(budget.largestChunkBytes)],
 ];
 let failed = 0;
 for (const [label, actual, allowed, slack] of checks) {
   const delta = actual - allowed;
   if (delta > slack) {
     failed++;
-    console.error(`asset-budget: FAIL ${label} grew by ${kb(delta)} (${kb(allowed)} -> ${kb(actual)})`);
+    console.error(`asset-budget: FAIL ${label} grew by ${kb(delta)} (${kb(allowed)} -> ${kb(actual)}, allowance ${kb(slack)})`);
     console.error('  Re-run with --update only if the growth is deliberate, and say why in the commit.');
+  } else if (delta > 0) {
+    console.log(`asset-budget: ${label} is ${kb(delta)} over the budget, inside the 2% drift allowance`);
   }
 }
 
