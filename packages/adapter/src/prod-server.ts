@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
+import { reportServerError } from '@vesk/adapter/src/error-report';
+import { executeError } from '@vesk/adapter/src/events';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { loadVeskConfig } from '@vesk/adapter/src/load-config';
@@ -130,6 +132,7 @@ interface BuildConfigRoute {
 
 interface BuildConfig {
   version: number;
+  [key: string]: unknown;
   middleware: boolean;
   routes: BuildConfigRoute[];
   prerendered?: Array<{ path: string; file: string }>;
@@ -216,6 +219,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
   }
 
   interface EventsModule {
+    onError?: (err: unknown, base?: Record<string, unknown>) => unknown;
     executeStart?: (base?: Record<string, unknown>) => Promise<void>;
     executeRequest?: (base?: Record<string, unknown>) => Promise<void>;
     executeStop?: (base?: Record<string, unknown>) => Promise<void>;
@@ -548,6 +552,19 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                 return;
               }
               console.error('vesk ssr error:', err.message);
+              // Two seams, both best-effort: a plugin's `onError` (dev-style
+              // plugin objects don't exist here) and `_events.ts`'s, which IS
+              // baked into the production build.
+              await reportServerError(err, {
+                url: url.pathname + url.search,
+                routePath: route.path,
+                target: 'node',
+                status: 500,
+                buildConfig,
+              });
+              if (eventsMod) {
+                await executeError(err, { url: url.href, routePath: route.path, target: 'node', status: 500 }, eventsMod);
+              }
               const errPath = resolve(appDir, 'error.vsk');
               let errorHtml: string | null = null;
               if (existsSync(errPath)) {

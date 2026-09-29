@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
-import { resolve, dirname, relative, basename } from 'node:path';
+import { resolve, dirname, relative, basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
@@ -7,6 +7,11 @@ import { resolveUserCssPath, isTailwindPlugin, resolveCssUrls, hasBuiltGlobalCss
 import { collectActionIds } from '@vesk/compiler/src/actions';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { describeAsset, type AssetDigest } from '@vesk/adapter/src/asset-hash';
+
+// The adapter's own package.json, for the version stamped into the manifest.
+function PACKAGES_DIR_SELF(): string {
+  return resolve(dirname(fileURLToPath(import.meta.url)), '..');
+}
 import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import { compileEvents } from '@vesk/adapter/src/events';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
@@ -439,6 +444,10 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra, hasEvents);
   // The asset map is what makes a deploy auditable: sizes, content hashes and
   // the SRI digests a page can carry.
+  // The build id is the asset map's own fingerprint: same assets, same id.
+  const buildId = emittedAssets.map((a) => a.hash).join('-');
+  manifest.buildId = buildId.slice(0, 32);
+  manifest.veskVersion = JSON.parse(readFileSync(join(PACKAGES_DIR_SELF(), 'package.json'), 'utf-8')).version;
   manifest.assets = {
     hashed,
     client: { file: clientFileName, url: clientUrl, hash: clientAsset.hash, bytes: clientAsset.bytes, integrity: clientAsset.integrity },

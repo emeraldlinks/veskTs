@@ -106,6 +106,25 @@ Point it at any build output: `npm run budget -- path/to/.vesk`.
 A Node version that leaves the support window gets a final patch, then the
 matrix is updated here in the same release.
 
+## Error reporting in production
+
+Production never sends a stack trace to the client. To see failures, use the
+seam rather than replacing the adapter's error handling:
+
+```ts
+// app/_events.ts — the production path (no plugin objects exist in prod)
+export async function onError(err: unknown, ctx) {
+  Sentry.captureException(err, { tags: { route: ctx.routePath, build: ctx.buildId } })
+}
+```
+
+A plugin's `onError(err, ctx)` hook does the same in dev. Both receive the
+route pattern, the URL, the target, the status, the Vesk version and the
+`buildId` from the build manifest — so a report is tied to an exact deploy. A
+hook that throws is logged and ignored: a reporting outage never becomes a
+second failure, and one error object is reported once no matter how many layers
+catch it.
+
 ## Reporting a regression
 
 Include the Vesk version (`vesk --version`), the Node version, the deploy

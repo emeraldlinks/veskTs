@@ -6,6 +6,7 @@ import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { DEFAULT_MAX_BODY_BYTES, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
+import { reportServerError, registerErrorHooks } from '@vesk/adapter/src/error-report';
 import { buildErrorPayload, createHmrServer } from './hmr';
 import * as hmrApi from './hmr';
 import type { HmrErrorPayload } from './hmr';
@@ -265,6 +266,9 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   const devDir = resolve(appDir, '..', '.vesk', 'dev');
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
   installMdReadHook([publicDir, resolve(devDir, 'static', 'public')]);
+  // Plugin `onError` hooks only exist here (dev): in production there are no
+  // plugin objects, and `_events.ts` is the seam that ships.
+  registerErrorHooks(options?.plugins as VeskPlugin[] | undefined);
 
   // Dev-panel plugin list: plugin / module names declared in the dev server's own config.
   const configPluginNames: string[] = (options?.plugins || []).map((p) => {
@@ -749,6 +753,7 @@ let finalBody = body;
             console.error(`[vdtime] ${url.pathname} ssrVersion=${ssrVersion} total=${Number(tHandle1 - t0) / 1e6 | 0}ms import=${Number(tImport1 - tImport0) / 1e6 | 0}ms handle=${Number(tHandle1 - tImport1) / 1e6 | 0}ms text=${Number(tText1 - tHandle1) / 1e6 | 0}ms`);
           } catch (e) {
             console.error('[vesk dev] SSR render failed:', e instanceof Error ? (e.stack || e.message) : String(e));
+            await reportServerError(e, { url: url.href, target: 'dev', status: 500 });
             res.writeHead(500, { 'Content-Type': 'text/html' });
             res.end(renderSsrErrorPage(e, url.pathname));
           }
