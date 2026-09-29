@@ -1,7 +1,7 @@
 import { readdirSync, existsSync, statSync } from 'fs'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
-import { execSync, spawn } from 'child_process'
+import { execSync, spawn, spawnSync } from 'child_process'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = resolve(__dirname, '..')
@@ -209,6 +209,23 @@ for (const dir of testDirs) {
       console.error(e.message.slice(0, 300))
       if (e.stdout) console.log(e.stdout.slice(-500))
     }
+  }
+}
+
+// Client-bundle budget: a ratchet on the emitted JS. Nothing else in the suite
+// notices a dependency that quietly adds 200 KB, and the build has already been
+// caught quietly getting 8x slower.
+{
+  const budgetScript = resolve(root, 'scripts/asset-budget.mjs')
+  const buildDir = resolve(root, 'test-app', '.vesk', 'e2e')
+  totalFiles++
+  process.stdout.write('scripts/asset-budget.mjs ... ')
+  if (!existsSync(buildDir)) {
+    console.log('SKIP (no e2e build)')
+  } else {
+    const res = spawnSync('node', [budgetScript, buildDir], { cwd: root, encoding: 'utf-8' })
+    process.stdout.write(res.status === 0 ? 'OK' : `FAIL\n${res.stdout || ''}${res.stderr || ''}`)
+    if (res.status !== 0) totalFailed++
   }
 }
 

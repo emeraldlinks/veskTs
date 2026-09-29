@@ -75,6 +75,25 @@ The version rules and changelog renderer live in `scripts/release-plan.mjs` and
 are covered by `packages/cli/src/release-plan.test.ts` — they decide what an
 installer resolves, so they are asserted rather than trusted.
 
+## Size budget
+
+`npm run budget` (also run by `scripts/test.js`, so it gates CI) measures the
+client JavaScript a production build emits and fails when it grows:
+
+```
+asset-budget: client runtime : 274.0 KB  (client.5ebf20b1ee.js)
+asset-budget: route chunks   : 29 files, 453.8 KB total
+asset-budget: largest chunk  : 55.1 KB  (page-portal.5beb2adfe7.js)
+asset-budget: TOTAL client JS: 727.8 KB
+```
+
+The numbers live in `perf-budget.json` and the gate is a **ratchet**: a smaller
+build tightens the budget automatically, so an improvement cannot be given back
+by accident. Growing it needs `npm run budget -- <buildDir> --update` and a
+sentence in the commit message explaining why the client now carries more.
+
+Point it at any build output: `npm run budget -- path/to/.vesk`.
+
 ## Support matrix
 
 | | supported |

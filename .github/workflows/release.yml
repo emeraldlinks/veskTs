@@ -35,6 +35,7 @@ jobs:
           CHROMIUM_PATH: ${{ steps.setup.outputs.chrome-path }}
         run: node scripts/test.js
 
+
   dev-test:
     name: dev-test.mjs
     runs-on: ubuntu-latest
