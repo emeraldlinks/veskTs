@@ -8,7 +8,7 @@
 // Usage: npm run test:lsp  (builds the bundle, then runs this file)
 
 import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -283,7 +283,9 @@ async function main() {
   assert(/reactive binding/i.test(reactiveHover), `hover on reactive binding count shows info`);
 
   // 13b. Md raw-HTML policy: warnings inside markdown template strings + <Md> hover
-  const mdDocUri = 'file://' + FIXTURE + '/app/md-doc.vsk';
+  // The file must exist on disk — volar only pushes diagnostics for project files.
+  const mdDocPath = resolve(FIXTURE, 'app/md-doc.vsk');
+  const mdDocUri = 'file://' + mdDocPath;
   const mdDoc = [
     "import { Md } from '@vesk/runtime'",
     '',
@@ -292,6 +294,7 @@ async function main() {
     '\t<Md content={doc} />',
     '}',
   ].join('\n');
+  writeFileSync(mdDocPath, mdDoc, 'utf-8');
   notify('textDocument/didOpen', {
     textDocument: { uri: mdDocUri, languageId: 'vsk', version: 1, text: mdDoc },
   });
@@ -300,7 +303,12 @@ async function main() {
     textDocument: { uri: mdDocUri, version: 2 },
     contentChanges: [{ range: { start: { line: 0, character: 0 }, end: { line: 0, character: 0 } }, text: '' }],
   });
-  await new Promise(r => setTimeout(r, 500));
+  // Poll: the md-html diagnostic arrives on volar's own schedule.
+  const mdDeadline = Date.now() + 30000;
+  while (Date.now() < mdDeadline) {
+    if (diagnostics.some(d => d.code === 'vesk-md-html')) break;
+    await new Promise(r => setTimeout(r, 500));
+  }
   const mdHtmlDiags = diagnostics.filter(d => d.code === 'vesk-md-html');
   assert(mdHtmlDiags.length >= 1, `md raw-HTML diagnostic emitted (${mdHtmlDiags.length})`);
   assert(mdHtmlDiags.some(d => d.message.includes('ESCAPED')), 'md html diagnostic explains default escaping');

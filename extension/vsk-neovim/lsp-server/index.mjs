@@ -95820,6 +95820,24 @@ function matchKeywordSequence(input, words) {
     const c = input.charCodeAt(p);
     return isWsChar(c) || c === 123;
 }
+/**
+ * True only while `tokenizeCode` drives the tokenizer directly. Acorn's
+ * `getOptions` copies only known option keys, so the request cannot travel on
+ * the options object — it is scoped here instead. Tokenizing is synchronous,
+ * so the save/restore is safe.
+ */
+let standaloneTokens = false;
+/** Runs `fn` with JSX tag recognition enabled without a parser driving it. */
+function withStandaloneTokens(fn) {
+    const prev = standaloneTokens;
+    standaloneTokens = true;
+    try {
+        return fn();
+    }
+    finally {
+        standaloneTokens = prev;
+    }
+}
 function VeskParserPlugin(config = {}) {
     return (Parser) => {
         const tt = Parser.tokTypes || types$1;
@@ -95834,6 +95852,15 @@ function VeskParserPlugin(config = {}) {
             #jsxChildDepthStack = [];
             constructor(options, input) {
                 super(options, input);
+                // The standalone tokenizer (`tokenizeCode`) drives `getToken()` without
+                // ever running the parser, so `component X { … }` never raises
+                // #componentDepth and every JSX tag would be read as relational
+                // operators. Callers that only need a token stream still need JSX, so
+                // they opt in explicitly; parser-driven parses are unaffected.
+            }
+            /** True when JSX tags are recognised without parser-driven componentDepth. */
+            #jsxAllowed() {
+                return this.#componentDepth > 0 || standaloneTokens;
             }
             #isBlockContext() {
                 const ctx = this.curContext();
@@ -96125,7 +96152,7 @@ function VeskParserPlugin(config = {}) {
                     }
                     return super.readToken(this.input.codePointAt(this.pos));
                 }
-                if (this.#componentDepth > 0 && code === 60 && this.#isBlockContext()) {
+                if (this.#jsxAllowed() && code === 60 && this.#isBlockContext()) {
                     const next = this.input.charCodeAt(this.pos + 1);
                     const startsNewStatement = this.hasPrecedingLineBreak();
                     const inType = this.inType;
@@ -96764,6 +96791,107 @@ function skipComment$1(text, i) {
     return i;
 }
 /**
+ * Blanks comments in the source, overwriting the comment characters with
+ * spaces so every source offset (and therefore every diagnostic line/column)
+ * is preserved. Newlines inside a comment are kept so line numbers hold.
+ *
+ * In JSX-children position acorn reads both `//` and `/* ... *​/` as JSXText
+ * rather than a comment, so commented-out code still ran: `//<span>old</span>`
+ * inside a component rendered the element, `//{count + 1}` emitted a live
+ * binding, and `/* <span>old</span> *​/` leaked the markup as visible text.
+ * Blanking comments before the parse makes a commented-out line behave like
+ * a comment in every position of a `.vsk` file.
+ *
+ * `/* ... *​/` is blanked wherever it appears (outside a string) because a
+ * block comment is inert everywhere in JS — and an unescaped `/*` cannot occur
+ * inside a regex literal, since it would terminate the regex there.
+ *
+ * `//` is blanked only when it is the first non-whitespace token on its line: a
+ * trailing `// note` after code is a real comment acorn already ignores, and
+ * blanking a mid-line `//` would corrupt regex literals (`/https:\/\//`) and
+ * intentional JSX text such as `ratio 1//2`. Strings and template literals are
+ * skipped throughout, so a comment marker inside them is never touched.
+ */
+function blankComments(text) {
+    const chars = text.split('');
+    const n = text.length;
+    let lineStart = true;
+    let i = 0;
+    while (i < n) {
+        const ch = text[i];
+        if (ch === '\n') {
+            lineStart = true;
+            i++;
+            continue;
+        }
+        if (isWhitespaceChar$1(ch)) {
+            i++;
+            continue;
+        }
+        if (ch === '"' || ch === "'" || ch === '`') {
+            const end = skipString(text, i);
+            for (let k = i; k < end; k++) {
+                const c = text[k];
+                if (c === '\n')
+                    lineStart = true;
+                else if (!isWhitespaceChar$1(c))
+                    lineStart = false;
+            }
+            i = end;
+            continue;
+        }
+        if (ch === '/' && text[i + 1] === '/') {
+            if (!lineStart) {
+                i += 2;
+                continue;
+            }
+            let j = i;
+            while (j < n && text[j] !== '\n') {
+                chars[j] = ' ';
+                j++;
+            }
+            i = j;
+            continue;
+        }
+        if (ch === '/' && text[i + 1] === '*') {
+            // Only a line-leading `/*` is blanked, for the same reason as `//`, and
+            // only when a terminator actually exists on the way. JSX text legitimately
+            // contains `/*`-looking runs — `app/api/**/route.ts` inside <code> is the
+            // canonical one — and a scanner that hunts for a missing `*/` would run
+            // past the end of the "comment" and blank the rest of the document,
+            // producing an unterminated-JSX build error. Mid-line block comments are
+            // real comments that acorn already ignores.
+            if (!lineStart) {
+                i += 2;
+                continue;
+            }
+            let j = i + 2;
+            let end = -1;
+            while (j < n) {
+                if (text[j] === '*' && text[j + 1] === '/') {
+                    end = j + 2;
+                    break;
+                }
+                j++;
+            }
+            if (end === -1) {
+                lineStart = false;
+                i += 2;
+                continue;
+            }
+            for (let k = i; k < end; k++)
+                if (text[k] !== '\n')
+                    chars[k] = ' ';
+            lineStart = false;
+            i = end;
+            continue;
+        }
+        lineStart = false;
+        i++;
+    }
+    return chars.join('');
+}
+/**
  * Given the index of an opening `(`, `[` or `{`, returns the index of its
  * matching closing delimiter. Strings, `//` and `/* ... *​/` comments are
  * skipped so delimiters inside them do not count. Returns `text.length`
@@ -96959,6 +97087,7 @@ class VeskError extends Error {
         }
         return new VeskError(msg, {
             ...context,
+            code: context.code || 'V0401',
             suggestions: [name, ...allCandidates.slice(0, 8)],
             nextSteps,
             tip: isBuiltin
@@ -96966,9 +97095,46 @@ class VeskError extends Error {
                 : '',
         });
     }
+    /**
+     * A `.vsk` namespace is resolved at the JSX-tag level: `<ns.Icon />` looks
+     * the component up in the registry by its exported name, exactly like
+     * `import { Icon }`, and no module object is ever built. The two forms that
+     * genuinely need a real module object are reported here.
+     *
+     * - `nested` — `<ns.Sub.Icon />`. A `.vsk` module's exports are flat
+     *   component names, so there is no object to walk into.
+     * - `value` — `ns.max` read as a value. Component tags resolve; plain value
+     *   reads do not, because nothing binds `ns` at runtime.
+     */
+    static vskNamespaceMember(context = {}) {
+        const nested = context.form === 'nested';
+        return new VeskError(nested
+            ? 'A `.vsk` namespace is flat, so `<ns.Sub.Icon />` cannot be resolved.'
+            : 'A `.vsk` namespace resolves component tags only, so `ns.value` is not available.', {
+            ...context,
+            code: context.code || 'V0410',
+            suggestions: nested
+                ? [
+                    "Import the component by name: import { Icon } from './icons.vsk'",
+                    "Import from the module that owns Sub: import * as Sub from './sub.vsk'",
+                ]
+                : [
+                    "Import the value by name: import { MAX } from './constants.vsk'",
+                    'Move the value into a .ts module and import it from there — those are real ES modules with live bindings.',
+                ],
+            nextSteps: [
+                'A `.vsk` tag resolves by component name in the global registry, not by module exports, so `import * as ns` + `<ns.Icon />` needs no module object.',
+                nested
+                    ? 'Re-export with a flat name (`export { Icon }`) or import the component directly.'
+                    : 'Re-export the value under a flat name and import it directly, or keep the value in a .ts module.',
+            ],
+            tip: '`<ns.Icon />` works; only nested paths and value reads need a real module namespace.',
+        });
+    }
     static classDecl(context = {}) {
         return new VeskError('class declarations are not supported inside Vesk components.', {
             ...context,
+            code: context.code || 'V0402',
             suggestions: [
                 'Use a plain object: const obj = { ... };',
                 'Use a factory function: function create() { return { ... }; }',
@@ -96984,6 +97150,7 @@ class VeskError extends Error {
     static serverBlockInClient(compName, context = {}) {
         return new VeskError(`{#server} block found in client island "${compName}". Client islands render on both server and client, so {#server} blocks have no effect.`, {
             ...context,
+            code: context.code || 'V0403',
             suggestions: [
                 `Remove the {#server} block from "${compName}".`,
                 `Or remove the \`client\` keyword from "${compName}" declaration.`,
@@ -96998,6 +97165,7 @@ class VeskError extends Error {
     static clientBlockInServer(compName, context = {}) {
         return new VeskError(`{#client} block found in component "${compName}", but this component is not a client island. {#client} blocks are only allowed inside components declared with the \`client\` keyword.`, {
             ...context,
+            code: context.code || 'V0404',
             suggestions: [
                 `Add \`client\`: \`component ${compName} client { ... }\``,
                 `Or remove the {#client}...{/client} block.`,
@@ -97018,6 +97186,7 @@ class VeskError extends Error {
     static configError(msg, validOptions = [], context = {}) {
         return new VeskError(msg, {
             ...context,
+            code: context.code || 'V0405',
             suggestions: validOptions.length ? [`Valid options: ${validOptions.join(', ')}`] : [],
             nextSteps: [
                 'Check your vesk.config file for typos.',
@@ -97028,6 +97197,7 @@ class VeskError extends Error {
     static asyncChildInSyncParent(parentName, childName, context = {}) {
         return new VeskError(`Component "${parentName}" renders "<${childName} />", but "<${childName} />" is async and "${parentName}" is not declared async.`, {
             ...context,
+            code: context.code || 'V0406',
             suggestions: [
                 `Declare the parent async: \`async component ${parentName} ...\``,
             ],
@@ -97039,8 +97209,23 @@ class VeskError extends Error {
             tip: `A component that renders an async component must itself be async so the renderer can await it before serializing the HTML. Async components also include components that call \`useFetch\`.`,
         });
     }
+    static attrJsxElement(context = {}) {
+        return new VeskError(`Attribute "${context.attr ?? ''}" on an HTML element is given a JSX element value. DOM attributes hold plain values — JSX elements belong to content or to a component prop (where they become a content slot).`, {
+            ...context,
+            code: context.code || 'V0407',
+            suggestions: [
+                'Pass the element as a child instead: <div>{ <yourElement /> }</div>',
+                'If the component accepts it, pass the element as a component prop instead of an HTML attribute.',
+            ],
+            nextSteps: [
+                'Move the JSX element into the element\'s content so it renders as a child node.',
+                'Component props can hold JSX elements — they are threaded as content slots and read back with {props.<name>}.',
+            ],
+            tip: 'JSX elements are content. They render inside an element or travel as a component prop — never as an attribute value on an HTML tag.',
+        });
+    }
     toString() {
-        let out = `[vesk] ${this.message}`;
+        let out = this.code ? `[vesk ${this.code}] ${this.message}` : `[vesk] ${this.message}`;
         if (this.file) {
             out += `\n  File: ${this.file}`;
             if (this.line) {
@@ -97086,6 +97271,280 @@ class VeskError extends Error {
             stack: this.stack,
         };
     }
+}
+
+/**
+ * Token-based syntax analysis built on the acorn tokenizer (via the Vesk
+ * TS/JSX parser). The tokenizer understands generics, JSX, template
+ * literals and the `&[...]` track-declaration sugar, so identifier-call
+ * detection and import parsing no longer need regexes. Every helper falls
+ * back to a character-level scan when the input cannot be tokenized (e.g.
+ * mid-edit content or partial fragments), so callers never crash on
+ * unparsable text.
+ */
+/**
+ * Tokenizes `code` with the Vesk parser's tokenizer. Returns an array of
+ * tokens (excluding EOF), or `null` when the input cannot be tokenized.
+ * `value` holds identifier/keyword/string text; punctuation tokens expose
+ * their span so callers can read the actual character via `code[start]`.
+ */
+function tokenizeCode(code) {
+    // No parser runs here, so the plugin cannot infer component bodies from its
+    // own component-depth counter and every JSX tag would be read as relational
+    // operators. `withStandaloneTokens` asks it to read JSX tags directly.
+    return withStandaloneTokens(() => {
+        try {
+            const ParserClass = createBaseParser();
+            const tok = ParserClass.tokenizer(code, {
+                ecmaVersion: 'latest',
+                sourceType: 'module',
+            });
+            const out = [];
+            let t;
+            while ((t = tok.getToken()) && t.type && t.type.label !== 'eof') {
+                out.push({
+                    label: t.type.label,
+                    value: typeof t.value === 'string' ? t.value : '',
+                    start: t.start,
+                    end: t.end,
+                });
+            }
+            return out;
+        }
+        catch {
+            return null;
+        }
+    });
+}
+/**
+ * True when `code` contains the identifier `name` (as a plain identifier or
+ * a JSX name), outside strings and comments.
+ */
+function containsIdentifier(code, name) {
+    const tokens = tokenizeCode(code);
+    if (tokens !== null) {
+        for (const t of tokens) {
+            if ((t.label === 'name' || t.label === 'jsxName') && t.value === name)
+                return true;
+        }
+        return false;
+    }
+    return manualContainsIdentifier(code, name);
+}
+/**
+ * True when an `import` statement in `code` imports the name `name`.
+ */
+function isIdentifierImported(code, name) {
+    const tokens = tokenizeCode(code);
+    if (tokens !== null) {
+        for (let i = 0; i < tokens.length; i++) {
+            if (tokens[i].label !== 'import')
+                continue;
+            let j = i + 1;
+            while (j < tokens.length &&
+                tokens[j].label !== ';' &&
+                !(tokens[j].label === 'name' && tokens[j].value === 'from')) {
+                j++;
+            }
+            for (let k = i + 1; k < j; k++) {
+                if ((tokens[k].label === 'name' || tokens[k].label === 'jsxName') && tokens[k].value === name)
+                    return true;
+            }
+            i = j;
+        }
+        return false;
+    }
+    return manualIsIdentifierImported(code, name);
+}
+function manualContainsIdentifier(code, name) {
+    let i = 0;
+    while (i < code.length) {
+        const c = code[i];
+        if (c === '"' || c === "'" || c === '`') {
+            i = skipString(code, i);
+            continue;
+        }
+        if (c === '/' && (code[i + 1] === '/' || code[i + 1] === '*')) {
+            i = skipComment$1(code, i);
+            continue;
+        }
+        if (isIdentStart(c) && code.slice(i, i + name.length) === name) {
+            const after = i + name.length;
+            if ((after >= code.length || !isIdentChar$1(code[after])) && (i === 0 || !isIdentChar$1(code[i - 1])))
+                return true;
+        }
+        i++;
+    }
+    return false;
+}
+function manualIsIdentifierImported(code, name) {
+    let i = 0;
+    while (i < code.length) {
+        const c = code[i];
+        if (c === '"' || c === "'" || c === '`') {
+            i = skipString(code, i);
+            continue;
+        }
+        if (c === '/' && (code[i + 1] === '/' || code[i + 1] === '*')) {
+            i = skipComment$1(code, i);
+            continue;
+        }
+        if (isIdentStart(c)) {
+            let j = i + 1;
+            while (j < code.length && isIdentChar$1(code[j]))
+                j++;
+            const word = code.slice(i, j);
+            if (word === 'import') {
+                let k = j;
+                while (k < code.length) {
+                    if (code[k] === ';' || code[k] === '\n')
+                        break;
+                    if (code[k] === '"' || code[k] === "'" || code[k] === '`') {
+                        k = skipString(code, k);
+                        continue;
+                    }
+                    if (isIdentStart(code[k]) && code.slice(k, k + name.length) === name) {
+                        const a = k + name.length;
+                        if ((a >= code.length || !isIdentChar$1(code[a])) && (k === 0 || !isIdentChar$1(code[k - 1])))
+                            return true;
+                    }
+                    k++;
+                }
+            }
+            i = j;
+            continue;
+        }
+        i++;
+    }
+    return false;
+}
+/**
+ * True when `code` declares `name` as a real top-level value (`const`/`let`/
+ * `var`/`function`/`class`). Used to tell a `.vsk` component — a registry entry
+ * with no binding — apart from an ordinary JS/TS declaration, whose
+ * `export { name }` must keep native module semantics.
+ */
+function hasTopLevelValueDeclaration(code, name) {
+    const tokens = tokenizeCode(code);
+    if (tokens === null)
+        return false;
+    const declWords = ['const', 'let', 'var', 'function', 'class'];
+    for (let i = 1; i < tokens.length; i++) {
+        if (tokens[i].label !== 'name' || tokens[i].value !== name)
+            continue;
+        const prev = tokens[i - 1];
+        // Declaration keywords carry their own token label (`const`, `var`,
+        // `function`, `class`); `let` arrives as a plain name. Match on value.
+        if (!prev || !declWords.includes(prev.value))
+            continue;
+        // `export const X` / `export function X` are preceded by `export`.
+        if (i >= 2) {
+            const pp = tokens[i - 2];
+            if (pp && pp.label === 'name' && pp.value === 'export')
+                continue;
+        }
+        return true;
+    }
+    return false;
+}
+/**
+ * Finds same-file export *specifier lists* — `export { A }`, `export { A as B }`
+ * — and returns them with their source spans so the caller can remove them.
+ *
+ * A `.vsk` component is a registry entry keyed by its declared name, not a
+ * top-level binding, so acorn's module validator rejects `export { A }` with
+ * `Export 'A' is not defined`. Export *declarations* (`export component A`,
+ * `export const A = 1`) and re-exports (`export … from '…'`) are left alone:
+ * those parse fine and are handled in the IR generator.
+ */
+function findSpecifierExports(code) {
+    const tokens = tokenizeCode(code);
+    if (tokens === null)
+        return [];
+    const out = [];
+    for (let i = 0; i < tokens.length; i++) {
+        if (tokens[i].label !== 'export')
+            continue;
+        // A specifier list starts with `{`. `export default`, `export const` and
+        // `export *` take another route and are left for the IR generator.
+        if (!tokens[i + 1] || tokens[i + 1].label !== '{')
+            continue;
+        // Find this statement's `}` and note any module source, which makes it a
+        // re-export (`export { A } from './x.vsk'`) rather than a specifier list.
+        let k = i + 2;
+        let depth = 1;
+        for (; k < tokens.length; k++) {
+            const lbl = tokens[k].label;
+            if (lbl === 'string') {
+                continue;
+            }
+            if (lbl === '{')
+                depth++;
+            else if (lbl === '}') {
+                depth--;
+                if (depth === 0)
+                    break;
+            }
+        }
+        // A re-export puts `from '…'` AFTER the closing brace, so check past it.
+        let isReexport = false;
+        for (let j = k + 1; j < tokens.length; j++) {
+            const lbl = tokens[j].label;
+            if (lbl === 'string') {
+                isReexport = true;
+                break;
+            }
+            if (lbl === ';' || lbl === 'export' || lbl === 'import' || lbl === '}')
+                break;
+        }
+        if (depth !== 0 || isReexport)
+            continue;
+        const pairs = readSpecifierPairs(code, tokens[i + 1].end, tokens[k].end);
+        if (pairs === null)
+            continue;
+        const stmtEnd = tokens[k].end;
+        for (const [local, exported] of pairs)
+            out.push({ local, exported, start: tokens[i].start, end: stmtEnd });
+        i = k;
+    }
+    return out;
+}
+/**
+ * Reads `A, B as C` pairs from the text between a `{` and its matching `}`.
+ * Returns `null` for anything that is not a plain (optionally `as`-aliased)
+ * identifier list, so unusual forms are left to the normal parser.
+ */
+function readSpecifierPairs(code, from, to) {
+    // Wrapped in parens so a leading `{` is a block, not the start of an object.
+    const tokens = tokenizeCode(`(${code.slice(from, to)})`);
+    if (tokens === null || tokens.length < 2)
+        return null;
+    const pairs = [];
+    let i = 1; // skip the '('
+    while (i < tokens.length) {
+        const local = tokens[i];
+        if (!local || local.label === ')' || local.label === ';')
+            break;
+        if (local.label !== 'name')
+            return null;
+        const asTok = tokens[i + 1];
+        if (asTok && asTok.label === 'name' && asTok.value === 'as') {
+            const exported = tokens[i + 2];
+            if (!exported || exported.label !== 'name')
+                return null;
+            pairs.push([local.value, exported.value]);
+            i += 3;
+        }
+        else {
+            pairs.push([local.value, local.value]);
+            i += 1;
+        }
+        const sep = tokens[i];
+        if (!sep || sep.label !== ',')
+            break;
+        i += 1;
+    }
+    return pairs.length > 0 ? pairs : null;
 }
 
 function isIdentChar(code) {
@@ -97342,9 +97801,29 @@ function createBaseParser() {
 }
 function parse$1(source, options = {}) {
     const ParserClass = createBaseParser();
-    const { code, annotations } = preprocessForClauses(source);
+    const { code, annotations } = preprocessForClauses(blankComments(source));
+    // Acorn validates that every `export { X }` names a real top-level binding.
+    // A `.vsk` component is a registry entry, not a binding, so acorn rejects
+    // `export { MyComponent }`. Remove only those specifier lists — one whose
+    // local IS a real declaration keeps native module semantics — and carry the
+    // pairs on the AST; the IR generator turns them into registry aliases.
+    const vskSource = !options.filename || String(options.filename).endsWith('.vsk');
+    const specifierExports = vskSource
+        ? findSpecifierExports(code).filter((e) => !hasTopLevelValueDeclaration(code, e.local))
+        : [];
+    let parseable = code;
+    if (specifierExports.length > 0) {
+        const edits = specifierExports
+            .map((e) => code.slice(e.start, e.end))
+            .map((text) => text.split('').map((ch) => (ch === '\n' ? '\n' : ' ')).join(''));
+        let cut = 0;
+        for (const spec of specifierExports) {
+            const blanked = edits[cut++];
+            parseable = parseable.slice(0, spec.start) + blanked + parseable.slice(spec.end);
+        }
+    }
     try {
-        const ast = ParserClass.parse(code, {
+        const ast = ParserClass.parse(parseable, {
             ecmaVersion: 'latest',
             sourceType: 'module',
             locations: true,
@@ -97353,6 +97832,9 @@ function parse$1(source, options = {}) {
         });
         if (annotations.length > 0) {
             ast.__vskAnnotations = annotations;
+        }
+        if (specifierExports.length > 0) {
+            ast.__vskSpecifierExports = specifierExports.map((e) => ({ local: e.local, exported: e.exported }));
         }
         return ast;
     }
@@ -97409,18 +97891,43 @@ class IRRoot {
     staticProps;
     loadFn;
     topLevelCode;
-    constructor(components, imports = [], importedNames = new Set(), staticProps = null, loadFn = null, topLevelCode = []) {
+    /**
+     * Same-file specifier exports (`export { A }`, `export { A as B }`) as
+     * `{ local, exported }` pairs. These are NOT emitted as JS: components live
+     * in the component registry rather than as top-level bindings, so a raw
+     * `export { A }` would reference an undefined identifier. The pairs become
+     * registry alias entries so the exported name is importable.
+     */
+    exportAliases;
+    /**
+     * Module specifiers re-exported from this file (`export * from './x.vsk'`,
+     * `export { A } from './x.vsk'`, `export * as ns from './x.vsk'`). The
+     * statements themselves are dropped — the target file is compiled and
+     * merged into this one's component registry instead.
+     */
+    reexportSources;
+    constructor(components, imports = [], importedNames = new Set(), staticProps = null, loadFn = null, topLevelCode = [], exportAliases = [], reexportSources = []) {
         this.components = components;
         this.imports = imports;
         this.importedNames = importedNames;
         this.staticProps = staticProps;
         this.loadFn = loadFn;
         this.topLevelCode = topLevelCode;
+        this.exportAliases = exportAliases;
+        this.reexportSources = reexportSources;
     }
 }
 class ComponentIR {
     name;
     paramNames;
+    /**
+     * The declared first parameter when it is a plain identifier
+     * (`component Card(p)`), i.e. the whole props object bound to another name.
+     * `null` for a destructuring pattern (`component Card({ title })`) or when
+     * there is no parameter. `paramNames` alone cannot express this: `p` and
+     * `{ p }` both flatten to `['p']` but need opposite bindings.
+     */
+    propsAlias;
     propsType;
     isClient;
     isAsync;
@@ -97433,6 +97940,7 @@ class ComponentIR {
     constructor(name, paramNames, body, opts = {}) {
         this.name = name;
         this.paramNames = paramNames;
+        this.propsAlias = opts.propsAlias ?? null;
         this.body = body;
         this.isClient = opts.isClient ?? false;
         this.isAsync = opts.isAsync ?? false;
@@ -97626,147 +98134,6 @@ for (let i = 0; i < chars.length; i++) {
   const c = chars.charCodeAt(i);
   intToChar[i] = c;
   charToInt[c] = i;
-}
-
-/**
- * Token-based syntax analysis built on the acorn tokenizer (via the Vesk
- * TS/JSX parser). The tokenizer understands generics, JSX, template
- * literals and the `&[...]` track-declaration sugar, so identifier-call
- * detection and import parsing no longer need regexes. Every helper falls
- * back to a character-level scan when the input cannot be tokenized (e.g.
- * mid-edit content or partial fragments), so callers never crash on
- * unparsable text.
- */
-/**
- * Tokenizes `code` with the Vesk parser's tokenizer. Returns an array of
- * tokens (excluding EOF), or `null` when the input cannot be tokenized.
- * `value` holds identifier/keyword/string text; punctuation tokens expose
- * their span so callers can read the actual character via `code[start]`.
- */
-function tokenizeCode(code) {
-    try {
-        const ParserClass = createBaseParser();
-        const tok = ParserClass.tokenizer(code, {
-            ecmaVersion: 'latest',
-            sourceType: 'module',
-        });
-        const out = [];
-        let t;
-        while ((t = tok.getToken()) && t.type && t.type.label !== 'eof') {
-            out.push({
-                label: t.type.label,
-                value: typeof t.value === 'string' ? t.value : '',
-                start: t.start,
-                end: t.end,
-            });
-        }
-        return out;
-    }
-    catch {
-        return null;
-    }
-}
-/**
- * True when `code` contains the identifier `name` (as a plain identifier or
- * a JSX name), outside strings and comments.
- */
-function containsIdentifier(code, name) {
-    const tokens = tokenizeCode(code);
-    if (tokens !== null) {
-        for (const t of tokens) {
-            if ((t.label === 'name' || t.label === 'jsxName') && t.value === name)
-                return true;
-        }
-        return false;
-    }
-    return manualContainsIdentifier(code, name);
-}
-/**
- * True when an `import` statement in `code` imports the name `name`.
- */
-function isIdentifierImported(code, name) {
-    const tokens = tokenizeCode(code);
-    if (tokens !== null) {
-        for (let i = 0; i < tokens.length; i++) {
-            if (tokens[i].label !== 'import')
-                continue;
-            let j = i + 1;
-            while (j < tokens.length &&
-                tokens[j].label !== ';' &&
-                !(tokens[j].label === 'name' && tokens[j].value === 'from')) {
-                j++;
-            }
-            for (let k = i + 1; k < j; k++) {
-                if ((tokens[k].label === 'name' || tokens[k].label === 'jsxName') && tokens[k].value === name)
-                    return true;
-            }
-            i = j;
-        }
-        return false;
-    }
-    return manualIsIdentifierImported(code, name);
-}
-function manualContainsIdentifier(code, name) {
-    let i = 0;
-    while (i < code.length) {
-        const c = code[i];
-        if (c === '"' || c === "'" || c === '`') {
-            i = skipString(code, i);
-            continue;
-        }
-        if (c === '/' && (code[i + 1] === '/' || code[i + 1] === '*')) {
-            i = skipComment$1(code, i);
-            continue;
-        }
-        if (isIdentStart(c) && code.slice(i, i + name.length) === name) {
-            const after = i + name.length;
-            if ((after >= code.length || !isIdentChar$1(code[after])) && (i === 0 || !isIdentChar$1(code[i - 1])))
-                return true;
-        }
-        i++;
-    }
-    return false;
-}
-function manualIsIdentifierImported(code, name) {
-    let i = 0;
-    while (i < code.length) {
-        const c = code[i];
-        if (c === '"' || c === "'" || c === '`') {
-            i = skipString(code, i);
-            continue;
-        }
-        if (c === '/' && (code[i + 1] === '/' || code[i + 1] === '*')) {
-            i = skipComment$1(code, i);
-            continue;
-        }
-        if (isIdentStart(c)) {
-            let j = i + 1;
-            while (j < code.length && isIdentChar$1(code[j]))
-                j++;
-            const word = code.slice(i, j);
-            if (word === 'import') {
-                let k = j;
-                while (k < code.length) {
-                    if (code[k] === ';' || code[k] === '\n')
-                        break;
-                    if (code[k] === '"' || code[k] === "'" || code[k] === '`') {
-                        k = skipString(code, k);
-                        continue;
-                    }
-                    if (isIdentStart(code[k]) && code.slice(k, k + name.length) === name) {
-                        const a = k + name.length;
-                        if ((a >= code.length || !isIdentChar$1(code[a])) && (k === 0 || !isIdentChar$1(code[k - 1])))
-                            return true;
-                    }
-                    k++;
-                }
-            }
-            i = j;
-            continue;
-        }
-        i++;
-    }
-    return false;
 }
 
 const ROOT_BLOCK = 1 << 1;
@@ -98470,6 +98837,16 @@ class ServerResponse extends Response {
         });
     }
 }
+/** Default request-body cap (1 MiB). Mirrors the compiler's DEFAULT_MAX_BODY_BYTES. */
+const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
+/** Thrown when a request body exceeds the cap. Carries `status = 413`. */
+class PayloadTooLargeError extends Error {
+    status = 413;
+    constructor(message = `Request body exceeds limit (${DEFAULT_MAX_BODY_BYTES} bytes)`) {
+        super(message);
+        this.name = 'PayloadTooLargeError';
+    }
+}
 class _VeskResponse extends ServerResponse {
     _cookieHeaders;
     _secHeaders;
@@ -98491,13 +98868,34 @@ class _VeskResponse extends ServerResponse {
         this._flushSecurityHeaders();
         return this;
     }
+    /**
+     * Rejects a body that declares itself over the cap before any bytes are
+     * read. The dev server additionally caps the Node stream itself; this is
+     * the portable guard for platform/serverless builds, so a route that does
+     * `await req.json()` on an oversized payload fails with 413 instead of an
+     * opaque 500.
+     */
+    _assertBodyWithinLimit() {
+        const limit = DEFAULT_MAX_BODY_BYTES;
+        const declared = Number(this.headers?.get('content-length') || '0');
+        if (Number.isFinite(declared) && declared > limit) {
+            throw new PayloadTooLargeError(`Request body exceeds limit (${limit} bytes)`);
+        }
+    }
     async text() {
         this._flushSecurityHeaders();
+        this._assertBodyWithinLimit();
         return super.text();
     }
     async json() {
         this._flushSecurityHeaders();
+        this._assertBodyWithinLimit();
         return super.json();
+    }
+    async formData() {
+        this._flushSecurityHeaders();
+        this._assertBodyWithinLimit();
+        return super.formData();
     }
     setCookie(name, value, opts = {}) {
         const parts = [`${name}=${encodeURIComponent(value)}`];
@@ -98881,7 +99279,37 @@ for (const [name, proto] of IR_CLASSES) {
         CLASS_BY_CTOR.set(ctor, name);
 }
 
-new AsyncLocalStorage();
+const TOKEN_KEY = '__vsk_ssr_token';
+const storage = new AsyncLocalStorage();
+// The generated server code reads `globalThis.__vsk_ssr_token` synchronously
+// at the top of every component render, and the runtime's promise tracker and
+// data writers read it the same way. Back that global with the ALS store so
+// those readers become request-scoped instead of process-global. Before this,
+// two concurrent renders adopted the same token and whichever finished first
+// deleted the other's data slot, so the second page shipped with an empty
+// handoff and the client refetched what SSR already had.
+//
+// Outside a render scope the accessor reads/writes nothing, which is what
+// keeps a stray write from leaking into the next request. Bundles that never
+// load this module keep the plain global and the previous behaviour.
+//
+// NEVER `delete globalThis.__vsk_ssr_token`. This is a configurable accessor,
+// so `delete` removes the property definition outright — it does not route
+// through the setter — and the process silently falls back to a
+// process-global token, reintroducing the race for every later request. Clear
+// a token by assigning through `globalThis` inside a scope, or with
+// `resetSsrToken`.
+Object.defineProperty(globalThis, TOKEN_KEY, {
+    configurable: true,
+    get() {
+        return storage.getStore()?.token;
+    },
+    set(value) {
+        const store = storage.getStore();
+        if (store)
+            store.token = value;
+    },
+});
 
 var typescript$2 = {exports: {}};
 
@@ -296846,6 +297274,42 @@ function getJSXTagName(el) {
         return name.namespace.name + ':' + name.name.name;
     return null;
 }
+/**
+ * Emits JSX text children. The parser has already decoded HTML entities in
+ * the value (`&lt;` → `<`, `&#123;` → `{`), so before re-emitting into a TSX
+ * surface we must re-escape the characters that tsc would otherwise read as
+ * syntax: `<` opens a tag, `>` and `{`/`}` are rejected in text, and `&`
+ * starts a fresh entity. @vesk/compiler's SSR and client codegen emit the
+ * same text through their own escaping/createTextNode paths, so this only
+ * affects the typecheck/LSP surface.
+ */
+function emitJSXText(g, text, start, end) {
+    if (text.indexOf('<') === -1 &&
+        text.indexOf('>') === -1 &&
+        text.indexOf('&') === -1 &&
+        text.indexOf('{') === -1 &&
+        text.indexOf('}') === -1) {
+        g.add(text, start, end);
+        return;
+    }
+    let out = '';
+    for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (c === '<')
+            out += '&lt;';
+        else if (c === '>')
+            out += '&gt;';
+        else if (c === '&')
+            out += '&amp;';
+        else if (c === '{')
+            out += '&#123;';
+        else if (c === '}')
+            out += '&#125;';
+        else
+            out += c;
+    }
+    g.add(out, start, end);
+}
 /** Collapses newline+whitespace runs to single spaces and records the raw index of every kept character. */
 function collapseWithMap(value) {
     let out = '';
@@ -296975,6 +297439,79 @@ function isTrackDeclStatement(stmt) {
     return (stmt.declarations || []).some((d) => d && d.id && d.id.type === 'ArrayPattern' && d.id.lazy === true && d.init);
 }
 /**
+ * Removes the type-argument list from a leading call expression, so
+ * `track<Post[]>([])` becomes `track([])`.
+ *
+ * `.vsk` files are type-checked as virtual files with a non-standard
+ * extension, where TypeScript reads `f<T>(x)` as the JSX element `<T>` rather
+ * than a generic call. That mis-parse swallows the rest of the enclosing
+ * function body, so every later binding is reported as "Cannot find name".
+ * Callers only use this when the type is preserved elsewhere (an explicit
+ * annotation on the binding), so nothing is lost.
+ */
+function stripCallTypeArgs(text) {
+    let i = 0;
+    while (i < text.length && /\s/.test(text[i]))
+        i++;
+    const nameStart = i;
+    while (i < text.length && /[A-Za-z0-9_$]/.test(text[i]))
+        i++;
+    if (i === nameStart)
+        return text;
+    // A property/element access chain (`ns.track<T>(x)`) — step over the rest.
+    while (i < text.length && (text[i] === '.' || text[i] === '?' || text[i] === '[')) {
+        const ch = text[i];
+        if (ch === '[') {
+            const close = text.indexOf(']', i);
+            if (close === -1)
+                return text;
+            i = close + 1;
+        }
+        else {
+            i++;
+            while (i < text.length && /[A-Za-z0-9_$]/.test(text[i]))
+                i++;
+        }
+    }
+    if (text[i] !== '<')
+        return text;
+    // Match the closing `>` of the type argument list, allowing nested angle
+    // brackets and quoted literal types.
+    let depth = 0;
+    let quote = '';
+    for (let j = i; j < text.length; j++) {
+        const c = text[j];
+        if (quote) {
+            if (c === '\\') {
+                j++;
+                continue;
+            }
+            if (c === quote)
+                quote = '';
+            continue;
+        }
+        if (c === '"' || c === "'" || c === '`') {
+            quote = c;
+            continue;
+        }
+        if (c === '<')
+            depth++;
+        else if (c === '>') {
+            depth--;
+            if (depth === 0) {
+                const after = text.slice(j + 1);
+                if (/^\s*\(/.test(after))
+                    return text.slice(0, i) + after;
+                return text;
+            }
+        }
+        else if (c === ';' || c === '\n') {
+            return text;
+        }
+    }
+    return text;
+}
+/**
  * Emits the rewrite for a `const &[count] = track(0)` declarator. Mirrors
  * the exact text produced by the previous string-level rewrite: the first
  * declarator absorbs the statement's `const`/`let`/`var` keyword, the
@@ -297040,8 +297577,18 @@ function emitTrackDeclStatement(g, source, stmt, indent, isLast, opts) {
             // Annotating it with the value annotation made `&[v, cell]` emit
             // `cell: T = <Tracked>` (unsound), and broke passing `cell` to APIs
             // expecting `Tracked<unknown>` (e.g. useFetch `into`).
-            g.add(`const ${cellName} = `);
-            g.add(initText, decl.init.start, decl.init.end);
+            // With an explicit annotation the type argument is redundant, and a
+            // leading `f<T>(...)` would be mis-read as JSX on a `.vsk` virtual file.
+            if (annotation) {
+                g.add(`const ${cellName}: Tracked<`);
+                g.add(annotation, annStart, annEnd);
+                g.add('> = ');
+            }
+            else {
+                g.add(`const ${cellName} = `);
+            }
+            const cellInit = annotation ? stripCallTypeArgs(initText) : initText;
+            g.add(cellInit, decl.init.start, decl.init.end);
             g.add(';');
             // First binding: the VALUE read from the cell.
             g.add(' let ');
@@ -297067,17 +297614,23 @@ function emitTrackDeclStatement(g, source, stmt, indent, isLast, opts) {
                 g.add(': ');
                 g.add(annotation, annStart, annEnd);
                 g.add(' = (');
-                g.add(initText, decl.init.start, decl.init.end);
+                g.add(stripCallTypeArgs(initText), decl.init.start, decl.init.end);
                 g.add(' as unknown as ');
                 g.add(annotation, annStart, annEnd);
                 g.add(');');
             }
             else {
-                g.add('let ');
-                g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
-                g.add(': any = ');
+                // No annotation: infer through a cell so the binding keeps its real
+                // type. `let items: any = track([...])` used to erase it, and every
+                // callback derived from the value (`items.map(n => …)`) then failed
+                // under `strict` with "parameter implicitly has an 'any' type".
+                const cellName = g.cellCount === 0 ? '__cell' : `__cell${g.cellCount}`;
+                g.cellCount++;
+                g.add(`const ${cellName} = `);
                 g.add(initText, decl.init.start, decl.init.end);
-                g.add(';');
+                g.add('; let ');
+                g.add(first, firstRange[0], firstRange[1], REACTIVE_DATA);
+                g.add(` = ${cellName}.get();`);
             }
             for (let n = 1; n < names.length; n++) {
                 g.add(' let ');
@@ -297126,7 +297679,7 @@ function emitJSXAttr(g, source, attr) {
         g.add(source.slice(v.start, v.end), v.start, v.end);
     }
 }
-function emitJSXElement(g, source, el, opts) {
+function emitJSXElement(g, source, el, opts, hoist) {
     const op = el.openingElement;
     const name = op.name;
     let prev;
@@ -297156,7 +297709,7 @@ function emitJSXElement(g, source, el, opts) {
     }
     if (op.selfClosing)
         return;
-    emitJSXChildren(g, source, el.children ?? [], opts);
+    emitJSXChildren(g, source, el.children ?? [], opts, hoist);
     if (el.closingElement) {
         g.add(source.slice(el.closingElement.start, el.closingElement.end), el.closingElement.start, el.closingElement.end);
     }
@@ -297168,9 +297721,9 @@ function emitJSXExprBody(g, source, expr, opts) {
         return emitJSXFragment(g, source, expr, opts);
     g.add(source.slice(expr.start, expr.end), expr.start, expr.end);
 }
-function emitJSXFragment(g, source, frag, opts) {
+function emitJSXFragment(g, source, frag, opts, hoist) {
     g.addRaw('<>');
-    emitJSXChildren(g, source, frag.children ?? [], opts);
+    emitJSXChildren(g, source, frag.children ?? [], opts, hoist);
     g.addRaw('</>');
 }
 /**
@@ -297233,7 +297786,7 @@ function emitForClauseMap(g, source, child, text, map, clauseStart, bodyEmit, em
     }
     return true;
 }
-function emitJSXChildren(g, source, children, opts) {
+function emitJSXChildren(g, source, children, opts, hoist) {
     let i = 0;
     let forPending = false;
     while (i < children.length) {
@@ -297296,7 +297849,7 @@ function emitJSXChildren(g, source, children, opts) {
                 continue;
             }
             forPending = false;
-            g.add(text, child.start, child.end);
+            emitJSXText(g, text, child.start, child.end);
             i++;
         }
         else if (child.type === 'JSXExpressionContainer') {
@@ -297317,11 +297870,11 @@ function emitJSXChildren(g, source, children, opts) {
                 i++;
                 continue;
             }
-            emitJSXElement(g, source, child, opts);
+            emitJSXElement(g, source, child, opts, hoist);
             i++;
         }
         else if (child.type === 'JSXFragment') {
-            emitJSXFragment(g, source, child, opts);
+            emitJSXFragment(g, source, child, opts, hoist);
             i++;
         }
         else if (child.type === 'IfStatement' || child.type === 'ForOfStatement' ||
@@ -297331,6 +297884,13 @@ function emitJSXChildren(g, source, children, opts) {
             child.type === 'VariableDeclaration' || child.type === 'ExpressionStatement') {
             // Statement-mode control flow nested among JSX children: TSX has no
             // statement children, so wrap each in an IIFE expression container.
+            // Bare declarations/expression statements are instead hoisted to the
+            // component body scope (see emitBodyCore) so later interpolations can
+            // reference them, mirroring the runtime IR which scopes them there too.
+            if (hoist && hoist.set.has(child)) {
+                i++;
+                continue;
+            }
             g.addRaw('{(() => { ');
             emitBody(g, source, [child], '', opts);
             g.addRaw(' })()}');
@@ -297352,10 +297912,27 @@ function emitIf(g, source, stmt, indent, opts) {
         emitBlock(g, source, stmt.alternate, indent, opts);
     }
 }
+/**
+ * Emits a for-of/for-in loop variable.
+ *
+ * `for (p of items)` declares nothing in TypeScript/JavaScript — `p` there is a
+ * reference to an outer binding, so `tsc` reports `Cannot find name 'p'` and
+ * `vesk typecheck` fails. In a statement-mode component body a bare loop
+ * variable is plainly meant as the loop's own binding, so declare it. An
+ * existing `const`/`let`/`var` (or a destructuring pattern) is passed through.
+ */
+function emitLoopVariable(g, source, left) {
+    if (left && left.type === 'Identifier') {
+        g.addRaw('const ');
+        g.add(source.slice(left.start, left.end), left.start, left.end);
+        return;
+    }
+    g.add(source.slice(left.start, left.end), left.start, left.end);
+}
 function emitForOf(g, source, stmt, indent, opts) {
     g.add(indent);
     g.addRaw('for (');
-    g.add(source.slice(stmt.left.start, stmt.left.end), stmt.left.start, stmt.left.end);
+    emitLoopVariable(g, source, stmt.left);
     g.addRaw(' of ');
     g.add(source.slice(stmt.right.start, stmt.right.end), stmt.right.start, stmt.right.end);
     g.addRaw(') ');
@@ -297364,7 +297941,7 @@ function emitForOf(g, source, stmt, indent, opts) {
 function emitForIn(g, source, stmt, indent, opts) {
     g.add(indent);
     g.addRaw('for (');
-    g.add(source.slice(stmt.left.start, stmt.left.end), stmt.left.start, stmt.left.end);
+    emitLoopVariable(g, source, stmt.left);
     g.addRaw(' in ');
     g.add(source.slice(stmt.right.start, stmt.right.end), stmt.right.start, stmt.right.end);
     g.addRaw(') ');
@@ -297455,7 +298032,7 @@ function emitPlainStatement(g, source, stmt, indent, isLast) {
     if (!text.endsWith('}') && !isLast)
         g.addRaw(';');
 }
-function emitStatement(g, source, stmt, indent, isLast, opts) {
+function emitStatement(g, source, stmt, indent, isLast, opts, hoist) {
     switch (stmt.type) {
         case 'JSXElement':
             if (getJSXTagName(stmt) === 'style') {
@@ -297465,13 +298042,13 @@ function emitStatement(g, source, stmt, indent, isLast, opts) {
                 return;
             }
             g.add(indent);
-            emitJSXElement(g, source, stmt, opts);
+            emitJSXElement(g, source, stmt, opts, hoist);
             if (!isLast)
                 g.addRaw(';');
             return;
         case 'JSXFragment':
             g.add(indent);
-            emitJSXFragment(g, source, stmt, opts);
+            emitJSXFragment(g, source, stmt, opts, hoist);
             if (!isLast)
                 g.addRaw(';');
             return;
@@ -297493,7 +298070,7 @@ function emitStatement(g, source, stmt, indent, isLast, opts) {
             let firstLine = true;
             for (let i = 0; i < innerStmts.length; i++) {
                 const before = g.code.length;
-                emitStatement(g, source, innerStmts[i], indent, isLast && i === innerStmts.length - 1, opts);
+                emitStatement(g, source, innerStmts[i], indent, isLast && i === innerStmts.length - 1, opts, hoist);
                 if (g.code.length > before) {
                     if (!firstLine)
                         g.addRaw('\n');
@@ -297535,7 +298112,7 @@ function emitStatement(g, source, stmt, indent, isLast, opts) {
             return emitPlainStatement(g, source, stmt, indent, isLast);
     }
 }
-function emitBody(g, source, stmts, indent, opts) {
+function emitBody(g, source, stmts, indent, opts, hoist) {
     let firstLine = true;
     let i = 0;
     while (i < stmts.length) {
@@ -297564,7 +298141,7 @@ function emitBody(g, source, stmts, indent, opts) {
             continue;
         }
         const before = g.code.length;
-        emitStatement(g, source, stmt, indent, isLast, opts);
+        emitStatement(g, source, stmt, indent, isLast, opts, hoist);
         if (g.code.length > before) {
             if (!firstLine)
                 g.addRaw('\n');
@@ -297620,6 +298197,26 @@ function emitReturn(g, source, stmt, opts) {
         emitChunkMapped(g, source, arg.start, arg.end);
     emitChunkMapped(g, source, arg.end, stmt.end);
 }
+function collectHoistEligible(children, set, list) {
+    for (const child of children ?? []) {
+        if (child.type === 'JSXElement') {
+            if (getJSXTagName(child) === 'style')
+                continue;
+            collectHoistEligible(child.children ?? [], set, list);
+            continue;
+        }
+        if (child.type === 'JSXFragment') {
+            collectHoistEligible(child.children ?? [], set, list);
+            continue;
+        }
+        if (child.type === 'VariableDeclaration' || child.type === 'ExpressionStatement') {
+            set.add(child);
+            if (list)
+                list.push(child);
+            continue;
+        }
+    }
+}
 /**
  * Emits a statement-mode component body (bare JSX, control flow,
  * guard-clause returns). The body text starts directly with the first
@@ -297627,7 +298224,103 @@ function emitReturn(g, source, stmt, opts) {
  * by the caller.
  */
 function emitBodyCore(g, source, stmts, opts) {
-    emitBody(g, source, stmts, '', opts);
+    const hoistSet = new Set();
+    const byRoot = new Map();
+    const collectRoot = (root) => {
+        const list = [];
+        collectHoistEligible(root.children ?? [], hoistSet, list);
+        if (list.length > 0)
+            byRoot.set(root, list);
+    };
+    const scanRoots = (list) => {
+        for (const s of list) {
+            if (!s)
+                continue;
+            if (s.type === 'JSXElement' && getJSXTagName(s) !== 'style') {
+                collectRoot(s);
+            }
+            else if (s.type === 'JSXFragment') {
+                collectRoot(s);
+            }
+            else if (s.type === 'VeskBlock') {
+                scanRoots(s.body ?? []);
+            }
+        }
+    };
+    scanRoots(stmts);
+    const ctx = { set: hoistSet };
+    const isRoot = (st) => (st.type === 'JSXElement' && getJSXTagName(st) !== 'style') || st.type === 'JSXFragment';
+    const units = [];
+    const pushStmts = (list) => {
+        for (let i = 0; i < list.length; i++) {
+            const s = list[i];
+            if (!s)
+                continue;
+            if (s.type === 'ForOfStatement' &&
+                list[i + 1] &&
+                list[i + 1].type === 'VeskBlock' &&
+                list[i + 1].tag === 'empty') {
+                units.push({ node: s, isHoisted: false, empty: list[i + 1] });
+                i++;
+                continue;
+            }
+            units.push({ node: s, isHoisted: isRoot(s) });
+        }
+    };
+    for (const s of stmts) {
+        if (!s)
+            continue;
+        if (s.type === 'VeskBlock') {
+            pushStmts(s.body ?? []);
+            continue;
+        }
+        pushStmts([s]);
+    }
+    const emitUnit = (u, isLast) => {
+        if (u.isHoisted) {
+            // Bare statements among this root element's JSX children must be visible
+            // to later interpolations, so emit them immediately before the root —
+            // after any body-level declarations they may depend on.
+            const list = byRoot.get(u.node);
+            if (list) {
+                byRoot.delete(u.node);
+                const n = list.length;
+                for (let k = 0; k < n; k++) {
+                    const before = g.code.length;
+                    emitStatement(g, source, list[k], '', false, opts, ctx);
+                    // Separator newline after every hoisted statement — the last one
+                    // separates it from its own root element.
+                    if (g.code.length > before)
+                        g.addRaw('\n');
+                }
+            }
+        }
+        if (u.empty !== undefined) {
+            emitForOf(g, source, u.node, '', opts);
+            const inner = u.empty.body ?? [];
+            if (inner.length > 0) {
+                g.addRaw('\n');
+                g.add('');
+                g.add(source.slice(u.node.right.start, u.node.right.end), u.node.right.start, u.node.right.end);
+                g.addRaw('.length === 0 && (() => {');
+                g.addRaw('\n');
+                emitBody(g, source, inner, '  ', opts);
+                g.addRaw('\n');
+                g.add('');
+                g.addRaw('})();');
+            }
+            return;
+        }
+        const before = g.code.length;
+        emitStatement(g, source, u.node, '', isLast, opts, ctx);
+        // Separator newline between body statements — every unit except the last
+        // one. The single-statement body keeps `{ <jsx> }` untouched.
+        if (g.code.length > before && !isLast)
+            g.addRaw('\n');
+    };
+    for (let i = 0; i < units.length; i++) {
+        emitUnit(units[i], i === units.length - 1);
+    }
 }
 /** Emits an expression-mode component body (`return <jsx>` or a bare expression). */
 function emitExpressionBody(g, source, coreStart, coreEnd, stmts, opts) {
@@ -297787,6 +298480,13 @@ function compileVskCodegen(source, opts = {}) {
     if (isModuleAst(ast) && containsIdentifier(code, 'Head') && !isIdentifierImported(code, 'Head')) {
         g.prepend('declare const Head: (props: { children?: Component }) => Component;\n');
         code = g.code;
+    }
+    // A `.vsk` file with no import/export is a *script* to TypeScript, so its
+    // top-level component functions land in the global scope and collide with the
+    // same-named component in another file ("Duplicate function implementation").
+    // Give every generated file module identity.
+    if (!isModuleAst(ast)) {
+        code += '\nexport {};\n';
     }
     return { code, mappings: g.mappings, styleRegions: g.styleRegions, errors: [] };
 }
@@ -298060,7 +298760,16 @@ declare namespace JSX {
     noscript?: VeskGlobalAttributes;
     template?: VeskGlobalAttributes;
     slot?: VeskGlobalAttributes & { name?: string };
-    meta?: VeskGlobalAttributes & { name?: string; content?: string; charSet?: string; httpEquiv?: string };
+    meta?: VeskGlobalAttributes & {
+      name?: string;
+      content?: string;
+      charSet?: string;
+      httpEquiv?: string;
+      // Lowercase aliases — HTML attribute names are case-insensitive and
+      // real code (and SSR output) writes charset. Keep in sync with the
+      // camelCase members.
+      charset?: string;
+    };
     title?: VeskGlobalAttributes;
     base?: VeskGlobalAttributes & { href?: string; target?: string };
     link?: VeskGlobalAttributes & {
@@ -298072,6 +298781,8 @@ declare namespace JSX {
       crossOrigin?: string;
       integrity?: string;
       type?: string;
+      // Lowercase alias — see the meta note above.
+      crossorigin?: string | boolean;
     };
     style?: VeskGlobalAttributes & { media?: string };
     script?: VeskGlobalAttributes & {
@@ -298083,6 +298794,8 @@ declare namespace JSX {
       integrity?: string;
       nonce?: string;
       noModule?: boolean | string;
+      // Lowercase aliases — see the meta note above.
+      crossorigin?: boolean | string;
     };
     svg?: VeskGlobalAttributes & {
       viewBox?: string;
@@ -298150,6 +298863,16 @@ declare namespace JSX {
 }
 declare type Component = string | number | boolean | null | undefined | Component[];
 declare const Head: (props: { children?: Component }) => Component;
+// Server-side .vsk code reads process.env (NODE_ENV, feature flags, secrets).
+// @types/node is not installed for browser targets, so declare the slice the
+// framework documents rather than failing every project that branches on env.
+declare const process: {
+  env: Record<string, string | undefined>;
+  argv: string[];
+  platform: string;
+  cwd(): string;
+  exit(code?: number): never;
+};
 interface Tracked<T> {
   get(): T;
   set(value: T): void;
@@ -298167,7 +298890,26 @@ declare function peek<T>(fn: () => T): T;
 declare function tick(): Promise<void>;
 declare function flushSync(fn: () => void): void;
 declare function on_destroy(fn: () => void): void;
-declare function createContext<T>(defaultValue?: T): { id: symbol; defaultValue: T | undefined };
+/**
+ * A context created by createContext. The value type flows from the default
+ * (or an explicit type argument) through set() and every get().
+ */
+interface VeskContext<T> {
+  readonly id: symbol;
+  get(): T;
+  set(value: T): void;
+}
+declare function createContext<const T>(defaultValue: T): VeskContext<T>;
+// Typed request-scoped store (middleware locals, event payloads). Declare the
+// shape once and every set/get is checked against it.
+interface VeskLocals<T extends object> {
+  set<K extends keyof T>(key: K, value: T[K]): void;
+  get<K extends keyof T>(key: K): T[K];
+  has<K extends keyof T>(key: K): boolean;
+  delete<K extends keyof T>(key: K): void;
+  all(): T;
+}
+declare function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
 // useFetch returns a THENABLE resource, not the data itself. In async
 // components you must \`await\` it before reading/iterating the payload;
 // passing \`into: <tracked cell>\` writes the payload into the cell and makes
@@ -298286,6 +299028,8 @@ declare module '@vesk/runtime' {
   export function track<T>(initialValue: T): Tracked<T>;
   export function track<T>(fn: () => T): Derived<T>;
   export function derived<T>(fn: () => T): Derived<T>;
+  export function createContext<const T>(defaultValue: T): VeskContext<T>;
+  export function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
 }
 `;
 
@@ -298960,12 +299704,10 @@ const VOID_ELEMENTS$1 = new Set([
     'base',
     'br',
     'col',
-    'command',
     'embed',
     'hr',
     'img',
     'input',
-    'keygen',
     'link',
     'meta',
     'param',
@@ -299151,53 +299893,66 @@ var nodeExports = requireNode$2();
 
 // ── Intrinsics (auto-imported from @vesk/runtime) ─────────────
 [
-    { name: 'track', kind: nodeExports.CompletionItemKind.Function, detail: 'Create a reactive signal', docs: 'Creates a reactive value. Returns a getter `fn()` that returns the value.', signature: 'track<T>(initial: T): [() => T, (v: T) => void]' },
-    { name: 'get', kind: nodeExports.CompletionItemKind.Function, detail: 'Get reactive signal value', docs: 'Returns the current value of a reactive signal.', signature: 'get<T>(signal: () => T): T' },
-    { name: 'set', kind: nodeExports.CompletionItemKind.Function, detail: 'Set reactive signal value', docs: 'Sets a new value on a reactive signal and triggers updates.', signature: 'set<T>(signal: (v: T) => void, value: T): void' },
-    { name: 'derived', kind: nodeExports.CompletionItemKind.Function, detail: 'Create derived reactive value', docs: 'Creates a derived signal that recomputes when dependencies change.', signature: 'derived<T>(fn: () => T): () => T' },
-    { name: 'effect', kind: nodeExports.CompletionItemKind.Function, detail: 'Run side effect on reactive changes', docs: 'Runs a function whenever its reactive dependencies change.', signature: 'effect(fn: () => void | (() => void)): () => void' },
-    { name: 'root', kind: nodeExports.CompletionItemKind.Function, detail: 'Create reactive root scope', docs: 'Creates a root scope for reactive computations.', signature: 'root<T>(fn: () => T): T' },
-    { name: 'untrack', kind: nodeExports.CompletionItemKind.Function, detail: 'Read signal without tracking', docs: 'Reads a signal value without creating a reactive dependency.', signature: 'untrack<T>(fn: () => T): T' },
-    { name: 'peek', kind: nodeExports.CompletionItemKind.Function, detail: 'Alias for untrack', docs: 'Alias for untrack — reads without tracking.', signature: 'peek<T>(fn: () => T): T' },
-    { name: 'tick', kind: nodeExports.CompletionItemKind.Function, detail: 'Flush pending updates', docs: 'Synchronously flushes all pending reactive updates.', signature: 'tick(): void' },
-    { name: 'flushSync', kind: nodeExports.CompletionItemKind.Function, detail: 'Flush updates synchronously', docs: 'Runs a function and synchronously flushes all reactive updates.', signature: 'flushSync(fn: () => void): void' },
-    { name: 'on_destroy', kind: nodeExports.CompletionItemKind.Function, detail: 'Register cleanup callback', docs: 'Registers a cleanup function called when the component is destroyed.', signature: 'on_destroy(fn: () => void): void' },
+    { name: 'track', kind: nodeExports.CompletionItemKind.Function, detail: 'Create a reactive cell', docs: 'Creates a reactive cell. With `const &[x] = track(v)` the binding `x` auto-unwraps (read/write directly). Also `track(() => expr)` creates a derived.', signature: 'track<T>(v: T): Tracked<T>' },
+    { name: 'get', kind: nodeExports.CompletionItemKind.Function, detail: 'Get reactive cell value', docs: 'Returns the current value of a tracked cell (non-& bindings).', signature: 'get<T>(cell: Tracked<T>): T' },
+    { name: 'set', kind: nodeExports.CompletionItemKind.Function, detail: 'Set reactive cell value', docs: 'Sets a new value on a tracked cell and schedules a microtask-batched update.', signature: 'set<T>(cell: Tracked<T>, value: T): void' },
+    { name: 'derived', kind: nodeExports.CompletionItemKind.Function, detail: 'Create derived reactive value', docs: 'Creates a lazy, memoized derived cell that recomputes when dependencies change.', signature: 'derived<T>(fn: () => T): Tracked<T>' },
+    { name: 'effect', kind: nodeExports.CompletionItemKind.Function, detail: 'Run side effect on reactive changes', docs: 'Runs a function now and whenever its reactive dependencies change. Return a cleanup fn to cancel.', signature: 'effect(fn: () => void | (() => void)): () => void' },
+    { name: 'untrack', kind: nodeExports.CompletionItemKind.Function, detail: 'Read cell without tracking', docs: 'Runs fn without subscribing to any cells it reads.', signature: 'untrack<T>(fn: () => T): T' },
+    { name: 'peek', kind: nodeExports.CompletionItemKind.Function, detail: 'Read cell without tracking', docs: 'Reads a tracked cell without subscribing.', signature: 'peek<T>(cell: Tracked<T>): T' },
+    { name: 'tick', kind: nodeExports.CompletionItemKind.Function, detail: 'Next animation frame', docs: 'Promise resolving on the next animation frame (after paint).', signature: 'tick(): Promise<void>' },
+    { name: 'flushSync', kind: nodeExports.CompletionItemKind.Function, detail: 'Flush updates synchronously', docs: 'Flushes pending updates, runs fn synchronously, restores batching.', signature: 'flushSync(fn?: () => void): void' },
+    { name: 'on_destroy', kind: nodeExports.CompletionItemKind.Function, detail: 'Register cleanup callback', docs: 'Registers a cleanup function called when the current block/component is destroyed.', signature: 'on_destroy(fn: () => void): void' },
     { name: 'createContext', kind: nodeExports.CompletionItemKind.Function, detail: 'Create a context value', docs: 'Creates a context that can be provided/consumed by component trees.', signature: 'createContext<T>(defaultValue: T): Context<T>' },
-    { name: 'Link', kind: nodeExports.CompletionItemKind.Class, detail: 'Client-side navigation link', docs: '<Link href="/path"> — SPA link component.', signature: 'Link(props: { href: string; class?: string; children?: unknown })' },
-    { name: 'NavLink', kind: nodeExports.CompletionItemKind.Class, detail: 'Navigation link with active state', docs: '<NavLink href="/path" class="..." activeClass="..."> — link that highlights when active.', signature: 'NavLink(props: { href: string; class?: string; activeClass?: string; children?: unknown })' },
+    { name: 'createResource', kind: nodeExports.CompletionItemKind.Function, detail: 'Reactive async resource (non-URL source)', docs: 'createResource(fn, key?, into?) — like useFetch but for any async function. Exposes { loading, error, data, refresh(), abort() } and is thenable.', signature: 'createResource<T>(fn: () => Promise<T>, key?: string, into?: Tracked<T>): Resource<T>' },
+    { name: 'Link', kind: nodeExports.CompletionItemKind.Class, detail: 'Client-side navigation link', docs: '<Link href="/path" scrollBehavior="smooth"> — SPA link component. scrollBehavior controls the window-scroll behavior on navigate (auto|instant|smooth).', signature: 'Link(props: { href: string; class?: string; style?: string; target?: string; rel?: string; scrollBehavior?: \'auto\' | \'instant\' | \'smooth\'; children?: unknown })' },
+    { name: 'NavLink', kind: nodeExports.CompletionItemKind.Class, detail: 'Navigation link with active state', docs: '<NavLink href="/path" class="..." activeClass="..." scrollBehavior="smooth"> — link that highlights when active.', signature: 'NavLink(props: { href: string; class?: string; activeClass?: string; scrollBehavior?: \'auto\' | \'instant\' | \'smooth\'; children?: unknown })' },
     { name: 'Outlet', kind: nodeExports.CompletionItemKind.Class, detail: 'Nested route outlet', docs: '<Outlet /> — renders matched child route.', signature: 'Outlet(props?: { children?: unknown })' },
-    { name: 'useRouter', kind: nodeExports.CompletionItemKind.Function, detail: 'Access router instance', docs: 'Returns the router instance with navigate(), prefetch(), etc.', signature: 'useRouter(): { navigate: (path: string) => void; prefetch: (path: string) => void }' },
-    { name: 'useNavigate', kind: nodeExports.CompletionItemKind.Function, detail: 'Navigate programmatically', docs: 'Returns a navigate function to programmatically navigate.', signature: 'useNavigate(): (path: string) => void' },
+    { name: 'Redirect', kind: nodeExports.CompletionItemKind.Class, detail: 'Redirect component', docs: '<Redirect to="/path" /> — throws a redirect during render.', signature: 'Redirect(props: { to: string; status?: number })' },
+    { name: 'useRouter', kind: nodeExports.CompletionItemKind.Function, detail: 'Access router instance', docs: 'Returns the router: push/replace/back/forward/go/refresh/navigate, prefetch, beforeEach, pathname/params/search/route, isLoading, progress, error, canGoBack.', signature: 'useRouter(): Router' },
+    { name: 'useNavigate', kind: nodeExports.CompletionItemKind.Function, detail: 'Navigate programmatically', docs: 'Returns a navigate function to programmatically navigate.', signature: 'useNavigate(): (path: string, opts?: { replace?: boolean }) => void' },
     { name: 'useParams', kind: nodeExports.CompletionItemKind.Function, detail: 'Access route parameters', docs: 'Returns the current route parameters object.', signature: 'useParams(): Record<string, string>' },
     { name: 'usePathname', kind: nodeExports.CompletionItemKind.Function, detail: 'Access current pathname', docs: 'Returns the current URL pathname as a reactive string.', signature: 'usePathname(): string' },
-    { name: 'useSearchParams', kind: nodeExports.CompletionItemKind.Function, detail: 'Access search parameters', docs: 'Returns reactive search params with get/set/delete.', signature: 'useSearchParams(): URLSearchParams' },
+    { name: 'useSearchParams', kind: nodeExports.CompletionItemKind.Function, detail: 'Access search parameters', docs: 'Returns reactive [URLSearchParams, setter] — setter replace-navs.', signature: 'useSearchParams(): [URLSearchParams, (next: URLSearchParams) => void]' },
     { name: 'useFetch', kind: nodeExports.CompletionItemKind.Function, detail: 'Data fetching with SSR support — thenable, await in async components', docs: 'useFetch<T>(url, options?) returns a thenable Resource<T>. In async components: `const posts = await useFetch<Post[]>(\'/api/posts\')`. To skip awaiting, fetch into a tracked cell: `useFetch(url, { key, into: cell })` — the payload lands in the cell and the return value can be ignored. Resource also exposes `.loading`, `.error`, `.data`, `.refresh()`, `.abort()`.', signature: 'useFetch<T>(url: string | (() => Promise<T>), options?: { key?: string; into?: unknown; staleTime?: number; ... }): Resource<T> (thenable — await for T)' },
-    { name: 'Form', kind: nodeExports.CompletionItemKind.Class, detail: 'SSR-first form component', docs: '<Form action="/api/submit" onSubmit={...}> — validates and submits forms.', signature: 'Form(props: { action: string; onSubmit?: (data: FormData) => void; children?: unknown })' },
-    { name: 'Field', kind: nodeExports.CompletionItemKind.Class, detail: 'Form field with validation', docs: '<Field name="email" required email> — form field with validation display.', signature: 'Field(props: { name: string; required?: boolean; children?: unknown })' },
+    { name: 'Form', kind: nodeExports.CompletionItemKind.Class, detail: 'SSR-first form component', docs: '<Form action="/api/submit" onSuccess={...}> — validates and submits forms; works without JS (native POST) and upgrades to JSON fetch.', signature: 'Form(props: { action?: string | Record<string, unknown>; method?: string; onSubmit?: (data: Record<string, unknown>, form: HTMLFormElement) => void | Promise<void>; onError?: (err: unknown) => void; onSuccess?: (res: Response) => void; children?: unknown })' },
+    { name: 'Field', kind: nodeExports.CompletionItemKind.Class, detail: 'Form field with validation', docs: '<Field name="email" label="Email" rules={[email()]}> — form field with validation display.', signature: 'Field(props: { name: string; label?: string; rules?: ValidationRule[]; errorClass?: string; children?: unknown })' },
     { name: 'required', kind: nodeExports.CompletionItemKind.Function, detail: 'Validation: required', docs: 'required("Custom message?") — validates value is non-empty.', signature: 'required(message?: string): Validator' },
     { name: 'email', kind: nodeExports.CompletionItemKind.Function, detail: 'Validation: email format', docs: 'email("Custom message?") — validates email format.', signature: 'email(message?: string): Validator' },
     { name: 'minLength', kind: nodeExports.CompletionItemKind.Function, detail: 'Validation: minimum length', docs: 'minLength(3, "Custom message?") — validates minimum string length.', signature: 'minLength(min: number, message?: string): Validator' },
     { name: 'maxLength', kind: nodeExports.CompletionItemKind.Function, detail: 'Validation: maximum length', docs: 'maxLength(100, "Custom message?") — validates maximum string length.', signature: 'maxLength(max: number, message?: string): Validator' },
     { name: 'pattern', kind: nodeExports.CompletionItemKind.Function, detail: 'Validation: regex pattern', docs: 'pattern(/^[a-z]+$/, "Custom message?") — validates against regex.', signature: 'pattern(re: RegExp, message?: string): Validator' },
     { name: 'custom', kind: nodeExports.CompletionItemKind.Function, detail: 'Custom validation', docs: 'custom(fn, "Message") — custom validation function.', signature: 'custom(fn: (value: unknown) => boolean, message?: string): Validator' },
-    { name: 'Experiment', kind: nodeExports.CompletionItemKind.Class, detail: 'A/B testing component', docs: '<Experiment name="test" variants={[...]}> — A/B test variants.', signature: 'Experiment(props: { name: string; variants: string[]; children?: unknown })' },
-    { name: 'Image', kind: nodeExports.CompletionItemKind.Class, detail: 'Optimized image component', docs: '<Image src="/photo.jpg" width={800} height={600} /> — responsive, lazy images.', signature: 'Image(props: { src: string; width?: number; height?: number; alt?: string })' },
-    { name: 'JsonLd', kind: nodeExports.CompletionItemKind.Class, detail: 'JSON-LD structured data', docs: '<JsonLd schema={ArticleSchema({...})} /> — injects structured data.', signature: 'JsonLd(props: { schema: Record<string, unknown> })' },
-    { name: 'Portal', kind: nodeExports.CompletionItemKind.Class, detail: 'Portal to another DOM node', docs: '<Portal container={document.body}>content</Portal>.', signature: 'Portal(props: { container: HTMLElement; children?: unknown })' },
+    { name: 'defineAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Define a server action', docs: 'defineAction({ input?, execute }) — registers a server-side form action. execute runs ONLY on the server.', signature: 'defineAction<T>(def: { input?: ActionInputSchema; execute: (input: T, ctx: ActionContext) => Promise<unknown> | unknown }): ActionDefinition' },
+    { name: 'getAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Get a registered action', docs: 'getAction(id) — retrieves a registered server action by id.', signature: 'getAction(id: string): ActionDefinition | undefined' },
+    { name: 'validateActionInput', kind: nodeExports.CompletionItemKind.Function, detail: 'Validate action input', docs: 'validateActionInput(def, input) — returns [{ field, message }] issues.', signature: 'validateActionInput(def: ActionDefinition, input: unknown): ActionIssue[]' },
+    { name: 'issuesToFieldMap', kind: nodeExports.CompletionItemKind.Function, detail: 'Map issues to fields', docs: 'issuesToFieldMap(issues) — converts action issues to a field→message map.', signature: 'issuesToFieldMap(issues: ActionIssue[]): Record<string, string>' },
+    { name: 'isFormAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Check form action', docs: 'isFormAction(action) — true when the value is a defineAction() result/stub.', signature: 'isFormAction(action: unknown): boolean' },
+    { name: 'clearActions', kind: nodeExports.CompletionItemKind.Function, detail: 'Clear all registered actions', docs: 'clearActions() — removes all registered server actions.', signature: 'clearActions(): void' },
+    { name: 'Experiment', kind: nodeExports.CompletionItemKind.Class, detail: 'A/B testing component', docs: '<Experiment name="test" variants={[...]}> — A/B test variants.', signature: 'Experiment(props: { name: string; variants?: ExperimentVariant[]; default?: unknown; sticky?: boolean; track?: boolean; children?: unknown })' },
+    { name: 'Image', kind: nodeExports.CompletionItemKind.Class, detail: 'Optimized image component', docs: '<Image src="/photo.jpg" width={800} height={600} /> — responsive, lazy images + sharp pipeline.', signature: 'Image(props: { src: string; alt?: string; width?: number | string; height?: number | string; priority?: boolean; loading?: \'lazy\' | \'eager\'; decoding?: \'sync\' | \'async\'; sizes?: string; widths?: number[]; class?: string; style?: string })' },
+    { name: 'JsonLd', kind: nodeExports.CompletionItemKind.Class, detail: 'JSON-LD structured data', docs: '<JsonLd schema={ArticleSchema({...})} /> — injects structured data.', signature: 'JsonLd(props: { schema?: Record<string, unknown>; key?: string; children?: Record<string, unknown> })' },
+    { name: 'Portal', kind: nodeExports.CompletionItemKind.Class, detail: 'Portal to another DOM node', docs: '<Portal target={document.body}>content</Portal>.', signature: 'Portal(props: { target: string | HTMLElement; children?: Node | ((frag: DocumentFragment) => void) })' },
     { name: 'Head', kind: nodeExports.CompletionItemKind.Class, detail: 'Document head element', docs: '<Head><title>...</title><meta ...></Head> — injects into <head>.', signature: 'Head(props: { children?: unknown })' },
-    { name: 'slot', kind: nodeExports.CompletionItemKind.Keyword, detail: 'Component slot for children', docs: '<slot /> — renders children passed to the component.', signature: 'slot(props?: { name?: string; children?: unknown })' },
-    { name: 'reconcile', kind: nodeExports.CompletionItemKind.Function, detail: 'Array reconciliation', docs: 'reconcile(arr, key) — efficient list diffing.', signature: 'reconcile<T>(arr: T[], key: keyof T): T[]' },
-    { name: 'redirect', kind: nodeExports.CompletionItemKind.Function, detail: 'Redirect to another route', docs: 'redirect("/path") — throws a redirect.', signature: 'redirect(path: string): never' },
-    { name: 'permanentRedirect', kind: nodeExports.CompletionItemKind.Function, detail: 'Permanent redirect (301)', docs: 'permanentRedirect("/path") — throws a permanent redirect.', signature: 'permanentRedirect(path: string): never' },
+    { name: 'LoadingIndicator', kind: nodeExports.CompletionItemKind.Class, detail: 'Loading progress bar', docs: '<LoadingIndicator /> — full-width loading bar for SPA navigations.', signature: 'LoadingIndicator(props?: LoadingIndicatorProps)' },
+    { name: 'useLoadingIndicator', kind: nodeExports.CompletionItemKind.Function, detail: 'Control the loading indicator', docs: 'useLoadingIndicator() — start/finish/force/hideDelay/resetDelay/duration for the loading bar.', signature: 'useLoadingIndicator(): LoadingIndicatorHandle' },
+    { name: 'NotFoundError', kind: nodeExports.CompletionItemKind.Class, detail: '404 error', docs: '<NotFoundError /> — throws a 404 not-found response.', signature: 'NotFoundError(props?: Record<string, unknown>)' },
+    { name: 'ArticleSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: Article schema', docs: 'ArticleSchema({...}) — JSON-LD structured data for articles.' },
+    { name: 'ProductSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: Product schema', docs: 'ProductSchema({...}) — JSON-LD structured data for products.' },
+    { name: 'FAQPageSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: FAQ page schema', docs: 'FAQPageSchema({...}) — JSON-LD structured data for FAQ pages.' },
+    { name: 'BreadcrumbListSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: Breadcrumb list schema', docs: 'BreadcrumbListSchema({...}) — JSON-LD structured data for breadcrumbs.' },
+    { name: 'OrganizationSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: Organization schema', docs: 'OrganizationSchema({...}) — JSON-LD structured data for organizations.' },
+    { name: 'LocalBusinessSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: Local business schema', docs: 'LocalBusinessSchema({...}) — JSON-LD structured data for local businesses.' },
+    { name: 'VideoSchema', kind: nodeExports.CompletionItemKind.Function, detail: 'SEO: Video schema', docs: 'VideoSchema({...}) — JSON-LD structured data for videos.' },
+    { name: 'redirect', kind: nodeExports.CompletionItemKind.Function, detail: 'Redirect to another route', docs: 'redirect("/path") — throws a redirect.', signature: 'redirect(url: string, status?: number): never' },
+    { name: 'permanentRedirect', kind: nodeExports.CompletionItemKind.Function, detail: 'Permanent redirect (308)', docs: 'permanentRedirect("/path") — throws a permanent redirect.', signature: 'permanentRedirect(url: string): never' },
     { name: 'notFound', kind: nodeExports.CompletionItemKind.Function, detail: 'Throw 404', docs: 'notFound() — throws a not-found response.', signature: 'notFound(): never' },
-    { name: 'Show', kind: nodeExports.CompletionItemKind.Class, detail: 'Conditional rendering', docs: '<Show when={condition}> — renders children when condition is truthy.', signature: 'Show(props: { when: boolean | (() => boolean); fallback?: unknown; children?: unknown })' },
-    { name: 'For', kind: nodeExports.CompletionItemKind.Class, detail: 'List rendering', docs: '<For each={items}> — keyed list rendering with reconciliation.', signature: 'For<T>(props: { each: T[]; by?: keyof T; children: (item: T, index: number) => unknown })' },
+    { name: 'Show', kind: nodeExports.CompletionItemKind.Class, detail: 'Conditional rendering', docs: '<Show when={condition}> — renders children when condition is truthy.', signature: 'Show(props: { when: unknown; children?: unknown; fallback?: unknown })' },
+    { name: 'For', kind: nodeExports.CompletionItemKind.Class, detail: 'List rendering', docs: '<For each={items}> — keyed list rendering with reconciliation.', signature: 'For<T>(props: { each: readonly T[] | null | undefined; children: (item: T, index: number) => unknown; fallback?: unknown })' },
     { name: 'Switch', kind: nodeExports.CompletionItemKind.Class, detail: 'Switch/match rendering', docs: '<Switch> with <Match> children — like a JS switch statement for JSX.', signature: 'Switch(props: { fallback?: unknown; children?: unknown })' },
     { name: 'Match', kind: nodeExports.CompletionItemKind.Class, detail: 'Match case for Switch', docs: '<Match when={value}> — a case inside a <Switch>.', signature: 'Match(props: { when: unknown; children?: unknown })' },
-    { name: 'Md', kind: nodeExports.CompletionItemKind.Class, detail: 'Markdown renderer', docs: '<Md>{content}</Md> — renders Markdown content as HTML.', signature: 'Md(props: { children: string })' },
-    { name: 'defineAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Define a server action', docs: 'defineAction({ name, handler }) — registers a server-side form action.', signature: 'defineAction<T>(action: { name: string; handler: (request: VeskRequest) => Promise<T> | T })' },
-    { name: 'getAction', kind: nodeExports.CompletionItemKind.Function, detail: 'Get a registered action', docs: 'getAction(name) — retrieves a registered server action by name.', signature: 'getAction(name: string): Function | undefined' },
-    { name: 'clearActions', kind: nodeExports.CompletionItemKind.Function, detail: 'Clear all registered actions', docs: 'clearActions() — removes all registered server actions.', signature: 'clearActions(): void' },
+    { name: 'Md', kind: nodeExports.CompletionItemKind.Class, detail: 'Markdown renderer', docs: '<Md content={doc} /> — renders Markdown content as HTML (GFM).', signature: 'Md(props: { content?: string | { get: () => string }; codeBg?: string; codeFg?: string })' },
+    { name: 'reconcile', kind: nodeExports.CompletionItemKind.Function, detail: 'Keyed list reconciliation', docs: 'reconcile(walker, claims) — efficient keyed list diffing during hydration.', signature: 'reconcile<T>(walker: HydrateWalker, claims: KeyedClaimFn<T>): void' },
 ];
 // ── HTML elements ──────────────────────────────────────────────
 const HTML_ELEMENTS = [
@@ -299377,8 +300132,8 @@ const EVENT_HANDLERS = {
 const EVENT_HANDLER_NAMES = Object.keys(EVENT_HANDLERS);
 // ── HTML attributes ────────────────────────────────────────────
 const GLOBAL_HTML_ATTRIBUTES = [
-    'class', 'className', 'id', 'style', 'title', 'lang', 'dir', 'hidden', 'tabindex',
-    'role', 'aria-label', 'aria-hidden', 'aria-expanded', 'aria-checked', 'aria-describedby',
+    'class', 'id', 'style', 'title', 'lang', 'dir', 'hidden', 'tabindex',
+    'role', 'aria-label', 'aria-hidden', 'aria-expanded', 'aria-describedby',
     'data-id', 'spellcheck', 'autofocus', 'draggable', 'contenteditable',
 ];
 const TAG_SPECIFIC_ATTRIBUTES = {
@@ -299444,14 +300199,20 @@ const INTRINSIC_TAGS = [
     'Link',
     'NavLink',
     'Outlet',
+    'Redirect',
+    'NotFoundError',
     'Image',
     'Portal',
     'Experiment',
+    'LoadingIndicator',
     'JsonLd',
     'ArticleSchema',
-    'ProfileSchema',
-    'SoftwareSchema',
-    'Script',
+    'ProductSchema',
+    'FAQPageSchema',
+    'BreadcrumbListSchema',
+    'OrganizationSchema',
+    'LocalBusinessSchema',
+    'VideoSchema',
     'Show',
     'For',
     'Switch',
@@ -299802,6 +300563,57 @@ function buildExpressionItems(source, wordRegex) {
         push(g.name, CompletionItemKind.Variable, g.detail);
     }
     return items;
+}
+
+/**
+ * Filter server-only globals from TypeScript completion results.
+ *
+ * Vesk projects may include Node types for API routes and config files, but
+ * `.vsk` component expressions run in the browser. TypeScript therefore can
+ * legitimately know `process`, `Buffer`, and `require`; exposing those names
+ * in component/tag completion is misleading and makes fatal-state fallback
+ * completions especially noisy.
+ */
+const SERVER_ONLY_GLOBALS = new Set(['process', 'Buffer', 'require', 'module', 'exports', '__dirname', '__filename']);
+function filterCompletionResult(result) {
+    if (Array.isArray(result)) {
+        return result.filter((item) => !isServerOnlyCompletion(item));
+    }
+    if (result && typeof result === 'object' && Array.isArray(result.items)) {
+        return {
+            ...result,
+            items: result.items.filter((item) => !isServerOnlyCompletion(item)),
+        };
+    }
+    return result;
+}
+function isServerOnlyCompletion(item) {
+    if (!item || typeof item !== 'object')
+        return false;
+    const label = item.label;
+    return typeof label === 'string' && SERVER_ONLY_GLOBALS.has(label);
+}
+function createCompletionFilterPlugin() {
+    return {
+        name: 'vesk-completion-filter',
+        capabilities: {},
+        create(context) {
+            let originalProvider;
+            let originalInstance;
+            for (const [plugin, instance] of context.plugins) {
+                if (plugin.name === 'typescript-semantic') {
+                    originalInstance = instance;
+                    originalProvider = instance.provideCompletionItems;
+                    instance.provideCompletionItems = async function (...args) {
+                        const result = await originalProvider?.apply(originalInstance, args);
+                        return filterCompletionResult(result);
+                    };
+                    break;
+                }
+            }
+            return {};
+        },
+    };
 }
 
 /**
@@ -330891,6 +331703,7 @@ function createVeskLanguageServer() {
                 stripDocumentFormatting(volarServiceCssExports.create()),
                 ...createTypeScriptServices(ts).map(stripDocumentFormatting),
                 // Must come after TypeScript services to intercept their providers.
+                createCompletionFilterPlugin(),
                 createTypeScriptDiagnosticFilterPlugin(),
                 createHoverPlugin(),
                 // Must come after TypeScript services: its create() disables
