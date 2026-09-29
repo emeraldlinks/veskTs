@@ -447,9 +447,9 @@ export default function Posts() {
 component Posts() {
 	let &[posts, postsCell] = track<Post[]>([])
 	useFetch('/api/posts', { key: 'posts', into: postsCell, staleTime: 30_000 })
-	{#if loading}
+	if (loading) {
 		<p>Loading…</p>
-	{/if}
+	}
 	for (const p of posts; key p.id) {
 		<li>{p.title}</li>
 	}
@@ -457,8 +457,8 @@ component Posts() {
 ```
 
 `Loading…` comes from the `useFetch` `loading` state; in Vesk `useFetch`
-itself exposes reactive `loading`. If you used `{#if loading}` make sure that
-block is real — inside a component you can also write
+itself exposes reactive `loading`. If you guard on `loading`, make sure the
+binding is real — inside a component you can also write
 `const { loading } = useFetch(…)`; the destructured `loading` binding is
 tracked.
 

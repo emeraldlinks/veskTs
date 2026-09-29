@@ -130,7 +130,7 @@ syntax region vskHeadBlock matchgroup=vskHeadTag start=/<[Hh][Ee][Aa][Dd][^>]*>/
 " ── Server/Client/Empty blocks ──────────────────────────────────
 syntax region vskServerBlock matchgroup=vskBlockTag start="{#server}" end="{\/server}" transparent
 syntax region vskClientBlock matchgroup=vskBlockTag start="{#client}" end="{\/client}" transparent
-syntax region vskEmptyBlock matchgroup=vskBlockTag start="{#empty}" end="{\/empty}" transparent
+syntax match vskBlockTag /#empty\s*{/
 
 " ── Function calls / property access ────────────────────────────
 syntax match vskFunctionCall /\<[A-Za-z_$][\w$]*\ze(/

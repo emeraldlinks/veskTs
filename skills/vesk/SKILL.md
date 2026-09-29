@@ -181,12 +181,21 @@ Statements the compiler understands:
 
 **Cannot** declare a `class` inside a component body.
 
-Loops gain extra clauses and an empty state:
+Loops gain extra clauses and an empty state — two equivalent spellings:
+the `} empty {` clause, or a `#empty { … }` block (hash-first, statement
+level; a standalone `#empty` with no preceding loop is dropped):
 
 ```vsk
 for (const item of items; key item.id; index i) {
 	<Row data={item} index={i} />
 } empty {
+	<p>Nothing here</p>
+}
+
+for (const item of items) {
+	<Row data={item} />
+}
+#empty {
 	<p>Nothing here</p>
 }
 ```
@@ -481,7 +490,9 @@ setSearch/route/canGoBack), `useNavigate()`, `useParams()`, `usePathname()`,
   - `'full'` (default) — hydrate immediately.
   - `'viewport'` — in-viewport now, rest via IntersectionObserver (rootMargin
     500px default).
-  - `'idle'` — chunked via requestIdleCallback (chunkSize 10, timeout 3000).
+  - `'idle'` — waits for the first requestIdleCallback window (timeout 3000),
+    then hydrates the whole container in one run. `chunkSize` is accepted
+    but has no effect.
   - `'interaction'` — on first click/touchstart/focus/mouseenter.
 - Islands: `client` components render both sides + always in client bundle;
   `{#client}` blocks are SSR-stripped but present client-side.
@@ -614,9 +625,9 @@ is the underlying primitive for non-URL sources.
 component Posts() {
 	const &[posts, postsCell] = track<Post[]>([])
 	useFetch('/api/posts', { key: 'posts', into: postsCell, staleTime: 30_000 })
-	{#if loading}
+	if (loading) {
 		<p>Loading…</p>
-	{/if}
+	}
 	for (const p of posts; key p.id) {
 		<article>{p.title}</article>
 	} empty {
@@ -1016,8 +1027,9 @@ export default defineConfig({
 `contentSecurityPolicy` (self-only + style-src 'unsafe-inline' for component
 styles), `hsts:'max-age=31536000; includeSubDomains'`,
 `referrerPolicy:'strict-origin-when-cross-origin'`, and `redactLogs:true`.
-`cors`, `trustProxy`, and rate-limit settings are separate server/security
-configuration concerns and are not preset fields.
+`cors`, `trustProxy`, and `rateLimit` (`{ windowMs, max }`) are optional
+`VeskSecurity` fields — opt-in, not in the strict preset; compose them via
+`preset('production', { rateLimit: { windowMs: 60000, max: 100 } })`.
 
 Presets: `preset('production')` (the strict security defaults),
 `preset('development')` (strict minus CSP), `preset('minimal')`

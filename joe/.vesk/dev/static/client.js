@@ -2006,11 +2006,11 @@ useFetch.arrayBuffer = (url, options) => useFetch(url, { ...options, parse: r =>
  *
  * Usage:
  *   const data = createResource(() => fetch('/api/items').then(r => r.json()));
- *   {#if data.loading}
+ *   if (data.loading) {
  *     <p>Loading...</p>
- *   {:else}
+ *   } else {
  *     {data().map(item => <li>{item.name}</li>)}
- *   {/if}
+ *   }
  *
  * During SSR, if the fetcher key matches pre-fetched data from the server,
  * the resource resolves immediately. Otherwise it fires the async function.
