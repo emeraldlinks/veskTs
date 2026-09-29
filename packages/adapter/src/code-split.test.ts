@@ -46,6 +46,10 @@ async function main() {
   }
 
   browser = await puppeteer.launch({
+    // Chrome's own 30s default is the tightest step in the suite on a loaded
+    // machine (measured 16s to launch on a 2-core box), which turned slow
+    // hardware into a red suite. The budget is for STARTUP only.
+    timeout: 120000,
     headless: true,
     args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-gpu', '--disable-dev-shm-usage'],
     executablePath: process.env.CHROMIUM_PATH || '/data/data/com.termux/files/usr/bin/chromium-browser',
@@ -59,7 +63,12 @@ async function main() {
     page.on('request', r => requests.push(r.url()));
 
     await page.goto(BASE + '/', { waitUntil: 'networkidle0' });
-    await assert(requests.some(r => r.includes('/_vesk/static/client.js')), 'Main client bundle loaded');
+    // Production asset names are content-hashed (`client.a1b2c3d4e5.js`); the
+    // bundle must still be requested, under its hashed URL.
+    await assert(
+      requests.some((r) => /\/_vesk\/static\/client(\.[0-9a-f]{10})?\.js/.test(r)),
+      `Main client bundle loaded (saw ${requests.length} requests)`,
+    );
     await page.close();
   }
 

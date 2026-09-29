@@ -166,7 +166,7 @@ ${serverStoreLine}
   // SSR already resolved. Entry is consumed on read (bound store).
   if (pathname === '/ssr-data.js') {
     const dataToken = url.searchParams.get('t') || '';
-    const dataStore = (globalThis.__vsk_ssr_data_store || {});
+    const dataStore = (globalThis.__vsk_ssr_payload_store || {});
     const payload = dataStore[dataToken];
     if (payload) delete dataStore[dataToken];
     const dataLines = [];

@@ -14,7 +14,11 @@ async function assert(condition, msg) {
 }
 
 async function main() {
-	browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox'] });
+	browser = await puppeteer.launch({
+    // Chrome's own 30s default is the tightest step in the suite on a loaded
+    // machine (measured 16s to launch on a 2-core box), which turned slow
+    // hardware into a red suite. The budget is for STARTUP only.
+    timeout: 120000, headless: true, args: ['--no-sandbox'] });
 
 	// ── Test 1: Initial load ──────────────────────────
 	console.log('\n=== TEST 1: Initial load (no content shift) ===');

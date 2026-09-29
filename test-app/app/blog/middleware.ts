@@ -1,4 +1,4 @@
-import type { MiddlewareContext } from '@vesk/compiler';
+import type { MiddlewareContext } from '@vesk/types';
 
 export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {
   ctx.set('blogMiddleware', 'active');

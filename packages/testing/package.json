@@ -1,0 +1,27 @@
+{
+  "name": "@vesk/testing",
+  "version": "0.2.47",
+  "description": "Test harness for Vesk components: SSR a .vsk file, hydrate it in a real DOM, drive it, assert on the result.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@vesk/adapter": "^0.2.47",
+    "@vesk/compiler": "^0.2.47",
+    "@vesk/runtime": "^0.2.47",
+    "@vesk/types": "^0.2.47",
+    "linkedom": "^0.18.13"
+  },
+  "license": "MIT"
+}

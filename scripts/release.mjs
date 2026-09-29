@@ -4,11 +4,13 @@ import { readFileSync, writeFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
+import { isChannel, STABLE } from './release-plan.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGES_DIR = join(ROOT, 'packages');
 
 const INTERNAL_NAMES = new Set([
+  '@vesk/testing',
   '@vesk/adapter',
   '@vesk/agentic',
   '@vesk/compiler',
@@ -39,6 +41,7 @@ const PUBLISH_ORDER = [
   '@vesk/vesk-cli',
   'lucide-vesk',
   'create-vesk',
+  '@vesk/testing',
 ];
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
@@ -48,10 +51,22 @@ function fail(msg) {
   process.exit(1);
 }
 
-const newVersion = process.argv.slice(2).find((a) => !a.startsWith('-'));
-if (!newVersion) fail('usage: node scripts/release.mjs <version> [--dry-run]');
+const argv = process.argv.slice(2);
+const newVersion = argv.find((a) => !a.startsWith('-'));
+if (!newVersion) fail('usage: node scripts/release.mjs <version> [--channel canary|beta|stable] [--dry-run]');
 if (!SEMVER.test(newVersion)) fail(`"${newVersion}" is not a valid semver version`);
-const dryRun = process.argv.includes('--dry-run');
+const dryRun = argv.includes('--dry-run');
+
+// Release train. `stable` is the only channel that moves the npm `latest`
+// dist-tag; canary/beta publish a prerelease under their own tag so a merge
+// never changes what an installer resolves by default.
+const channelFlagIndex = argv.indexOf('--channel');
+const channel = channelFlagIndex >= 0 && argv[channelFlagIndex + 1] ? argv[channelFlagIndex + 1] : STABLE;
+if (!isChannel(channel)) fail(`"${channel}" is not a release channel (canary|beta|stable)`);
+const distTag = channel === STABLE ? 'latest' : channel;
+if (channel !== STABLE && !newVersion.includes(`-${channel}.`)) {
+  fail(`a ${channel} release must be a ${channel}.N prerelease, got "${newVersion}"`);
+}
 
 const packages = [];
 for (const dir of readdirSync(PACKAGES_DIR)) {
@@ -133,6 +148,7 @@ const BUILD_ORDER = [
   '@vesk/vesk-cli',
   'lucide-vesk',
   'create-vesk',
+  '@vesk/testing',
 ];
 for (const name of BUILD_ORDER) {
   const p = byName.get(name);
@@ -161,11 +177,11 @@ for (const name of PUBLISH_ORDER) {
   const p = byName.get(name);
   if (!p) fail(`package ${name} not found`);
   console.log(`\n\x1b[1mrelease: publishing ${name}\x1b[0m`);
-  const res = spawnSync('npm', ['publish', '--access', 'public'], {
+  const res = spawnSync('npm', ['publish', '--access', 'public', '--tag', distTag], {
     cwd: dirname(p.path),
     stdio: 'inherit',
   });
   if (res.status !== 0) fail(`npm publish failed for ${name}`);
 }
 
-console.log(`\n\x1b[32m✓\x1b[0m Published all packages at \x1b[1m${newVersion}\x1b[0m`);
+console.log(`\n\x1b[32m✓\x1b[0m Published all packages at \x1b[1m${newVersion}\x1b[0m under dist-tag \x1b[1m${distTag}\x1b[0m`);

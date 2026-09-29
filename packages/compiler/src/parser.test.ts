@@ -12,7 +12,7 @@
  * NOTE: Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  * Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  */
-import { parse } from '@vesk/compiler/src/parser';
+import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
 import { tokenizeCode, findSpecifierExports, hasTopLevelValueDeclaration } from '@vesk/compiler/src/tokens';
 
 let passed = 0;
@@ -1345,6 +1345,36 @@ describe('tokenizeCode with JSX in a component body', () => {
 	it('keeps `export { A }` for a local that really is a top-level binding', () => {
 		const src = 'const A = 1\nexport { A }\n';
 		expect(hasTopLevelValueDeclaration(src, 'A')).toBe(true);
+	});
+
+	it('parseGeneratedJs reports the same node offsets as the .vsk parser', () => {
+		// The generated-code strip passes run on both, so the offsets the caller
+		// slices with have to agree — the fast path is only sound because they do.
+		const generated = [
+			"import { track } from '@vesk/runtime';",
+			'import { Badge } from "./badge.vsk";',
+			'export const helper = 1;',
+			'const Cell = track(0);',
+			'function render() { return String(get(Cell)); }',
+			'export default render;',
+		].join('\n');
+		const fast = parseGeneratedJs(generated);
+		expect(fast === null).toBe(false);
+		const full = parse(generated, { filename: 'chunk.js' });
+		expect(fast.body.length).toBe(full.body.length);
+		for (let i = 0; i < full.body.length; i++) {
+			expect(fast.body[i].type).toBe(full.body[i].type);
+			expect(fast.body[i].start).toBe(full.body[i].start);
+			expect(fast.body[i].end).toBe(full.body[i].end);
+		}
+	});
+
+	it('parseGeneratedJs declines anything the plain parser cannot read', () => {
+		// The caller falls back to `parse` on null, so the fast path must never
+		// "succeed" on a dialect it does not understand.
+		expect(parseGeneratedJs('const x: number = 1;') === null).toBe(true);
+		expect(parseGeneratedJs('const el = <div a={b} />;') === null).toBe(true);
+		expect(parseGeneratedJs('function f( {') === null).toBe(true);
 	});
 
 	it('a specifier export of a component parses (the reported symptom)', () => {

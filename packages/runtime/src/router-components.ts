@@ -183,12 +183,51 @@ export function handleScroll(pathname: string, isReplace?: boolean, scrollBehavi
 
 const HEAD_MARKER = 'data-vesk-head';
 
+/**
+ * Undo the server's HTML escaping for head text and attribute values.
+ *
+ * The head arrives as an HTML *source* string — the compiler escapes it exactly
+ * as it escapes body text (`&amp; &lt; &gt; &quot; &#39;`). Writing that source
+ * straight into `textContent`/`setAttribute` shows the escapes to the user: a
+ * docs page titled `Client Boundary & Islands` got the tab title
+ * `Client Boundary &amp; Islands` after every client-side navigation, while a
+ * full load was fine (the browser had parsed the same source itself). One
+ * pass, left to right, so `&amp;amp;` decodes to the literal `&amp;` and never
+ * further.
+ */
+const HEAD_ENTITIES: Record<string, string> = {
+	amp: '&',
+	lt: '<',
+	gt: '>',
+	quot: '"',
+	apos: "'",
+	nbsp: '\u00a0',
+};
+
+function decodeHeadText(value: string): string {
+	if (value.indexOf('&') === -1) return value;
+	return value.replace(/&(#x[0-9a-fA-F]+|#\d+|[a-zA-Z][a-zA-Z0-9]*);/g, (match, body: string) => {
+		if (body.charCodeAt(0) === 35 /* # */) {
+			const hex = body.charCodeAt(1) === 120 || body.charCodeAt(1) === 88; // x | X
+			const num = parseInt(hex ? body.slice(2) : body.slice(1), hex ? 16 : 10);
+			if (!Number.isFinite(num) || num < 0 || num > 0x10ffff) return match;
+			try {
+				return String.fromCodePoint(num);
+			} catch {
+				return match;
+			}
+		}
+		const named = HEAD_ENTITIES[body.toLowerCase()];
+		return named === undefined ? match : named;
+	});
+}
+
 function applyHeadAttrs(el: HTMLElement, raw: string): void {
 	for (const attrMatch of raw.matchAll(/([a-zA-Z0-9\-:]+)\s*=\s*("([^"]*)"|'([^']*)')/g)) {
 		const name = attrMatch[1];
 		const value = attrMatch[3] ?? attrMatch[4] ?? '';
 		if (name.toLowerCase() === 'charset') continue;
-		el.setAttribute(name, value);
+		el.setAttribute(name, decodeHeadText(value));
 	}
 }
 
@@ -206,7 +245,7 @@ export function applyHead(headHtml: string): void {
 	const titleMatch = headHtml.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
 	if (titleMatch) {
 		const t = document.createElement('title');
-		t.textContent = titleMatch[1];
+		t.textContent = decodeHeadText(titleMatch[1]);
 		t.setAttribute(HEAD_MARKER, '');
 		head.appendChild(t);
 	}
@@ -239,7 +278,7 @@ export function applyHead(headHtml: string): void {
 
 	for (const m of headHtml.matchAll(/<style\b([^>]*)>([\s\S]*?)<\/style>/gi)) {
 		const style = document.createElement('style');
-		style.textContent = m[2];
+		style.textContent = decodeHeadText(m[2]);
 		style.setAttribute(HEAD_MARKER, '');
 		head.appendChild(style);
 	}

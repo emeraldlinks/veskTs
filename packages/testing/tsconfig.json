@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "paths": {
+      "@vesk/compiler/src/*": ["../compiler/src/*"],
+      "@vesk/runtime/src/*": ["../runtime/src/*"],
+      "@vesk/adapter/src/*": ["../adapter/src/*"],
+      "@vesk/types": ["../types/src/index.ts"]
+    }
+  },
+  "include": ["src/**/*.ts"]
+}

@@ -28,6 +28,8 @@ function usage(code = 0) {
   console.error('  vesk start [-p 3000]          Start production server');
   console.error('  vesk dev [-p 3000]            Start dev server with HMR');
   console.error('  vesk init                     Create app/global.css (Tailwind entrypoint) if missing');
+  console.error('  vesk migrate [--dry-run]       Apply the codemods this project\'s version needs');
+  console.error('  vesk migrate --list            List available codemods');
   console.error('  vesk --help                   Show this help');
   console.error('');
   console.error('Scaffolding:  npx create-vesk@latest <project-name>');
@@ -277,6 +279,52 @@ if (cmd === 'init') {
     ``,
   ].join('\n'));
   console.error(`vesk init: created ${target}`);
+  process.exit(0);
+}
+
+if (cmd === 'migrate') {
+  const projectDir = process.cwd();
+  const { runMigrate } = await import('./migrate.js') as typeof import('./migrate.js');
+  const { CODEMODS } = await import('./codemods.js') as typeof import('./codemods.js');
+  const { version: cliVersion } = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf-8')) as { version: string };
+
+  if (args.includes('--list')) {
+    console.error('vesk migrate: available codemods');
+    for (const c of CODEMODS) {
+      console.error(`  ${c.id.padEnd(22)} ${c.from} -> ${c.to}`);
+      console.error(`  ${' '.repeat(22)} ${c.describe}`);
+    }
+    process.exit(0);
+  }
+
+  const flag = (name: string): string | undefined => {
+    const i = args.indexOf(`--${name}`);
+    if (i >= 0 && args[i + 1] && !args[i + 1].startsWith('-')) return args[i + 1];
+    const inline = args.find((a) => a.startsWith(`--${name}=`));
+    return inline ? inline.slice(name.length + 3) : undefined;
+  };
+  const only = args.filter((a) => a.startsWith('--') && !a.includes('=') && CODEMODS.some((c) => c.id === a.slice(2))).map((a) => a.slice(2));
+
+  const report = runMigrate({
+    projectDir,
+    cliVersion,
+    from: flag('from'),
+    to: flag('to'),
+    only,
+    dryRun: args.includes('--dry-run'),
+  });
+
+  console.error(`vesk migrate: ${report.from} (${report.fromSource}) -> ${report.to}`);
+  console.error(`  codemods: ${report.codemods.length > 0 ? report.codemods.join(', ') : 'none'}`);
+  for (const n of report.notes) console.error(`  ${n}`);
+  for (const s of report.skipped) console.error(`  skipped ${s}`);
+  if (report.filesChanged.length === 0) {
+    console.error('  nothing to change');
+    process.exit(0);
+  }
+  const verb = report.dryRun ? 'would change' : 'changed';
+  console.error(`  ${verb} ${report.filesChanged.length} file(s): ${report.filesChanged.join(', ')}`);
+  if (report.dryRun) console.error('  (dry run — re-run without --dry-run to apply)');
   process.exit(0);
 }
 

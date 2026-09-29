@@ -43,7 +43,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
 
   const entryFile = resolve(outDir, 'server', `.runtime-entry-${buildId++}.mjs`);
   const entryContent = [
-    `import { renderPage, renderFullPage, renderPageStream, compileFile, setRuntimeModule, setVskHydrate, hydratePrecompile, assertSameOrigin } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
+    `import { renderPage, renderFullPage, renderPageStream, compileFile, setRuntimeModule, setVskHydrate, hydratePrecompile, assertSameOrigin, withSsrStore } from ${JSON.stringify(resolve(compilerRoot, 'server-codegen.js'))};`,
     `import { parseCookies } from ${JSON.stringify(resolve(compilerRoot, 'server-cookies.js'))};`,
     `import * as __veskRuntime from ${JSON.stringify(resolve(runtimeRoot, 'index-server.js'))};`,
     '',
@@ -82,7 +82,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     '}',
     '',
     'export { renderPage, renderFullPage, renderPageStream, compileFile, setVskHydrate, hydratePrecompile, parseCookies, assertSameOrigin };',
-    'export { withSsrStore } from "@vesk/compiler/src/ssr-store";',
+    'export { withSsrStore };',
     '',
     '// Deliver hydration data as an origin-served script so strict CSP (no unsafe-inline)',
     '// does not block it. The prod server serves /ssr-data.js from the global store.',
@@ -94,7 +94,11 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     "  let tk = '';",
     "  for (const b of bytes) tk += b.toString(16).padStart(2, '0');",
     '  const token = tk;',
-    "  const store = (globalThis.__vsk_ssr_data_store ||= {});",
+    '  // Named __vsk_ssr_payload_store, NOT __vsk_ssr_data_*: the compiler keys',
+    '  // per-request slots `__vsk_ssr_data_<token>` and pruneSsrDataSlots()',
+    '  // reaps that prefix. Sharing it let the reaper wipe every pending',
+    '  // /ssr-data.js payload, so a served page\'s hydration script 404\'d.',
+    "  const store = (globalThis.__vsk_ssr_payload_store ||= {});",
     "  store[token] = payload;",
     '  // Bound the store: if the browser never fetches /ssr-data.js the entry',
     '  // would otherwise linger forever. Evict the oldest entry past 100.',

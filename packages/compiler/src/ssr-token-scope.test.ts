@@ -167,6 +167,36 @@ it('slot liveness: keep/drop is observable and defaults to free', () => {
   assert(!isSsrSlotLive('claimed'), 'dropSsrSlot did not release');
 });
 
+it('a duplicate module copy shares one request-scope state', async () => {
+  // The server bundle reached this module through two specifiers for a while,
+  // so the process ran two copies: two AsyncLocalStorages and two liveness
+  // maps. A scope opened by the copy the generated handler imports was then
+  // invisible to the copy `renderFullPage` reaps with, which read every
+  // concurrent request's slot as abandoned and deleted it — the page rendered
+  // but shipped without its ssr-data script. The state is pinned to
+  // globalThis precisely so a second copy is harmless; simulate one.
+  const copy = (await import('@vesk/compiler/src/ssr-store?duplicate-copy=1')) as typeof import('@vesk/compiler/src/ssr-store');
+  assert(copy !== (await import('@vesk/compiler/src/ssr-store')), 'the simulated duplicate resolved to the same module instance');
+
+  const token = withSsrStore(() => {
+    const own = currentSsrToken()!;
+    // The other copy must see this scope, and vice versa.
+    assertEq(copy.currentSsrToken(), own, 'a duplicate module copy does not see the live request scope');
+    keepSsrSlot(own);
+    assert(copy.isSsrSlotLive(own), 'a duplicate module copy does not see a live slot claim');
+    // The scope itself holds one claim, so a single drop must not free the
+    // slot — claims are refcounted and nested renders add their own.
+    dropSsrSlot(own);
+    assert(copy.isSsrSlotLive(own), 'a duplicate module copy lost the scope-level claim after one release');
+    copy.dropSsrSlot(own);
+    assert(!copy.isSsrSlotLive(own), 'a duplicate module copy does not see a released slot claim');
+    assertEq(copy.withSsrStore(() => copy.currentSsrToken()), own, 'a duplicate module copy minted a second token for one request');
+    return own;
+  });
+  assert(typeof token === 'string' && token.length > 0, 'withSsrStore did not mint a token');
+  assert(!copy.isSsrSlotLive(token), 'the scope released its claim on settle');
+});
+
 console.log('\n=== Concurrent renders keep their own handoff ===');
 
 it('two overlapping renderFullPage calls each ship their own ssr-data', async () => {
@@ -244,6 +274,30 @@ it('a live render slot survives the reaper that bounds abandoned slots', async (
     return !d || Object.keys(d).length === 0;
   });
   assertEq(empty.length, 0, `${empty.length}/${N} renders shipped an empty handoff — the reaper collected a live slot`);
+});
+
+it('a 48-request deduped burst on one resource key ships 48 handoffs', async () => {
+  // This is the shape of the real /async failure: 48 concurrent requests, one
+  // shared resource key. The first render starts the fetch, the rest dedupe
+  // onto it, and all 48 documents have to serialize their own handoff. It is
+  // the case that broke when the server bundle carried two copies of the
+  // request-scope store: every scope was invisible to the reaper, which
+  // deleted live slots until 7 of the 48 documents shipped with no ssr-data
+  // script while their page bodies looked perfectly fine.
+  const source = `component App(props) {
+    const data = useFetch('/api/shared')
+    <p>{data.value}</p>
+  }`;
+  const N = 48;
+  const htmls = await withFetch(
+    () => Promise.all(Array.from({ length: N }, (_, i) => renderFullPage(source, 'App', { i }))),
+    slowFetch({ value: 'shared payload' }, 25) as unknown as typeof fetch
+  );
+  const empty = htmls.filter((h) => {
+    const d = ssrDataOf(h);
+    return !d || Object.keys(d).length === 0;
+  });
+  assertEq(empty.length, 0, `${empty.length}/${N} deduped renders shipped an empty handoff — a shared resource key must still give every document its own handoff`);
 });
 
 console.log('\n=== Streaming renders ===');

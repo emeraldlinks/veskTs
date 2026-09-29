@@ -238,6 +238,37 @@ export interface VeskPlugin {
    * apply `onHead` only — see plugin-api docs.
    */
   onHtml?: (html: string, ctx?: RenderPluginContext) => string | null | Promise<string | null>;
+  /**
+   * Called when a request fails in production, with the error, the route it was
+   * rendering, and whether the client saw the message (production never leaks
+   * stacks, so a reporter gets the details here and the user gets "Internal
+   * Server Error").
+   *
+   * This is the seam an error-reporting service plugs into. Without it,
+   * adopting Vesk means either shipping stack traces to users or replacing the
+   * adapter's error handling — there was no supported way in between. A hook
+   * that throws is caught and logged, never turned into a second failure.
+   */
+  onError?: (err: unknown, ctx: ServerErrorContext) => void | Promise<void>;
+  [key: string]: unknown;
+}
+
+/** Context for `onError`. Mirrors {@link RenderPluginContext} plus timing. */
+export interface ServerErrorContext {
+  /** Request URL when the failure came from a live request. */
+  url?: string;
+  /** Route path pattern, e.g. `/blog/[slug]`. */
+  routePath?: string;
+  /** Which server produced it. */
+  target: 'node' | 'edge' | 'dev';
+  /** HTTP status the client was given (500 unless the error carried one). */
+  status: number;
+  /** Milliseconds from request start to the failure, when known. */
+  durationMs?: number;
+  /** Vesk version, from the build manifest. */
+  version?: string;
+  /** Build id, from the build manifest — ties a report to an exact deploy. */
+  buildId?: string;
   [key: string]: unknown;
 }
 
@@ -375,6 +406,15 @@ export interface SsrFunctionOptions {
    * SSR function at request time.
    */
   headExtra?: string;
+  /**
+   * URL of the emitted client bundle, content-hashed in production
+   * (`/_vesk/static/client.a1b2c3d4e5.js`) and a stable `client.js` in dev.
+   * The client bundle is generated BEFORE the SSR functions so the hash is
+   * known here rather than patched in afterwards.
+   */
+  clientScriptUrl?: string;
+  /** SRI digest for `clientScriptUrl`; omitted in dev. */
+  clientScriptIntegrity?: string;
 }
 
 export interface ApiFunctionOptions {
@@ -517,6 +557,23 @@ export interface Manifest {
   headExtra?: string;
   /** True when the app declares a server-events file (`_events.ts`). */
   events?: boolean;
+  /**
+   * Emitted browser assets with their content hashes and SRI digests. Present
+   * on every production build; `hashed` is false for a dev build, where names
+   * stay stable so HMR can rewrite them.
+   */
+  /**
+   * Identifier of this build, derived from the emitted asset hashes. A server
+   * error report carries it, so "which deploy was this?" is answerable.
+   */
+  buildId?: string;
+  /** The Vesk version that produced this build. */
+  veskVersion?: string;
+  assets?: {
+    hashed: boolean;
+    client: { file: string; url: string; hash: string; bytes: number; integrity: string };
+    chunks: Array<{ file: string; hash: string; bytes: number; integrity: string }>;
+  };
 }
 
 export interface SsgRouteResult {

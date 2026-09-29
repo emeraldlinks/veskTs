@@ -520,17 +520,10 @@ function startRequest<T>(handle: ResourceHandle<T>, skipCache: boolean): Promise
 			});
 		} else {
 			// Deduped onto another request's in-flight fetch. The winner's
-			// callback above only attributes the data to its own token, so this
-			// request's render slot would stay empty and its document would
-			// serialize without an ssr-data script. Attribute the shared result
-			// to this render's token as well.
-			const ownerToken = (g().__vsk_ssr_token as string) || undefined;
-			if (ownerToken) {
-				prom.then(
-					data => { setSsrData(key, data, ownerToken); },
-					() => {},
-				);
-			}
+			// callback writes the shared result, and `useResource`'s SSR cache
+			// hit re-emits it into THIS render's token (see the getSsrData
+			// branch below), so the deduping document still serializes its own
+			// handoff. Only the resource state needs wiring up here.
 			attachSettle(handle, prom);
 		}
 		trackSsrPromise(prom);

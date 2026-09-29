@@ -68,7 +68,10 @@ async function main() {
     // structurally, so no `<!--vsk:…-->` markers should be present.
     const markers = (html.match(/<!--vsk(--|:)/g) || []).length;
     assert(markers === 0, `SSR output is markerless (found ${markers} markers)`);
-    assert(flat.includes('<script type="module" src="/_vesk/static/client.js">'), 'client runtime script tag present');
+    // The tag carries a content-hashed URL and, in production, an SRI digest.
+    const scriptTag = (flat.match(/<script type="module" src="\/_vesk\/static\/client[^"]*"[^>]*>/) || [])[0] || '';
+    assert(scriptTag.length > 0, `client runtime script tag present (saw: ${flat.match(/<script type="module"[^>]*>/g)?.join(' ') || 'no module script'})`);
+    assert(/integrity="sha384-[A-Za-z0-9+/=]+"/.test(scriptTag), `script tag carries an SRI digest: ${scriptTag}`);
   }
 
   console.log('\n=== Dynamic routes ===');

@@ -1,4 +1,4 @@
-export { parse, createBaseParser } from '@vesk/compiler/src/parser';
+export { parse, createBaseParser, parseGeneratedJs } from '@vesk/compiler/src/parser';
 export { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
 export { generateIR } from '@vesk/compiler/src/ir-generator';
 export { render } from '@vesk/compiler/src/server-codegen';

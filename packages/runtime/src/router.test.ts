@@ -2190,6 +2190,48 @@ describe('applyHead reconciliation of route-declared head tags', () => {
 		} finally { restoreHead(); }
 	});
 
+	test('applyHead decodes the server\'s HTML escaping (view-source vs the tab)', () => {
+		// The head arrives as escaped HTML SOURCE, because that is what the
+		// compiler emits. Assigning it to textContent/setAttribute verbatim shows
+		// the escapes to the user: a docs page titled `Client Boundary & Islands`
+		// rendered the tab as `Client Boundary &amp; Islands` after every SPA nav,
+		// while a full load was correct (the browser had parsed the same source).
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<title>Client Boundary &amp; Islands — Vesk Docs</title>');
+			const title = findAttrs(head, (a) => a.tagName === 'TITLE')[0];
+			expect(title.textContent).toBe('Client Boundary & Islands — Vesk Docs');
+			// …and only one pass: a literal `&amp;` in the source stays literal.
+			applyHead('<title>a &amp;amp; b</title>');
+			const again = findAttrs(head, (a) => a.tagName === 'TITLE')[0];
+			expect(again.textContent).toBe('a &amp; b');
+		} finally { restoreHead(); }
+	});
+
+	test('applyHead decodes escaped attribute values and style text', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<meta name="description" content="a &amp; b &lt; c" /><style>.x{content:\"&amp;\"}</style>');
+			const metas = findAttrs(head, (a) => a.tagName === 'META' && a.attributes && a.attributes.name === 'description');
+			expect(metas.length).toBe(1);
+			expect(attrsOf(metas[0]).content).toBe('a & b < c');
+			const styles = findAttrs(head, (a) => a.tagName === 'STYLE');
+			expect(styles[0].textContent.includes('"&"')).toBe(true);
+		} finally { restoreHead(); }
+	});
+
+	test('applyHead leaves an unrecognised entity alone', () => {
+		const head = functionalHead();
+		swapHead(head);
+		try {
+			applyHead('<title>100&percnt; &notanentity; &#x1F600;</title>');
+			const title = findAttrs(head, (a) => a.tagName === 'TITLE')[0];
+			expect(title.textContent).toBe('100&percnt; &notanentity; \u{1F600}');
+		} finally { restoreHead(); }
+	});
+
 	test('applyHead replaces stale flagged tags on a second nav (link swap)', () => {
 		const head = functionalHead();
 		swapHead(head);

@@ -1,10 +1,12 @@
 import { readFileSync, existsSync, watch, statSync } from 'node:fs';
-import { resolve, extname, dirname } from 'node:path';
+import { resolve, extname, dirname, basename } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { DEFAULT_MAX_BODY_BYTES, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
 import { build } from '@vesk/adapter/src/index';
+import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
+import { reportServerError, registerErrorHooks } from '@vesk/adapter/src/error-report';
 import { buildErrorPayload, createHmrServer } from './hmr';
 import * as hmrApi from './hmr';
 import type { HmrErrorPayload } from './hmr';
@@ -264,6 +266,9 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   const devDir = resolve(appDir, '..', '.vesk', 'dev');
   const publicDir = options?.publicDir || resolve(appDir, '..', 'public');
   installMdReadHook([publicDir, resolve(devDir, 'static', 'public')]);
+  // Plugin `onError` hooks only exist here (dev): in production there are no
+  // plugin objects, and `_events.ts` is the seam that ships.
+  registerErrorHooks(options?.plugins as VeskPlugin[] | undefined);
 
   // Dev-panel plugin list: plugin / module names declared in the dev server's own config.
   const configPluginNames: string[] = (options?.plugins || []).map((p) => {
@@ -597,7 +602,7 @@ await doBuild().catch(() => {});
     // the tag was never emitted and this was unreachable. Mirrors prod-server.
     if (url.pathname === '/ssr-data.js') {
       const token = url.searchParams.get('t') || '';
-      const store = (globalThis as Record<string, unknown>).__vsk_ssr_data_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
+      const store = (globalThis as Record<string, unknown>).__vsk_ssr_payload_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
       const payload = store?.[token];
       if (payload) delete store[token];
       console.error(`[ssr-data-trace] ${url.pathname} token=${token.slice(0,6)} referer=${req.headers['referer'] || req.headers['referrer'] || '-'} payload=${payload ? JSON.stringify({ props: Object.keys(payload.props || {}), data: Object.keys(payload.ssrData || {}) }) : 'NONE'}`);
@@ -617,7 +622,9 @@ await doBuild().catch(() => {});
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
         const ext = extname(staticPath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        // Dev names are stable so HMR can rewrite them, which means they must
+        // never be cached: the same URL has to serve the newest bytes.
+        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cacheControlFor(basename(staticPath), true) });
         res.end(readFileSync(staticPath));
         return;
       }
@@ -712,7 +719,7 @@ let finalBody = body;
           } catch (e) {
             const message = e instanceof Error ? e.message : String(e);
             res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: message }));
+            res.end(JSON.stringify({ ok: false, error: message }));
           }
           return;
         }
@@ -728,8 +735,6 @@ let finalBody = body;
             const t0 = process.hrtime.bigint();
             const tImport0 = process.hrtime.bigint();
             const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const _origFetch = globalThis.fetch;
-            globalThis.fetch = function _fetchDebug(u: string | URL | Request, init?: RequestInit) { console.error('FETCH-DEBUG', typeof u === 'string' ? u : String(u), (new Error()).stack); return _origFetch(u, init); };
             const tImport1 = process.hrtime.bigint();
             const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
             const response = await mod.handle(webRequest);
@@ -747,7 +752,8 @@ let finalBody = body;
             res.end(finalBody);
             console.error(`[vdtime] ${url.pathname} ssrVersion=${ssrVersion} total=${Number(tHandle1 - t0) / 1e6 | 0}ms import=${Number(tImport1 - tImport0) / 1e6 | 0}ms handle=${Number(tHandle1 - tImport1) / 1e6 | 0}ms text=${Number(tText1 - tHandle1) / 1e6 | 0}ms`);
           } catch (e) {
-            console.error('[nbsp-debug] DEV-SSR-ERROR', e instanceof Error ? (e.stack || e.message) : String(e));
+            console.error('[vesk dev] SSR render failed:', e instanceof Error ? (e.stack || e.message) : String(e));
+            await reportServerError(e, { url: url.href, target: 'dev', status: 500 });
             res.writeHead(500, { 'Content-Type': 'text/html' });
             res.end(renderSsrErrorPage(e, url.pathname));
           }

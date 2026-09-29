@@ -15,14 +15,17 @@ let buildId = 0;
  * isolates and the Node prod server share one lifetime; `onStop` clears it so
  * dev HMR reloads can boot a fresh module.
  */
-function buildEntry(sourcePath: string): string {
+export function buildEventsEntry(sourcePath: string): string {
   return [
     `import * as __events from ${JSON.stringify(sourcePath)};`,
     '',
     'const __store = () => (globalThis.__vesk_server_ctx ||= {});',
     '',
     'const __handlers = {};',
-    "for (const __name of ['onStart', 'onRequest', 'onStop']) {",
+    // `onError` joins the server events: production has no plugin objects, so
+    // this is the seam an error reporter actually uses there (plugins carry
+    // their own `onError` in dev, where plugin objects do exist).
+    "for (const __name of ['onStart', 'onRequest', 'onStop', 'onError']) {",
     '  const __fn = __events[__name];',
     "  if (typeof __fn === 'function') __handlers[__name] = __fn;",
     '}',
@@ -51,6 +54,7 @@ function buildEntry(sourcePath: string): string {
     '  await __handlers.onRequest(__makeCtx(base));',
     '}',
     '',
+
     'export async function executeStop(base) {',
     '  if (typeof __handlers.onStop !== \'function\') return;',
     '  try {',
@@ -63,8 +67,28 @@ function buildEntry(sourcePath: string): string {
     'export const onStart = __handlers.onStart;',
     'export const onRequest = __handlers.onRequest;',
     'export const onStop = __handlers.onStop;',
+    'export const onError = __handlers.onError;',
     '',
   ].join('\n');
+}
+
+/**
+ * Report a production failure to `_events.ts`'s `onError`, if it exports one.
+ * Never throws: a reporting outage must not add a second failure to a request
+ * that already failed.
+ */
+export async function executeError(
+  err: unknown,
+  base: Record<string, unknown>,
+  mod: unknown,
+): Promise<void> {
+  const fn = (mod as { onError?: (e: unknown, ctx: unknown) => unknown } | null)?.onError;
+  if (typeof fn !== 'function') return;
+  try {
+    await fn(err, base);
+  } catch (e) {
+    console.error('vesk: _events onError threw and was ignored:', e instanceof Error ? e.message : e);
+  }
 }
 
 /**
@@ -81,7 +105,7 @@ export async function compileEvents(appDir: string, outDir: string): Promise<boo
   const serverDir = resolve(outDir, 'server');
   mkdirSync(serverDir, { recursive: true });
   const entryFile = resolve(serverDir, `.events-entry-${buildId++}.mjs`);
-  writeFileSync(entryFile, buildEntry(sourcePath), 'utf-8');
+  writeFileSync(entryFile, buildEventsEntry(sourcePath), 'utf-8');
 
   try {
     const result = await esbuild.build({

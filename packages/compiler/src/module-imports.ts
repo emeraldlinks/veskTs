@@ -312,14 +312,69 @@ function depsFresh(cachedVal: CachedModule): boolean {
   return true;
 }
 
-export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
+/**
+ * Raw file contents, keyed by path and validated by mtime.
+ *
+ * `readSsrSource` is on the hot path of every `.vsk` compile: a page's module
+ * bundle pulls in its `.ts`/`.js` imports, and a docs-style app where 26 pages
+ * all import one content module read and re-parsed that module 26 times. The
+ * parsed AST is deliberately NOT shared (callers mutate it — `stripTsTypes`,
+ * `stripped.body = ...`) and is still produced per call; only the immutable
+ * text is reused, and only while the file's mtime is unchanged, so an edit in
+ * a watch session is picked up immediately.
+ */
+const rawSourceCache = new Map<string, { mtimeMs: number; raw: string }>();
+
+/**
+ * Bounded, insertion-ordered eviction.
+ *
+ * The cap has to clear the OLDEST entries, not the whole map: an app that
+ * imports an icon barrel walks 1,600+ modules, and a 512-entry cap with
+ * `clear()` on overflow thrashed itself into a 0% hit rate (11,235 reads of
+ * 1,620 distinct files on vesk-doc). Draining the front keeps the hot modules
+ * resident and bounds memory.
+ */
+const BUILD_CACHE_MAX = 8192;
+const BUILD_CACHE_EVICT = 2048;
+
+function evict<T>(cache: Map<string, T>): void {
+  if (cache.size <= BUILD_CACHE_MAX) return;
+  let dropped = 0;
+  for (const key of cache.keys()) {
+    cache.delete(key);
+    if (++dropped >= BUILD_CACHE_EVICT) break;
+  }
+}
+
+function readSourceCached(absPath: string): string | null {
+  let mtimeMs: number;
+  try {
+    mtimeMs = statSync(absPath).mtimeMs;
+  } catch {
+    return null;
+  }
+  const hit = rawSourceCache.get(absPath);
+  if (hit && hit.mtimeMs === mtimeMs) return hit.raw;
   let raw: string;
   try {
     raw = readFileSync(absPath, 'utf-8');
-  } catch (err) {
-    console.warn(`[vesk] SSR: failed to read ${absPath}: ${(err as Error)?.message ?? String(err)}`);
+  } catch {
     return null;
   }
+  rawSourceCache.set(absPath, { mtimeMs, raw });
+  evict(rawSourceCache);
+  return raw;
+}
+
+export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
+  const cachedRaw = readSourceCached(absPath);
+  if (cachedRaw === null) {
+    // Keep the original warning: a missing module is a build-time signal, not
+    // a cache miss to swallow.
+    console.warn(`[vesk] SSR: failed to read ${absPath}`);
+    return null;
+  }
+  const raw = cachedRaw;
   let ast: ReturnType<typeof parse> | null = null;
   try {
     ast = parse(raw, { filename: absPath });
@@ -842,6 +897,19 @@ export function resolveSsrModule(specifier: string, fromDir: string): string | n
     // resolver so app-local aliases win over any same-named package.
     const aliased = resolveAliasModule(specifier, fromDir);
     if (aliased) return toRealPath(aliased);
+    // Bare specifier. A package's `exports` map is consulted BEFORE Node's own
+    // resolver: `createRequire.resolve` applies the CJS conditions, so it picks
+    // a `.cjs` build for a package that also ships ESM — and fails outright on
+    // an `import`-only package. Vesk emits ESM, so the `import` condition is
+    // the correct one. Node's resolver stays as the fallback (builtins, exotic
+    // conditions), and the node_modules walk after that.
+    const viaExports = resolveViaPackageExports(specifier, fromDir);
+    if (viaExports) return viaExports;
+    // Same reasoning for the legacy fields: a package declaring both `module`
+    // and `main` wants the ESM build (Vesk emits ESM), while `createRequire`
+    // would take `main` and hand us the CJS one.
+    const viaModuleField = resolveViaPackageModuleField(specifier, fromDir);
+    if (viaModuleField) return viaModuleField;
     // Bare specifier — prefer the native resolver (exports map, conditions,
     // builtins, symlinks), then fall back to a node_modules walk-up.
     const native = nativeResolve(specifier, fromDir);
@@ -921,6 +989,132 @@ function statOrNull(p: string): { isFile: () => boolean; isDirectory: () => bool
   }
 }
 
+/**
+ * Resolve a subpath through a package's `exports` map.
+ *
+ * This is what makes a Vesk app work inside an existing pnpm/npm/yarn
+ * workspace. A modern workspace package declares `exports` and often NO `main`
+ * (or points `main` at a CJS build while the app imports ESM), and subpath
+ * imports (`@acme/ui/button`) resolve through the map rather than through the
+ * directory layout. Without this, such a package simply does not resolve, and
+ * the app has to vendor it.
+ *
+ * Conditions are tried in import order: `import`, `module`, `node`, `default`.
+ * A pattern (`./dist/*.js`) is matched with the single `*` capture.
+ */
+export function resolveExports(exportsField: unknown, subpath: string): string | null {
+  const conditions = ['import', 'module', 'node', 'default'];
+  const target = (value: unknown): string | null => {
+    if (typeof value === 'string') return value;
+    if (!value || typeof value !== 'object') return null;
+    for (const cond of conditions) {
+      if (cond in (value as Record<string, unknown>)) {
+        const got = target((value as Record<string, unknown>)[cond]);
+        if (got) return got;
+      }
+    }
+    return null;
+  };
+
+  if (typeof exportsField === 'string') return subpath === '.' ? exportsField : null;
+  if (!exportsField || typeof exportsField !== 'object') return null;
+  const map = exportsField as Record<string, unknown>;
+
+  if (subpath in map) {
+    const direct = target(map[subpath]);
+    if (direct) return direct;
+    return null;
+  }
+  // Longest-prefix match for `./*` patterns, as Node does.
+  let best: { key: string; star: string } | null = null;
+  for (const key of Object.keys(map)) {
+    const star = key.indexOf('*');
+    if (star === -1) continue;
+    const prefix = key.slice(0, star);
+    const suffix = key.slice(star + 1);
+    if (!subpath.startsWith(prefix) || !subpath.endsWith(suffix)) continue;
+    if (subpath.length < prefix.length + suffix.length) continue;
+    if (best === null || prefix.length > best.key.length) {
+      best = { key: prefix, star: subpath.slice(prefix.length, subpath.length - suffix.length) };
+    }
+  }
+  if (!best) return null;
+  const pattern = target(map[Object.keys(map).find((k) => k.startsWith(best.key + '*') && k.endsWith(best.key.slice(0, -1)) + '*') as string] ?? map[`${best.key}*`]);
+  if (pattern === null) return null;
+  return pattern.split('*').join(best.star);
+}
+
+/**
+ * Resolve a bare specifier through a package's `module` field (the ESM entry
+ * in a package that also has a CJS `main`).
+ */
+export function resolveViaPackageModuleField(specifier: string, fromDir: string): string | null {
+  const firstSlash = specifier.indexOf('/');
+  const splitAt = specifier.startsWith('@') ? specifier.indexOf('/', firstSlash + 1) : firstSlash;
+  const pkgName = splitAt > 0 ? specifier.slice(0, splitAt) : specifier;
+  if (splitAt > 0) return null; // a subpath import needs the exports map
+  let dir = fromDir;
+  for (let depth = 0; depth < 64; depth++) {
+    const pkgPath = join(dir, 'node_modules', pkgName, 'package.json');
+    if (statOrNull(pkgPath) !== null) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { module?: unknown };
+        if (typeof pkg.module === 'string' && pkg.module.length > 0) {
+          const found = probeFile(resolve(join(dir, 'node_modules', pkgName), pkg.module));
+          if (found) return toRealPath(found);
+        }
+      } catch {
+        // malformed package.json — fall through
+      }
+      return null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+/**
+ * Resolve a bare specifier through its package's `exports` map, walking
+ * node_modules upwards. Returns null when the package has no map, does not
+ * export the subpath, or cannot be read.
+ */
+export function resolveViaPackageExports(specifier: string, fromDir: string): string | null {
+  // A scoped name (`@acme/ui`) has its slash INSIDE the package name — taking
+  // the first slash as the subpath separator turns it into package `@acme` +
+  // subpath `./ui`, which no `exports` map matches, and the lookup silently
+  // falls through to Node's resolver.
+  const firstSlash = specifier.indexOf('/');
+  const splitAt = specifier.startsWith('@') ? specifier.indexOf('/', firstSlash + 1) : firstSlash;
+  const pkgName = splitAt > 0 ? specifier.slice(0, splitAt) : specifier;
+  const subpath = splitAt > 0 ? '.' + specifier.slice(splitAt) : '.';
+  let dir = fromDir;
+  for (let depth = 0; depth < 64; depth++) {
+    const pkgDir = join(dir, 'node_modules', pkgName);
+    const pkgPath = join(pkgDir, 'package.json');
+    if (statOrNull(pkgPath) !== null) {
+      try {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { exports?: unknown };
+        if (pkg.exports !== undefined) {
+          const target = resolveExports(pkg.exports, subpath);
+          if (target) {
+            const found = probeFile(resolve(pkgDir, target));
+            if (found) return toRealPath(found);
+          }
+        }
+      } catch {
+        // malformed package.json — fall through to the resolvers below
+      }
+      return null;
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
 function probeFile(base: string): string | null {
   const st = statOrNull(base);
   if (st && st.isFile()) return base;
@@ -929,10 +1123,23 @@ function probeFile(base: string): string | null {
     const pkgSt = statOrNull(pkgPath);
     if (pkgSt && pkgSt.isFile()) {
       try {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { main?: unknown; exports?: unknown };
-        if (typeof pkg.main === 'string' && pkg.main.length > 0) {
-          const viaMain = probeFile(resolve(base, pkg.main));
-          if (viaMain) return viaMain;
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { main?: unknown; module?: unknown; exports?: unknown };
+        // `exports` first: it is what the package author intends and what a
+        // workspace package usually ships. `main`/`module` are the legacy
+        // fallbacks.
+        if (pkg.exports !== undefined) {
+          const viaExports = resolveExports(pkg.exports, '.');
+          if (viaExports) {
+            const found = probeFile(resolve(base, viaExports));
+            if (found) return found;
+          }
+        }
+        for (const field of ['module', 'main'] as const) {
+          const value = pkg[field];
+          if (typeof value === 'string' && value.length > 0) {
+            const found = probeFile(resolve(base, value));
+            if (found) return found;
+          }
         }
       } catch {
         // ignore malformed package.json
@@ -1216,28 +1423,53 @@ export function collectModuleBundled(absPath: string, collector: ModuleCollector
     return key;
   }
 
-  const src = readSsrSource(absPath);
-  if (!src || !src.ast) {
-    const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
-    collector.modules.push({ key, code: raw, dir, deps: {} });
-    return key;
+  // The transpiled code and the relative specifiers of a module do not depend
+  // on which collector is asking, only on the file — and every `.vsk` compile
+  // builds its own collector, so a docs-style app whose 26 pages all import one
+  // content module read, parsed, stripped and re-transpiled that module 26
+  // times (51s of a 95s build). Cache the result against the file's mtime and
+  // skip the read AND the parse on a hit: callers mutate the AST they get
+  // (`stripTsTypes`, `stripped.body = ...`), so the AST itself stays private to
+  // the call that created it.
+  let mtimeMs = -1;
+  try {
+    mtimeMs = statSync(absPath).mtimeMs;
+  } catch { /* unreadable: fall through to the uncached path */ }
+  const cached = mtimeMs >= 0 ? bundledCodeCache.get(absPath) : undefined;
+  let code: string;
+  let specifiers: string[];
+  if (cached && cached.mtimeMs === mtimeMs) {
+    code = cached.code;
+    specifiers = cached.specifiers;
+  } else {
+    const src = readSsrSource(absPath);
+    if (!src || !src.ast) {
+      const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
+      collector.modules.push({ key, code: raw, dir, deps: {} });
+      return key;
+    }
+    let stripped = src.ast;
+    if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
+    stripped.body = (stripped.body || []).filter((n: unknown) => (n ? !isTypeOnlyStatement(n) : false));
+    specifiers = [...collectModuleSpecifiers(src.ast)];
+    code = esmToCjs(stripped.body as Array<{ type: string }>);
+    bundledCodeCache.set(absPath, { mtimeMs, code, specifiers });
+    evict(bundledCodeCache);
   }
 
-  let stripped = src.ast;
-  if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
-  stripped.body = (stripped.body || []).filter((n: unknown) => (n ? !isTypeOnlyStatement(n) : false));
-
   const deps: Record<string, string> = {};
-  for (const spec of collectModuleSpecifiers(src.ast)) {
+  for (const spec of specifiers) {
     if (!isRelativeSpec(spec)) continue;
     const depPath = resolveSsrModule(spec, dir);
     if (!depPath) continue;
     deps[spec] = collectModuleBundled(depPath, collector);
   }
 
-  collector.modules.push({ key, code: esmToCjs(stripped.body as Array<{ type: string }>), dir, deps });
+  collector.modules.push({ key, code, dir, deps });
   return key;
 }
+
+const bundledCodeCache = new Map<string, { mtimeMs: number; code: string; specifiers: string[] }>();
 
 /**
  * Builds the module bundle + local-binding list for a set of import lines

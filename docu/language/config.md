@@ -124,3 +124,22 @@ The `--platform` flag (or `VESK_PLATFORM` env) controls output format:
   `preset`, `validateConfig`
 - `packages/cli/src/index.ts` — config loading (`loadConfig`)
 - `packages/types/src/index.ts` — `VeskConfig`, `SecurityConfig`
+
+
+## Monorepos and workspaces
+
+Vesk apps work inside an existing pnpm/npm/yarn workspace: the compiler resolves
+bare specifiers through the package's `exports` map (including subpaths and
+`./*` patterns) and prefers the `import`/`module` entry over the CJS `main`, so a
+workspace package that ships only ESM resolves correctly on both the server and
+the client.
+
+Practical notes:
+
+- keep the app's own dependencies as normal ranges; `workspace:` is a
+  package-manager protocol and never appears in an import specifier,
+- a workspace package imported for its **values** (a component, a constant) is
+  bundled into the server module closure, so it must be plain TS/JS with no
+  Node builtins on the server path,
+- `.vsk` files still need a relative or tsconfig-`paths` import; they are not
+  published through `exports`.

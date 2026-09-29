@@ -10,6 +10,7 @@
   },
   "workspaces": [
     "packages/adapter",
+    "packages/testing",
     "packages/adapters/vite",
     "packages/agentic",
     "packages/cli",
@@ -25,10 +26,11 @@
   ],
   "scripts": {
     "build": "npx tsx packages/cli/build.ts",
-    "typecheck": "tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/adapter/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/plugin-pwa/tsconfig.json",
+    "typecheck": "tsc --noEmit -p packages/testing/tsconfig.json && tsc --noEmit -p packages/types/tsconfig.json && tsc --noEmit -p packages/compiler/tsconfig.json && tsc --noEmit -p packages/runtime/tsconfig.json && tsc --noEmit -p packages/adapter/tsconfig.json && tsc --noEmit -p packages/cli/tsconfig.json && tsc --noEmit -p packages/plugin-pwa/tsconfig.json",
     "test:dev": "npx tsx tests/dev-test.mjs",
     "test:prod": "npx tsx tests/prod-test.mjs",
     "test:unit": "node scripts/test.js",
+    "budget": "node scripts/asset-budget.mjs",
     "test": "npm run test:unit && npm run test:dev",
     "release": "node scripts/release.mjs",
     "release:dry": "node scripts/release.mjs --dry-run",
