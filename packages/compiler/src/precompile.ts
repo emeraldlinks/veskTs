@@ -88,6 +88,7 @@ function precompileFileInternal(
   }
 
   const topLevelCode = transformTopLevelForActions(ir.topLevelCode, 'server');
+  const metadataSource = (ir as { metadataSource?: string | null }).metadataSource || null;
   const runtimeImports = ir.imports.slice();
 
   const collector: ModuleCollector = { keysByAbs: new Map(), modules: [] };
@@ -121,5 +122,8 @@ function precompileFileInternal(
     bindings,
     topLevelCode,
     subFiles,
+    // A static `export const metadata` rides along so a serverless function can
+    // serialize the head without the `.vsk` source being present at all.
+    ...(metadataSource ? { metadataSource } : {}),
   };
 }

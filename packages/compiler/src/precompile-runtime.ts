@@ -72,6 +72,14 @@ export interface PrecompileFilePlan {
   topLevelCode: string[];
   /** The file's `.vsk` imports, precompiled recursively. */
   subFiles: PrecompileSubFilePlan[];
+  /**
+   * Source of a static `export const metadata = defineMetadata({...})`.
+   *
+   * Carried as SOURCE, not as a value, so the plan stays pure JSON (it is
+   * embedded in a generated function and can be cached to disk). Evaluation
+   * happens in a sealed sandbox with only `defineMetadata` in scope.
+   */
+  metadataSource?: string;
 }
 
 // ---------------------------------------------------------------------------

@@ -18,3 +18,6 @@ export type { VeskLeafComponent, VeskPrimitiveComponent, VeskTaggedLeafComponent
 export { LoadingIndicator, useLoadingIndicator, configureLoadingIndicator, getLoadingProgress, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 export type { LoadingIndicatorHandle, LoadingIndicatorOptions, LoadingIndicatorProps } from '@vesk/runtime/src/loading-indicator';
 export { defineAction, getAction, clearActions, validateActionInput, issuesToFieldMap, isFormAction } from '@vesk/runtime/src/action';
+
+export { defineMetadata, mergeMetadata, resolveTitle, metadataToHtml } from '@vesk/runtime/src/metadata';
+export type { VeskMetadata, MetadataTitle, OpenGraphMetadata } from '@vesk/runtime/src/metadata';

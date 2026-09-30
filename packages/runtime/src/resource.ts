@@ -31,6 +31,20 @@ export interface UseFetchOptions<T> extends Omit<RequestInit, 'body'> {
 	timeout?: number;
 	enabled?: boolean;
 	dedupe?: boolean;
+	/**
+	 * How SSR treats this resource. `'wait'` (default) holds the document
+	 * until it settles, so the data is in the SSR handoff. `'defer'` starts the
+	 * fetch but excludes it from the settle barrier, so the document flushes
+	 * without it.
+	 *
+	 * The right choice for a resource inside a `{#client}` island: the island's
+	 * server output is a placeholder the client fills on hydration, so making
+	 * the document wait for that fetch delays every other byte on the page to
+	 * buy data the client was going to fetch anyway. The cost is one extra
+	 * client-side request for that island; the saving is the whole page's
+	 * time-to-first-byte.
+	 */
+	ssr?: 'wait' | 'defer';
 }
 
 export class HttpError extends Error {
@@ -444,8 +458,21 @@ function writeCache(key: string, data: unknown): void {
 	if (!entry || entry.data !== data) getClientCache().set(key, { data, fetchedAt: Date.now() });
 }
 
-function trackSsrPromise(promise: Promise<unknown>): void {
+function trackSsrPromise(promise: Promise<unknown>, defer = false): void {
 	const tk = (g().__vsk_ssr_token as string) || '';
+	if (defer) {
+		// Deliberately NOT in the settle barrier's array. It is still tracked so
+		// nothing waits on it, and the data still lands in the token's slot if
+		// it happens to arrive before serialization (a race we take for free).
+		// Late data is simply absent from the handoff, which is correct: the
+		// consumer is an island that fetches on hydration anyway.
+		const deferredKey = tk ? `__vsk_ssr_deferred_${tk}` : '__vsk_ssr_deferred';
+		if (!g()[deferredKey]) g()[deferredKey] = [];
+		(g()[deferredKey] as Promise<unknown>[]).push(promise);
+		// Never leave a rejection unobserved on a promise nobody awaits.
+		promise.then(undefined, () => {});
+		return;
+	}
 	const promisesKey = tk ? `__vsk_ssr_promises_${tk}` : '__vsk_ssr_promises';
 	if (!g()[promisesKey]) g()[promisesKey] = [];
 	(g()[promisesKey] as Promise<unknown>[]).push(promise);
@@ -526,7 +553,7 @@ function startRequest<T>(handle: ResourceHandle<T>, skipCache: boolean): Promise
 			// handoff. Only the resource state needs wiring up here.
 			attachSettle(handle, prom);
 		}
-		trackSsrPromise(prom);
+		trackSsrPromise(prom, options.ssr === 'defer');
 		return prom as Promise<T>;
 	}
 

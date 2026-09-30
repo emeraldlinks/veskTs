@@ -125,3 +125,34 @@ data instead of re-fetching.
 - `packages/runtime/src/index-client.ts` — resource exports
 - `packages/runtime/src/index-server.ts` — `setSsrData`, `clearSsrData`,
   `resolveSsrResources`
+
+
+## Island data must not hold the document
+
+SSR waits for every resource a render starts, so a page can never be sent
+before its slowest fetch. For data that belongs to a `client` island that is
+usually the wrong trade: the island's server output is a placeholder the client
+fills on hydration anyway, so the wait delays every other byte on the page to
+buy a request the client was going to make.
+
+```ts
+component Widget client {
+  // fetched during SSR, but the DOCUMENT does not wait for it
+  const feed = useFetch('/api/feed', { ssr: 'defer' })
+  return <ul>{feed.value.items.map((i) => <li>{i.title}</li>)}</ul>
+}
+```
+
+What `'defer'` does:
+
+- starts the fetch (so a shared, warm value can still be reused), and keeps it
+  out of the settle barrier — the document flushes without it;
+- leaves the data out of the SSR handoff when it loses the race, which is
+  correct: the consumer is an island that fetches on hydration;
+- never leaves an unhandled rejection behind.
+
+The cost is one extra client-side request for that island. The saving is the
+whole page's time-to-first-byte. Use the default (`'wait'`) for anything the
+server should render — and `async component` + `await useFetch` when the data
+is part of the page's critical path, which is better than any fallback: no
+placeholder, no patch, no flash.

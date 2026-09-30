@@ -1529,6 +1529,13 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
   const importedNames = new Set<string>();
   let staticProps: string | null = null;
   let loadFn: string | null = null;
+  // `export const metadata = defineMetadata({...})` — the SOURCE of the
+  // expression, captured like `load`/`getStaticProps`. It is evaluated in a
+  // sandbox with nothing in scope but `defineMetadata`, so a static head can
+  // never depend on the component's frame evaluating correctly (the class of
+  // bug the `<Head>` interpolation path is prone to) and can never be
+  // non-deterministic.
+  let metadataSource: string | null = null;
   const topLevelCode: string[] = [];
   const exportAliases: Array<{ local: string; exported: string }> = [];
   const reexportSources: string[] = [];
@@ -1577,6 +1584,18 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
           : null;
       if (fnName === 'getStaticProps') {
         staticProps = stripCodeTypes(getSource(source, decl));
+        continue;
+      }
+    }
+
+    if (node.type === 'ExportNamedDeclaration' && node.declaration && !metadataSource) {
+      const decl = node.declaration;
+      const first = decl.type === 'VariableDeclaration' ? decl.declarations[0] : null;
+      if (first?.id?.name === 'metadata') {
+        // The INITIALIZER, not the declaration: the sandbox evaluates this as
+        // an expression (`return ( … )`), so a `const metadata = …` wrapper
+        // would be a syntax error.
+        metadataSource = first.init ? stripCodeTypes(getSource(source, first.init)) : null;
         continue;
       }
     }
@@ -1803,7 +1822,9 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     }
   }
 
-  return new IRRoot(components, imports, importedNames, staticProps, loadFn, topLevelCode, exportAliases, reexportSources);
+  const irRoot = new IRRoot(components, imports, importedNames, staticProps, loadFn, topLevelCode, exportAliases, reexportSources);
+  irRoot.metadataSource = metadataSource;
+  return irRoot;
   } finally {
     currentVskNamespaceLocals = prevNamespaceLocals;
     currentSourceFile = prevSourceFile;

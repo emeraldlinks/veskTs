@@ -20,6 +20,13 @@ export class IRRoot {
   importedNames: Set<string>;
   staticProps: string | null;
   loadFn: string | null;
+  /**
+   * Source of `export const metadata = defineMetadata({...})`, when present.
+   * Static by construction: evaluated with only `defineMetadata` in scope, at
+   * build time where possible and in a sealed sandbox at request time
+   * otherwise, so the head never depends on the component's frame.
+   */
+  metadataSource?: string | null;
   topLevelCode: string[];
   /**
    * Same-file specifier exports (`export { A }`, `export { A as B }`) as

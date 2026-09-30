@@ -5,6 +5,7 @@ import { tryEvalExpr, escapeHtml } from '@vesk/compiler/src/server-utils';
 import { isWhitespaceChar } from '@vesk/compiler/src/scan';
 import { parse } from '@vesk/compiler/src/parser';
 import { collectTrackedNames, transformTracked, transformTrackedInit, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
+import { defineMetadata as metadataShim, metadataToHtml, type VeskMetadata } from '@vesk/runtime/src/metadata';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
 
@@ -334,6 +335,34 @@ function irNodeToHeadHtml(node: IRNode, ctx: HeadEvalCtx, reconcileable = false)
     }
   }
   return '';
+}
+
+/**
+ * Evaluate a static `export const metadata = …` in a SEALED sandbox.
+ *
+ * The sandbox has exactly one binding — `defineMetadata` — and no access to
+ * globals, the request, or the component. That is the whole point: a static
+ * head must not be able to depend on the component's frame evaluating
+ * correctly (which is how `<title>{doc.title}</title>` came out empty), and it
+ * must not be able to be non-deterministic. Anything that needs state belongs
+ * in `<Head>`, which is reactive.
+ *
+ * Returns null — never throws — for a source that will not evaluate, so a
+ * broken metadata declaration degrades to "no static head" rather than taking
+ * the page down.
+ */
+export function renderStaticMetadataHtml(source: string | null | undefined): string {
+  if (!source) return '';
+  try {
+    // Imported lazily and by module path so this stays a server-side concern
+    // and does not pull the runtime into a client bundle.
+    const fn = new Function('defineMetadata', 'return (' + source + ')') as (define: typeof metadataShim) => unknown;
+    const meta = fn(metadataShim) as VeskMetadata;
+    return metadataToHtml(meta);
+  } catch (e) {
+    console.error('vesk: static metadata could not be evaluated:', e instanceof Error ? e.message : e);
+    return '';
+  }
 }
 
 /**

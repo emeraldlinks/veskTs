@@ -13,7 +13,7 @@ import {
   securityHeaders, securityComment,
   safeJsonForScript, quoteAttr,
 } from '@vesk/compiler/src/server-utils';
-import { renderHeadHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
+import { renderHeadHtml, renderStaticMetadataHtml, mergeHeadHtml } from '@vesk/compiler/src/server-head';
 import { buildComponentMap } from '@vesk/compiler/src/server-jsgen';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { collectVskImportPaths, collectVskReexportPaths, vskRegistryAliases, applyVskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
@@ -48,6 +48,7 @@ export function compileFile(source: string, options?: { sourcePath?: string }): 
   const owners = new VskComponentOwners();
   const result = compileFileInternal(source, options?.sourcePath, new Set(), owners);
   owners.report('SSR');
+  result.metadataSource = (result.ir as { metadataSource?: string | null }).metadataSource || null;
   return result;
 }
 
@@ -186,6 +187,9 @@ export function renderPage(
   const fullRegistry = new Map([...registry, ...componentMap]);
   const targetComp = ir.components.find((c) => c.name === componentName);
 
+  // A static `export const metadata` on this .vsk file, if any.
+  const metadataSource = ((ir as { metadataSource?: string | null }).metadataSource || null);
+
   const doRender = (ssrProps: Record<string, unknown>): RenderPageResult | Promise<RenderPageResult> => {
     (globalThis as any).__vsk_ssr = true;
     // Reuse an in-flight render token: the generated adapter handler renders
@@ -212,9 +216,12 @@ export function renderPage(
         }
         return {
           body: bodyHtml,
-          // The component's own scope, so head expressions that read an import
-          // resolve (see renderHeadHtml).
-          head: renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk)),
+          // A static `export const metadata` wins: it is evaluated in a sealed
+          // sandbox, so it cannot depend on the component's frame resolving
+          // (the failure mode that shipped an empty <title>). Whatever the
+          // page's `<Head>` adds is appended, not lost.
+          head: [renderStaticMetadataHtml(metadataSource), renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk))]
+            .filter(Boolean).join('\n'),
           props: ssrProps
         };
       })();
@@ -225,7 +232,10 @@ export function renderPage(
     } finally {
       delete (globalThis as any).__vsk_ssr;
     }
-    const headHtml = targetComp ? renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk)) : '';
+    const headHtml = [
+      renderStaticMetadataHtml(metadataSource),
+      targetComp ? renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk)) : '',
+    ].filter(Boolean).join('\n');
     const pending = (globalThis as any)[`__vsk_ssr_promises_${renderToken}`];
     if (pending && pending.length > 0) {
       // A sync component still started server resources (useFetch): settle them
@@ -259,6 +269,7 @@ export function renderPage(
 function clearSsrCells(token: string | undefined): void {
   if (!token) return;
   delete (globalThis as any)[`__vsk_ssr_promises_${token}`];
+  delete (globalThis as any)[`__vsk_ssr_deferred_${token}`];
   delete (globalThis as any)[`__vsk_ssr_failures_${token}`];
   // This render is done with the token: release the slot so the reaper below
   // can collect paths that never run renderFullPage (a bare renderPage/render
@@ -672,6 +683,7 @@ export function renderPageStream(
   resetVskState(!!options.hydrate, options.markerless !== false);
 
   const targetComp = ir.components.find((c) => c.name === componentName);
+  const metadataSource = (cached?.metadataSource ?? (ir as { metadataSource?: string | null }).metadataSource ?? null);
   const cssUrls: string[] = options.cssUrls || (options.cssUrl ? [options.cssUrl] : []);
   const cssLink = cssUrls.map(u => `\t<link rel="stylesheet" href="${u}" />\n`).join('');
 
@@ -685,7 +697,10 @@ export function renderPageStream(
   }
   let streamHeadHtml: string | null = null;
   if (targetComp) {
-    let headHtml = renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk));
+    let headHtml = [
+      renderStaticMetadataHtml(metadataSource),
+      renderHeadHtml(targetComp, ssrProps, scopedVesk(renderFn, __vesk)),
+    ].filter(Boolean).join('\n');
     if (options.pageHead) {
       const merged = mergeHeadHtml(options.pageHead, headHtml);
       headHtml = merged.html;

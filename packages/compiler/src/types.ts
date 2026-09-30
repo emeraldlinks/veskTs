@@ -43,6 +43,11 @@ export interface CompileFileResult {
   ir: IRRoot;
   componentMap: Map<string, Function>;
   __vesk: Record<string, unknown>;
+  /**
+   * Source of a static `export const metadata`, hoisted from the IR so a
+   * precompiled (source-less) render can still serialize the head.
+   */
+  metadataSource?: string | null;
 }
 
 export interface FullPageOptions {
