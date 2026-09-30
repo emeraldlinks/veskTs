@@ -26,6 +26,7 @@ export const docGroups = [
 ] as const;
 
 import { pages as dataFetchingPages } from "./docs-data-fetching";
+import { pages as metadataPages } from "./docs-metadata";
 import { pages as middlewarePages } from "./docs-middleware";
 import { pages as routingPages } from "./docs-routing";
 import { pages as serverApisPages } from "./docs-server-apis";
@@ -2047,6 +2048,7 @@ update([]);            // clear the list`,
 
 const extendedPages: DocPage[] = [
   ...dataFetchingPages,
+  ...metadataPages,
   ...middlewarePages,
   ...routingPages,
   ...serverApisPages,
@@ -2095,6 +2097,7 @@ const docSlugOrder = [
   "middleware",
   "isr",
   "server-apis",
+  "metadata",
   "seo",
   "network",
   "bindings",

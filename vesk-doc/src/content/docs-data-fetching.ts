@@ -715,6 +715,12 @@ export async function loadPageData() {
         text:
           "`setSsrSink` and the `SsrDataSink` interface are server-only: `@vesk/runtime/server` exports them, the default client entry does not.",
       },
+      {
+        kind: "note",
+        tone: "info",
+        text:
+          "For data that belongs to a `client` island, pass `{ ssr: 'defer' }`: the fetch starts during SSR but stays out of the settle barrier, so the document is not held for data the client fetches on hydration anyway. See the Metadata page for the full trade-off.",
+      },
     ],
   },
   {
