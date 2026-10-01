@@ -612,6 +612,12 @@ export interface SeoAuditResult {
   passed: number;
   errors: number;
   warnings: number;
+  /**
+   * Every issue found, with the page it came from. The counts are for humans
+   * reading a terminal; this is for anything that wants to assert on the audit
+   * instead of scraping its output.
+   */
+  issues: Array<SeoCheckIssue & { page: string }>;
 }
 
 export interface CombinedPageInfo {

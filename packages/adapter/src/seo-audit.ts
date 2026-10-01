@@ -41,6 +41,17 @@ interface SeoCheckFn {
   (src: string): SeoCheckIssue[];
 }
 
+/**
+ * Does this source declare its head as data?
+ *
+ * `export const metadata = defineMetadata({...})` is a complete head on its own,
+ * so every check that asks "is there a title / description / og tag?" has to
+ * consider it — otherwise the audit fails the exact style the docs recommend.
+ */
+function hasMetadataDeclaration(src: string): boolean {
+  return /\bdefineMetadata\s*\(|export\s+const\s+metadata\b/.test(src);
+}
+
 const SEO_CHECKS: Record<string, SeoCheckFn> = {
   h1: (src: string) => {
     const count = (src.match(/<h1[^>]*>/gi) || []).length;
@@ -78,6 +89,16 @@ const SEO_CHECKS: Record<string, SeoCheckFn> = {
   },
 
   metaDescription: (src: string) => {
+    if (hasMetadataDeclaration(src)) {
+      // `export const metadata = defineMetadata({ description: … })` is the
+      // declared source of the description; the audit reads source text, so it
+      // can see the declaration but not evaluate it (and must not flag a page
+      // for using the documented API).
+      if (!/\bdescription\s*:/.test(src)) {
+        return [{ severity: SEVERITY.WARN, message: 'No `description` in the metadata declaration' }];
+      }
+      return [];
+    }
     if (!/name=["']description["']/.test(src)) {
       return [{ severity: SEVERITY.WARN, message: 'Missing meta description' }];
     }
@@ -86,6 +107,12 @@ const SEO_CHECKS: Record<string, SeoCheckFn> = {
 
   ogTags: (src: string) => {
     const issues: SeoCheckIssue[] = [];
+    if (hasMetadataDeclaration(src)) {
+      // Whether a page wants Open Graph tags is the author's call, and a
+      // metadata declaration is a complete head by itself — so do not invent
+      // three warnings about tags the audit cannot see.
+      return issues;
+    }
     const required = ['og:title', 'og:description', 'og:image'];
     for (const tag of required) {
       const pattern = new RegExp(`property=["']${tag}["']`);
@@ -104,8 +131,18 @@ const SEO_CHECKS: Record<string, SeoCheckFn> = {
   },
 
   title: (src: string) => {
+    // A static `export const metadata = defineMetadata({ title: … })` is the
+    // documented way to declare a title now, and it produces the same <title>.
+    // Without this, the page style the docs recommend failed `vesk seo
+    // --strict` with "missing <title>".
+    if (hasMetadataDeclaration(src)) {
+      if (!/\btitle\s*:/.test(src)) {
+        return [{ severity: SEVERITY.WARN, message: 'No `title` in the metadata declaration — it will render no <title>' }];
+      }
+      return [];
+    }
     if (!/<title>/i.test(src) && !/<Head>/i.test(src) && !/title>/i.test(src)) {
-      return [{ severity: SEVERITY.ERROR, message: 'Missing <title> or <Head> — page title is critical for SEO' }];
+      return [{ severity: SEVERITY.ERROR, message: 'Missing <title>, <Head>, or `export const metadata` — page title is critical for SEO' }];
     }
     return [];
   },
@@ -132,11 +169,12 @@ export function runSeoAudit(appDir: string, _options?: Record<string, unknown>):
   const combined = collectCombinedSource(appDir);
   if (combined.length === 0) {
     console.error('vesk seo-audit: no page.vsk files found');
-    return { passed: 0, errors: 0, warnings: 0 };
+    return { passed: 0, errors: 0, warnings: 0, issues: [] };
   }
 
   let errors = 0;
   let warnings = 0;
+  const allIssues: Array<SeoCheckIssue & { page: string }> = [];
 
   for (const { path, src } of combined) {
     const relPath = path.replace(appDir, '').replace(/^[\\/]/, '');
@@ -150,6 +188,7 @@ export function runSeoAudit(appDir: string, _options?: Record<string, unknown>):
     for (const check of Object.values(SEO_CHECKS)) {
       const issues = check(src);
       for (const issue of issues) {
+        allIssues.push({ ...issue, page: relPath || 'page.vsk' });
         if (issue.severity === SEVERITY.ERROR) { fileErrors++; }
         else { fileWarnings++; }
         fileIssues.push(issue);
@@ -173,5 +212,5 @@ export function runSeoAudit(appDir: string, _options?: Record<string, unknown>):
   const total = combined.length;
   const status: string = errors > 0 ? 'FAIL' : (warnings > 0 ? 'PASS_WARN' : 'PASS');
   console.error(`vesk seo-audit: ${total} pages — ${errors} errors, ${warnings} warnings [${status}]`);
-  return { passed: total, errors, warnings };
+  return { passed: total, errors, warnings, issues: allIssues };
 }

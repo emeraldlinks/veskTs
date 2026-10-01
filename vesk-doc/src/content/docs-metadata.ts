@@ -82,6 +82,43 @@ component Page() {
         text:
           "The serializer is the same code for the build and the runtime, with text and attributes escaped by their own rules — escaping a `content` attribute as text is how you get `&amp;amp;` in a description.",
       },
+      { kind: "h2", text: "When it is NOT enough: a dynamic title" },
+      {
+        kind: "p",
+        text:
+          "A metadata declaration is static, so it cannot express a title that depends on the route. This very site is the case: `/docs/[slug]` serves 26 pages, and each one's title comes from the document it resolved. That is `<Head>`'s job, and it works — the page it renders is correct after hydration.",
+      },
+      {
+        kind: "code",
+        filename: "app/docs/[slug]/page.vsk",
+        language: "vsk",
+        code: `import { getDoc } from '../../../src/content/docs'
+
+// Static per-route metadata for the layout and the index…
+export const metadata = defineMetadata({ title: { template: '%s — Vesk Docs' } })
+
+component DocsPage(props: { params: { slug: string } }) {
+  const doc = getDoc(props.params.slug)
+  if (!doc) throw new NotFoundError()
+
+  // …and a dynamic title for the page itself, merged with the above.
+  return (
+    <>
+      <Head>
+        <title>{doc.title} — Vesk Docs</title>
+        <meta name="description" content={doc.description} />
+      </Head>
+      <article><h1>{doc.title}</h1></article>
+    </>
+  )
+}`,
+      },
+      {
+        kind: "note",
+        tone: "warn",
+        text:
+          "Order matters when you mix them: the static declaration is emitted FIRST and the interpolated one after, so a dynamic `<title>` wins the browser's title bar (there is only one) while the static tags you did not duplicate are still there. If you find yourself writing a dynamic title, ask whether it could be a route of its own — `metadata` is the better answer wherever the value is knowable at build time.",
+      },
       { kind: "h2", text: "Layouts and title templates" },
       {
         kind: "p",

@@ -57,6 +57,47 @@ function writePage(dir, name, content, layout) {
 }
 
 describe('SEO Audit', () => {
+  it('accepts a static `export const metadata` as the page title', () => {
+    // Regression: the audit only knew about <title>/<Head>, so a page written
+    // the way the docs recommend failed `vesk seo --strict` with
+    // "Missing <title> or <Head> — page title is critical for SEO".
+    const dir = tmpApp('metadata-title');
+    writePage(dir, 'page.vsk', `
+      import { defineMetadata } from '@vesk/runtime'
+
+      export const metadata = defineMetadata({
+        title: 'Pricing',
+        description: 'What it costs.',
+      })
+
+      component Page() {
+        <h1>Pricing</h1>
+      }
+    `);
+    const audit = runSeoAudit(dir);
+    const messages = audit.issues.map((i) => i.message);
+    expect(messages.some((m) => /Missing <title>/.test(m))).toBe(false);
+    expect(messages.some((m) => /Missing meta description/.test(m))).toBe(false);
+    // Open Graph is the author's call; the audit cannot see into a declaration,
+    // so it must not invent three warnings about tags it cannot check.
+    expect(messages.some((m) => /og:/.test(m))).toBe(false);
+  });
+
+  it('still reports a metadata declaration that is missing a title', () => {
+    const dir = tmpApp('metadata-no-title');
+    writePage(dir, 'page.vsk', `
+      import { defineMetadata } from '@vesk/runtime'
+
+      export const metadata = defineMetadata({ description: 'No title here.' })
+
+      component Page() {
+        <h1>Untitled</h1>
+      }
+    `);
+    const audit = runSeoAudit(dir);
+    expect(audit.issues.some((i) => /No `title` in the metadata declaration/.test(i.message))).toBe(true);
+  });
+
   it('reports missing title and h1', () => {
     const dir = tmpApp('seo-missing');
     writePage(dir, 'page', `<p>Hello</p>`);

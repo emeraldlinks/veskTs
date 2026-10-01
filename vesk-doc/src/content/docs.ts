@@ -1161,12 +1161,41 @@ throw new VeskError({
     slug: "seo",
     title: "SEO",
     description:
-      "Structured data via the JsonLd component and schema generator functions, plus vesk seo to audit your app.",
+      "Titles and descriptions via defineMetadata, structured data via the JsonLd component and schema generators, plus vesk seo to audit your app.",
     group: "Runtime",
     blocks: [
       {
         kind: "p",
         text: "Vesk provides structured data (JSON-LD) components for search engine optimization. All auto-imported from `@vesk/runtime`.",
+      },
+      { kind: "h2", text: "Titles and descriptions" },
+      {
+        kind: "p",
+        text:
+          "Declare a route's head as data with `export const metadata = defineMetadata({...})` from `@vesk/runtime`. It is evaluated at build time in a sealed sandbox, so the title cannot come out empty the way an interpolated `<Head>` expression can, and `vesk seo` understands it:",
+      },
+      {
+        kind: "code",
+        filename: "app/pricing/page.vsk",
+        language: "vsk",
+        code: `import { defineMetadata } from '@vesk/runtime'
+
+export const metadata = defineMetadata({
+  title: 'Pricing',
+  description: 'What it costs, and what it does not.',
+  openGraph: { title: 'Pricing', image: '/og.png' },
+  alternates: { canonical: '/pricing' },
+})
+
+component Page() {
+  <h1>Pricing</h1>
+}`,
+      },
+      {
+        kind: "note",
+        tone: "info",
+        text:
+          "For a title that depends on the route (a docs site with one page per slug, say), use `<Head>` — it is the reactive path — and the two merge, static first. See the Metadata page for why interpolated `<Head>` titles are worth avoiding where you can, and how `vesk seo` treats both.",
       },
       { kind: "h2", text: "JsonLd component" },
       {
