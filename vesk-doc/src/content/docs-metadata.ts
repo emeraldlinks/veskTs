@@ -92,7 +92,8 @@ component Page() {
         kind: "code",
         filename: "app/docs/[slug]/page.vsk",
         language: "vsk",
-        code: `import { getDoc } from '../../../src/content/docs'
+        code: `// @props { "params": { "slug": "getting-started" } }
+import { getDoc } from '../../../src/content/docs'
 
 // Static per-route metadata for the layout and the index…
 export const metadata = defineMetadata({ title: { template: '%s — Vesk Docs' } })
@@ -157,7 +158,8 @@ export const metadata = defineMetadata({ title: 'Pricing' })`,
         kind: "code",
         filename: "components/Feed.vsk",
         language: "vsk",
-        code: `component Feed client {
+        code: `// @client-only — an island fetches on hydration, so this never SSRs
+component Feed client {
   // fetched during SSR, but the DOCUMENT does not wait for it
   const feed = useFetch('/api/feed', { ssr: 'defer' })
   return <ul>{feed.value.items.map((i) => <li>{i.title}</li>)}</ul>

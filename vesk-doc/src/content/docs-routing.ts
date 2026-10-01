@@ -351,7 +351,8 @@ createRouter(tree, { container: document.getElementById('root')! }).start();`,
 					{
 						label: "statement mode",
 						filename: "app/error.vsk",
-						code: `component ErrorBoundary(props: { error: any; retry: any; params: any }) {
+						code: `// @props { "error": { "message": "Something broke" }, "statusCode": 500 }
+component ErrorBoundary(props: { error: any; retry: any; params: any }) {
 	<main>
 		<h1>Something went wrong</h1>
 		<p>{props.error.message}</p>
@@ -362,7 +363,8 @@ createRouter(tree, { container: document.getElementById('root')! }).start();`,
 					{
 						label: "expression mode",
 						filename: "app/error.vsk",
-						code: `component ErrorBoundary(props: { error: any; retry: any; params: any }) {
+						code: `// @props { "error": { "message": "Something broke" }, "retry": null, "statusCode": 500 }
+component ErrorBoundary(props: { error: any; retry: any; params: any }) {
 	return (
 		<main>
 			<h1>Something went wrong</h1>

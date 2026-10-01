@@ -68,7 +68,9 @@ component PostList() {
   if (posts.error) return <p>{(posts.error as Error).message}</p>;
 
   <ul>
-    for (const post of posts.data) {
+    // posts.data is undefined until the first success — iterate a fallback, or
+    // the render throws on the server where there is no second pass.
+    for (const post of posts.data ?? []) {
       <li>{post.title}</li>
     }
   </ul>
@@ -96,7 +98,8 @@ component PostList() {
 
   return (
     <ul>
-      {posts.data.map((post) => <li>{post.title}</li>)}
+      {/* posts.data is undefined until the first success */}
+      {(posts.data ?? []).map((post) => <li>{post.title}</li>)}
     </ul>
   );
 }`,
@@ -241,6 +244,7 @@ interface Post {
 }
 
 component OptionalPosts() {
+  const token = 'demo-token'
   const posts = useFetch<Post[]>('/api/posts', {
     key: 'posts',
     retry: 2,
@@ -254,7 +258,9 @@ component OptionalPosts() {
   if (posts.loading) return <p>Loading...</p>;
 
   <ul>
-    for (const post of posts.data) {
+    // posts.data is undefined until the first success, and the server has no
+    // second pass — iterate a fallback or the render throws.
+    for (const post of posts.data ?? []) {
       <li>{post.title}</li>
     }
   </ul>
@@ -271,6 +277,7 @@ interface Post {
 }
 
 component OptionalPosts() {
+  const token = 'demo-token'
   const posts = useFetch<Post[]>('/api/posts', {
     key: 'posts',
     retry: 2,
@@ -285,7 +292,8 @@ component OptionalPosts() {
 
   return (
     <ul>
-      {posts.data.map((post) => <li>{post.title}</li>)}
+      {/* posts.data is undefined until the first success */}
+      {(posts.data ?? []).map((post) => <li>{post.title}</li>)}
     </ul>
   );
 }`,
@@ -418,6 +426,10 @@ component DocReader(props: { id: string }) {
   name: string;
 }
 
+component Skeleton() {
+  <div class="animate-pulse bg-gray-200 h-4 w-32 rounded" />
+}
+
 component UserProfile(props: { userId: string }) {
   const user = createResource(
     async () => {
@@ -438,6 +450,10 @@ component UserProfile(props: { userId: string }) {
             filename: "app/components/UserProfile.vsk",
             code: `interface User {
   name: string;
+}
+
+component Skeleton() {
+  <div class="animate-pulse bg-gray-200 h-4 w-32 rounded" />
 }
 
 component UserProfile(props: { userId: string }) {
@@ -629,7 +645,9 @@ component PostList() {
   }
 
   <ul>
-    for (const post of posts.data) {
+    // posts.data is undefined until the first success, and the server has no
+    // second pass — iterate a fallback or the render throws.
+    for (const post of posts.data ?? []) {
       <li>{post.title}</li>
     }
   </ul>
@@ -657,7 +675,8 @@ component PostList() {
 
   return (
     <ul>
-      {posts.data.map((post) => <li>{post.title}</li>)}
+      {/* posts.data is undefined until the first success */}
+      {(posts.data ?? []).map((post) => <li>{post.title}</li>)}
     </ul>
   );
 }`,
@@ -756,7 +775,8 @@ export async function loadPageData() {
         kind: "code",
         filename: "app/lib/net.ts",
         language: "ts",
-        code: `import { getNetworkState } from '@vesk/runtime';
+        code: `// @client-only — the network APIs live in the client barrel
+import { getNetworkState } from '@vesk/runtime';
 
 const state = getNetworkState();
 console.log(state.online);        // true | false
@@ -777,14 +797,16 @@ console.log(state.saveData);      // boolean`,
           {
             label: "statement mode",
             filename: "app/components/NetworkStatus.vsk",
-            code: `import { watchNetwork } from '@vesk/runtime';
+            code: `// @client-only — the network APIs live in the client barrel
+import { watchNetwork } from '@vesk/runtime';
 
 component NetworkStatus() {
-  let &[online] = track(navigator.onLine ?? true);
+  let &[online, onlineCell] = track(navigator.onLine ?? true);
 
-  watchNetwork((state) => {
-    online = state.online;
-  });
+  // watchNetwork calls you with a plain snapshot — write the CELL, not the
+  // local: "online = ..." would rebind a local and re-render nothing.
+  const unsubscribe = watchNetwork((state) => onlineCell.set(state.online));
+  on_destroy(unsubscribe);
 
   <p class={online ? 'text-green-600' : 'text-red-600'}>
     {online ? 'Online' : 'Offline'}
@@ -794,7 +816,8 @@ component NetworkStatus() {
           {
             label: "expression mode",
             filename: "app/components/NetworkStatus.vsk",
-            code: `import { watchNetwork } from '@vesk/runtime';
+            code: `// @client-only — the network APIs live in the client barrel
+import { watchNetwork } from '@vesk/runtime';
 
 component NetworkStatus() {
   let &[online] = track(navigator.onLine ?? true);
@@ -823,14 +846,20 @@ component NetworkStatus() {
           {
             label: "statement mode",
             filename: "app/components/ConnectionBadge.vsk",
-            code: `import { getNetworkState, watchNetwork } from '@vesk/runtime';
+            code: `// @client-only — getNetworkState/watchNetwork live in the client barrel
+import { getNetworkState, watchNetwork } from '@vesk/runtime';
 
 component ConnectionBadge() {
   const &[state, stateCell] = track(getNetworkState());
 
-  watchNetwork((next) => {
-    state = next;
-  });
+  // watchNetwork CALLS YOU with a plain snapshot. It is not a cell, so the
+  // subscription has to write the cell explicitly — assigning "state = next"
+  // would rebind a local and re-render nothing.
+  const unsubscribe = watchNetwork((next) => set(stateCell, next));
+
+  // …and it has to be torn down with the component, or every remount adds a
+  // subscription that fires forever.
+  on_destroy(unsubscribe);
 
   <span>
     {state.online ? 'online' : 'offline'} · {state.effectiveType}
@@ -841,14 +870,20 @@ component ConnectionBadge() {
           {
             label: "expression mode",
             filename: "app/components/ConnectionBadge.vsk",
-            code: `import { getNetworkState, watchNetwork } from '@vesk/runtime';
+            code: `// @client-only — getNetworkState/watchNetwork live in the client barrel
+import { getNetworkState, watchNetwork } from '@vesk/runtime';
 
 component ConnectionBadge() {
   const &[state, stateCell] = track(getNetworkState());
 
-  watchNetwork((next) => {
-    state = next;
-  });
+  // watchNetwork CALLS YOU with a plain snapshot. It is not a cell, so the
+  // subscription has to write the cell explicitly — assigning "state = next"
+  // would rebind a local and re-render nothing.
+  const unsubscribe = watchNetwork((next) => set(stateCell, next));
+
+  // …and it has to be torn down with the component, or every remount adds a
+  // subscription that fires forever.
+  on_destroy(unsubscribe);
 
   return (
     <span>

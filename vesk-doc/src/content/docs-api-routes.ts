@@ -323,6 +323,12 @@ const { data, stale } = await isr(
             filename: "app/pricing/page.vsk",
             code: `import { isr } from '@vesk/runtime';
 
+// Self-contained: the real page imports its loader from ../lib/plans.
+async function fetchPlans() {
+  return [{ name: 'Starter', price: 0 }]
+}
+
+// @props { "plans": [{ "name": "Starter" }] }
 async component Pricing(props: { plans: { name: string }[] }) {
   {#server}
     const { data } = await isr('pricing', async () => {
@@ -339,6 +345,12 @@ async component Pricing(props: { plans: { name: string }[] }) {
             filename: "app/pricing/page.vsk",
             code: `import { isr } from '@vesk/runtime';
 
+// Self-contained: the real page imports its loader from ../lib/plans.
+async function fetchPlans() {
+  return [{ name: 'Starter', price: 0 }]
+}
+
+// @props { "plans": [{ "name": "Starter" }] }
 async component Pricing(props: { plans: { name: string }[] }) {
   {#server}
     const { data } = await isr('pricing', async () => {
@@ -464,6 +476,11 @@ component SignupForm() {
             filename: "app/components/UsernameForm.vsk",
             code: `import { Form, Field, required, minLength, maxLength, pattern } from '@vesk/runtime';
 
+// Self-contained: the real form would import its action from app/actions/.
+async function usernameAction() {
+  return { ok: true }
+}
+
 component UsernameForm() {
   <Form action={usernameAction} method="POST">
     <Field
@@ -487,6 +504,11 @@ component UsernameForm() {
             label: "expression mode",
             filename: "app/components/UsernameForm.vsk",
             code: `import { Form, Field, required, minLength, maxLength, pattern } from '@vesk/runtime';
+
+// Self-contained: the real form imports its action from app/actions/.
+async function usernameAction() {
+  return { ok: true }
+}
 
 component UsernameForm() {
   return (
