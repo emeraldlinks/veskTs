@@ -29,6 +29,7 @@ import * as configPlugin from '../../../vesk-doc/src/content/docs-config-plugin.
 import * as cli from '../../../vesk-doc/src/content/docs-cli.js';
 import * as native from '../../../vesk-doc/src/content/docs-native.js';
 import * as nativeComponents from '../../../vesk-doc/src/content/docs-native-components.js';
+import * as reactivePages from '../../../vesk-doc/src/content/docs-reactive.js';
 
 let passed = 0;
 let failed = 0;
@@ -46,6 +47,7 @@ const MODULES: Record<string, { pages?: Array<{ slug: string; blocks?: unknown[]
   'docs-cli': cli as never,
   'docs-native': native as never,
   'docs-native-components': nativeComponents as never,
+  'docs-reactive': reactivePages as never,
 };
 
 interface CodeBlock { kind?: string; filename?: string; code?: string; tabs?: Array<{ filename?: string; code?: string }> }

@@ -27,6 +27,7 @@ export const docGroups = [
 
 import { pages as dataFetchingPages } from "./docs-data-fetching";
 import { pages as metadataPages } from "./docs-metadata";
+import { pages as reactivePages } from "./docs-reactive";
 import { pages as middlewarePages } from "./docs-middleware";
 import { pages as routingPages } from "./docs-routing";
 import { pages as serverApisPages } from "./docs-server-apis";
@@ -2078,6 +2079,7 @@ update([]);            // clear the list`,
 const extendedPages: DocPage[] = [
   ...dataFetchingPages,
   ...metadataPages,
+  ...reactivePages,
   ...middlewarePages,
   ...routingPages,
   ...serverApisPages,
@@ -2120,6 +2122,14 @@ const docSlugOrder = [
   "errors",
   "routing",
   "data-fetching",
+  "track",
+  "derived",
+  "get-set",
+  "effect",
+  "scheduler",
+  "show",
+  "for",
+  "switch-match",
   "hydration",
   "forms",
   "api-routes",
