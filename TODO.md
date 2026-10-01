@@ -2,6 +2,9 @@
 
 > Living task tracker. Read at start of every session. Update after every unit of work.
 
+Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
+(VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
+
 **Current phase:** pure-TS pipeline (haul parked)
 
 **This session (namespace resolution + duplicate-name warnings + SSR settle drain):**

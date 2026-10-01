@@ -56,6 +56,7 @@ vesk typecheck [--no-strict]      # tsc-in-.vsk, strict by default
 vesk start [-p 3000]              # production server; needs a build
 vesk dev [-p 3000] [-H 127.0.0.1]
 vesk init                         # create src/global.css if missing
+vesk migrate [--dry-run] [--list] [--from <v>] [--to <v>] [--<codemod-id>]
 ```
 
 - `dev`: loads `.env` then `.env.local`; serves SSR pages, `/api/*`, server
@@ -71,6 +72,30 @@ vesk init                         # create src/global.css if missing
   Platforms: `node` \| `vercel` \| `netlify` \| `cloudflare` \| `deno` \|
   `aws` \| `edge` \| `coxmos` (auto-detected from CI, else `node`).
   `--target edge` promotes node build to generic edge.
+  **Production assets are content-hashed** (`client.2ed3cbebcc.js`) and served
+  `immutable`; the same bytes' sha384 rides on the tag as `integrity` **with
+  `crossorigin="anonymous"`** (without it a browser silently skips the check).
+  Dev keeps the stable names — HMR rewrites them. `config.json` carries an
+  `assets` map (`file`, `url`, `hash`, `bytes`, `integrity` per chunk) plus a
+  `buildId`; never hardcode `client.js`, resolve names from the manifest.
+  `/_vesk/runtime.js` stays a stable alias for the runtime.
+- `migrate`: applies the codemods a project needs, resolved from the
+  **project's installed `@vesk/*`** (not the running CLI); `--from`/`--to`
+  override so a migration can be rehearsed. Codemods are AST transforms
+  through the compiler's own parser — offsets are edited in place, so the diff
+  shows only the migration. Two ship:
+  - `track-destructuring` — rewrites `const [c, setC] = track(0)` (which
+    parses but is **not reactive** — no TrackDecl, so the binding is not a
+    cell and `<b>{c}</b>` compiles to a one-time read) into the documented
+    `const &[c, setC] = track(0)`.
+  - `import-type-source` — repoints app-facing type imports at `@vesk/types`,
+    **gated on the name actually being exported** by the installed
+    `@vesk/types`; anything unprovable is reported, never guessed.
+
+  Scans `.vsk/.ts/.tsx/.mjs/.js`, skipping `node_modules`, `.vesk`, `dist`,
+  `build`, `.git`, `.next`, `coverage`. Unparsable files are reported, not
+  rewritten. Always prints a report: what would change, what changed, and what
+  a human still has to do.
 - `start`: request pipeline = static files → hydration-data → runtime →
   static assets → prerendered pages → middleware chain → server actions →
   API routes → SSR pages (with ISR) → custom 404. Sets `NODE_ENV=production`.
@@ -99,6 +124,36 @@ component List<T>(…) { … }              // generic type params supported
   `component Card({ title, body = '', featured }: { title: string; body?: string; featured?: boolean })`.
 - `{props.children}` is the ONLY children channel — **no `<slot/>`**.
 - Layouts receive `{ children, params }`.
+- The props parameter may have **any name** (`component Card(p)`, `(props)`,
+  `(ctx)`, or a destructuring pattern) — a single identifier is bound to the
+  whole props object, a pattern destructures it.
+
+### Cross-file components & namespaces
+
+```vsk
+import { Card } from './card.vsk'
+import { Card as Post } from './card.vsk'
+import * as UI from './card.vsk'
+
+<Card /><Post /><UI.Card />
+```
+
+- Components resolve through **one global registry keyed by declared name**,
+  not per-module bindings — a component is importable whether or not its file
+  writes `export`. `export` matters for renaming (`export { A as B }`) and
+  barrels (`export * from './x.vsk'`), not for hiding.
+- A namespace import is a **compile-time shorthand only** — `<UI.Card />` looks
+  `Card` up in the same registry as `<Card />`; no module object is built.
+  Two forms are `V0410`: a nested tag `<UI.Sub.Card />` (a `.vsk` namespace is
+  flat) and reading a namespace member as a **value** (`{UI.max}`) — import
+  values by name, or keep them in a `.ts` module. A namespace import from a
+  `.ts`/`.js` module is a real module object, so `<NS.Icon />` there is an
+  ordinary member expression.
+- **Duplicate component names across files are legal but warn.** The client
+  registry keeps the *last* registration while SSR keeps the *first*, so a
+  collision can render a different component in the browser than in the SSR
+  HTML — rename one of them. The warning fires identically on client and SSR so
+  hydration can never disagree with the server.
 
 ### Attributes / events
 
@@ -483,9 +538,23 @@ setSearch/route/canGoBack), `useNavigate()`, `useParams()`, `usePathname()`,
 - Streaming: `renderPageStream()` AsyncGenerator (prod server pipes chunks).
 - Per-request SSR state isolated via `AsyncLocalStorage` — concurrent
   requests never mix data.
-- **Hydration markers**: server emits `<!--vsk-->` before each non-static
-  subtree. Fully static trees have zero markers → **no hydration runtime, no
-  JS shipped**. Pages without interactivity ship no JS.
+- **SSR HTML is plain HTML — hydration is markerless (the default).** The
+  server emits **no** `<!--vsk:…-->` comments, no generated ids/classes, and no
+  `data-*` hydration attributes (including `data-vsk-key`) — not even in dev.
+  User-authored attributes are untouched. All hydration information lives in
+  the compiler-generated client program (JS), and the client claims the server
+  DOM **structurally** with a tree of per-parent walkers:
+  `nextElement(tag, skipK)` walks the element children of an adopted parent,
+  resolving each claim positionally (with static residue skipped).
+  - Fully static trees ship **no hydration runtime and no JS** at all; pages
+    without interactivity ship no JS.
+  - Region fences (`if`/`for`/`map`/keyed lists) are runtime-created
+    `document.createComment(...)` nodes only; SSR regions are inline.
+  - Keyed lists carry identity in JS only.
+  - Pass `markerless: false` to `renderPage`/`render()`/`compileClient` to get
+    the legacy marker mode back (it is still supported and tested, but it is
+    NOT what a normal build emits — do not assert on `<!--vsk-->` in output, and
+    do not assert on `data-vsk-key` in SSR HTML).
 - Strategies (router `hydrate` option or direct fns):
   - `'full'` (default) — hydrate immediately.
   - `'viewport'` — in-viewport now, rest via IntersectionObserver (rootMargin
@@ -894,6 +963,35 @@ const stripeHook = webhook({ secret: process.env.STRIPE_SECRET!, handler: (event
 export const POST = stripeHook;        // invalid sig → 401
 ```
 
+Providers sign differently, so the signature details are options:
+
+| Option | Default | Notes |
+|---|---|---|
+| `headerName` | `'x-webhook-signature'` | signature header to read |
+| `signaturePrefix` | `'sha256='` | pass `''` for unprefixed hex |
+| `algorithm` | `'SHA-256'` | `'SHA-512'` for Paystack |
+| `signedPayload` | raw body | sign a field subset, not the raw body |
+
+```ts
+// Paystack signs `${amount}${reference}` — kobo amount then reference — with
+// HMAC-SHA512 hex, unprefixed. The raw body never matches, so an algorithm
+// override alone is not enough: both `algorithm` and `signedPayload` are needed.
+type PaystackEvent = { event: string; data: { amount: number; reference: string } };
+const paystackHook = webhook<PaystackEvent>({
+	secret: process.env.PAYSTACK_SECRET!,
+	headerName: 'x-paystack-signature',
+	signaturePrefix: '',
+	algorithm: 'SHA-512',
+	signedPayload: (event) => `${event.data.amount}${event.data.reference}`,
+	handler: (event) => fulfill(event),
+});
+export const POST = paystackHook;
+```
+
+`webhook()` is POST-only, compares signatures without early return, and treats a
+`signedPayload` that throws (event missing the signed fields) as a bad signature
+— 401, not a 500 — without running the handler. `signedPayload` runs *before* verification (the payload must be derived before it can be checked), so it receives unauthenticated data — keep it pure: read fields off the event and return a string.
+
 - Config-level `security.cors` applies automatically in prod server; helper
   only for custom servers. `cors.credentials` opt-in, never with wildcard origin.
 
@@ -995,6 +1093,70 @@ routes in dev exactly as production.
   ON, sameSite Lax, path `/`. `.clearCookie(name)` → maxAge 0.
 - Signed: HMAC-SHA256 helpers above.
 
+## Server Events & Error Reporting (`app/_events.ts`)
+
+```ts
+import type { ServerEventContext } from '@vesk/types'
+
+export async function onStart(ctx: ServerEventContext) { ctx.set('booted', true) }
+export async function onRequest(ctx: ServerEventContext) { /* per request */ }
+export async function onError(err: unknown, ctx: ServerErrorContext) { /* report */ }
+export async function onStop(ctx: ServerEventContext) { /* shutdown / HMR */ }
+```
+
+`ServerEventContext` is a superset of `MiddlewareContext` (`set`/`get`/`locals`
+plus the Node `http.Server`, `null` on serverless/edge). Lifecycle timing:
+`onStart` once at boot (or lazily once per isolate on serverless/edge),
+`onRequest` per request, `onStop` on graceful shutdown (Node servers only).
+Values `set()` during `onStart` land in the **server-wide** context and are
+pre-seeded into every request's `locals`.
+
+- **`onError` is the production error-reporting seam.** Production never leaks
+  a stack trace to the client (the right default), which otherwise left an
+  adopter two bad options. `ServerErrorContext` carries `url`, `routePath`,
+  `target` (`'node' | 'edge' | 'dev'`), `status`, `durationMs`, and `version` +
+  **`buildId`** from the build manifest, so a report can be tied to a deploy.
+- Two registration paths, deliberately: a **plugin's** `onError(err, ctx)` and
+  `_events.ts`'s. The `_events.ts` one is the one that matters in production —
+  production has no plugin objects — while a plugin's hook is available in dev.
+- A hook that throws is caught and logged, never escalated into a second
+  failure (a reporting outage must not take down a page that was already
+  failing); one failing hook does not stop the others; and one request is
+  never reported twice.
+
+## Testing components (`@vesk/testing`)
+
+```bash
+npm i -D @vesk/testing
+```
+
+```ts
+import { mount, renderComponent } from '@vesk/testing'
+
+const { html, head, props } = renderComponent(source, 'Counter', { start: 1 })
+const view = mount(source, 'Counter', { start: 1 })
+view.text('.label'); view.attr('button', 'class'); view.has('.bump')
+await view.click('.bump'); view.input('.field', 'hi')
+view.flush(); await view.waitFor(() => …); view.unmount()
+```
+
+- `renderComponent(source, name?, props?, opts?)` compiles + SSRs a `.vsk`
+  source in-process. It throws the compiler's own code-frame diagnostic when the
+  source does not compile, so a broken fixture reads like a compile error
+  rather than an empty string (a test helper that silently returns `''` is
+  worse than none). `opts.hydrate: false` renders the non-hydrate emitter,
+  which is a different assertion.
+- `mount(...)` puts that output in a real DOM (linkedom) and returns a driver:
+  `text`, `attr`, `has`, `all`, `click`, `input`, `flush`, `waitFor`, `unmount`.
+  Ambient `document`/`window`/`Event`/`Node` are installed for the mount and
+  **restored on `unmount()`**, so mounts do not leak into each other.
+- `attrOf(html, selector, attribute)` reads a head/attribute out of a fragment,
+  decoded the way a browser would.
+- Deliberately **not a browser**: no layout, no network, no service worker.
+  Anything that needs a real one (hydration against a live page, click-through
+  navigation, viewport behaviour) still belongs in `tests/hydration-test.mjs`
+  against a running server.
+
 ## Configuration (`vesk.config.ts` / `.js`)
 
 Everything optional, validated at CLI start. Every key + default:
@@ -1039,7 +1201,8 @@ Compose: `preset('production', { trustProxy: true })`.
 
 Normalization: unknown preset names throw; `md.html` ∈
 escape|allow|allowlist; plugins must have name + ≥1 hook (`onCSS`,
-`onFileWatch`, `onTransformJS`, `onBuildStart`, `onBuildEnd`, `onRequest`) or
+`onFileWatch`, `onTransformJS`, `onBuildStart`, `onBuildEnd`, `onRequest`,
+`onStart`, `onStop`, `onError`) or
 a non-empty `provides` record. A broken prod config **fails closed** (secure
 defaults + loud warning). Config load order: `.env` → `.env.local` →
 `vesk.config.js` (preferred over `.ts`, transpiled, `@vesk/compiler` globals
@@ -1156,5 +1319,14 @@ import { Show, For, Switch, Match } from '@vesk/runtime';
 - **Tailwind doesn't scan dynamic class bindings** — keep classes static.
 - **Island/`#server`/`#client` validation** is enforced by the compiler —
   server components can't use `{#client}`, islands can't use `{#server}`.
+- **SSR HTML carries no hydration markers and no `data-vsk-*`.** Markerless is
+  the default. Never assert on `<!--vsk-->`/`data-vsk-key` in server output,
+  and never hand-write one to "fix" a mismatch.
+- **Never hardcode `client.js`** in a production context — assets are
+  content-hashed; read the name from the build manifest (`config.json` `assets`).
+- **Two components with the same name in different files silently diverge**
+  (client keeps the last, SSR keeps the first) — the build warns; rename one.
+- **Namespace member-expressions are not values.** `{UI.max}` and
+  `<UI.Sub.Card />` are `V0410`; only `<UI.Card />` resolves.
 - After editing `packages/compiler/src`, run
   `npx tsx packages/cli/src/build-packages.ts` before probing.

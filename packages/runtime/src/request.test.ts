@@ -283,6 +283,16 @@ describe('Lifecycle Hooks', () => {
 	});
 });
 
+// Computed with WebCrypto directly rather than through the helper under test,
+// so a bug in `computeSignature` cannot make its own test pass.
+async function hmacHex(secret, payload, hash) {
+	const key = await crypto.subtle.importKey(
+		'raw', new TextEncoder().encode(secret), { name: 'HMAC', hash }, false, ['sign'],
+	);
+	const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(payload));
+	return Array.from(new Uint8Array(sig)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
 describe('webhook', () => {
 
 	it('webhook factory throws without secret', () => {
@@ -323,6 +333,133 @@ describe('webhook', () => {
 		});
 		const result = await wh(req);
 		expect(result.status).toBe(401);
+	});
+
+	it('webhook accepts a correctly signed body (SHA-256 default)', async () => {
+		const secret = 'whsec_test';
+		const body = JSON.stringify({ event: 'charge.success' });
+		const sig = await hmacHex(secret, body, 'SHA-256');
+		let seen = null;
+		const wh = webhook({ secret, handler: async (e) => { seen = e; return new Response('ok'); } });
+		const req = new Request('http://test', {
+			method: 'POST',
+			headers: { 'x-webhook-signature': 'sha256=' + sig },
+			body,
+		});
+		const result = await wh(req);
+		expect(result.status).toBe(200);
+		expect(seen).toEqual({ event: 'charge.success' });
+	});
+
+	// Paystack: HMAC-SHA512 hex, no prefix, over `amount + reference` — not the
+	// raw body. Neither the algorithm nor the payload matches the default.
+	it('webhook verifies a Paystack-shaped SHA-512 signature over a field subset', async () => {
+		const secret = 'sk_test_secret';
+		const event = { event: 'charge.success', data: { amount: 500000, reference: 'ref_abc123' } };
+		const body = JSON.stringify(event);
+		const sig = await hmacHex(secret, `${event.data.amount}${event.data.reference}`, 'SHA-512');
+		let seen = null;
+		const wh = webhook({
+			secret,
+			headerName: 'x-paystack-signature',
+			signaturePrefix: '',
+			algorithm: 'SHA-512',
+			signedPayload: (e) => `${e.data.amount}${e.data.reference}`,
+			handler: async (ev) => { seen = ev; return new Response('ok'); },
+		});
+		const req = new Request('http://test', {
+			method: 'POST',
+			headers: { 'x-paystack-signature': sig },
+			body,
+		});
+		const result = await wh(req);
+		expect(result.status).toBe(200);
+		expect(seen).toEqual(event);
+	});
+
+	it('a SHA-256 signature is refused when SHA-512 is configured', async () => {
+		const secret = 'sk_test_secret';
+		const event = { event: 'charge.success', data: { amount: 500000, reference: 'ref_abc123' } };
+		const body = JSON.stringify(event);
+		const sig = await hmacHex(secret, `${event.data.amount}${event.data.reference}`, 'SHA-256');
+		const wh = webhook({
+			secret, headerName: 'x-paystack-signature', signaturePrefix: '', algorithm: 'SHA-512',
+			signedPayload: (e) => `${e.data.amount}${e.data.reference}`,
+			handler: async () => new Response('ok'),
+		});
+		const result = await wh(new Request('http://test', { method: 'POST', headers: { 'x-paystack-signature': sig }, body }));
+		expect(result.status).toBe(401);
+	});
+
+	it('a valid signature over the wrong fields is refused', async () => {
+		const secret = 'sk_test_secret';
+		const event = { event: 'charge.success', data: { amount: 500000, reference: 'ref_abc123' } };
+		const body = JSON.stringify(event);
+		// Correct secret and hash, but the amount a real attacker would raise.
+		const sig = await hmacHex(secret, `900000${event.data.reference}`, 'SHA-512');
+		const wh = webhook({
+			secret, headerName: 'x-paystack-signature', signaturePrefix: '', algorithm: 'SHA-512',
+			signedPayload: (e) => `${e.data.amount}${e.data.reference}`,
+			handler: async () => new Response('ok'),
+		});
+		const result = await wh(new Request('http://test', { method: 'POST', headers: { 'x-paystack-signature': sig }, body }));
+		expect(result.status).toBe(401);
+	});
+
+	it('an event missing the signed fields is a 401, not a 500', async () => {
+		const secret = 'sk_test_secret';
+		const wh = webhook({
+			secret, headerName: 'x-paystack-signature', signaturePrefix: '', algorithm: 'SHA-512',
+			signedPayload: (e) => `${e.data.amount}${e.data.reference}`,
+			handler: async () => new Response('ok'),
+		});
+		const sig = await hmacHex(secret, 'x', 'SHA-512');
+		const result = await wh(new Request('http://test', {
+			method: 'POST', headers: { 'x-paystack-signature': sig }, body: JSON.stringify({ noData: true }),
+		}));
+		expect(result.status).toBe(401);
+	});
+
+	it('signedPayload does not weaken the POST-only rule', async () => {
+		const wh = webhook({
+			secret: 's', algorithm: 'SHA-512', signaturePrefix: '',
+			signedPayload: () => 'x', handler: async () => new Response('ok'),
+		});
+		const result = await wh(new Request('http://test', { method: 'GET' }));
+		expect(result.status).toBe(405);
+	});
+
+	// Compile-time contract: declaring the event type must infer through both
+	// `handler` and `signedPayload`. `amount` is read off the typed event, so if
+	// the generic were dropped this file would fail to typecheck.
+	it('webhook generic infers the event in handler and signedPayload', async () => {
+		type PaystackEvent = { event: string; data: { amount: number; reference: string } };
+		const secret = 'sk_test_secret';
+		const event: PaystackEvent = { event: 'charge.success', data: { amount: 500000, reference: 'ref_typed' } };
+		const body = JSON.stringify(event);
+		const sig = await hmacHex(secret, `${event.data.amount}${event.data.reference}`, 'SHA-512');
+		let amount = 0;
+		const wh = webhook<PaystackEvent>({
+			secret, headerName: 'x-paystack-signature', signaturePrefix: '', algorithm: 'SHA-512',
+			signedPayload: (e) => `${e.data.amount}${e.data.reference}`,
+			handler: (e) => { amount = e.data.amount; return new Response('ok'); },
+		});
+		const result = await wh(new Request('http://test', {
+			method: 'POST', headers: { 'x-paystack-signature': sig }, body,
+		}));
+		expect(result.status).toBe(200);
+		expect(amount).toBe(500000);
+	});
+
+	it('a non-POST delivery never reaches signedPayload', async () => {
+		let called = false;
+		const wh = webhook({
+			secret: 's', algorithm: 'SHA-512', signedPayload: () => { called = true; return 'x'; },
+			handler: async () => new Response('ok'),
+		});
+		await wh(new Request('http://test', { method: 'GET' }));
+		await wh(new Request('http://test', { method: 'DELETE' }));
+		expect(called).toBe(false);
 	});
 });
 

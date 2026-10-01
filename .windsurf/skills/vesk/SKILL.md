@@ -894,6 +894,35 @@ const stripeHook = webhook({ secret: process.env.STRIPE_SECRET!, handler: (event
 export const POST = stripeHook;        // invalid sig → 401
 ```
 
+Providers sign differently, so the signature details are options:
+
+| Option | Default | Notes |
+|---|---|---|
+| `headerName` | `'x-webhook-signature'` | signature header to read |
+| `signaturePrefix` | `'sha256='` | pass `''` for unprefixed hex |
+| `algorithm` | `'SHA-256'` | `'SHA-512'` for Paystack |
+| `signedPayload` | raw body | sign a field subset, not the raw body |
+
+```ts
+// Paystack signs `${amount}${reference}` — kobo amount then reference — with
+// HMAC-SHA512 hex, unprefixed. The raw body never matches, so an algorithm
+// override alone is not enough: both `algorithm` and `signedPayload` are needed.
+type PaystackEvent = { event: string; data: { amount: number; reference: string } };
+const paystackHook = webhook<PaystackEvent>({
+	secret: process.env.PAYSTACK_SECRET!,
+	headerName: 'x-paystack-signature',
+	signaturePrefix: '',
+	algorithm: 'SHA-512',
+	signedPayload: (event) => `${event.data.amount}${event.data.reference}`,
+	handler: (event) => fulfill(event),
+});
+export const POST = paystackHook;
+```
+
+`webhook()` is POST-only, compares signatures without early return, and treats a
+`signedPayload` that throws (event missing the signed fields) as a bad signature
+— 401, not a 500 — without running the handler. `signedPayload` runs *before* verification (the payload must be derived before it can be checked), so it receives unauthenticated data — keep it pure: read fields off the event and return a string.
+
 - Config-level `security.cors` applies automatically in prod server; helper
   only for custom servers. `cors.credentials` opt-in, never with wildcard origin.
 

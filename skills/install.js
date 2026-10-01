@@ -39,9 +39,17 @@ const SKILLS = [
 	{ name: 'vesk', src: 'skills/vesk/SKILL.md' },
 	{ name: 'react-to-vesk', src: 'skills/react-to-vesk/SKILL.md' },
 	{ name: 'nuxt-to-vesk', src: 'skills/nuxt-to-vesk/SKILL.md' },
+	{ name: 'bun-to-vesk', src: 'skills/bun-to-vesk/SKILL.md' },
 ];
 const HERE = dirname(fileURLToPath(import.meta.url));
 const CWD = process.cwd();
+// `src` is repo-root-relative but this file lives in `skills/`, so resolve it
+// against the root. Using the relative path as-is made every install depend on
+// the caller's cwd and fail from anywhere but the repo root.
+const REPO_ROOT = join(HERE, '..');
+for (const skill of SKILLS) {
+	skill.src = join(REPO_ROOT, skill.src);
+}
 
 /**
  * Each entry: how to locate the target directory (global vs project) and

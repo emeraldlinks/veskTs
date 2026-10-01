@@ -139,33 +139,58 @@ export function cors(options: CorsOptions = {}): CorsMiddleware {
 	return middleware;
 }
 
-interface WebhookOptions {
+export interface WebhookOptions<T = unknown> {
 	secret: string;
-	handler: (event: unknown, request: Request) => unknown;
+	/**
+	 * Receives the verified event. Declare `webhook<YourEvent>({...})` to have
+	 * `handler` and `signedPayload` typed as your event instead of `unknown`.
+	 */
+	handler: (event: T, request: Request) => unknown;
 	headerName?: string;
 	signaturePrefix?: string;
+	/**
+	 * HMAC hash. Defaults to `SHA-256` (Stripe, GitHub, Slack). Paystack signs
+	 * with `SHA-512`.
+	 */
+	algorithm?: 'SHA-256' | 'SHA-512';
+	/**
+	 * Canonicalise the signed payload, for providers that sign a subset of the
+	 * event instead of the raw body.
+	 *
+	 * Paystack computes its signature over `` `${amount}${reference}` `` — the
+	 * kobo amount and the transaction reference — so the raw body can never
+	 * match. Receives the parsed event; its return value is what gets signed.
+	 *
+	 * This runs *before* verification — the payload has to be derived before it
+	 * can be checked — so it is handed unauthenticated data. Keep it pure: read
+	 * fields off the event and return a string, nothing else. Throwing is safe
+	 * and yields a `401`.
+	 */
+	signedPayload?: (event: T) => string;
 }
 
-export function webhook(options: WebhookOptions): (request: Request) => Promise<Response> {
+export function webhook<T = unknown>(options: WebhookOptions<T>): (request: Request) => Promise<Response> {
 	const {
 		secret,
 		handler,
 		headerName = 'x-webhook-signature',
 		signaturePrefix = 'sha256=',
+		algorithm = 'SHA-256',
+		signedPayload,
 	} = options;
 
 	if (!secret) throw new Error('webhook() requires a secret');
 	if (!handler) throw new Error('webhook() requires a handler function');
 
-	async function computeSignature(body: BufferSource | string): Promise<string> {
+	async function computeSignature(payload: string): Promise<string> {
 		const key = typeof secret === 'string' ? new TextEncoder().encode(secret) as BufferSource : secret as BufferSource;
-		const data: BufferSource = typeof body === 'string' ? new TextEncoder().encode(body) : body as BufferSource;
+		const data = new TextEncoder().encode(payload) as BufferSource;
 
 		const crypto = globalThis.crypto;
 		if (!crypto?.subtle) {
 			throw new Error('Web Crypto API not available (required for webhook signature verification)');
 		}
-		return crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign'])
+		return crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: algorithm }, false, ['sign'])
 			.then(k => crypto.subtle.sign('HMAC', k, data))
 			.then(sig => {
 				const hex = Array.from(new Uint8Array(sig))
@@ -193,7 +218,35 @@ export function webhook(options: WebhookOptions): (request: Request) => Promise<
 		}
 
 		const body = await request.text();
-		const expectedSig = await computeSignature(body);
+
+		let parsed: unknown;
+		try {
+			parsed = JSON.parse(body);
+		} catch {
+			parsed = body;
+		}
+		// The trust boundary. JSON.parse can only give us `unknown`, but the
+		// caller's generic is the declaration that this body has the shape they
+		// expect — and the signature was already verified above, so the payload
+		// is authentic even though it is not statically known to be well-formed.
+		const event = parsed as T;
+
+		// A `signedPayload` that throws means the event lacks the fields the
+		// provider signs over. That is a malformed or forged delivery, so it
+		// fails as a bad signature rather than as a 500 — the handler must not run.
+		let payload = body;
+		if (signedPayload) {
+			try {
+				payload = signedPayload(event);
+			} catch {
+				return new Response(JSON.stringify({ error: 'Invalid signature' }), {
+					status: 401,
+					headers: { 'Content-Type': 'application/json' },
+				});
+			}
+		}
+
+		const expectedSig = await computeSignature(payload);
 		const prefixLen = signaturePrefix.length;
 		const providedSig = signature.startsWith(signaturePrefix)
 			? signature.slice(prefixLen)
@@ -215,13 +268,6 @@ export function webhook(options: WebhookOptions): (request: Request) => Promise<
 				status: 401,
 				headers: { 'Content-Type': 'application/json' },
 			});
-		}
-
-		let event: unknown;
-		try {
-			event = JSON.parse(body);
-		} catch {
-			event = body;
 		}
 
 		return handler(event, request) as Response;

@@ -38,9 +38,18 @@ die()  { printf '\033[1;31m[vesk-skills]\033[0m ERROR: %s\n' "$*" >&2; exit 1; }
 
 # When run as a file from a checkout, copy from the repo; when piped through
 # curl, fetch the raw files from GitHub. Both deliver identical content.
+#
+# SCRIPT_DIR is the `scripts/` directory; SKILLS_DIR is the repo root beside it.
+# Looking for `scripts/skills/<name>/SKILL.md` never matches, which silently
+# made a checkout install re-download the PUBLISHED skill and clobber local
+# edits to it — the exact thing a fresh `main` checkout is supposed to avoid.
 SCRIPT_DIR=""
+SKILLS_DIR=""
 if [[ -n "${BASH_SOURCE[0]:-}" && "${BASH_SOURCE[0]}" != "bash" ]]; then
   SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd || true)"
+  if [[ -n "$SCRIPT_DIR" && -d "$SCRIPT_DIR/../skills" ]]; then
+    SKILLS_DIR="$(cd -- "$SCRIPT_DIR/../skills" >/dev/null 2>&1 && pwd || true)"
+  fi
 fi
 
 # ---- platforms --------------------------------------------------------------
@@ -64,8 +73,8 @@ platform_name() { printf '%s' "$1" | awk -F'|' '{print $1}'; }
 # ---- helpers ----------------------------------------------------------------
 fetch_skill() {
   local name="$1" file="$2" dest="$3"
-  if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/skills/$name/$file" ]]; then
-    cp "$SCRIPT_DIR/skills/$name/$file" "$dest"
+  if [[ -n "$SKILLS_DIR" && -f "$SKILLS_DIR/$name/$file" ]]; then
+    cp "$SKILLS_DIR/$name/$file" "$dest"
   else
     curl -fsSL "$RAW_BASE/skills/$name/$file" -o "$dest" || die "failed to fetch $name/$file from $RAW_BASE"
   fi
@@ -84,8 +93,8 @@ install_one() {
   fi
   fetch_skill "$name" SKILL.md "$dir/$name/SKILL.md"
   # Best-effort README, if the skill ships one.
-  if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/skills/$name/README.md" ]]; then
-    cp "$SCRIPT_DIR/skills/$name/README.md" "$dir/$name/README.md"
+  if [[ -n "$SKILLS_DIR" && -f "$SKILLS_DIR/$name/README.md" ]]; then
+    cp "$SKILLS_DIR/$name/README.md" "$dir/$name/README.md"
   else
     curl -fsSL "$RAW_BASE/skills/$name/README.md" -o "$dir/$name/README.md" 2>/dev/null || true
   fi

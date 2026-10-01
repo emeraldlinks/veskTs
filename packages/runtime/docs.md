@@ -65,7 +65,7 @@ All under `packages/runtime/src/`:
 | `router-components.ts` | `Outlet`, `Link`, `NavLink`, router hooks (`useNavigate`/`useParams`/`usePathname`/`useSearchParams`/`useRouter`), `Redirect`/`notFound`, head/scroll handling. |
 | `router-match.ts` | Route tree matching: `matchRoute`, `flattenLayoutChain`, `compileRoutePattern`, `buildTreeFromMap`. |
 | `resource.ts` | `createResource` / `useFetch` (`.json`/`.text`/`.arrayBuffer`/`.stream`), `streamText`, SSR data handoff, client cache, dedupe, retry/timeout/abort, `resolveFetchUrl` (prefers `ctx.resolveUrl` → `ctx.url` string → `__vesk_ssr_base_url`), `HttpError`/`TimeoutError`. `useFetch.stream` consumes `ReadableStream` chunk-by-chunk into an `into` cell (`onChunk` callback), `urlOrFn` may be a provider `() => string` re-evaluated on every fetch/`refresh()` so a tracked path change propagates without recreating the resource. |
-| `request.ts` | Server HTTP abstraction: `ServerRequest`, `VeskRequest` (`resolveUrl`, `from`, `host`/`origin`, locals `get`/`set`, cookie parsing, body-cap guard), `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream(ReadableStream)`), `cookies`/`headers`/`locals`, `withValidation`, `cors`, hooks, webhooks, signed cookies, `VeskResponse.stream`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`. |
+| `request.ts` | Server HTTP abstraction: `ServerRequest`, `VeskRequest` (`resolveUrl`, `from`, `host`/`origin`, locals `get`/`set`, cookie parsing, body-cap guard), `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream(ReadableStream)`), `cookies`/`headers`/`locals`, `withValidation`, `cors`, hooks, webhooks (`webhook()` — POST-only, non-short-circuiting signature compare; `algorithm` `'SHA-256'`/`'SHA-512'`, `signaturePrefix`, `headerName`, `signedPayload` for providers that sign a field subset such as Paystack), signed cookies, `VeskResponse.stream`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`. |
 | `isr.ts` | Incremental Static Regeneration: `isr`, `pageIsr`, `componentIsr`, `revalidatePath`/`revalidateTag`, cache clearing. |
 | `form.ts` | `Form` / `Field` components + validation rules (`required`, `email`, `minLength`, `maxLength`, `pattern`, `custom`). |
 | `action.ts` | Server actions: `defineAction`, registry lookup, input validation, form-action detection. |
@@ -449,7 +449,7 @@ retaining `unknown` for undeclared keys.
 (`resolveUrl`, `from`, `host`/`origin`, `query`/`parsedUrl`, `getBody`),
 `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream`),
 `withValidation`, `useBody`, `useParams` (request), `useRequest`, `cors`,
-`defineHook`, `removeHook`, `runHooks`, `webhook`, `signCookie`, `unsignCookie`,
+`defineHook`, `removeHook`, `runHooks`, `webhook`, `WebhookOptions`, `signCookie`, `unsignCookie`,
 `setSignedCookie`, `readSignedCookie`, `applyRequestSecurity`. `VeskResponse.stream(readable, init?)`
 creates a chunked `ReadableStream` response (`Transfer-Encoding: chunked`,
 no `Content-Length`; delivered via `deliverResponse`'s `getReader()` loop on dev/prod servers;

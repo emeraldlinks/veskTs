@@ -539,7 +539,7 @@ export async function GET(request: Request) {
       { kind: "h2", text: "Webhooks" },
       {
         kind: "p",
-        text: "`webhook({ secret, handler, headerName?, signaturePrefix? })` returns a request handler that verifies a SHA-256 HMAC signature before running your `handler(event, request)`. The signature is compared in constant time (length then char-by-char). A missing or invalid signature responds `401` with `{ error }`. Requires Web Crypto, and `handler` must return a `Response`.",
+        text: "`webhook<T>({ secret, handler, headerName?, signaturePrefix?, algorithm?, signedPayload? })` returns a POST-only request handler that verifies an HMAC signature before running your `handler(event, request)`. The signature is compared in constant time (length then char-by-char, with no early return). A missing or invalid signature responds `401` with `{ error }`. Requires Web Crypto, and `handler` must return a `Response`.",
       },
       {
         kind: "list",
@@ -547,7 +547,10 @@ export async function GET(request: Request) {
           "`secret` — required; used as the HMAC key.",
           "`handler(event, request)` — `event` is the parsed JSON body (raw body text when it isn't JSON).",
           "`headerName` — default `'x-webhook-signature'`.",
-          "`signaturePrefix` — default `'sha256='`.",
+          "`signaturePrefix` — default `'sha256='`; pass `''` for unprefixed hex.",
+          "`algorithm` — default `'SHA-256'`; pass `'SHA-512'` for Paystack.",
+          "`signedPayload(event)` — sign something other than the raw body. Receives the parsed event and returns the string to HMAC. Needed for providers that sign a field subset; a throw is treated as an invalid signature (`401`), not a `500`, and the handler does not run. It runs *before* verification — the payload must be derived before it can be checked — so it is handed unauthenticated data: keep it pure.",
+          "The type parameter `T` defaults to `unknown`. Declare `webhook<YourEvent>({ ... })` and both `handler` and `signedPayload` receive `YourEvent` — that declaration is your assertion that the body has the shape you expect, and it is not checked against the incoming JSON.",
         ],
       },
       {
@@ -559,6 +562,28 @@ export const POST = webhook({
   secret: process.env.WEBHOOK_SECRET!,
   headerName: 'x-webhook-signature',
   signaturePrefix: 'sha256=',
+  handler(event, request) {
+    return Response.json({ received: event });
+  },
+});`,
+      },
+      {
+        kind: "p",
+        text: "Not every provider signs the raw body with SHA-256. Paystack signs `${amount}${reference}` — the kobo amount followed by the transaction reference — with HMAC-SHA512 and sends unprefixed hex in `x-paystack-signature`, so an algorithm override alone would still reject every genuine event. Supply `signedPayload` to sign the same canonical string Paystack signs.",
+      },
+      {
+        kind: "code",
+        filename: "app/api/hooks/paystack/route.ts",
+        code: `import { webhook } from '@vesk/runtime/server';
+
+type PaystackEvent = { event: string; data: { amount: number; reference: string } };
+
+export const POST = webhook<PaystackEvent>({
+  secret: process.env.PAYSTACK_SECRET_KEY!,
+  headerName: 'x-paystack-signature',
+  signaturePrefix: '',
+  algorithm: 'SHA-512',
+  signedPayload: (event) => \`\${event.data.amount}\${event.data.reference}\`,
   handler(event, request) {
     return Response.json({ received: event });
   },

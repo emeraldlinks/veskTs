@@ -5,7 +5,7 @@ export { serverLocals, getServerContext, setServerContext, clearServerContext, s
 export { createResource, setSsrData, clearSsrData, setSsrSink, resolveSsrResources, useFetch, HttpError, TimeoutError, mutate, type SsrDataSink } from '@vesk/runtime/src/resource';
 export { Portal } from '@vesk/runtime/src/portal';
 export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams as routerParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound, NotFoundError } from '@vesk/runtime/src/router';
-export { cookies, headers, locals, ServerResponse, ServerRequest, VeskRequest, VeskResponse, PayloadTooLargeError, DEFAULT_MAX_BODY_BYTES, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook, signCookie, unsignCookie, setSignedCookie, readSignedCookie, applyRequestSecurity } from '@vesk/runtime/src/request';
+export { cookies, headers, locals, ServerResponse, ServerRequest, VeskRequest, VeskResponse, PayloadTooLargeError, DEFAULT_MAX_BODY_BYTES, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook, WebhookOptions, signCookie, unsignCookie, setSignedCookie, readSignedCookie, applyRequestSecurity } from '@vesk/runtime/src/request';
 export { isr, revalidatePath, revalidateTag, clearIsrCache, pageIsr, componentIsr, revalidateComponent, isrConfigToRevalidate } from '@vesk/runtime/src/isr';
 export { JsonLd, ArticleSchema, ProductSchema, FAQPageSchema, BreadcrumbListSchema, OrganizationSchema, LocalBusinessSchema, VideoSchema } from '@vesk/runtime/src/seo';
 export { Image } from '@vesk/runtime/src/image';
