@@ -296,6 +296,58 @@ let &[total, rawTotal] = track(0);     // rawTotal is the raw Tracked<number>`,
     ],
   },
   {
+    slug: "component-namespaces",
+    title: "Component Namespaces",
+    description:
+      "import * as NS from './card.vsk' and <NS.Card /> — the namespace is a compile-time shorthand, not a value.",
+    group: "Language",
+    blocks: [
+      {
+        kind: "p",
+        text:
+          "A `.vsk` file can be imported as a namespace, and a component tag can then be qualified. The namespace is resolved at compile time to the component's exported name — no module object is ever constructed at runtime.",
+      },
+      {
+        kind: "code",
+        filename: "app/page.vsk",
+        language: "vsk",
+        code: `import * as UI from './card.vsk'
+
+component Page() {
+  <UI.Card />
+}`,
+      },
+      {
+        kind: "p",
+        text: "That is exactly what the flat form does, and the two are interchangeable:",
+      },
+      {
+        kind: "code",
+        filename: "app/page.vsk",
+        language: "vsk",
+        code: `import { Card } from './card.vsk'
+
+component Page() {
+  <Card />
+}`,
+      },
+      { kind: "h2", text: "What does NOT work" },
+      {
+        kind: "list",
+        items: [
+          "A nested path — `<UI.Sub.Card />` raises V0410: a .vsk namespace is flat, there is no nested object to walk into.",
+          "Reading a non-component as a VALUE — `{UI.max}` raises V0410, because only component tags resolve. Import the value by name, or keep it in a .ts module.",
+        ],
+      },
+      {
+        kind: "note",
+        tone: "info",
+        text:
+          "Both rules are specific to .vsk targets. A namespace import from a .ts or .js module is a real module object, so <NS.Icon /> there is an ordinary member expression.",
+      },
+    ],
+  },
+  {
     slug: "reactivity",
     title: "Reactivity",
     description:
@@ -2106,6 +2158,7 @@ const extendedBySlug = new Map(extendedPages.map((p) => [p.slug, p]));
 const docSlugOrder = [
   "getting-started",
   "components",
+  "component-namespaces",
   "track-declarations",
   "reactivity",
   "expression-mode",
