@@ -154,5 +154,138 @@ test('client: shorthand works with destructured raw cell', () => {
   expect(code).toContain("const rawCell = track(0, (current) => current * 2, (next, prev) => typeof next === 'string' ? Number(next) : next);");
 });
 
+// ============================================================
+// Plain (non-&) track must reach the server renderer bound.
+//
+// `const &[n] = track(0)` lowers to a TrackDecl, which has always pulled
+// `get`/`set`/`track` into the component's `__vesk` scope. The PLAIN form
+// stays a raw RuntimeStatement that still calls `track(`, and it used to
+// render with `track` unbound — the whole page failed with
+// "track is not defined". Regression cover for that, plus the false-positive
+// guards that keep the detection from injecting on a mere mention.
+// ============================================================
+test('server: plain track (no &) is bound in the SSR scope', () => {
+  const source = `component App {
+    const n = track(0)
+    const bump = () => { set(n, get(n) + 1) }
+    <p>{get(n)}</p>
+    <button onClick={bump}>go</button>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>0</p>');
+});
+
+test('server: plain track with a generic argument is bound', () => {
+  const source = `component App {
+    const items = track<string[]>([])
+    const add = () => set(items, [...get(items), 'x'])
+    <p>{get(items).length}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>0</p>');
+});
+
+test('server: plain track inside a for-init is bound', () => {
+  const source = `component App {
+    const seed = track(3)
+    const out: number[] = []
+    for (let i = 0; i < get(seed); i++) { out.push(i) }
+    <p>{out.length}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>3</p>');
+});
+
+test('server: plain track in statement-mode control flow is bound', () => {
+  const source = `component App {
+    const n = track(0)
+    if (get(n) === 0) {
+      <p>zero</p>
+    } else {
+      <p>other</p>
+    }
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>zero</p>');
+});
+
+test('server: plain track inside a component prop expression is bound', () => {
+  const source = `component App {
+    const seed = track(2)
+    <Panel value={get(seed)} />
+  }
+  component Panel(props: { value: number }) {
+    <span>{props.value}</span>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<span>2</span>');
+});
+
+test('server: a plain track() mentioned in a string does NOT bind it', () => {
+  const source = `component App {
+    const label = 'call track(0) to make a cell'
+    <p>{label}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('call track(0) to make a cell');
+});
+
+test('server: a plain track() mentioned in a comment does NOT bind it', () => {
+  const source = `component App {
+    // remember: track(0) makes a cell
+    <p>hi</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>hi</p>');
+});
+
+test('server: a member access .track() does NOT bind it', () => {
+  const source = `component App {
+    const api = { track: () => 7 }
+    <p>{api.track()}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>7</p>');
+});
+
+test('server: a local binding named track does not collide with the runtime', () => {
+  const source = `component App {
+    const api = { track: () => 7 }
+    const track = 'a local string named track'
+    <p>{api.track()}{track}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>7a local string named track</p>');
+});
+
+test('server expr-mode: plain track (no &) is bound in the SSR scope', () => {
+  const source = `component App {
+    const n = track(5)
+    const bump = () => set(n, get(n) + 1)
+    return <div><p>{get(n)}</p><button onClick={bump}>go</button></div>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>5</p>');
+});
+
+test('server expr-mode: plain track with a generic is bound', () => {
+  const source = `component App {
+    const items = track<string[]>(['a'])
+    const add = () => set(items, [...get(items), 'b'])
+    return <p>{get(items).join(',')}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>a</p>');
+});
+
+test('server expr-mode: a plain track() in a string does NOT bind it', () => {
+  const source = `component App {
+    const label = 'track(0)'
+    return <p>{label}</p>
+  }`;
+  const html = render(source, 'App', {}) as string;
+  expect(html).toContain('<p>track(0)</p>');
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

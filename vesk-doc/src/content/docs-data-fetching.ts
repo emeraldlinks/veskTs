@@ -801,11 +801,12 @@ console.log(state.saveData);      // boolean`,
 import { watchNetwork } from '@vesk/runtime';
 
 component NetworkStatus() {
-  let &[online, onlineCell] = track(navigator.onLine ?? true);
+  let &[online] = track(navigator.onLine ?? true);
 
-  // watchNetwork calls you with a plain snapshot — write the CELL, not the
-  // local: "online = ..." would rebind a local and re-render nothing.
-  const unsubscribe = watchNetwork((state) => onlineCell.set(state.online));
+  // watchNetwork calls you with a plain snapshot. Assigning to the tracked
+  // binding is the write — the compiler turns it into a cell set, so the
+  // template above follows it.
+  const unsubscribe = watchNetwork((state) => online = state.online);
   on_destroy(unsubscribe);
 
   <p class={online ? 'text-green-600' : 'text-red-600'}>
@@ -850,12 +851,12 @@ component NetworkStatus() {
 import { getNetworkState, watchNetwork } from '@vesk/runtime';
 
 component ConnectionBadge() {
-  const &[state, stateCell] = track(getNetworkState());
+  const &[state] = track(getNetworkState());
 
-  // watchNetwork CALLS YOU with a plain snapshot. It is not a cell, so the
-  // subscription has to write the cell explicitly — assigning "state = next"
-  // would rebind a local and re-render nothing.
-  const unsubscribe = watchNetwork((next) => set(stateCell, next));
+  // watchNetwork CALLS YOU with a plain snapshot. Assigning to the tracked
+  // binding is the write — the compiler turns it into a cell set, so the
+  // template below follows it.
+  const unsubscribe = watchNetwork((next) => state = next);
 
   // …and it has to be torn down with the component, or every remount adds a
   // subscription that fires forever.
@@ -874,12 +875,12 @@ component ConnectionBadge() {
 import { getNetworkState, watchNetwork } from '@vesk/runtime';
 
 component ConnectionBadge() {
-  const &[state, stateCell] = track(getNetworkState());
+  const &[state] = track(getNetworkState());
 
-  // watchNetwork CALLS YOU with a plain snapshot. It is not a cell, so the
-  // subscription has to write the cell explicitly — assigning "state = next"
-  // would rebind a local and re-render nothing.
-  const unsubscribe = watchNetwork((next) => set(stateCell, next));
+  // watchNetwork CALLS YOU with a plain snapshot. Assigning to the tracked
+  // binding is the write — the compiler turns it into a cell set, so the
+  // template below follows it.
+  const unsubscribe = watchNetwork((next) => state = next);
 
   // …and it has to be torn down with the component, or every remount adds a
   // subscription that fires forever.

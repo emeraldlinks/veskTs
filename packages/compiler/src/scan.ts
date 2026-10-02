@@ -332,6 +332,78 @@ export function containsForOfIn(text: string): boolean {
 }
 
 /**
+ * Reports whether `ident` appears in `text` as a CALLED identifier — i.e.
+ * followed by an optional TS generic clause and then `(`.
+ *
+ * This is a character-loop tokenizer, not a text match: it steps over
+ * whitespace, `//` and block comments, and quoted / template strings, so
+ * `track(` appearing inside a string, a comment or a property access
+ * (`obj.track(...)`) never counts. Template literals are skipped whole —
+ * including their `${...}` holes — because a `track(` in an interpolation is
+ * not a reliable enough signal to inject a runtime binding for.
+ *
+ * Used to decide which runtime helpers a raw statement needs without
+ * requiring the caller to have been lowered into a TrackDecl first.
+ */
+export function callsIdentifier(text: string, ident: string): boolean {
+	let i = 0;
+	const len = text.length;
+	// True when the previous significant character means the next identifier
+	// is a member access (`obj.track`) rather than a free call.
+	let afterDot = false;
+
+	while (i < len) {
+		const ch = text[i];
+
+		if (isWhitespaceChar(ch)) {
+			i++;
+			continue;
+		}
+
+		const commentEnd = skipComment(text, i);
+		if (commentEnd !== i) {
+			i = commentEnd;
+			continue;
+		}
+
+		if (ch === '"' || ch === "'" || ch === '`') {
+			i = skipString(text, i);
+			afterDot = false;
+			continue;
+		}
+
+		if (ch === '.' || (ch === '?' && text[i + 1] === '.')) {
+			afterDot = true;
+			i += ch === '.' ? 1 : 2;
+			continue;
+		}
+
+		if (isIdentStartCode(ch.charCodeAt(0))) {
+			let j = i + 1;
+			while (j < len && isIdentCharCode(text.charCodeAt(j))) j++;
+			const name = text.slice(i, j);
+			let k = skipWhitespace(text, j);
+			// A `name<T,>(...)` generic call — skip the balanced `<...>`.
+			if (text[k] === '<') {
+				k = skipTrackGeneric(text, k);
+				k = skipWhitespace(text, k);
+			}
+			if (name === ident && text[k] === '(' && !afterDot) {
+				return true;
+			}
+			afterDot = false;
+			i = j;
+			continue;
+		}
+
+		afterDot = false;
+		i++;
+	}
+
+	return false;
+}
+
+/**
  * Extracts the argument text of a `track<...>(...)` call from an init
  * expression. Handles nested generics (`track<Map<string, number>>(...)`)
  * and balanced parens in the argument. Returns the inner expression text,

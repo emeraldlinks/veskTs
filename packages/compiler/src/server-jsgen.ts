@@ -1,6 +1,6 @@
 import type { IRNode, ComponentIR, IRRoot } from '@vesk/compiler/src/ir';
 import {
-  StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion,
+  Expression, StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion,
   MapRegion, WhileLoop, SwitchBlock, TryCatch, ForLoop,
   TrackDecl, RuntimeStatement, ComponentRef, ComponentCall,
   ServerBlock, ClientBlock, HeadBlock, SlotNode, PropSlot, PropSlotRender,
@@ -8,7 +8,7 @@ import {
 import { isStaticIR, collectTrackedNames, transformTracked, transformTrackedInit, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
-import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, findBalancedEnd, startsWithIdentifier } from '@vesk/compiler/src/scan';
+import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, findBalancedEnd, startsWithIdentifier, callsIdentifier } from '@vesk/compiler/src/scan';
 import {
   isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
@@ -563,6 +563,91 @@ export interface ComponentMapEntry {
 }
 
 /**
+ * Whether a component body needs `track` / `get` / `set` destructured into its
+ * `__vesk` scope.
+ *
+ * A `TrackDecl` (`const &[n] = track(0)`) always needs them. A PLAIN
+ * `const n = track(0)` does not lower to a TrackDecl — it stays a raw
+ * `RuntimeStatement` whose source still calls `track` — and used to reach the
+ * server renderer unbound, taking the whole page down with
+ * "track is not defined". The client codegen imports these names
+ * unconditionally, so the server has to recognise the plain form too or the
+ * two halves of a file disagree about what is in scope.
+ */
+function bodyNeedsRuntimeCells(nodes: IRNode[]): boolean {
+  for (const node of nodes) {
+    if (node instanceof TrackDecl) return true;
+
+    // Raw statement / expression text: the only place a plain `track(...)`
+    // call can appear outside a lowered node.
+    if (node instanceof RuntimeStatement && callsIdentifier(node.raw, 'track')) return true;
+
+    if (node instanceof Expression && callsIdentifier(node.raw, 'track')) return true;
+
+    if (node instanceof ForLoop) {
+      if (callsIdentifier(node.init, 'track')) return true;
+      if (callsIdentifier(node.update, 'track')) return true;
+      if (callsIdentifier(node.condition.raw, 'track')) return true;
+      if (bodyNeedsRuntimeCells(node.bodyTemplate)) return true;
+    }
+
+    if (node instanceof StaticNode) {
+      for (const attr of node.attributes) {
+        if (callsIdentifier(attr.value, 'track')) return true;
+      }
+      if (bodyNeedsRuntimeCells(node.children)) return true;
+    }
+
+    if (node instanceof ComponentCall) {
+      for (const prop of node.props) {
+        if (callsIdentifier(prop.value.raw, 'track')) return true;
+      }
+      for (const spread of node.spreadProps) {
+        if (callsIdentifier(spread.raw, 'track')) return true;
+      }
+      if (bodyNeedsRuntimeCells(node.children)) return true;
+    }
+
+    if (node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) {
+      if (bodyNeedsRuntimeCells(node.children)) return true;
+    }
+
+    if (node instanceof PropSlot && bodyNeedsRuntimeCells(node.body)) return true;
+
+    if (node instanceof MapRegion) {
+      if (callsIdentifier(node.expression.raw, 'track')) return true;
+      if (bodyNeedsRuntimeCells(node.bodyTemplate)) return true;
+      if (bodyNeedsRuntimeCells(node.alternateNodes)) return true;
+    }
+
+    if (node instanceof OpaqueDynamicRegion) {
+      if (callsIdentifier(node.condition.raw, 'track')) return true;
+      if (bodyNeedsRuntimeCells(node.consequentNodes)) return true;
+      if (bodyNeedsRuntimeCells(node.alternateNodes)) return true;
+    }
+
+    if (node instanceof WhileLoop) {
+      if (callsIdentifier(node.condition.raw, 'track')) return true;
+      if (bodyNeedsRuntimeCells(node.bodyTemplate)) return true;
+    }
+
+    if (node instanceof SwitchBlock) {
+      if (callsIdentifier(node.discriminant.raw, 'track')) return true;
+      for (const c of node.cases) {
+        if (c.test && callsIdentifier(c.test.raw, 'track')) return true;
+        if (bodyNeedsRuntimeCells(c.body)) return true;
+      }
+    }
+
+    if (node instanceof TryCatch) {
+      if (bodyNeedsRuntimeCells(node.bodyTemplate)) return true;
+      if (bodyNeedsRuntimeCells(node.catchBody)) return true;
+    }
+  }
+  return false;
+}
+
+/**
  * Builds the compiled body source for every component in an IR root. Used by
  * both `buildComponentMap` (live functions) and `precompile.ts` (AOT SSR plans
  * that reconstruct the same functions at function-bundle load time).
@@ -578,7 +663,7 @@ export function buildComponentEntries(irRoot: IRRoot): ComponentMapEntry[] {
   const componentNames = new Set(irRoot.components.map((c) => c.name));
   const topValueNames = topNames.filter((n) => !componentNames.has(n));
   const importedNames = new Set([...runtimeNames, ...localValueNames, ...topValueNames]);
-  const hasTracked = irRoot.components.some((c) => c.body.some((n) => n instanceof TrackDecl));
+  const hasTracked = irRoot.components.some((c) => bodyNeedsRuntimeCells(c.body));
   const extraNames = hasTracked ? ['get', 'set', 'track'] : [];
   // Values exported by a `.vsk` module (`export const MAX = 10`) are hoisted
   // into this file's `__vesk` and must be destructured into component scope.

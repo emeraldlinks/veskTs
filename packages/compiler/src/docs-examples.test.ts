@@ -92,6 +92,63 @@ function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
 }
 
+// ============================================================
+// Style gate: docs must teach the `&` sugar.
+//
+// `const &[count] = track(0)` is the form a reader should copy. The plain
+// `const count = track(0)` and the array-pattern-without-`&` forms work — they
+// compile and render — which is exactly the problem: they rot silently. This
+// gate walks the real AST (the parser records `&` as `lazy: true` on the
+// ArrayPattern) so it never misreads a `track` that appears inside a string or
+// a comment.
+function trackSugarViolations(code: string, label: string): string[] {
+  const problems: string[] = [];
+  const root: unknown = parse(code, { filename: 'snippet.vsk' });
+
+  const visit = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    if (node === null || typeof node !== 'object') return;
+
+    const n = node as Record<string, unknown>;
+
+    // A declaration initialised from track(...) must destructure with `&`.
+    if (n.type === 'VariableDeclaration' && Array.isArray(n.declarations)) {
+      for (const decl of n.declarations as Array<Record<string, unknown>>) {
+        const init = decl.init as Record<string, unknown> | null;
+        if (!init || init.type !== 'CallExpression') continue;
+        const callee = init.callee as Record<string, unknown> | undefined;
+        if (callee?.type !== 'Identifier' || callee.name !== 'track') continue;
+
+        const id = decl.id as Record<string, unknown>;
+        if (id.type === 'Identifier') {
+          problems.push(
+            `\`const ${(id as { name: string }).name} = track(...)\` — write \`const &[${(id as { name: string }).name}] = track(...)\` so reads and writes are tracked`,
+          );
+        } else if (id.type === 'ArrayPattern' && id.lazy !== true) {
+          const names = (id.elements as Array<{ name?: string }>)
+            .map((e) => e?.name)
+            .filter(Boolean)
+            .join(', ');
+          problems.push(
+            `\`const [${names}] = track(...)\` is missing the \`&\` — write \`const &[${names}] = track(...)\``,
+          );
+        }
+      }
+    }
+
+    for (const key of Object.keys(n)) {
+      if (key === 'loc' || key === 'range') continue;
+      visit(n[key]);
+    }
+  };
+
+  visit(root);
+  return problems.map((p) => `${label}: ${p}`);
+}
+
 function isRenderable(filename: string | undefined, code: string): boolean {
   if (!filename || !filename.endsWith('.vsk')) return false;
   return /\bcomponent\s+\w/.test(code);
@@ -142,6 +199,12 @@ async function checkRenderable(label: string, code: string) {
   const clientOnlyExample = /^\s*\/\/\s*@client-only\b/m.test(code);
   const componentName = /component\s+(\w+)/.exec(code)?.[1];
   if (!componentName) throw new Error('no component name found');
+
+  // Style gate runs before compiling, so a violation names the example even if
+  // the example also fails to compile.
+  const violations = trackSugarViolations(code, label);
+  if (violations.length > 0) throw new Error(violations.join('\n    '));
+
   if (clientOnlyExample) {
     try {
       compilesForClient(code);
@@ -183,6 +246,114 @@ async function check(label: string, filename: string | undefined, code: string, 
 }
 
 console.log('\n=== Docs examples compile ===');
+
+// ============================================================
+// Documented-behaviour claims.
+//
+// The reactive pages make assertions that no compile-or-render check can see,
+// because they are claims about what does NOT happen. The effect page used to
+// say "side effects run on the server too", which was false — the page shipped
+// for months because every example rendered fine. These tests pin the claims
+// the pages now make, so the next edit to the prose has to face the runtime.
+console.log('\n=== Documented behaviour: effect and SSR ===');
+
+function behaviour(name: string, fn: () => void | Promise<void>) {
+  try {
+    const r = fn();
+    if (r instanceof Promise) {
+      r.then(
+        () => { passed++; console.log(`  ✓ ${name}`); },
+        (e: Error) => { failed++; failures.push({ name, message: e.message }); console.log(`  ✗ ${name}\n    ${e.message}`); },
+      );
+      return;
+    }
+    passed++;
+    console.log(`  ✓ ${name}`);
+  } catch (e) {
+    failed++;
+    failures.push({ name, message: (e as Error).message });
+    console.log(`  ✗ ${name}\n    ${(e as Error).message}`);
+  }
+}
+
+function assertNotContains(actual: unknown, unexpected: string, msg: string) {
+  if (typeof actual === 'string' && actual.includes(unexpected)) {
+    throw new Error(`${msg} (found ${JSON.stringify(unexpected)}) in ${JSON.stringify(actual).slice(0, 200)}`);
+  }
+}
+
+/** Text content, whitespace-collapsed — rendered markup is indented, so a
+ *  literal `<p>0</p>` comparison would test the pretty-printer, not the value. */
+function textOf(html: string): string {
+  return html
+    .replace(/<[^>]*>/g, '\u0000')
+    .replace(/\s+/g, ' ')
+    .replace(/\s*\u0000\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+behaviour('effect body does NOT run during SSR', () => {
+  const code = `component Tracker() {
+  const &[hits] = track(0)
+
+  effect(() => {
+    hits = hits + 1
+    console.log('EFFECT RAN')
+  })
+
+  <p>{hits}</p>
+}`;
+  return renderFullPage(code, 'Tracker', {}, new Map(), { hydrate: true }).then((html: string) => {
+    // The effect body writes 1 into the cell. If it ran on the server the
+    // rendered HTML would carry it, so this is the assertion: render, then
+    // confirm the cell still shows 0.
+    const text = textOf(html);
+    assert(text.includes('0'), `effect body ran during SSR — expected the cell to still read 0, got ${text.slice(0, 120)}`);
+    assert(!/\b1\b/.test(text), `the effect body wrote to the cell during SSR — rendered ${text.slice(0, 120)}`);
+  });
+});
+
+behaviour('a browser API inside an effect does not crash SSR', () => {
+  const code = `component Measure() {
+  const &[width] = track(0)
+
+  effect(() => {
+    width = document.querySelector('div').getBoundingClientRect().width
+  })
+
+  <div>x</div>
+  <span>{width}</span>
+}`;
+  return renderFullPage(code, 'Measure', {}, new Map(), { hydrate: true }).then((html: string) => {
+    const text = textOf(html);
+    assert(
+      text.includes('x 0'),
+      `expected the server to render the initial value, got ${text.slice(0, 120)}`,
+    );
+  });
+});
+
+behaviour('a browser API in a component BODY still throws (effects are the escape hatch)', () => {
+  const code = `component Broken() {
+  const width = document.querySelector('div').getBoundingClientRect().width
+  <div>{width}</div>
+}`;
+  return renderFullPage(code, 'Broken', {}, new Map(), { hydrate: true }).then(
+    () => { throw new Error('expected SSR to throw for a bare document access'); },
+    () => { /* threw, as documented */ },
+  );
+});
+
+behaviour('useFetch is the SSR path the effect page points at', () => {
+  const code = `component Loader() {
+  const res = useFetch('/api/thing', { key: 'thing' })
+  return <p>{res.loading ? 'loading' : 'done'}</p>
+}`;
+  return renderFullPage(code, 'Loader', {}, new Map(), { hydrate: true }).then((html: string) => {
+    assert(html.includes('<!DOCTYPE html>'), `useFetch example failed to server-render: ${html.slice(0, 200)}`);
+  });
+});
 
 const skipped: string[] = [];
 const clientOnly: string[] = [];
