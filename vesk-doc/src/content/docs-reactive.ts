@@ -677,7 +677,7 @@ export const pages: { slug: string; title: string; description: string; group: s
     slug: "for",
     title: "Lists and For",
     description:
-      "Rendering lists server-side with the native for loop, what the For component does, and the gap you should know about.",
+      "Rendering lists server-side: the native for loop (keyed) and the For component, and when to use which.",
     group: "Runtime",
     blocks: [
       {
@@ -735,8 +735,7 @@ export const pages: { slug: string; title: string; description: string; group: s
         kind: "code",
         filename: "app/tasks/page.vsk",
         language: "vsk",
-        code: `// @client-only — see the gap below: For does not render rows during SSR
-component Tasks() {
+        code: `component Tasks() {
   const &[tasks] = track(['Write the docs', 'Ship the release'])
 
   const renderRow = (item: string) => <li>{item}</li>
@@ -748,14 +747,14 @@ component Tasks() {
       },
       {
         kind: "note",
-        tone: "warn",
+        tone: "info",
         text:
-          "Known gap, measured rather than guessed. Today For does NOT render its rows during SSR: a child that returns JSX makes server rendering throw ('Unexpected token <', because the codegen emits the arrow body verbatim instead of lowering it), and a child that returns a string renders an empty list. It works on the client. For anything that must be server-rendered, use the native for loop above.",
+          "For renders its rows on the server AND on the client, with output identical to the native loop. It used to be server-empty: a function-valued child is not an IR node, so the JSX in its body was emitted verbatim and the render threw, and even once it compiled the child was wrapped in the text emitter so For called something that returned nothing.",
       },
       {
         kind: "p",
         text:
-          "This is a compiler bug, not a design limit — the emitted server code keeps the raw arrow source instead of lowering it the way the client codegen does. It is tracked in TODO.md with a reproducer, and this page will change when it lands.",
+          "Reach for the native for loop anyway when you want KEYED reconciliation: For renders rows but does not key them, so a reorder rebuilds them instead of moving them. When order can change and identity matters, the keyed loop is the right tool.",
       },
     ],
   },

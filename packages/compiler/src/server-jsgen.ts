@@ -15,6 +15,14 @@ import {
   __vskHydrate, __vskMarkerless, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
 import { localValueImportNames } from '@vesk/compiler/src/module-imports';
+import { lowerJsxInExpression } from '@vesk/compiler/src/server-jsx-lowering';
+import { print } from 'esrap';
+import tsPrinter from 'esrap/languages/ts';
+
+/** Print an already-lowered AST with the plain TS printer (no JSX remains). */
+function printLoweredTs(ast: ESTreeNode): string {
+  return print(ast, tsPrinter()).code;
+}
 import { vskImportValueNames } from '@vesk/compiler/src/vsk-imports';
 
 // Hydrate-mode component-boundary wrapper. Each server-rendered component call
@@ -108,7 +116,19 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
       `})();`,
     ].join('\n');
   }
-  if (node instanceof RuntimeStatement) return semicolonizeStatement(transformTracked(node as any, tracked || new Map()));
+  if (node instanceof RuntimeStatement) {
+    const stmt = node as unknown as { ast: ESTreeNode | null };
+    const lowered = stmt.ast ? lowerJsxInExpression(stmt.ast) : null;
+    if (lowered && lowered !== stmt.ast && (tracked?.size ?? 0) === 0) {
+      return semicolonizeStatement(printLoweredTs(lowered as ESTreeNode));
+    }
+    if (lowered && lowered !== stmt.ast) {
+      return semicolonizeStatement(
+        transformTracked({ ...(node as object), ast: lowered } as never, tracked || new Map()),
+      );
+    }
+    return semicolonizeStatement(transformTracked(node as any, tracked || new Map()));
+  }
   if (node instanceof SlotNode) {
     // Markerless mode drops the slot boundary comments: SSR output is plain
     // HTML and slot claims scope structurally (createLayoutSlot subject to the
@@ -134,7 +154,21 @@ function isEvent(target: string | null): boolean {
 }
 
 function exprJSX(node: { raw: string; ast: ESTreeNode | null }, tracked?: Map<string, TrackedInfo>): string {
-  return exprJS(transformTracked(node as any, tracked || new Map()));
+  // A function-valued child — `<For each={items}>{(item) => <li/>}</For>` —
+  // carries JSX inside an EXPRESSION, and the server has no IR node for it, so
+  // it used to be printed verbatim and the render threw "Unexpected token '<'".
+  // Lower it to the string the body emitter would have produced. Client output
+  // is untouched (a chunk goes through esbuild's tsx loader, so JSX is legal
+  // there).
+  const lowered = node.ast ? lowerJsxInExpression(node.ast) : null;
+  const didLower = lowered !== node.ast;
+  if (didLower && (tracked?.size ?? 0) === 0) {
+    // `transformTracked` returns the RAW source when there is nothing to
+    // rewrite, which would throw the lowering away. With no tracked names there
+    // are no rewrites to lose.
+    return exprJS(printLoweredTs(lowered as ESTreeNode));
+  }
+  return exprJS(transformTracked({ ...node, ast: lowered } as any, tracked || new Map()));
 }
 
 function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
@@ -453,6 +487,20 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
     }
   }
   if (regularChildren.length > 0) {
+    // A single function-valued child (`<For each={items}>{(item) => …}</For>`,
+    // or a reference to one) must stay a FUNCTION: `For` calls it per item.
+    // Wrapping it in the `(() => { const __out = []; … })()` text emitter made it
+    // return undefined, so For rendered an empty list.
+    const fnType = regularChildren.length === 1 && regularChildren[0] instanceof DynamicBinding && regularChildren[0].kind === 'text'
+      ? (regularChildren[0].expression.ast as { type?: string } | null)?.type
+      : null;
+    const isFnChild = fnType === 'ArrowFunctionExpression'
+      || fnType === 'FunctionExpression'
+      || fnType === 'Identifier'
+      || fnType === 'MemberExpression';
+    if (isFnChild) {
+      propsEntries.push(`children: ${exprJSX((regularChildren[0] as DynamicBinding).expression, tracked)}`);
+    } else {
     const childLines: string[] = [];
     for (const child of regularChildren) {
       const code = irNodeToJS(child, importedNames, isAsync, tracked);
@@ -465,6 +513,7 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
       lines.push(`const __out = [];`);
       lines.push(indent(childLines.join('\n')));
       lines.push(`return __out.join(''); })();`);
+    }
     }
   }
   const propsObj = `{ ${propsEntries.join(', ')} }`;
@@ -494,9 +543,9 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   }
   const callExpr = `${awaitKw}${calleeVar}(${propsObj}, __registry, (${calleeVar}.__veskScope || __vesk))`;
   if (__vskHydrate && !__vskMarkerless) {
-    lines.push(`__out.push(${JSON.stringify(componentMarker(compName))} + (${callExpr} || ''));`);
+    lines.push(`__out.push(${JSON.stringify(componentMarker(compName))} + __flat(${callExpr}));`);
   } else {
-    lines.push(`__out.push(${callExpr} || '');`);
+    lines.push(`__out.push(__flat(${callExpr}));`);
   }
   return lines.join('\n');
 }
@@ -515,6 +564,9 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
   lines.push(`const __styleText = (v) => { if (typeof v === 'string') return v; if (v && typeof v === 'object') { let s = ''; for (const k in v) { const x = v[k]; if (x == null || x === false) continue; s += k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase()) + ':' + x + ';'; } return s; } return String(v); };`);
   lines.push(`const __attr = (n, v) => (v == null || v === false) ? '' : ' ' + n + '="' + __escape(n === 'style' ? __styleText(v) : String(v)) + '"';`);
   lines.push(`const raw = (s) => s == null ? '' : String(s);`);
+  // A component may return an ARRAY of strings (`<For>` maps its children), and
+  // `Array#toString` joins the rows with commas — `<li>a</li>,<li>b</li>`.
+  lines.push(`const __flat = (v) => Array.isArray(v) ? v.join('') : (v == null ? '' : String(v));`);
   lines.push(`const __tk = globalThis.__vsk_ssr_token || '';`);
 
   if (asyncMode) {
