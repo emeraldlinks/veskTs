@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shell = createLucideIcon("shell", __iconNode);
+const Shell = /* @__PURE__ */ createLucideIcon("shell", __iconNode);
 
 export default Shell;
 export { Shell };

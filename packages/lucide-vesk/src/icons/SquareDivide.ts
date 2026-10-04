@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareDivide = createLucideIcon("square-divide", __iconNode);
+const SquareDivide = /* @__PURE__ */ createLucideIcon("square-divide", __iconNode);
 
 export default SquareDivide;
 export { SquareDivide };

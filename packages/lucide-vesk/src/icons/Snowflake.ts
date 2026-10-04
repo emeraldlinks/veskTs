@@ -83,7 +83,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Snowflake = createLucideIcon("snowflake", __iconNode);
+const Snowflake = /* @__PURE__ */ createLucideIcon("snowflake", __iconNode);
 
 export default Snowflake;
 export { Snowflake };

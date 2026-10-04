@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PaintRoller = createLucideIcon("paint-roller", __iconNode);
+const PaintRoller = /* @__PURE__ */ createLucideIcon("paint-roller", __iconNode);
 
 export default PaintRoller;
 export { PaintRoller };

@@ -7,6 +7,7 @@ import { walk } from 'zimmerframe';
 import { parse } from '@vesk/compiler/src/parser';
 import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement } from '@vesk/compiler/src/strip-ts';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
+import { VeskError } from '@vesk/compiler/src/errors';
 
 // =============================================================
 // SSR module-value imports.
@@ -259,6 +260,11 @@ export function loadSsrModule(absPath: string): Record<string, unknown> | null {
       // transitive closure on every cold load (tens of seconds dev, too slow to
       // ship in prod).
       const src = readSsrSource(absPath);
+      // Report here, before any fallback can run. `nativeRequireFallback` and
+      // the raw-source substitution both "succeed" in the sense that they
+      // return something, which is how an unparseable module used to keep
+      // going and fail somewhere else entirely.
+      if (src?.parseError) throw src.parseError;
       const body = (src?.ast?.body || []) as Array<{ type: string } & Record<string, unknown>>;
       if (src && isPureReexportBarrel(body)) {
         exportsObj = createLazyBarrelExports(buildBarrelSpec(body), dirname(absPath));
@@ -366,7 +372,14 @@ function readSourceCached(absPath: string): string | null {
   return raw;
 }
 
-export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<typeof parse> | null } | null {
+export interface SsrSource {
+  raw: string;
+  ast: ReturnType<typeof parse> | null;
+  /** Set when `raw` could not be parsed; see `moduleParseFailed`. */
+  parseError?: VeskError;
+}
+
+export function readSsrSource(absPath: string): SsrSource | null {
   const cachedRaw = readSourceCached(absPath);
   if (cachedRaw === null) {
     // Keep the original warning: a missing module is a build-time signal, not
@@ -375,13 +388,28 @@ export function readSsrSource(absPath: string): { raw: string; ast: ReturnType<t
     return null;
   }
   const raw = cachedRaw;
-  let ast: ReturnType<typeof parse> | null = null;
   try {
-    ast = parse(raw, { filename: absPath });
-  } catch {
-    ast = null;
+    return { raw, ast: parse(raw, { filename: absPath }) };
+  } catch (e) {
+    // A parse failure is a BUILD FAILURE, not a fallback. It used to return
+    // `ast: null` silently, and the caller then substituted the raw source — so
+    // the file's TypeScript syntax reached `new Function` and surfaced as a
+    // bare `Unexpected token ':'` in whichever module imported it, with no
+    // file, no line, and (because the module's exports came back undefined) a
+    // trail of unrelated `X is not iterable` failures behind it.
+    const err = e as VeskError;
+    let parseError: VeskError;
+    if (err instanceof VeskError) {
+      // `parse()` already produced a located diagnostic for this file. Keep its
+      // message, frame and position — they are strictly better than a wrapper's
+      // — and add the code so the failure is identifiable in build logs.
+      parseError = err;
+      if (err.code === undefined) err.code = 'V0901';
+    } else {
+      parseError = VeskError.moduleParseFailed({ file: absPath, reason: (e as Error)?.message });
+    }
+    return { raw, ast: null, parseError };
   }
-  return { raw, ast };
 }
 
 /** True when every statement in a module body is a re-export (or a type-only /
@@ -490,7 +518,11 @@ function createLazyBarrelExports(spec: BarrelSpec, dir: string): Record<string, 
   const loadSource = (source: string): Record<string, unknown> | null => {
     let target = targets.get(source);
     if (!target) {
-      target = resolveSsrModule(source, dir) ?? '';
+      // Compiler-owned sources resolve through their package `exports` map, not
+      // the project's tsconfig `paths` (see `createModuleRequire`).
+      target = (isCompilerOwnedTarget(source)
+        ? resolveCompilerOwnedModule(source)
+        : resolveSsrModule(source, dir)) ?? '';
       if (!target) return null;
       targets.set(source, target);
     }
@@ -576,7 +608,7 @@ function createLazyBarrelExports(spec: BarrelSpec, dir: string): Record<string, 
 function evaluateModuleFile(
   absPath: string,
   exportsObj: Record<string, unknown>,
-  src?: { raw: string; ast: ReturnType<typeof parse> | null } | null
+  src?: SsrSource | null
 ): boolean {
   let raw: string;
   if (src) {
@@ -593,6 +625,10 @@ function evaluateModuleFile(
   let ast: ReturnType<typeof parse> | null;
   if (src) {
     ast = src.ast;
+    // Report the parse failure at the file that caused it rather than letting
+    // the raw source reach `new Function` and fail as a SyntaxError nobody can
+    // trace back.
+    if (!ast && src.parseError) throw src.parseError;
   } else {
     try {
       ast = parse(raw, { filename: absPath });
@@ -687,8 +723,56 @@ function scanUnsupportedNode(node: unknown, inFunction = false): string | null {
 }
 
 /** Recursive `require` used inside evaluated modules, rooted at their dir. */
+/**
+ * Resolve a compiler-owned (`@vesk/*`) specifier WITHOUT consulting tsconfig
+ * `paths`. The package's own `exports` map is the authority for its own
+ * subpaths — and it points at built JavaScript.
+ */
+function resolveCompilerOwnedModule(specifier: string): string | null {
+  const viaExports = resolveViaPackageExports(specifier, process.cwd());
+  if (viaExports) return viaExports;
+  const viaModuleField = resolveViaPackageModuleField(specifier, process.cwd());
+  if (viaModuleField) return viaModuleField;
+  const native = nativeResolve(specifier, process.cwd());
+  if (native && !isBuiltinPath(native)) return native;
+  return null;
+}
+
 function createModuleRequire(fromDir: string): (specifier: string) => unknown {
   return (specifier: string): unknown => {
+    // `@vesk/*` is compiler-owned, and it is BUILT JavaScript by the time it
+    // ships (`@vesk/runtime` → `dist/index-client.js`). It must not go through
+    // this loader at all, which parses with the `.vsk` grammar.
+    //
+    // Both halves of that were wrong, and together they took down any module
+    // that imported BOTH a `@vesk/*` package and a relative module:
+    //
+    //  1. Resolution used the project's tsconfig `paths`, which map
+    //     `@vesk/runtime/*` to `packages/runtime/src/*`, while the package's own
+    //     `exports` map sends the same specifier to `dist/*.js`. The alias won,
+    //     so the loader was handed raw TypeScript.
+    //  2. The built runtime entry is itself a re-export barrel, so it became a
+    //     lazy Proxy. Reading any name resolved a source file and parsed it
+    //     with the `.vsk` grammar — which rejects `component` as a reserved
+    //     word, so even `dist/ripple-runtime.js` failed.
+    //
+    // The resulting throw escaped the proxy read and propagated out of the
+    // IMPORTING module's evaluation, so every one of its exports came back
+    // `undefined` and any `track(...)` cell in it threw
+    // `Cannot read properties of undefined (reading 'get')`.
+    //
+    // Native `require` is the right loader here: these packages ship plain JS
+    // with a real `exports` map, exactly what Node is for. The bare-only and
+    // relative-only cases each happened to recover via `nativeRequireFallback`,
+    // which is why each looked fine in isolation and only the combination broke.
+    if (isCompilerOwnedTarget(specifier)) {
+      const resolved = resolveCompilerOwnedModule(specifier);
+      if (resolved) {
+        const native = nativeRequireFallback(resolved);
+        if (native) return native;
+      }
+      throw new Error(`Cannot load module '${specifier}'`);
+    }
     const resolved = resolveSsrModule(specifier, fromDir);
     if (!resolved) throw new Error(`Cannot find module '${specifier}'`);
     // Builtins are handled natively; files join every live evaluation frame so
@@ -1444,6 +1528,10 @@ export function collectModuleBundled(absPath: string, collector: ModuleCollector
   } else {
     const src = readSsrSource(absPath);
     if (!src || !src.ast) {
+      // A module we could not parse is a hard failure. Substituting the raw
+      // source (the historical behavior) pushes every type annotation in this
+      // file into `new Function` and blames some unrelated module later.
+      if (src?.parseError) throw src.parseError;
       const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
       collector.modules.push({ key, code: raw, dir, deps: {} });
       return key;

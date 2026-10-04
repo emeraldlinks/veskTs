@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlipHorizontal2 = createLucideIcon("flip-horizontal-2", __iconNode);
+const FlipHorizontal2 = /* @__PURE__ */ createLucideIcon("flip-horizontal-2", __iconNode);
 
 export default FlipHorizontal2;
 export { FlipHorizontal2 };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignCenterHorizontal = createLucideIcon("align-center-horizontal", __iconNode);
+const AlignCenterHorizontal = /* @__PURE__ */ createLucideIcon("align-center-horizontal", __iconNode);
 
 export default AlignCenterHorizontal;
 export { AlignCenterHorizontal };

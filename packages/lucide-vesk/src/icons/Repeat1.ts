@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Repeat1 = createLucideIcon("repeat-1", __iconNode);
+const Repeat1 = /* @__PURE__ */ createLucideIcon("repeat-1", __iconNode);
 
 export default Repeat1;
 export { Repeat1 };

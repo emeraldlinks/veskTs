@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Telescope = createLucideIcon("telescope", __iconNode);
+const Telescope = /* @__PURE__ */ createLucideIcon("telescope", __iconNode);
 
 export default Telescope;
 export { Telescope };

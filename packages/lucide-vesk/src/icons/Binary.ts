@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Binary = createLucideIcon("binary", __iconNode);
+const Binary = /* @__PURE__ */ createLucideIcon("binary", __iconNode);
 
 export default Binary;
 export { Binary };

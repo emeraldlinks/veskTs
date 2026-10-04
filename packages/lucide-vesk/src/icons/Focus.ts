@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Focus = createLucideIcon("focus", __iconNode);
+const Focus = /* @__PURE__ */ createLucideIcon("focus", __iconNode);
 
 export default Focus;
 export { Focus };

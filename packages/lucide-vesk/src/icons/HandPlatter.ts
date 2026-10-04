@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HandPlatter = createLucideIcon("hand-platter", __iconNode);
+const HandPlatter = /* @__PURE__ */ createLucideIcon("hand-platter", __iconNode);
 
 export default HandPlatter;
 export { HandPlatter };

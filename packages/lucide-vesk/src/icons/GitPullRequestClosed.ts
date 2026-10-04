@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitPullRequestClosed = createLucideIcon("git-pull-request-closed", __iconNode);
+const GitPullRequestClosed = /* @__PURE__ */ createLucideIcon("git-pull-request-closed", __iconNode);
 
 export default GitPullRequestClosed;
 export { GitPullRequestClosed };

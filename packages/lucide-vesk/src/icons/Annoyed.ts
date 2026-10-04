@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Annoyed = createLucideIcon("annoyed", __iconNode);
+const Annoyed = /* @__PURE__ */ createLucideIcon("annoyed", __iconNode);
 
 export default Annoyed;
 export { Annoyed };

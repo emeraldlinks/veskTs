@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ReceiptRussianRuble = createLucideIcon("receipt-russian-ruble", __iconNode);
+const ReceiptRussianRuble = /* @__PURE__ */ createLucideIcon("receipt-russian-ruble", __iconNode);
 
 export default ReceiptRussianRuble;
 export { ReceiptRussianRuble };

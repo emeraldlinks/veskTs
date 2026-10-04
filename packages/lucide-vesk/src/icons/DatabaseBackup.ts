@@ -50,7 +50,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DatabaseBackup = createLucideIcon("database-backup", __iconNode);
+const DatabaseBackup = /* @__PURE__ */ createLucideIcon("database-backup", __iconNode);
 
 export default DatabaseBackup;
 export { DatabaseBackup };

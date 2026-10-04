@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LampWallDown = createLucideIcon("lamp-wall-down", __iconNode);
+const LampWallDown = /* @__PURE__ */ createLucideIcon("lamp-wall-down", __iconNode);
 
 export default LampWallDown;
 export { LampWallDown };

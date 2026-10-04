@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CloudOff = createLucideIcon("cloud-off", __iconNode);
+const CloudOff = /* @__PURE__ */ createLucideIcon("cloud-off", __iconNode);
 
 export default CloudOff;
 export { CloudOff };

@@ -89,7 +89,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Vault = createLucideIcon("vault", __iconNode);
+const Vault = /* @__PURE__ */ createLucideIcon("vault", __iconNode);
 
 export default Vault;
 export { Vault };

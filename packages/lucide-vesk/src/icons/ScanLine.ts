@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScanLine = createLucideIcon("scan-line", __iconNode);
+const ScanLine = /* @__PURE__ */ createLucideIcon("scan-line", __iconNode);
 
 export default ScanLine;
 export { ScanLine };

@@ -46,7 +46,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleDivide = createLucideIcon("circle-divide", __iconNode);
+const CircleDivide = /* @__PURE__ */ createLucideIcon("circle-divide", __iconNode);
 
 export default CircleDivide;
 export { CircleDivide };

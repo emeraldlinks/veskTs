@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Vegan = createLucideIcon("vegan", __iconNode);
+const Vegan = /* @__PURE__ */ createLucideIcon("vegan", __iconNode);
 
 export default Vegan;
 export { Vegan };

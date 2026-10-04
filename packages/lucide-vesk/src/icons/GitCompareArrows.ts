@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitCompareArrows = createLucideIcon("git-compare-arrows", __iconNode);
+const GitCompareArrows = /* @__PURE__ */ createLucideIcon("git-compare-arrows", __iconNode);
 
 export default GitCompareArrows;
 export { GitCompareArrows };

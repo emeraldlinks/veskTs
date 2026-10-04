@@ -40,7 +40,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Trello = createLucideIcon("trello", __iconNode);
+const Trello = /* @__PURE__ */ createLucideIcon("trello", __iconNode);
 
 export default Trello;
 export { Trello };

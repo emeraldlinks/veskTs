@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CalendarSearch = createLucideIcon("calendar-search", __iconNode);
+const CalendarSearch = /* @__PURE__ */ createLucideIcon("calendar-search", __iconNode);
 
 export default CalendarSearch;
 export { CalendarSearch };

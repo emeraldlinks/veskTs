@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WifiZero = createLucideIcon("wifi-zero", __iconNode);
+const WifiZero = /* @__PURE__ */ createLucideIcon("wifi-zero", __iconNode);
 
 export default WifiZero;
 export { WifiZero };

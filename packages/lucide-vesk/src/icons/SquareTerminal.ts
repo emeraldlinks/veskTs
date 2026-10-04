@@ -34,7 +34,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareTerminal = createLucideIcon("square-terminal", __iconNode);
+const SquareTerminal = /* @__PURE__ */ createLucideIcon("square-terminal", __iconNode);
 
 export default SquareTerminal;
 export { SquareTerminal };

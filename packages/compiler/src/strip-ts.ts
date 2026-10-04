@@ -181,13 +181,52 @@ export function stripTsTypes(ast: any): any {
   });
 }
 
+/**
+ * Drop TS syntax from ONE function parameter.
+ *
+ * A parameter is not always a bare `Identifier`: with a default value it is an
+ * `AssignmentPattern` (`a: T = {}`), and then the annotation and the `?` live
+ * on `left`, NOT on the pattern node. Clearing only `p.typeAnnotation` handled
+ * `(a: string)` and left every defaulted parameter's annotation in place, so the
+ * emitted module kept a literal `: Partial<Record<string, number>>` and the SSR
+ * module loader died on `Unexpected token ':'` — one shape that only appeared
+ * when a parameter also had an initializer, which is why every non-defaulted
+ * case tested clean.
+ *
+ * Descending through the pattern covers the defaulted forms AND the destructured
+ * ones (`({ a }: Opts = {})`), and `RestElement` (`...rest: string[]`), so no
+ * parameter shape can keep type syntax.
+ */
+function stripParamTypes(p: any): void {
+  if (!p) return;
+  if (p.typeAnnotation) p.typeAnnotation = null;
+  if (p.optional) p.optional = false;
+  switch (p.type) {
+    case 'AssignmentPattern':
+      // `a: T = dflt` — the binding is `left`; the default (right) is real JS.
+      stripParamTypes(p.left);
+      break;
+    case 'RestElement':
+      stripParamTypes(p.argument);
+      break;
+    case 'ObjectPattern':
+      for (const prop of p.properties || []) {
+        // Shorthand `{ a }` has `value === shorthand`; `value` is always the binding.
+        stripParamTypes(prop.value || prop.argument || prop);
+      }
+      break;
+    case 'ArrayPattern':
+      for (const el of p.elements || []) if (el) stripParamTypes(el);
+      break;
+    default:
+      break;
+  }
+}
+
 function stripFunctionTypes(node: any): void {
   if (node.returnType) node.returnType = null;
   if (node.typeParameters) node.typeParameters = null;
-  for (const p of node.params || []) {
-    if (p.typeAnnotation) p.typeAnnotation = null;
-    if (p.optional) p.optional = false;
-  }
+  for (const p of node.params || []) stripParamTypes(p);
 }
 
 /**

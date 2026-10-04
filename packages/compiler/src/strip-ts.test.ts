@@ -117,6 +117,91 @@ test('isTypeOnlyStatement: recognizes import type and export type', () => {
   expect(isTypeOnlyStatement(typeExport)).toEqual(true);
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Parameter annotations that survive only when a DEFAULT value is present.
+//
+// A parameter with a default is an `AssignmentPattern`, and the annotation lives
+// on `left` rather than on the pattern node. Clearing only `param.typeAnnotation`
+// therefore handled `(a: string)` and left every defaulted parameter's type in
+// place, so the emitted module kept a literal `: Partial<Record<string, number>>`
+// and the SSR module loader died on `Unexpected token ':'`. Every non-defaulted
+// shape tested clean, which is exactly why this survived — it only appeared once
+// a parameter also had an initializer.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** True when a TS type annotation survived into the emitted JS. */
+function hasAnnotation(code: string): boolean {
+  // Look at the parameter region only: the arrow body legitimately contains
+  // colons of its own.
+  const head = code.split('=>')[0] ?? '';
+  return /[:?]/.test(head.replace(/\{[^}]*\}/g, '{}'));
+}
+
+test('stripCodeTypes: a parameter annotation WITH a default is dropped', () => {
+  const out = stripCodeTypes('export const f = (a: Partial<Record<string, number>> = {}) => 1;');
+  expect(hasAnnotation(out)).toEqual(false);
+  expect(out).toContain('a = {}');
+});
+
+test('stripCodeTypes: an inline object-literal type with a default is dropped', () => {
+  const out = stripCodeTypes('export const f = (o: { isIssuable?: boolean } = {}) => 1;');
+  expect(hasAnnotation(out)).toEqual(false);
+  expect(out).toContain('o = {}');
+});
+
+test('stripCodeTypes: a default EXPRESSION parameter annotation is dropped', () => {
+  const out = stripCodeTypes('export const f = (v: ThemeVariant = theme.get()) => 1;');
+  expect(hasAnnotation(out)).toEqual(false);
+  expect(out).toContain('theme.get()');
+});
+
+test('stripCodeTypes: an optional parameter with a default is dropped', () => {
+  const out = stripCodeTypes('export const f = (a?: string = "x") => a;');
+  expect(hasAnnotation(out)).toEqual(false);
+  expect(out).toContain('"x"');
+});
+
+test('stripCodeTypes: a DESTRUCTURED parameter with a default is dropped', () => {
+  const out = stripCodeTypes('export const f = ({ a, b }: Opts = {}) => a;');
+  expect(hasAnnotation(out)).toEqual(false);
+  expect(out).toContain('{ a, b } = {}');
+});
+
+test('stripCodeTypes: a rest parameter annotation is dropped', () => {
+  const out = stripCodeTypes('export const f = (...rest: string[]) => rest.length;');
+  expect(hasAnnotation(out)).toEqual(false);
+});
+
+test('stripCodeTypes: an array-destructured parameter with a default is dropped', () => {
+  const out = stripCodeTypes('export const f = ([a, b]: number[] = []) => a;');
+  expect(hasAnnotation(out)).toEqual(false);
+});
+
+test('stripCodeTypes: every parameter shape together, on a function declaration', () => {
+  const out = stripCodeTypes('export function g(a: string, b?: number = 2, { c }: C = {}, ...r: string[]) { return a; }');
+  expect(hasAnnotation(out)).toEqual(false);
+  expect(out).toContain('b = 2');
+});
+
+test('stripCodeTypes: a parameter WITHOUT a default is still dropped (no regression)', () => {
+  const out = stripCodeTypes('export const f = (a: string, b: Record<string, number>) => 1;');
+  expect(hasAnnotation(out)).toEqual(false);
+});
+
+test('stripCodeTypes: a default value with no annotation is left intact', () => {
+  const out = stripCodeTypes('export const f = (a = 5) => a;');
+  expect(out).toContain('a = 5');
+});
+
+test('stripCodeTypes: the stripped module is valid JavaScript', () => {
+  // The real failure was not a missing annotation but an emitted module that
+  // could not be evaluated at all, so assert evaluability, not just text.
+  const out = stripCodeTypes('export const f = (a: Partial<Record<string, number>> = {}) => Object.keys(a).length;');
+  const body = out.replace(/^export\s+/, '');
+  const value = new Function(`${body}; return f;`)() as (a: Record<string, number>) => number;
+  expect(value({ x: 1, y: 2 })).toEqual(2);
+});
+
 const results = () => {
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);

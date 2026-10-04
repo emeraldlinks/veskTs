@@ -97,7 +97,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BrainCircuit = createLucideIcon("brain-circuit", __iconNode);
+const BrainCircuit = /* @__PURE__ */ createLucideIcon("brain-circuit", __iconNode);
 
 export default BrainCircuit;
 export { BrainCircuit };

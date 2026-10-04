@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Origami = createLucideIcon("origami", __iconNode);
+const Origami = /* @__PURE__ */ createLucideIcon("origami", __iconNode);
 
 export default Origami;
 export { Origami };

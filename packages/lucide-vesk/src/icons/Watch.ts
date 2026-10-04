@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Watch = createLucideIcon("watch", __iconNode);
+const Watch = /* @__PURE__ */ createLucideIcon("watch", __iconNode);
 
 export default Watch;
 export { Watch };

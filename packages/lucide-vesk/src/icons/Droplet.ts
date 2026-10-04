@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Droplet = createLucideIcon("droplet", __iconNode);
+const Droplet = /* @__PURE__ */ createLucideIcon("droplet", __iconNode);
 
 export default Droplet;
 export { Droplet };

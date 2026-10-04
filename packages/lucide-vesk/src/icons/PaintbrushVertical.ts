@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PaintbrushVertical = createLucideIcon("paintbrush-vertical", __iconNode);
+const PaintbrushVertical = /* @__PURE__ */ createLucideIcon("paintbrush-vertical", __iconNode);
 
 export default PaintbrushVertical;
 export { PaintbrushVertical };

@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScissorsLineDashed = createLucideIcon("scissors-line-dashed", __iconNode);
+const ScissorsLineDashed = /* @__PURE__ */ createLucideIcon("scissors-line-dashed", __iconNode);
 
 export default ScissorsLineDashed;
 export { ScissorsLineDashed };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShieldMinus = createLucideIcon("shield-minus", __iconNode);
+const ShieldMinus = /* @__PURE__ */ createLucideIcon("shield-minus", __iconNode);
 
 export default ShieldMinus;
 export { ShieldMinus };

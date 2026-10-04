@@ -16,6 +16,7 @@ const testDirs = [
   resolve(root, 'packages/plugin-pwa/src'),
   resolve(root, 'packages/testing/src'),
   resolve(root, 'packages/plugin-tailwind/src'),
+  resolve(root, 'packages/lucide-vesk/src'),
 ]
 
 const e2eFiles = new Set([

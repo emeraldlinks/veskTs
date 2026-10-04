@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HousePlus = createLucideIcon("house-plus", __iconNode);
+const HousePlus = /* @__PURE__ */ createLucideIcon("house-plus", __iconNode);
 
 export default HousePlus;
 export { HousePlus };

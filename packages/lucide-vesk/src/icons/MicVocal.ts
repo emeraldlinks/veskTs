@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MicVocal = createLucideIcon("mic-vocal", __iconNode);
+const MicVocal = /* @__PURE__ */ createLucideIcon("mic-vocal", __iconNode);
 
 export default MicVocal;
 export { MicVocal };

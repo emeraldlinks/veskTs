@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageSquareDashed = createLucideIcon("message-square-dashed", __iconNode);
+const MessageSquareDashed = /* @__PURE__ */ createLucideIcon("message-square-dashed", __iconNode);
 
 export default MessageSquareDashed;
 export { MessageSquareDashed };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TrainFront = createLucideIcon("train-front", __iconNode);
+const TrainFront = /* @__PURE__ */ createLucideIcon("train-front", __iconNode);
 
 export default TrainFront;
 export { TrainFront };

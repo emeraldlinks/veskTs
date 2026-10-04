@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WrapText = createLucideIcon("wrap-text", __iconNode);
+const WrapText = /* @__PURE__ */ createLucideIcon("wrap-text", __iconNode);
 
 export default WrapText;
 export { WrapText };

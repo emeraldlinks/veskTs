@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GripVertical = createLucideIcon("grip-vertical", __iconNode);
+const GripVertical = /* @__PURE__ */ createLucideIcon("grip-vertical", __iconNode);
 
 export default GripVertical;
 export { GripVertical };

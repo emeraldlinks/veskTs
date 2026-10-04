@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PencilOff = createLucideIcon("pencil-off", __iconNode);
+const PencilOff = /* @__PURE__ */ createLucideIcon("pencil-off", __iconNode);
 
 export default PencilOff;
 export { PencilOff };

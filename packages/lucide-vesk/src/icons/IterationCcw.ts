@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const IterationCcw = createLucideIcon("iteration-ccw", __iconNode);
+const IterationCcw = /* @__PURE__ */ createLucideIcon("iteration-ccw", __iconNode);
 
 export default IterationCcw;
 export { IterationCcw };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AirVent = createLucideIcon("air-vent", __iconNode);
+const AirVent = /* @__PURE__ */ createLucideIcon("air-vent", __iconNode);
 
 export default AirVent;
 export { AirVent };

@@ -28,7 +28,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleSlash = createLucideIcon("circle-slash", __iconNode);
+const CircleSlash = /* @__PURE__ */ createLucideIcon("circle-slash", __iconNode);
 
 export default CircleSlash;
 export { CircleSlash };

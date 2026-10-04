@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const VideoOff = createLucideIcon("video-off", __iconNode);
+const VideoOff = /* @__PURE__ */ createLucideIcon("video-off", __iconNode);
 
 export default VideoOff;
 export { VideoOff };

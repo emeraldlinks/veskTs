@@ -34,7 +34,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClipboardCheck = createLucideIcon("clipboard-check", __iconNode);
+const ClipboardCheck = /* @__PURE__ */ createLucideIcon("clipboard-check", __iconNode);
 
 export default ClipboardCheck;
 export { ClipboardCheck };

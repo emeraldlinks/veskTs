@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Copyleft = createLucideIcon("copyleft", __iconNode);
+const Copyleft = /* @__PURE__ */ createLucideIcon("copyleft", __iconNode);
 
 export default Copyleft;
 export { Copyleft };

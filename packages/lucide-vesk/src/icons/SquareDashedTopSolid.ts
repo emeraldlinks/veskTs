@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareDashedTopSolid = createLucideIcon("square-dashed-top-solid", __iconNode);
+const SquareDashedTopSolid = /* @__PURE__ */ createLucideIcon("square-dashed-top-solid", __iconNode);
 
 export default SquareDashedTopSolid;
 export { SquareDashedTopSolid };

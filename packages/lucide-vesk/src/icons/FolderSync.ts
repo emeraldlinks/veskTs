@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderSync = createLucideIcon("folder-sync", __iconNode);
+const FolderSync = /* @__PURE__ */ createLucideIcon("folder-sync", __iconNode);
 
 export default FolderSync;
 export { FolderSync };

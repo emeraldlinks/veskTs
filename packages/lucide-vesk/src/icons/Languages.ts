@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Languages = createLucideIcon("languages", __iconNode);
+const Languages = /* @__PURE__ */ createLucideIcon("languages", __iconNode);
 
 export default Languages;
 export { Languages };

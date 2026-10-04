@@ -1389,6 +1389,99 @@ describe('tokenizeCode with JSX in a component body', () => {
 	});
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Generic arrow functions in expression position.
+//
+// `function f<T>(…)` and `async <T,>(…) =>` both parsed; a plain `<T,>(…) =>`
+// did not, because a `<` in expression position is tokenized as `jsxTagStart`
+// and the plugin's generic-arrow branch is gated on an `options.jsx` flag that
+// `parse()` never sets — dead code. The construct is unparseable, and the
+// failure was invisible: `readSsrSource` treats a parse error as "module not
+// understood" and substitutes the RAW source, so it surfaced much later as
+// `Unexpected token ':'` while the emitted module was evaluated.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('generic arrow functions', () => {
+	const parses = (src) => {
+		try {
+			parse(src);
+			return true;
+		} catch {
+			return false;
+		}
+	};
+
+	it('parses <T,>(…) => with the trailing comma TS uses to disambiguate', () => {
+		expect(parses('export const f = <T,>(key: string, fallback: T): T => fallback;')).toBe(true);
+	});
+
+	it('parses <T>(…) =>', () => {
+		expect(parses('export const f = <T>(k: T): T => k;')).toBe(true);
+	});
+
+	it('parses a constrained type parameter', () => {
+		expect(parses('const f = <T extends object>(k: T): T => k;')).toBe(true);
+	});
+
+	it('parses several type parameters', () => {
+		expect(parses('const f = <A, B>(k: A): B => k as any;')).toBe(true);
+	});
+
+	it('parses a generic arrow whose default value is itself an arrow', () => {
+		expect(parses('const f = <T,>(cb: (x: T) => T = (x) => x): T => cb(1 as any);')).toBe(true);
+	});
+
+	it('parses generic + braced constraint + object-literal return type', () => {
+		// The one shape that still failed after the first fix, and the reason is
+		// worth keeping: it needs all THREE of a generic arrow, an object-literal
+		// type-param constraint, and an explicit return-type annotation, so
+		// dropping any one of them parses cleanly and hides the bug. The return
+		// type `{ roles: R[]; changed: boolean }` contains a `;`, which the scan
+		// was reading as a statement boundary — correct at depth zero, wrong
+		// inside braces.
+		expect(parses('export const f = <R extends { id: string }>(a: R[], b: R[]): { roles: R[]; changed: boolean } => a;')).toBe(true);
+	});
+
+	it('parses that same arrow split across lines', () => {
+		expect(parses('export const f = <R extends { id: string }>(\n  a: R[],\n  b: R[],\n): { roles: R[]; changed: boolean } => a;')).toBe(true);
+	});
+
+	it('parses a return type whose object literal nests and wraps', () => {
+		expect(parses('export const f = <T extends { a: { b: string } }>(x: T): { v: { n: number } } => x;')).toBe(true);
+	});
+
+	it('parses a return type with no trailing semicolon', () => {
+		expect(parses('export const f = <R extends { id: string }>(a: R[]): { roles: R[] } => a;')).toBe(true);
+	});
+
+	it('parses a generic arrow with an object-literal return type', () => {
+		expect(parses('const f = <T,>(k: T): { v: T } => ({ v: k });')).toBe(true);
+	});
+
+	it('still parses JSX elements (the disambiguation must not regress)', () => {
+		expect(parses('const a = <div class="x">hi</div>;')).toBe(true);
+		expect(parses('const a = <><b/></>;')).toBe(true);
+		expect(parses('const a = <Foo.Bar x={1}/>;')).toBe(true);
+	});
+
+	it('still parses a JSX element followed by parenthesized text', () => {
+		// The `>` here is followed by `(`, exactly like a generic arrow's, so
+		// this is the case a naive `>`-then-`(` rule would wrongly blank.
+		expect(parses('const a = <div>(hi)</div>;')).toBe(true);
+	});
+
+	it('still parses type ARGUMENTS and comparisons', () => {
+		expect(parses('const a = f<string>(1);')).toBe(true);
+		expect(parses('const a = 1 < 2 && 3 > 1;')).toBe(true);
+		expect(parses('const a = b ? c < d : e > f;')).toBe(true);
+	});
+
+	it('leaves a <T,> inside a string or comment alone', () => {
+		expect(parses('const s = "<T,>(x) => x";')).toBe(true);
+		expect(parses('// <T,>(x) => x\nconst a = 1;')).toBe(true);
+	});
+});
+
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) {
 	process.exit(1);

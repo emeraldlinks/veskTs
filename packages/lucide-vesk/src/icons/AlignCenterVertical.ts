@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignCenterVertical = createLucideIcon("align-center-vertical", __iconNode);
+const AlignCenterVertical = /* @__PURE__ */ createLucideIcon("align-center-vertical", __iconNode);
 
 export default AlignCenterVertical;
 export { AlignCenterVertical };

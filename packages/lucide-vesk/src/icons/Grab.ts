@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Grab = createLucideIcon("grab", __iconNode);
+const Grab = /* @__PURE__ */ createLucideIcon("grab", __iconNode);
 
 export default Grab;
 export { Grab };

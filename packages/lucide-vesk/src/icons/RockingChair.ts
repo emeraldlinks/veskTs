@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RockingChair = createLucideIcon("rocking-chair", __iconNode);
+const RockingChair = /* @__PURE__ */ createLucideIcon("rocking-chair", __iconNode);
 
 export default RockingChair;
 export { RockingChair };

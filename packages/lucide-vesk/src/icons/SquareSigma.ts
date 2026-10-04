@@ -27,7 +27,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareSigma = createLucideIcon("square-sigma", __iconNode);
+const SquareSigma = /* @__PURE__ */ createLucideIcon("square-sigma", __iconNode);
 
 export default SquareSigma;
 export { SquareSigma };

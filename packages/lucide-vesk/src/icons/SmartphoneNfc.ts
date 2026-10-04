@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SmartphoneNfc = createLucideIcon("smartphone-nfc", __iconNode);
+const SmartphoneNfc = /* @__PURE__ */ createLucideIcon("smartphone-nfc", __iconNode);
 
 export default SmartphoneNfc;
 export { SmartphoneNfc };

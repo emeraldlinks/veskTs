@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PanelsRightBottom = createLucideIcon("panels-right-bottom", __iconNode);
+const PanelsRightBottom = /* @__PURE__ */ createLucideIcon("panels-right-bottom", __iconNode);
 
 export default PanelsRightBottom;
 export { PanelsRightBottom };

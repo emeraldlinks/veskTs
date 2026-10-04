@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareArrowUpRight = createLucideIcon("square-arrow-up-right", __iconNode);
+const SquareArrowUpRight = /* @__PURE__ */ createLucideIcon("square-arrow-up-right", __iconNode);
 
 export default SquareArrowUpRight;
 export { SquareArrowUpRight };

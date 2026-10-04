@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TramFront = createLucideIcon("tram-front", __iconNode);
+const TramFront = /* @__PURE__ */ createLucideIcon("tram-front", __iconNode);
 
 export default TramFront;
 export { TramFront };

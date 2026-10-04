@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ToyBrick = createLucideIcon("toy-brick", __iconNode);
+const ToyBrick = /* @__PURE__ */ createLucideIcon("toy-brick", __iconNode);
 
 export default ToyBrick;
 export { ToyBrick };

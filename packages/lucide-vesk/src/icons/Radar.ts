@@ -61,7 +61,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Radar = createLucideIcon("radar", __iconNode);
+const Radar = /* @__PURE__ */ createLucideIcon("radar", __iconNode);
 
 export default Radar;
 export { Radar };

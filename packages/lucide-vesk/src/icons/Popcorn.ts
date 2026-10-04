@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Popcorn = createLucideIcon("popcorn", __iconNode);
+const Popcorn = /* @__PURE__ */ createLucideIcon("popcorn", __iconNode);
 
 export default Popcorn;
 export { Popcorn };

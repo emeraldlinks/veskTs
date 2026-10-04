@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShieldX = createLucideIcon("shield-x", __iconNode);
+const ShieldX = /* @__PURE__ */ createLucideIcon("shield-x", __iconNode);
 
 export default ShieldX;
 export { ShieldX };

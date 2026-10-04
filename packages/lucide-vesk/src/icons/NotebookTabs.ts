@@ -69,7 +69,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NotebookTabs = createLucideIcon("notebook-tabs", __iconNode);
+const NotebookTabs = /* @__PURE__ */ createLucideIcon("notebook-tabs", __iconNode);
 
 export default NotebookTabs;
 export { NotebookTabs };

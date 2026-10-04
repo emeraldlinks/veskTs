@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BellDot = createLucideIcon("bell-dot", __iconNode);
+const BellDot = /* @__PURE__ */ createLucideIcon("bell-dot", __iconNode);
 
 export default BellDot;
 export { BellDot };

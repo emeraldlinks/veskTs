@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareChartGantt = createLucideIcon("square-chart-gantt", __iconNode);
+const SquareChartGantt = /* @__PURE__ */ createLucideIcon("square-chart-gantt", __iconNode);
 
 export default SquareChartGantt;
 export { SquareChartGantt };

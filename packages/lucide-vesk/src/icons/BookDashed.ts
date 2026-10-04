@@ -77,7 +77,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BookDashed = createLucideIcon("book-dashed", __iconNode);
+const BookDashed = /* @__PURE__ */ createLucideIcon("book-dashed", __iconNode);
 
 export default BookDashed;
 export { BookDashed };

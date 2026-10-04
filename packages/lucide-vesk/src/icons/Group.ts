@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Group = createLucideIcon("group", __iconNode);
+const Group = /* @__PURE__ */ createLucideIcon("group", __iconNode);
 
 export default Group;
 export { Group };

@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BrickWallFire = createLucideIcon("brick-wall-fire", __iconNode);
+const BrickWallFire = /* @__PURE__ */ createLucideIcon("brick-wall-fire", __iconNode);
 
 export default BrickWallFire;
 export { BrickWallFire };

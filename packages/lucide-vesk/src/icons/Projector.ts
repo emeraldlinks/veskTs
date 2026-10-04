@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Projector = createLucideIcon("projector", __iconNode);
+const Projector = /* @__PURE__ */ createLucideIcon("projector", __iconNode);
 
 export default Projector;
 export { Projector };

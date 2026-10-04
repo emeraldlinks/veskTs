@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sofa = createLucideIcon("sofa", __iconNode);
+const Sofa = /* @__PURE__ */ createLucideIcon("sofa", __iconNode);
 
 export default Sofa;
 export { Sofa };

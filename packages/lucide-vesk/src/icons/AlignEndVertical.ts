@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignEndVertical = createLucideIcon("align-end-vertical", __iconNode);
+const AlignEndVertical = /* @__PURE__ */ createLucideIcon("align-end-vertical", __iconNode);
 
 export default AlignEndVertical;
 export { AlignEndVertical };

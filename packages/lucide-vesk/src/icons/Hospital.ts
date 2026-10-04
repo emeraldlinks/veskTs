@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Hospital = createLucideIcon("hospital", __iconNode);
+const Hospital = /* @__PURE__ */ createLucideIcon("hospital", __iconNode);
 
 export default Hospital;
 export { Hospital };

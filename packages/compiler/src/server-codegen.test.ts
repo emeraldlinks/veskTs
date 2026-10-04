@@ -2254,6 +2254,76 @@ describe('Dynamic attribute undefined/false omission', () => {
 		expect(html.indexOf('undefined')).toBe(-1);
 	});
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Self-closing JSX is not self-closing HTML.
+//
+// Two bugs, both invisible in the source and both found by reading served
+// markup rather than by writing a test:
+///
+///   1. `<div class="dot" />` was emitted verbatim. The HTML parser IGNORES the
+///      trailing slash on a non-void element, so this opens a `<div>` and every
+///      following sibling becomes its child. The client's `createElement` builds
+///      a real element, so the served structure and the client structure
+///      disagreed — the DOM was wrong before hydration even started.
+///
+///   2. On a self-closed element, dynamic attributes were appended AFTER the
+///      tag (`<img /> src="..."`), where the parser drops them. A
+///      `style={{ backgroundColor: accent }}` on a decorative dot simply never
+///      appeared in the served page.
+///
+/// Void elements must keep `/>`, and so must anything inside `<svg>`/`<math>`,
+/// where self-closing syntax IS part of the content model.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('self-closing elements in SSR output', () => {
+	it('emits an explicit end tag for a self-closed non-void element', () => {
+		expect(render('component App { return <div class="dot" />; }', 'App')).toBe('<div class="dot"></div>');
+	});
+	it('does the same for every non-void HTML tag', () => {
+		for (const tag of ['span', 'div', 'p', 'section', 'button', 'a', 'label']) {
+			expect(render(`component App { return <${tag} class="x" />; }`, 'App')).toBe(`<${tag} class="x"></${tag}>`);
+		}
+	});
+	it('keeps following siblings as siblings, not children', () => {
+		const html = render('component App { return <div><div class="a" /><span>after</span></div>; }', 'App');
+		expect(html).toBe('<div><div class="a"></div><span>after</span></div>');
+		// The regression signature: `<span>` nested inside the dot.
+		expect(html.indexOf('<div class="a"><span>')).toBe(-1);
+	});
+	it('keeps `/>` for void elements', () => {
+		expect(render('component App { return <img src="/x.png" />; }', 'App')).toBe('<img src="/x.png" />');
+		expect(render('component App { return <br />; }', 'App')).toBe('<br />');
+		expect(render('component App { return <p>a<br />b</p>; }', 'App')).toBe('<p>a<br />b</p>');
+	});
+	it('keeps `/>` for SVG children, where self-closing is valid', () => {
+		expect(render('component App { return <svg viewBox="0 0 24 24"><path d="M1 1" /></svg>; }', 'App'))
+			.toBe('<svg viewBox="0 0 24 24"><path d="M1 1" /></svg>');
+		expect(render('component App { return <svg><circle cx="1" /></svg>; }', 'App'))
+			.toBe('<svg><circle cx="1" /></svg>');
+	});
+	it('places a DYNAMIC attribute inside the tag, not after it', () => {
+		const html = render('component App(props: { c: string }) { return <div class="dot" style={{ backgroundColor: props.c }} />; }', 'App', { c: '#f00' });
+		expect(html).toBe('<div class="dot" style="background-color:#f00;"></div>');
+		// The old shape put the attribute after the tag, where it was dropped.
+		expect(html.indexOf('"></div> style=')).toBe(-1);
+	});
+	it('places a dynamic attribute inside a VOID tag', () => {
+		const html = render('component App(props: { s: string }) { return <img src={props.s} />; }', 'App', { s: '/x.png' });
+		expect(html).toBe('<img src="/x.png" />');
+		expect(html.indexOf('/> src=')).toBe(-1);
+	});
+	it('places a dynamic attribute inside an SVG child', () => {
+		const html = render('component App(props: { d: string }) { return <svg><path d={props.d} /></svg>; }', 'App', { d: 'M1 1' });
+		expect(html).toBe('<svg><path d="M1 1" /></svg>');
+	});
+	it('handles a dynamic class AND style together on a self-closed element', () => {
+		const html = render('component App(props: { c: string; s: string }) { return <div class={props.c} style={{ backgroundColor: props.s }} />; }', 'App', { c: 'dot', s: '#0f0' });
+		expect(html).toBe('<div class="dot" style="background-color:#0f0;"></div>');
+	});
+	it('still nests children normally inside a non-void element', () => {
+		expect(render('component App { return <div><span>a</span></div>; }', 'App')).toBe('<div><span>a</span></div>');
+	});
+});
 asyncChain.then(() => {
 	console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 	if (failed > 0) process.exit(1);

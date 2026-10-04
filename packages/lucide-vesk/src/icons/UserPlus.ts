@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UserPlus = createLucideIcon("user-plus", __iconNode);
+const UserPlus = /* @__PURE__ */ createLucideIcon("user-plus", __iconNode);
 
 export default UserPlus;
 export { UserPlus };

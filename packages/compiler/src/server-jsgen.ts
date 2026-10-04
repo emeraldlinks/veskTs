@@ -12,6 +12,7 @@ import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, f
 import {
   isStatic, escapeHtml, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
+  VOID_ELEMENTS,
   __vskHydrate, __vskMarkerless, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
 } from '@vesk/compiler/src/server-utils';
 import { localValueImportNames } from '@vesk/compiler/src/module-imports';
@@ -67,7 +68,7 @@ function componentMarker(compName: string): string {
 
 export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isAsync: boolean = false, tracked?: Map<string, TrackedInfo>): string {
   importedNames = importedNames || __vskImportedNames;
-  if (node instanceof StaticNode) return staticNodeToJS(node, isAsync, tracked);
+  if (node instanceof StaticNode) return staticNodeToJS(node, isAsync, tracked, __inForeignContent);
   if (node instanceof TextNode) {
     if (!node.value) return '';
     // The JSX parser entity-decodes text (`&lt;style&gt;` -> `<style>`), so the
@@ -171,7 +172,18 @@ function exprJSX(node: { raw: string; ast: ESTreeNode | null }, tracked?: Map<st
   return exprJS(transformTracked({ ...node, ast: lowered } as any, tracked || new Map()));
 }
 
-function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
+/**
+ * True while emitting inside `<svg>`/`<math>`, where self-closing syntax is
+ * part of the content model rather than ignored. Module-level because the
+ * emitter already recurses through `irNodeToJS`, and threading a context
+ * parameter through every call site would touch a dozen emitters that have no
+ * interest in it.
+ */
+let __inForeignContent = false;
+
+const FOREIGN_ROOTS = new Set(['svg', 'math']);
+
+function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string, TrackedInfo>, inForeign = false): string {
   const lines: string[] = [];
 
   const dynAttrTargets = new Set<string>();
@@ -204,17 +216,30 @@ function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string,
   }
 
   if (node.selfClosing) {
-    let tag = openTag + ' />';
+    const voidOrForeign = VOID_ELEMENTS.has(node.tag) || inForeign;
+    // A self-closing JSX element is NOT a self-closing HTML element. The HTML
+    // parser ignores the trailing slash on anything that is not a void element,
+    // so `<div class="dot" />` opens a `<div>` and every following sibling
+    // becomes its child — the served document's structure silently diverges
+    // from the client's, which builds a real element with `createElement`.
+    // Void elements keep `/>`, and so does anything inside `<svg>`/`<math>`,
+    // where self-closing syntax IS part of the content model.
+    const tail = voidOrForeign ? ' />' : `></${node.tag}>`;
     if (hasDynamicAttrs) {
-      let expr = JSON.stringify(tag);
+      // Dynamic attributes must land INSIDE the open tag. They used to be
+      // appended after it — `<img /> src="..."` — which made the parser drop
+      // them, so `<div style={{ backgroundColor: accent }} />` served with no
+      // `style` at all and the colour silently vanished.
+      let expr = JSON.stringify(openTag);
       for (const child of node.children) {
         if (child instanceof DynamicBinding && child.kind === 'attribute' && child.target !== 'ref' && !isEvent(child.target)) {
           expr += ` + __attr(${JSON.stringify(child.target)}, ${exprJSX(child.expression, tracked)})`;
         }
       }
+      expr += ` + ${JSON.stringify(tail)}`;
       lines.push(`__out.push(${expr});`);
     } else {
-      lines.push(`__out.push(${JSON.stringify(tag)});`);
+      lines.push(`__out.push(${JSON.stringify(openTag + tail)});`);
     }
     return lines.join('\n');
   }
@@ -236,10 +261,13 @@ function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string,
     lines.push(`__out.push(${JSON.stringify(openTag + '>')});`);
   }
 
+  const prevForeign = __inForeignContent;
+  if (FOREIGN_ROOTS.has(node.tag)) __inForeignContent = true;
   for (const child of childNodes) {
     const code = irNodeToJS(child, null, isAsync, tracked);
     if (code) lines.push(code);
   }
+  __inForeignContent = prevForeign;
 
   lines.push(`__out.push(${JSON.stringify('</' + node.tag + '>')});`);
   return lines.join('\n');

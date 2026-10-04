@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PanelRightOpen = createLucideIcon("panel-right-open", __iconNode);
+const PanelRightOpen = /* @__PURE__ */ createLucideIcon("panel-right-open", __iconNode);
 
 export default PanelRightOpen;
 export { PanelRightOpen };

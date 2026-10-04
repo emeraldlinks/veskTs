@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Drill = createLucideIcon("drill", __iconNode);
+const Drill = /* @__PURE__ */ createLucideIcon("drill", __iconNode);
 
 export default Drill;
 export { Drill };

@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArrowUp10 = createLucideIcon("arrow-up-1-0", __iconNode);
+const ArrowUp10 = /* @__PURE__ */ createLucideIcon("arrow-up-1-0", __iconNode);
 
 export default ArrowUp10;
 export { ArrowUp10 };

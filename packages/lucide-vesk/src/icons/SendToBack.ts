@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SendToBack = createLucideIcon("send-to-back", __iconNode);
+const SendToBack = /* @__PURE__ */ createLucideIcon("send-to-back", __iconNode);
 
 export default SendToBack;
 export { SendToBack };

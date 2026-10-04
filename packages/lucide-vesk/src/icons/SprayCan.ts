@@ -74,7 +74,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SprayCan = createLucideIcon("spray-can", __iconNode);
+const SprayCan = /* @__PURE__ */ createLucideIcon("spray-can", __iconNode);
 
 export default SprayCan;
 export { SprayCan };

@@ -77,7 +77,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquaresIntersect = createLucideIcon("squares-intersect", __iconNode);
+const SquaresIntersect = /* @__PURE__ */ createLucideIcon("squares-intersect", __iconNode);
 
 export default SquaresIntersect;
 export { SquaresIntersect };

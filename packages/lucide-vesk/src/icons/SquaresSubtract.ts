@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquaresSubtract = createLucideIcon("squares-subtract", __iconNode);
+const SquaresSubtract = /* @__PURE__ */ createLucideIcon("squares-subtract", __iconNode);
 
 export default SquaresSubtract;
 export { SquaresSubtract };

@@ -30,7 +30,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareSlash = createLucideIcon("square-slash", __iconNode);
+const SquareSlash = /* @__PURE__ */ createLucideIcon("square-slash", __iconNode);
 
 export default SquareSlash;
 export { SquareSlash };

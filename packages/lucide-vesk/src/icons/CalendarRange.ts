@@ -63,7 +63,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CalendarRange = createLucideIcon("calendar-range", __iconNode);
+const CalendarRange = /* @__PURE__ */ createLucideIcon("calendar-range", __iconNode);
 
 export default CalendarRange;
 export { CalendarRange };

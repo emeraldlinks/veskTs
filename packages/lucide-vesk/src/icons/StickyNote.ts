@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const StickyNote = createLucideIcon("sticky-note", __iconNode);
+const StickyNote = /* @__PURE__ */ createLucideIcon("sticky-note", __iconNode);
 
 export default StickyNote;
 export { StickyNote };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const IndentDecrease = createLucideIcon("indent-decrease", __iconNode);
+const IndentDecrease = /* @__PURE__ */ createLucideIcon("indent-decrease", __iconNode);
 
 export default IndentDecrease;
 export { IndentDecrease };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgePoundSterling = createLucideIcon("badge-pound-sterling", __iconNode);
+const BadgePoundSterling = /* @__PURE__ */ createLucideIcon("badge-pound-sterling", __iconNode);
 
 export default BadgePoundSterling;
 export { BadgePoundSterling };

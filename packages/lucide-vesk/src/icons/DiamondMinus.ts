@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DiamondMinus = createLucideIcon("diamond-minus", __iconNode);
+const DiamondMinus = /* @__PURE__ */ createLucideIcon("diamond-minus", __iconNode);
 
 export default DiamondMinus;
 export { DiamondMinus };

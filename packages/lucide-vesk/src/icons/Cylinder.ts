@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cylinder = createLucideIcon("cylinder", __iconNode);
+const Cylinder = /* @__PURE__ */ createLucideIcon("cylinder", __iconNode);
 
 export default Cylinder;
 export { Cylinder };

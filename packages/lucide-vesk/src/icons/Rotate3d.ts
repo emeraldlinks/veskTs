@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Rotate3d = createLucideIcon("rotate-3d", __iconNode);
+const Rotate3d = /* @__PURE__ */ createLucideIcon("rotate-3d", __iconNode);
 
 export default Rotate3d;
 export { Rotate3d };

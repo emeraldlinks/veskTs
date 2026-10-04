@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WindArrowDown = createLucideIcon("wind-arrow-down", __iconNode);
+const WindArrowDown = /* @__PURE__ */ createLucideIcon("wind-arrow-down", __iconNode);
 
 export default WindArrowDown;
 export { WindArrowDown };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ServerCrash = createLucideIcon("server-crash", __iconNode);
+const ServerCrash = /* @__PURE__ */ createLucideIcon("server-crash", __iconNode);
 
 export default ServerCrash;
 export { ServerCrash };

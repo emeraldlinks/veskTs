@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TrainFrontTunnel = createLucideIcon("train-front-tunnel", __iconNode);
+const TrainFrontTunnel = /* @__PURE__ */ createLucideIcon("train-front-tunnel", __iconNode);
 
 export default TrainFrontTunnel;
 export { TrainFrontTunnel };

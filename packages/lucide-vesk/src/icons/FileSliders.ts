@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileSliders = createLucideIcon("file-sliders", __iconNode);
+const FileSliders = /* @__PURE__ */ createLucideIcon("file-sliders", __iconNode);
 
 export default FileSliders;
 export { FileSliders };

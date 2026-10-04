@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Microwave = createLucideIcon("microwave", __iconNode);
+const Microwave = /* @__PURE__ */ createLucideIcon("microwave", __iconNode);
 
 export default Microwave;
 export { Microwave };

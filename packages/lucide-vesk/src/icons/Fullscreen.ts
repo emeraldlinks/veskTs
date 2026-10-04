@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Fullscreen = createLucideIcon("fullscreen", __iconNode);
+const Fullscreen = /* @__PURE__ */ createLucideIcon("fullscreen", __iconNode);
 
 export default Fullscreen;
 export { Fullscreen };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Forward = createLucideIcon("forward", __iconNode);
+const Forward = /* @__PURE__ */ createLucideIcon("forward", __iconNode);
 
 export default Forward;
 export { Forward };

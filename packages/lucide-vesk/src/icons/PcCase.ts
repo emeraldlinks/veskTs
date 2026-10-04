@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PcCase = createLucideIcon("pc-case", __iconNode);
+const PcCase = /* @__PURE__ */ createLucideIcon("pc-case", __iconNode);
 
 export default PcCase;
 export { PcCase };

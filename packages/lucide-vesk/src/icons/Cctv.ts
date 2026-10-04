@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cctv = createLucideIcon("cctv", __iconNode);
+const Cctv = /* @__PURE__ */ createLucideIcon("cctv", __iconNode);
 
 export default Cctv;
 export { Cctv };

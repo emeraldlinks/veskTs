@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AtSign = createLucideIcon("at-sign", __iconNode);
+const AtSign = /* @__PURE__ */ createLucideIcon("at-sign", __iconNode);
 
 export default AtSign;
 export { AtSign };

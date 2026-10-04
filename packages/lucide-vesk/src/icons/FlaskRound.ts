@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlaskRound = createLucideIcon("flask-round", __iconNode);
+const FlaskRound = /* @__PURE__ */ createLucideIcon("flask-round", __iconNode);
 
 export default FlaskRound;
 export { FlaskRound };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileChartLine = createLucideIcon("file-chart-line", __iconNode);
+const FileChartLine = /* @__PURE__ */ createLucideIcon("file-chart-line", __iconNode);
 
 export default FileChartLine;
 export { FileChartLine };

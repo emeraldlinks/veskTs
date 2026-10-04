@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Toilet = createLucideIcon("toilet", __iconNode);
+const Toilet = /* @__PURE__ */ createLucideIcon("toilet", __iconNode);
 
 export default Toilet;
 export { Toilet };

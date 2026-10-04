@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cannabis = createLucideIcon("cannabis", __iconNode);
+const Cannabis = /* @__PURE__ */ createLucideIcon("cannabis", __iconNode);
 
 export default Cannabis;
 export { Cannabis };

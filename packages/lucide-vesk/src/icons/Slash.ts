@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Slash = createLucideIcon("slash", __iconNode);
+const Slash = /* @__PURE__ */ createLucideIcon("slash", __iconNode);
 
 export default Slash;
 export { Slash };

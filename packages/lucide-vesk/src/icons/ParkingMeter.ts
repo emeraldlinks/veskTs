@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ParkingMeter = createLucideIcon("parking-meter", __iconNode);
+const ParkingMeter = /* @__PURE__ */ createLucideIcon("parking-meter", __iconNode);
 
 export default ParkingMeter;
 export { ParkingMeter };

@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Diameter = createLucideIcon("diameter", __iconNode);
+const Diameter = /* @__PURE__ */ createLucideIcon("diameter", __iconNode);
 
 export default Diameter;
 export { Diameter };

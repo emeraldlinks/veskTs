@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListOrdered = createLucideIcon("list-ordered", __iconNode);
+const ListOrdered = /* @__PURE__ */ createLucideIcon("list-ordered", __iconNode);
 
 export default ListOrdered;
 export { ListOrdered };

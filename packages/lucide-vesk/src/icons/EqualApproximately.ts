@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EqualApproximately = createLucideIcon("equal-approximately", __iconNode);
+const EqualApproximately = /* @__PURE__ */ createLucideIcon("equal-approximately", __iconNode);
 
 export default EqualApproximately;
 export { EqualApproximately };

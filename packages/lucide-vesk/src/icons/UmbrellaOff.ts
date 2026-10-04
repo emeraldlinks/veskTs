@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UmbrellaOff = createLucideIcon("umbrella-off", __iconNode);
+const UmbrellaOff = /* @__PURE__ */ createLucideIcon("umbrella-off", __iconNode);
 
 export default UmbrellaOff;
 export { UmbrellaOff };

@@ -111,7 +111,23 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 	for (let i = 0; i < tree.length; i++) {
 		const node = tree[i];
 		if (node.isGroup) {
+			const before = result.length;
 			flattenLayoutChain(node.children || [], pathParts, result);
+			if (result.length > before) continue;
+			// A group can BE the page at this position: `app/(public)/page.vsk`
+			// serves `/`. Recursing into its children was the only thing this
+			// branch did, and at `/` none of them match (each carries a path
+			// segment), so the group was dropped and the chain collapsed onto the
+			// page-less root — a client-side 404 for the zero-segment path, with
+			// no hydration, while `/about` and every nested route matched fine.
+			//
+			// A group is transparent for prefix matching; it has to be
+			// transparent here too. Only at a terminal position: mid-path, the
+			// child that matched is the page, not the group.
+			if (node.page && (pathParts.length === 0 || pathParts.every((p) => p === ''))) {
+				result.push(node);
+				break;
+			}
 			continue;
 		}
 
@@ -136,6 +152,20 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 			if ((node as any).standalone) result.length = 0;
 			result.push(node);
 			if (isLeaf) {
+				// A container node at a terminal position must still let a deeper
+				// page-owning node win. The root is exactly this case: it matches
+				// every URL, so without descending here the chain stopped on the
+				// page-less root and never reached `app/(public)/page.vsk` — a
+				// client 404 with no hydration for `/`, while `/about` matched
+				// fine.
+				//
+				// Only when THIS node has no page of its own; if it does, it is the
+				// page and descending would shadow it.
+				if (!node.page && (node.children || []).length > 0) {
+					const before = result.length;
+					flattenLayoutChain(node.children || [], remaining, result);
+					if (result.length > before) break;
+				}
 				break;
 			} else if ((node.children || []).length > 0) {
 				flattenLayoutChain(node.children || [], remaining, result);

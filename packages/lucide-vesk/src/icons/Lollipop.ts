@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Lollipop = createLucideIcon("lollipop", __iconNode);
+const Lollipop = /* @__PURE__ */ createLucideIcon("lollipop", __iconNode);
 
 export default Lollipop;
 export { Lollipop };

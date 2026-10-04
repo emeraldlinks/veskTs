@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Gpu = createLucideIcon("gpu", __iconNode);
+const Gpu = /* @__PURE__ */ createLucideIcon("gpu", __iconNode);
 
 export default Gpu;
 export { Gpu };

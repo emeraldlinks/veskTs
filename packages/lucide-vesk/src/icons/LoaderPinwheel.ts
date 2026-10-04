@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LoaderPinwheel = createLucideIcon("loader-pinwheel", __iconNode);
+const LoaderPinwheel = /* @__PURE__ */ createLucideIcon("loader-pinwheel", __iconNode);
 
 export default LoaderPinwheel;
 export { LoaderPinwheel };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Youtube = createLucideIcon("youtube", __iconNode);
+const Youtube = /* @__PURE__ */ createLucideIcon("youtube", __iconNode);
 
 export default Youtube;
 export { Youtube };

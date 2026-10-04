@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Newspaper = createLucideIcon("newspaper", __iconNode);
+const Newspaper = /* @__PURE__ */ createLucideIcon("newspaper", __iconNode);
 
 export default Newspaper;
 export { Newspaper };

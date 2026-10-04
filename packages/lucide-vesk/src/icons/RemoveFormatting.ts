@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RemoveFormatting = createLucideIcon("remove-formatting", __iconNode);
+const RemoveFormatting = /* @__PURE__ */ createLucideIcon("remove-formatting", __iconNode);
 
 export default RemoveFormatting;
 export { RemoveFormatting };

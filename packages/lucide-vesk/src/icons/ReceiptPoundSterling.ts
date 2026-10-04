@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ReceiptPoundSterling = createLucideIcon("receipt-pound-sterling", __iconNode);
+const ReceiptPoundSterling = /* @__PURE__ */ createLucideIcon("receipt-pound-sterling", __iconNode);
 
 export default ReceiptPoundSterling;
 export { ReceiptPoundSterling };

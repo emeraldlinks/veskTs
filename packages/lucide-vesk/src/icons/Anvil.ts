@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Anvil = createLucideIcon("anvil", __iconNode);
+const Anvil = /* @__PURE__ */ createLucideIcon("anvil", __iconNode);
 
 export default Anvil;
 export { Anvil };

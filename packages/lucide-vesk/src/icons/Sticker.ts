@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sticker = createLucideIcon("sticker", __iconNode);
+const Sticker = /* @__PURE__ */ createLucideIcon("sticker", __iconNode);
 
 export default Sticker;
 export { Sticker };

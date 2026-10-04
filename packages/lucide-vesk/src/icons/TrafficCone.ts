@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TrafficCone = createLucideIcon("traffic-cone", __iconNode);
+const TrafficCone = /* @__PURE__ */ createLucideIcon("traffic-cone", __iconNode);
 
 export default TrafficCone;
 export { TrafficCone };

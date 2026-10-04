@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SendHorizontal = createLucideIcon("send-horizontal", __iconNode);
+const SendHorizontal = /* @__PURE__ */ createLucideIcon("send-horizontal", __iconNode);
 
 export default SendHorizontal;
 export { SendHorizontal };

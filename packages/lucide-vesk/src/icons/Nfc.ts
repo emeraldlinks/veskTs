@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Nfc = createLucideIcon("nfc", __iconNode);
+const Nfc = /* @__PURE__ */ createLucideIcon("nfc", __iconNode);
 
 export default Nfc;
 export { Nfc };

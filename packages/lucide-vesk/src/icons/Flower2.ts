@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Flower2 = createLucideIcon("flower-2", __iconNode);
+const Flower2 = /* @__PURE__ */ createLucideIcon("flower-2", __iconNode);
 
 export default Flower2;
 export { Flower2 };

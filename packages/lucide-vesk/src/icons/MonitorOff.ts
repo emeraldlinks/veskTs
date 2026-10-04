@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MonitorOff = createLucideIcon("monitor-off", __iconNode);
+const MonitorOff = /* @__PURE__ */ createLucideIcon("monitor-off", __iconNode);
 
 export default MonitorOff;
 export { MonitorOff };

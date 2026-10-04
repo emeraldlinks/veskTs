@@ -77,7 +77,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Microchip = createLucideIcon("microchip", __iconNode);
+const Microchip = /* @__PURE__ */ createLucideIcon("microchip", __iconNode);
 
 export default Microchip;
 export { Microchip };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderSymlink = createLucideIcon("folder-symlink", __iconNode);
+const FolderSymlink = /* @__PURE__ */ createLucideIcon("folder-symlink", __iconNode);
 
 export default FolderSymlink;
 export { FolderSymlink };

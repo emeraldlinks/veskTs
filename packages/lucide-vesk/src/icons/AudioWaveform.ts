@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AudioWaveform = createLucideIcon("audio-waveform", __iconNode);
+const AudioWaveform = /* @__PURE__ */ createLucideIcon("audio-waveform", __iconNode);
 
 export default AudioWaveform;
 export { AudioWaveform };

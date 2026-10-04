@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Bitcoin = createLucideIcon("bitcoin", __iconNode);
+const Bitcoin = /* @__PURE__ */ createLucideIcon("bitcoin", __iconNode);
 
 export default Bitcoin;
 export { Bitcoin };

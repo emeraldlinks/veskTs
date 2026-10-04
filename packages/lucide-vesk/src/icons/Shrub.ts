@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shrub = createLucideIcon("shrub", __iconNode);
+const Shrub = /* @__PURE__ */ createLucideIcon("shrub", __iconNode);
 
 export default Shrub;
 export { Shrub };

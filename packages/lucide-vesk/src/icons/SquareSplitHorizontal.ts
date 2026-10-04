@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareSplitHorizontal = createLucideIcon("square-split-horizontal", __iconNode);
+const SquareSplitHorizontal = /* @__PURE__ */ createLucideIcon("square-split-horizontal", __iconNode);
 
 export default SquareSplitHorizontal;
 export { SquareSplitHorizontal };

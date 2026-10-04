@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ExternalLink = createLucideIcon("external-link", __iconNode);
+const ExternalLink = /* @__PURE__ */ createLucideIcon("external-link", __iconNode);
 
 export default ExternalLink;
 export { ExternalLink };

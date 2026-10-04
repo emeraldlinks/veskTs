@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PillBottle = createLucideIcon("pill-bottle", __iconNode);
+const PillBottle = /* @__PURE__ */ createLucideIcon("pill-bottle", __iconNode);
 
 export default PillBottle;
 export { PillBottle };

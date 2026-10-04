@@ -77,7 +77,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TableColumnsSplit = createLucideIcon("table-columns-split", __iconNode);
+const TableColumnsSplit = /* @__PURE__ */ createLucideIcon("table-columns-split", __iconNode);
 
 export default TableColumnsSplit;
 export { TableColumnsSplit };

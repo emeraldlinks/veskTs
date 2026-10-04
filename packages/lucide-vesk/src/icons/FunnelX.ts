@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FunnelX = createLucideIcon("funnel-x", __iconNode);
+const FunnelX = /* @__PURE__ */ createLucideIcon("funnel-x", __iconNode);
 
 export default FunnelX;
 export { FunnelX };

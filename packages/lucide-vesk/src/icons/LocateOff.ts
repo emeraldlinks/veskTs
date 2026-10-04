@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LocateOff = createLucideIcon("locate-off", __iconNode);
+const LocateOff = /* @__PURE__ */ createLucideIcon("locate-off", __iconNode);
 
 export default LocateOff;
 export { LocateOff };

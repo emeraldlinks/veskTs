@@ -77,7 +77,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SunSnow = createLucideIcon("sun-snow", __iconNode);
+const SunSnow = /* @__PURE__ */ createLucideIcon("sun-snow", __iconNode);
 
 export default SunSnow;
 export { SunSnow };

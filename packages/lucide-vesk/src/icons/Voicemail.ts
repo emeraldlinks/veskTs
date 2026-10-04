@@ -36,7 +36,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Voicemail = createLucideIcon("voicemail", __iconNode);
+const Voicemail = /* @__PURE__ */ createLucideIcon("voicemail", __iconNode);
 
 export default Voicemail;
 export { Voicemail };

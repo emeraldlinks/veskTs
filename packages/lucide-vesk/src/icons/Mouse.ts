@@ -27,7 +27,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Mouse = createLucideIcon("mouse", __iconNode);
+const Mouse = /* @__PURE__ */ createLucideIcon("mouse", __iconNode);
 
 export default Mouse;
 export { Mouse };

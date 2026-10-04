@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SaveOff = createLucideIcon("save-off", __iconNode);
+const SaveOff = /* @__PURE__ */ createLucideIcon("save-off", __iconNode);
 
 export default SaveOff;
 export { SaveOff };

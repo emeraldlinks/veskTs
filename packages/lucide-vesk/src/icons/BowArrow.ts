@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BowArrow = createLucideIcon("bow-arrow", __iconNode);
+const BowArrow = /* @__PURE__ */ createLucideIcon("bow-arrow", __iconNode);
 
 export default BowArrow;
 export { BowArrow };

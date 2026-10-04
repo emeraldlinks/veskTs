@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Videotape = createLucideIcon("videotape", __iconNode);
+const Videotape = /* @__PURE__ */ createLucideIcon("videotape", __iconNode);
 
 export default Videotape;
 export { Videotape };

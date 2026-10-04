@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MoveDown = createLucideIcon("move-down", __iconNode);
+const MoveDown = /* @__PURE__ */ createLucideIcon("move-down", __iconNode);
 
 export default MoveDown;
 export { MoveDown };

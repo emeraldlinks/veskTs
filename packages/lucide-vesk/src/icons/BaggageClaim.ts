@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BaggageClaim = createLucideIcon("baggage-claim", __iconNode);
+const BaggageClaim = /* @__PURE__ */ createLucideIcon("baggage-claim", __iconNode);
 
 export default BaggageClaim;
 export { BaggageClaim };

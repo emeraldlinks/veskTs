@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FishSymbol = createLucideIcon("fish-symbol", __iconNode);
+const FishSymbol = /* @__PURE__ */ createLucideIcon("fish-symbol", __iconNode);
 
 export default FishSymbol;
 export { FishSymbol };

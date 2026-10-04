@@ -73,7 +73,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Biohazard = createLucideIcon("biohazard", __iconNode);
+const Biohazard = /* @__PURE__ */ createLucideIcon("biohazard", __iconNode);
 
 export default Biohazard;
 export { Biohazard };

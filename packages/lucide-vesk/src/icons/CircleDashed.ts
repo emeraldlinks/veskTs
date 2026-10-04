@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleDashed = createLucideIcon("circle-dashed", __iconNode);
+const CircleDashed = /* @__PURE__ */ createLucideIcon("circle-dashed", __iconNode);
 
 export default CircleDashed;
 export { CircleDashed };

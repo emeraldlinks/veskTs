@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CupSoda = createLucideIcon("cup-soda", __iconNode);
+const CupSoda = /* @__PURE__ */ createLucideIcon("cup-soda", __iconNode);
 
 export default CupSoda;
 export { CupSoda };

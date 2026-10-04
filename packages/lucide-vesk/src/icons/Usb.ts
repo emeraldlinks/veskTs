@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Usb = createLucideIcon("usb", __iconNode);
+const Usb = /* @__PURE__ */ createLucideIcon("usb", __iconNode);
 
 export default Usb;
 export { Usb };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderPen = createLucideIcon("folder-pen", __iconNode);
+const FolderPen = /* @__PURE__ */ createLucideIcon("folder-pen", __iconNode);
 
 export default FolderPen;
 export { FolderPen };

@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Twitch = createLucideIcon("twitch", __iconNode);
+const Twitch = /* @__PURE__ */ createLucideIcon("twitch", __iconNode);
 
 export default Twitch;
 export { Twitch };

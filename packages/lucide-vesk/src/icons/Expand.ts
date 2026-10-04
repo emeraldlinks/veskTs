@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Expand = createLucideIcon("expand", __iconNode);
+const Expand = /* @__PURE__ */ createLucideIcon("expand", __iconNode);
 
 export default Expand;
 export { Expand };

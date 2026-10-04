@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pause = createLucideIcon("pause", __iconNode);
+const Pause = /* @__PURE__ */ createLucideIcon("pause", __iconNode);
 
 export default Pause;
 export { Pause };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartBarBig = createLucideIcon("chart-bar-big", __iconNode);
+const ChartBarBig = /* @__PURE__ */ createLucideIcon("chart-bar-big", __iconNode);
 
 export default ChartBarBig;
 export { ChartBarBig };

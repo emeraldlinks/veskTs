@@ -63,7 +63,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LocateFixed = createLucideIcon("locate-fixed", __iconNode);
+const LocateFixed = /* @__PURE__ */ createLucideIcon("locate-fixed", __iconNode);
 
 export default LocateFixed;
 export { LocateFixed };

@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TypeOutline = createLucideIcon("type-outline", __iconNode);
+const TypeOutline = /* @__PURE__ */ createLucideIcon("type-outline", __iconNode);
 
 export default TypeOutline;
 export { TypeOutline };

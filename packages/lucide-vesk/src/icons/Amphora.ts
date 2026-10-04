@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Amphora = createLucideIcon("amphora", __iconNode);
+const Amphora = /* @__PURE__ */ createLucideIcon("amphora", __iconNode);
 
 export default Amphora;
 export { Amphora };

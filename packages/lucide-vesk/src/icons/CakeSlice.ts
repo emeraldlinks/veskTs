@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CakeSlice = createLucideIcon("cake-slice", __iconNode);
+const CakeSlice = /* @__PURE__ */ createLucideIcon("cake-slice", __iconNode);
 
 export default CakeSlice;
 export { CakeSlice };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MarsStroke = createLucideIcon("mars-stroke", __iconNode);
+const MarsStroke = /* @__PURE__ */ createLucideIcon("mars-stroke", __iconNode);
 
 export default MarsStroke;
 export { MarsStroke };

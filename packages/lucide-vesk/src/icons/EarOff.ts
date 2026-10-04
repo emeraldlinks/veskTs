@@ -44,7 +44,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EarOff = createLucideIcon("ear-off", __iconNode);
+const EarOff = /* @__PURE__ */ createLucideIcon("ear-off", __iconNode);
 
 export default EarOff;
 export { EarOff };

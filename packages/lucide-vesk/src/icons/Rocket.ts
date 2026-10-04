@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Rocket = createLucideIcon("rocket", __iconNode);
+const Rocket = /* @__PURE__ */ createLucideIcon("rocket", __iconNode);
 
 export default Rocket;
 export { Rocket };

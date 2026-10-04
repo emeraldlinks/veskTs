@@ -27,7 +27,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareChevronUp = createLucideIcon("square-chevron-up", __iconNode);
+const SquareChevronUp = /* @__PURE__ */ createLucideIcon("square-chevron-up", __iconNode);
 
 export default SquareChevronUp;
 export { SquareChevronUp };

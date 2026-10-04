@@ -83,7 +83,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ServerCog = createLucideIcon("server-cog", __iconNode);
+const ServerCog = /* @__PURE__ */ createLucideIcon("server-cog", __iconNode);
 
 export default ServerCog;
 export { ServerCog };

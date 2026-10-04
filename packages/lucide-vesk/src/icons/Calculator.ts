@@ -81,7 +81,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Calculator = createLucideIcon("calculator", __iconNode);
+const Calculator = /* @__PURE__ */ createLucideIcon("calculator", __iconNode);
 
 export default Calculator;
 export { Calculator };

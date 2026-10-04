@@ -50,7 +50,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PackagePlus = createLucideIcon("package-plus", __iconNode);
+const PackagePlus = /* @__PURE__ */ createLucideIcon("package-plus", __iconNode);
 
 export default PackagePlus;
 export { PackagePlus };

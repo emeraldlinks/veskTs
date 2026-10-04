@@ -77,7 +77,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Dna = createLucideIcon("dna", __iconNode);
+const Dna = /* @__PURE__ */ createLucideIcon("dna", __iconNode);
 
 export default Dna;
 export { Dna };

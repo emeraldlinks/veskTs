@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Lasso = createLucideIcon("lasso", __iconNode);
+const Lasso = /* @__PURE__ */ createLucideIcon("lasso", __iconNode);
 
 export default Lasso;
 export { Lasso };

@@ -75,7 +75,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Slack = createLucideIcon("slack", __iconNode);
+const Slack = /* @__PURE__ */ createLucideIcon("slack", __iconNode);
 
 export default Slack;
 export { Slack };

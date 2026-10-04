@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shapes = createLucideIcon("shapes", __iconNode);
+const Shapes = /* @__PURE__ */ createLucideIcon("shapes", __iconNode);
 
 export default Shapes;
 export { Shapes };

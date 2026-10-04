@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitCompare = createLucideIcon("git-compare", __iconNode);
+const GitCompare = /* @__PURE__ */ createLucideIcon("git-compare", __iconNode);
 
 export default GitCompare;
 export { GitCompare };

@@ -185,6 +185,43 @@ export class VeskError extends Error {
    * - `value` — `ns.max` read as a value. Component tags resolve; plain value
    *   reads do not, because nothing binds `ns` at runtime.
    */
+  /**
+   * An imported `.ts`/`.js` module could not be parsed.
+   *
+   * This used to be silent, and that is the whole point of the diagnostic. A
+   * parse failure meant the module's RAW, untranspiled source was substituted,
+   * so TypeScript syntax reached `new Function` and the module blew up much
+   * later with a bare `Unexpected token ':'` — attributed to no file, at a
+   * point in the build far from the code that caused it. It also poisoned the
+   * whole shared module graph: one unparseable module left its exports
+   * undefined, so unrelated consumers failed with `X is not iterable`.
+   *
+   * Two real constructs hit this: a parameter annotation that survived the
+   * stripper only when the parameter also had a default value, and a generic
+   * arrow's type parameter list, which the JSX tokenizer cannot read at all.
+   * Both are fixed; this error exists so the NEXT such gap is reported at the
+   * right file with the right line instead of surfacing three modules later.
+   */
+  static moduleParseFailed(context: VeskErrorOptions & { reason?: string } = {}): VeskError {
+    return new VeskError(
+      `Could not parse an imported module${context.reason ? `: ${context.reason}` : '.'}`,
+      {
+        ...context,
+        code: context.code || 'V0901',
+        suggestions: [
+          'Check the line the ^ marker points at — it is the construct the parser stopped on.',
+          'If it is TypeScript syntax the stripper does not handle, simplifying it here fixes every module that imports this file.',
+          'This is a bug in the compiler, not in your code, if the construct is ordinary TypeScript — please report it with the source line.',
+        ],
+        nextSteps: [
+          'A module that fails to parse is substituted with its raw source, so every type annotation it contains becomes a runtime SyntaxError.',
+          'The failure is reported here, at the offending file and line, rather than as an `Unexpected token` in whichever module happened to import it.',
+        ],
+        tip: 'Ordinary TypeScript should parse; if this fires on valid TS, the parser is missing a construct.',
+      },
+    );
+  }
+
   static vskNamespaceMember(context: VeskErrorOptions & { form?: 'nested' | 'value' } = {}): VeskError {
     const nested = context.form === 'nested';
     return new VeskError(

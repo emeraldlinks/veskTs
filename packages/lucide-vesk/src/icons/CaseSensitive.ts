@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CaseSensitive = createLucideIcon("case-sensitive", __iconNode);
+const CaseSensitive = /* @__PURE__ */ createLucideIcon("case-sensitive", __iconNode);
 
 export default CaseSensitive;
 export { CaseSensitive };

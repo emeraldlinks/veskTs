@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LeafyGreen = createLucideIcon("leafy-green", __iconNode);
+const LeafyGreen = /* @__PURE__ */ createLucideIcon("leafy-green", __iconNode);
 
 export default LeafyGreen;
 export { LeafyGreen };

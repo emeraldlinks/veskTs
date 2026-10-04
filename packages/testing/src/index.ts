@@ -20,6 +20,7 @@
  * is for the other 90%.
  */
 import { parseHTML } from 'linkedom';
+import { resolve } from 'node:path';
 import { renderPage } from '@vesk/compiler/src/server-codegen';
 
 /** One rendered component: its HTML plus the props it was rendered with. */
@@ -41,6 +42,16 @@ export interface RenderOptions {
   hydrate?: boolean;
   /** File name used in error messages and source paths. */
   fileName?: string;
+  /**
+   * Directory the source is treated as living in, for module resolution.
+   * Defaults to `process.cwd()`. This is what makes an import of a real
+   * package resolve: SSR resolves bare specifiers from the importing file's
+   * directory upward through `node_modules`, so a harness that passed no
+   * directory could never resolve `lucide-vesk` (or anything else) and every
+   * component-importing fixture failed — including ones that work in a real
+   * build.
+   */
+  dir?: string;
 }
 
 /**
@@ -57,9 +68,14 @@ export function renderComponent(
   options: RenderOptions = {},
 ): RenderedComponent {
   const hydrate = options.hydrate !== false;
+  // A real path, even for an in-memory source: it is the anchor module
+  // resolution uses. `__harness__.vsk` sits in the same directory the app's own
+  // components would, so a bare import walks up to the project's node_modules
+  // exactly as it does in `vesk dev` / `vesk build`.
+  const sourcePath = resolve(options.dir ?? process.cwd(), options.fileName ?? '__harness__.vsk');
   const result = renderPage(source, componentName || 'App', props, new Map(), {
     hydrate,
-    sourcePath: options.fileName,
+    sourcePath,
   }) as { body: string; head: string; props: Record<string, unknown> };
   return { html: result.body, head: result.head, props: result.props };
 }

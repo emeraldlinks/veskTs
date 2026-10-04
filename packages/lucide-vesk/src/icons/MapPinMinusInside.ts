@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MapPinMinusInside = createLucideIcon("map-pin-minus-inside", __iconNode);
+const MapPinMinusInside = /* @__PURE__ */ createLucideIcon("map-pin-minus-inside", __iconNode);
 
 export default MapPinMinusInside;
 export { MapPinMinusInside };

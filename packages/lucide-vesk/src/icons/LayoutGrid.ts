@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LayoutGrid = createLucideIcon("layout-grid", __iconNode);
+const LayoutGrid = /* @__PURE__ */ createLucideIcon("layout-grid", __iconNode);
 
 export default LayoutGrid;
 export { LayoutGrid };

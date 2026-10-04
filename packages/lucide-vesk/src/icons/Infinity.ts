@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Infinity = createLucideIcon("infinity", __iconNode);
+const Infinity = /* @__PURE__ */ createLucideIcon("infinity", __iconNode);
 
 export default Infinity;
 export { Infinity };

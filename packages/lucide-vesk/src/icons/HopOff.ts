@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HopOff = createLucideIcon("hop-off", __iconNode);
+const HopOff = /* @__PURE__ */ createLucideIcon("hop-off", __iconNode);
 
 export default HopOff;
 export { HopOff };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PhoneMissed = createLucideIcon("phone-missed", __iconNode);
+const PhoneMissed = /* @__PURE__ */ createLucideIcon("phone-missed", __iconNode);
 
 export default PhoneMissed;
 export { PhoneMissed };

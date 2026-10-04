@@ -417,6 +417,91 @@ let currentVskNamespaceLocals: Set<string> | null = null;
 let currentSourceFile: string | undefined;
 
 /**
+ * Names bound to a component VALUE in the component's OWN body (a parameter or
+ * a `const`/`let`/`var`/function declared inside it) that a JSX tag may
+ * legally resolve to.
+ *
+ * A JSX tag was historically registry-only: `<Icon />` looked the name up in
+ * the component registry and threw "was not found" when it missed, even though
+ * `const Icon = item.icon` had bound a perfectly good component value one line
+ * above. That made the single most natural way to write a dynamic-icon nav
+ * list (`const Icon = item.icon; <li><Icon size={14} /></li>`) a 500 for the
+ * WHOLE route — and the error text ("declare it with the `component` keyword")
+ * named the one thing the author had already done correctly.
+ *
+ * Such a name is emitted with a `calleeExpr`, routing it through the SAME code
+ * path that already works for `<it.icon />` — the callee is invoked directly
+ * instead of resolved as a name.
+ *
+ * Deliberately EXCLUDES imported names and top-level file values: those
+ * already resolve through the `importedNames` path in both codegens, and
+ * giving them a callee there would take self-claiming runtime components
+ * (`Link`, `Form`, `Md`) off the path that reserves the caller's walker
+ * correctly. Registry resolution also keeps precedence: a name that is a
+ * declared `component` still wins.
+ */
+let currentComponentValues: Set<string> | null = null;
+
+/** File-wide name sets backing `isComponentValueName`. */
+let currentFileComponentNames: Set<string> | null = null;
+let currentFileValueBindings: Set<string> | null = null;
+let currentImportedNames: Set<string> | null = null;
+
+/**
+ * Module-scope helpers whose body IS a component call — the module-scope
+ * equivalent of the previous problem:
+ *
+ *   const renderIcon = (n: number) => Terminal({ size: n });
+ *   <div>{renderIcon(14)}</div>
+ *
+ * The callee here is the helper, not the component, so resolving names finds
+ * nothing to fix. Inlining it is exact and lossless in the one shape that is
+ * unambiguously a component render: a helper whose ENTIRE body is a single
+ * component-call-shaped expression, with plain identifier parameters. The
+ * argument is substituted into the props object by identifier match, so no
+ * general (and unsound) alpha-renaming is needed.
+ *
+ * Anything more complicated — a helper with statements, a component call whose
+ * props reference the parameter several times, a non-identifier argument — is
+ * deliberately NOT inlined. It stays an ordinary call, which is the historical
+ * (and correct for non-component helpers) behavior.
+ */
+interface ComponentCallHelper {
+  /** Props of the component call the helper returns. */
+  props: Array<{ name: string; value: any }>;
+  spreadProps: any[];
+  slots: Array<{ name: string; nodes: IRNode[] }>;
+  /** Helper parameter names, in declaration order. */
+  paramNames: string[];
+  /** The component the helper body invokes. */
+  componentName: string;
+}
+
+let currentComponentCallHelpers: Map<string, ComponentCallHelper> | null = null;
+
+/** A helper body expression that is exactly one component call, or null. */
+function unwrapHelperBody(node: any): any | null {
+  let body = node;
+  if (body?.type === 'ArrowFunctionExpression' || body?.type === 'FunctionExpression') body = body.body;
+  if (body?.type === 'BlockStatement') {
+    const stmts = (body.body || []).filter((s: any) => s.type !== 'EmptyStatement');
+    if (stmts.length !== 1) return null;
+    body = stmts[0];
+  }
+  if (body?.type === 'ReturnStatement') body = body.argument;
+  if (!body) return null;
+  // Shape check only — deliberately NOT `componentCallInExpression`, which
+  // consults the per-component name sets. Helpers are collected once for the
+  // whole file, before any component's sets are installed, and whether a
+  // callee resolves to a component is settled at the call site instead.
+  if (body.type !== 'CallExpression') return null;
+  if (body.callee?.type !== 'Identifier') return null;
+  const args = body.arguments || [];
+  if (args.length === 0 || args[0]?.type !== 'ObjectExpression') return null;
+  return body;
+}
+
+/**
  * Local names bound by `import * as ns from './x.vsk'` that are NOT shadowed by
  * any other binding in the file. A `.vsk` namespace is only special when the
  * name still refers to the import: if a parameter or a local shadows it, the
@@ -466,6 +551,51 @@ function markShadowedBindings(node: any, namespaceLocals: Map<string, { path: st
 }
 
 /** Names a single binding-bearing node introduces. */
+/**
+ * Every top-level VALUE binding in the file (excluding `component`
+ * declarations — those are registry entries, not values, and resolve by name).
+ * Pre-scanned rather than read out of `topLevelCode`, which fills in as the
+ * top-level loop runs and would therefore miss a binding declared after the
+ * component currently being compiled.
+ */
+function collectFileValueBindings(ast: any): Set<string> {
+  const names = new Set<string>();
+  for (const node of (ast.body || []) as any[]) {
+    if (node.type === 'ComponentDeclaration') continue;
+    if (node.type === 'ImportDeclaration') continue;
+    const target = node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration'
+      ? node.declaration
+      : node;
+    if (!target) continue;
+    if (target.type === 'VariableDeclaration') {
+      for (const d of target.declarations || []) for (const n of declaredBindingNames(d)) names.add(n);
+      continue;
+    }
+    for (const n of declaredBindingNames(target)) names.add(n);
+  }
+  return names;
+}
+
+/**
+ * Every value binding a tag inside one component body could resolve to —
+ * the component's own parameters and body-local declarations only.
+ */
+function collectComponentValueNames(compNode: any): Set<string> {
+  const names = new Set<string>();
+  if (!compNode) return names;
+  for (const p of compNode.params || []) for (const n of declaredBindingNames(p)) names.add(n);
+  for (const stmt of (compNode.body?.body || []) as any[]) {
+    // A body statement is the DECLARATION (`const Icon = …`), and
+    // `declaredBindingNames` reads declarators, so unwrap first.
+    if (stmt.type === 'VariableDeclaration') {
+      for (const d of stmt.declarations || []) for (const n of declaredBindingNames(d)) names.add(n);
+      continue;
+    }
+    for (const n of declaredBindingNames(stmt)) names.add(n);
+  }
+  return names;
+}
+
 function declaredBindingNames(node: any): string[] {
   const out: string[] = [];
   const pushPattern = (id: any): void => {
@@ -541,8 +671,212 @@ function findNamespaceValueUse(node: any, locals: Set<string>): any | null {
   return null;
 }
 
+/**
+ * Build the helper table from the file's top-level const/function bindings.
+ * Only single-expression component-call bodies with plain identifier params
+ * are recorded — see `ComponentCallHelper` for why the rest are excluded.
+ */
+function collectComponentCallHelpers(source: string, ast: any): Map<string, ComponentCallHelper> {
+  const out = new Map<string, ComponentCallHelper>();
+  for (const node of (ast.body || []) as any[]) {
+    const decl = node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration'
+      ? node.declaration
+      : node;
+    if (!decl) continue;
+    let name: string | null = null;
+    let fn: any = null;
+    if (decl.type === 'VariableDeclaration' && decl.declarations?.length === 1) {
+      const d = decl.declarations[0];
+      if (d.id?.type === 'Identifier') { name = d.id.name; fn = d.init; }
+    } else if (decl.type === 'FunctionDeclaration' && decl.id?.name) {
+      name = decl.id.name;
+      fn = decl;
+    }
+    if (!name || !fn) continue;
+    if (fn.type !== 'ArrowFunctionExpression' && fn.type !== 'FunctionExpression' && fn.type !== 'FunctionDeclaration') continue;
+    // A rest/default/destructured parameter cannot be substituted by a simple
+    // identifier match, so such helpers are left as ordinary calls.
+    const params = fn.params || [];
+    if (params.some((p: any) => p.type !== 'Identifier')) continue;
+    const body = unwrapHelperBody(fn);
+    if (body === null) continue;
+    const args = body.arguments || [];
+    const propsObj = args[0];
+    const props: Array<{ name: string; value: any }> = [];
+    const spreadProps: any[] = [];
+    const slots: Array<{ name: string; nodes: IRNode[] }> = [];
+    for (const prop of (propsObj.properties || []) as any[]) {
+      if (prop.type === 'SpreadElement') { spreadProps.push(prop.argument); continue; }
+      const pname = prop.key.type === 'Identifier' ? prop.key.name : prop.key.value;
+      if (prop.value.type === 'JSXElement' || prop.value.type === 'JSXFragment') {
+        slots.push({ name: pname, nodes: exprToIR(source, prop.value) });
+        continue;
+      }
+      props.push({ name: pname, value: prop.value });
+    }
+    const paramNames: string[] = params.map((p: any) => p.name as string);
+    out.set(name, { props, spreadProps, slots, paramNames, componentName: body.callee.name });
+  }
+  return out;
+}
+
+/**
+ * Replace every identifier in `node` that matches a helper parameter with the
+ * argument passed at the call site. Identifier-only and AST-level (the compiler
+ * never rewrites source by pattern), and it returns null if the tree holds
+ * anything it cannot prove is a value — e.g. a nested function that closes over
+ * the parameter, where substituting would change what runs.
+ */
+function substituteHelperParams(node: any, bindings: Map<string, any>): any | null {
+  if (!node || typeof node !== 'object') return node;
+  if (Array.isArray(node)) {
+    const out: any[] = [];
+    for (const child of node) {
+      const next = substituteHelperParams(child, bindings);
+      if (next === null) return null;
+      out.push(next);
+    }
+    return out;
+  }
+  if (typeof node.type !== 'string') return node;
+  // A nested function body runs later and may capture the parameter; leave the
+  // whole helper alone rather than risk changing its meaning.
+  if (node.type === 'ArrowFunctionExpression' || node.type === 'FunctionExpression') return null;
+  if (node.type === 'Identifier' && bindings.has(node.name)) {
+    const bound = bindings.get(node.name);
+    return bound === null ? null : bound;
+  }
+  const out: Record<string, any> = {};
+  for (const key of Object.keys(node)) {
+    if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') {
+      out[key] = node[key];
+      continue;
+    }
+    const next = substituteHelperParams(node[key], bindings);
+    if (next === null) return null;
+    out[key] = next;
+  }
+  return out;
+}
+
+/** Lower a call to a `ComponentCallHelper` into a real `ComponentCall`. */
+function helperCallToIR(source: string, helper: ComponentCallHelper, args: any[]): IRNode[] | null {
+  // The rendered component is the one INSIDE the helper, not the helper itself.
+  const compName = helper.componentName;
+  // First argument is the props object INSIDE the helper; the caller's
+  // arguments fill the helper's parameters from index 0.
+  const bindings = new Map<string, any>();
+  helper.paramNames.forEach((param, i) => bindings.set(param, args[i] ?? null));
+  for (const bound of bindings.values()) if (bound === null) return null;
+  const props: { name: string; value: Expression }[] = [];
+  for (const p of helper.props) {
+    const substituted = substituteHelperParams(p.value, bindings);
+    if (substituted === null) return null;
+    props.push({ name: p.name, value: toExpression(source, substituted) });
+  }
+  const spreadProps: Expression[] = [];
+  for (const sp of helper.spreadProps) {
+    const substituted = substituteHelperParams(sp, bindings);
+    if (substituted === null) return null;
+    spreadProps.push(toExpression(source, substituted));
+  }
+  return [new ComponentCall(compName, props, helper.slots.flatMap((s) => [new PropSlot(s.name, s.nodes)]), spreadProps, -1, componentValueCallee(compName))];
+}
+
 function isHTMLTag(name: string): boolean {
   return name.length > 0 && name[0] === name[0].toLowerCase();
+}
+
+/**
+ * The `calleeExpr` for a bare-identifier JSX tag, or null when the name must
+ * resolve through the component registry.
+ *
+ * Null is the default and the reason every existing tag is untouched: only a
+ * name bound to a value in this component's scope gets a callee, so
+ * `component Icon {}` / imported components keep registry semantics (with
+ * their "not found" diagnostic), while `const Icon = item.icon` — which used to
+ * throw and take the whole route down with it — resolves to the value it is.
+ */
+function componentValueCallee(tagName: string): string | null {
+  if (!currentComponentValues || !currentComponentValues.has(tagName)) return null;
+  return tagName;
+}
+
+/**
+ * A component invoked as a function in expression position, or null.
+ *
+ * The callee must be a plain identifier that names a component — an import, a
+ * top-level file value, a body-local binding, or a declared `component` — and
+ * the first argument an object literal, the shape `Terminal({ size: 14 })` has.
+ *
+ * This is a WIDER name test than `componentValueCallee`, and deliberately so:
+ * a tag only needs a callee for names nothing else can resolve, but a CALL has
+ * no other lowering at all. The first argument must be an object literal
+ * because that is what distinguishes a component invocation from an ordinary
+ * call on a same-named helper, and the callee must be a known component name
+ * for the same reason — `doThing(x)` on a local helper stays an ordinary call.
+ */
+function componentCallInExpression(expr: any): any | null {
+  if (!expr || expr.type !== 'CallExpression') return null;
+  const callee = expr.callee;
+  if (!callee || callee.type !== 'Identifier') return null;
+  if (!isComponentValueName(callee.name)) return null;
+  const args = expr.arguments || [];
+  if (args.length === 0 || !args[0] || args[0].type !== 'ObjectExpression') return null;
+  return expr;
+}
+
+/**
+ * Every name in the file that denotes a component: declared `component`s,
+ * imports, top-level file values, and the current component's body-local
+ * bindings. Used only to recognize a component call — never to give a tag a
+ * callee (that is `componentValueCallee`'s narrower job).
+ */
+function isComponentValueName(name: string): boolean {
+  if (currentFileComponentNames?.has(name)) return true;
+  if (currentComponentValues?.has(name)) return true;
+  return currentFileValueBindings?.has(name) || currentImportedNames?.has(name) || false;
+}
+
+/**
+ * Lower `Comp({ a: 1, ...rest })` to a `ComponentCall`. Props/spreads map
+ * straight onto the component-call channels; a slot-shaped value (`children`)
+ * is routed through `PropSlot` so named content keeps working when a component
+ * is invoked as a function rather than used as a tag.
+ */
+function componentCallToIR(source: string, expr: any): IRNode[] {
+  const calleeName = (expr.callee as { name: string }).name;
+  const args = expr.arguments || [];
+  const propsArg = args[0];
+  const props: { name: string; value: Expression }[] = [];
+  const spreadProps: Expression[] = [];
+  const slots: PropSlot[] = [];
+  for (const prop of (propsArg.properties || []) as any[]) {
+    if (prop.type === 'SpreadElement') {
+      spreadProps.push(toExpression(source, prop.argument));
+      continue;
+    }
+    const name = prop.key.type === 'Identifier' ? prop.key.name : prop.key.value;
+    if (prop.value.type === 'JSXElement' || prop.value.type === 'JSXFragment') {
+      slots.push(new PropSlot(name, exprToIR(source, prop.value)));
+      continue;
+    }
+    props.push({ name, value: toExpression(source, prop.value) });
+  }
+  // Extra positional arguments are the component ABI (`props`, registry,
+  // walker) that only the compiler emits; a caller's own extra args are not
+  // something to forward, and silently dropping them would hide a mistake.
+  const children = args.length > 1
+    ? [new RuntimeStatement(`/* [vesk] extra arguments to a component call are ignored */ ${getSource(source, args[1])}`)]
+    : [];
+  return [new ComponentCall(
+    calleeName,
+    props,
+    [...children, ...slots],
+    spreadProps,
+    expr.start ?? -1,
+    componentValueCallee(calleeName),
+  )];
 }
 
 function isMapCall(expr: any): boolean {
@@ -887,7 +1221,10 @@ function processJSXChildren(source: string, children: any[]): IRNode[] {
         }
       }
 
-      result.push(new DynamicBinding(toExpression(source, expr)));
+      // Routed through exprToIR so a component invoked as a function (and a
+      // module-scope helper returning one) becomes a real component render
+      // rather than text that gets escaped into visible markup.
+      result.push(...exprToIR(source, expr));
       i++;
     } else if (child.type === 'JSXElement') {
       result.push(...processJSXElement(source, child));
@@ -947,6 +1284,28 @@ function exprToIR(source: string, expr: any): IRNode[] {
     return [new MapRegion(arrayExpr, itemVar, bodyNodes, keyExpr, indexVar)];
   }
   if (expr.type === 'ParenthesizedExpression') return exprToIR(source, expr.expression);
+  // A component INVOKED as a function in expression position
+  // (`{Terminal({ size: 14 })}`, or any branch of a ternary/`&&`) used to
+  // degrade to a text binding, and the server escaped the component's HTML
+  // string into visible page text — the worst failure mode of the three,
+  // because it looks like content. `{cond ? Terminal({ size: 14 }) : null}`
+  // was worse still: the escaped markup rendered as nothing at all, so a
+  // missing icon shipped silently.
+  //
+  // A component's return value is markup, not text, so the call must be a real
+  // component render. It is lowered to the SAME `ComponentCall` node a `<Tag />`
+  // would produce, which means it inherits the hydration marker, the claim
+  // path, and the fragment flattening that the tag form already relies on —
+  // rather than needing a second, parallel implementation.
+  if (componentCallInExpression(expr) !== null) return componentCallToIR(source, expr);
+  // A module-scope helper that just returns a component call is the same
+  // component render one level removed — inline it (see
+  // `ComponentCallHelper`) rather than let its HTML be escaped into the page.
+  if (expr?.type === 'CallExpression' && currentComponentCallHelpers?.has((expr.callee as any)?.name)) {
+    const helper = currentComponentCallHelpers.get((expr.callee as any).name)!;
+    const inlined = helperCallToIR(source, helper, expr.arguments || []);
+    if (inlined !== null) return inlined;
+  }
   // Nested conditionals/`&&` with JSX branches become nested dynamic regions
   // so `a ? <X/> : b ? <Y/> : <Z/>` compiles recursively instead of degrading
   // to a raw text binding.
@@ -1056,13 +1415,13 @@ function processJSXElement(source: string, element: any): IRNode[] {
 
   if (!isHTMLTag(tagName) && selfClosing) {
     const { props, spreadProps, slots } = extractProps(source, element);
-    return [new ComponentCall(tagName, props, slots.map((s) => new PropSlot(s.name, s.nodes)), spreadProps, element.start)];
+    return [new ComponentCall(tagName, props, slots.map((s) => new PropSlot(s.name, s.nodes)), spreadProps, element.start, componentValueCallee(tagName))];
   }
 
   if (!isHTMLTag(tagName)) {
     const { props, spreadProps, slots } = extractProps(source, element);
     const children = processJSXChildren(source, element.children || []);
-    return [new ComponentCall(tagName, props, [...children, ...slots.map((s) => new PropSlot(s.name, s.nodes))], spreadProps, element.start)];
+    return [new ComponentCall(tagName, props, [...children, ...slots.map((s) => new PropSlot(s.name, s.nodes))], spreadProps, element.start, componentValueCallee(tagName))];
   }
 
   const attributes = element.openingElement.attributes
@@ -1556,6 +1915,22 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
   const vskNamespaceLocals = collectVskNamespaceLocals(ast);
   const prevNamespaceLocals = currentVskNamespaceLocals;
   const prevSourceFile = currentSourceFile;
+  // Pre-scan the two name sets the per-component value resolution needs, so
+  // order in the file does not matter.
+  const fileValueBindings = collectFileValueBindings(ast);
+  currentComponentCallHelpers = collectComponentCallHelpers(source, ast);
+  const prevFileComponentNames = currentFileComponentNames;
+  const prevFileValueBindings = currentFileValueBindings;
+  const prevImportedNames = currentImportedNames;
+  const fileComponentNames = new Set<string>(
+    ((ast.body || []) as any[])
+      .map((n) => (n.type === 'ExportNamedDeclaration' || n.type === 'ExportDefaultDeclaration' ? n.declaration : n))
+      .filter((n) => n?.type === 'ComponentDeclaration')
+      .map((n) => n.id.name as string),
+  );
+  currentFileComponentNames = fileComponentNames;
+  currentFileValueBindings = fileValueBindings;
+  currentImportedNames = importedNames;
   currentVskNamespaceLocals = vskNamespaceLocals;
   currentSourceFile = file;
   try {
@@ -1696,6 +2071,13 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
 
     const name = inner.id.name;
     const paramNames = getParamNames(inner.params, source);
+    // Value bindings a tag/call in THIS body may resolve to (see
+    // `currentComponentValues`). Registry components are excluded so a declared
+    // `component Icon` keeps winning over any same-named value binding.
+    const valueNames = collectComponentValueNames(inner);
+    const prevComponentValues = currentComponentValues;
+    currentComponentValues = new Set([...valueNames].filter((n) => !fileComponentNames.has(n)));
+    try {
     // A plain-identifier first parameter receives the whole props object under
     // its own name (React-style); a destructuring pattern receives the fields.
     const firstParam = inner.params?.[0];
@@ -1760,6 +2142,9 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       comp.style = css;
       components.push(comp);
       __slotProps = prevSlotProps;
+    }
+    } finally {
+      currentComponentValues = prevComponentValues;
     }
   }
 
@@ -1828,5 +2213,9 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
   } finally {
     currentVskNamespaceLocals = prevNamespaceLocals;
     currentSourceFile = prevSourceFile;
+    currentFileComponentNames = prevFileComponentNames;
+    currentFileValueBindings = prevFileValueBindings;
+    currentImportedNames = prevImportedNames;
+    currentComponentCallHelpers = null;
   }
 }

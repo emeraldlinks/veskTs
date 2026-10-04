@@ -52,7 +52,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PackageSearch = createLucideIcon("package-search", __iconNode);
+const PackageSearch = /* @__PURE__ */ createLucideIcon("package-search", __iconNode);
 
 export default PackageSearch;
 export { PackageSearch };

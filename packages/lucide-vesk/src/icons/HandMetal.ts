@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HandMetal = createLucideIcon("hand-metal", __iconNode);
+const HandMetal = /* @__PURE__ */ createLucideIcon("hand-metal", __iconNode);
 
 export default HandMetal;
 export { HandMetal };

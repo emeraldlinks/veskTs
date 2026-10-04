@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Drama = createLucideIcon("drama", __iconNode);
+const Drama = /* @__PURE__ */ createLucideIcon("drama", __iconNode);
 
 export default Drama;
 export { Drama };

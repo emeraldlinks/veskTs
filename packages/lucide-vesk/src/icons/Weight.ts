@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Weight = createLucideIcon("weight", __iconNode);
+const Weight = /* @__PURE__ */ createLucideIcon("weight", __iconNode);
 
 export default Weight;
 export { Weight };

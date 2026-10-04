@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ship = createLucideIcon("ship", __iconNode);
+const Ship = /* @__PURE__ */ createLucideIcon("ship", __iconNode);
 
 export default Ship;
 export { Ship };

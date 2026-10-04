@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BellRing = createLucideIcon("bell-ring", __iconNode);
+const BellRing = /* @__PURE__ */ createLucideIcon("bell-ring", __iconNode);
 
 export default BellRing;
 export { BellRing };

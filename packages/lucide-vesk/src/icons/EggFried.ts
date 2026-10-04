@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EggFried = createLucideIcon("egg-fried", __iconNode);
+const EggFried = /* @__PURE__ */ createLucideIcon("egg-fried", __iconNode);
 
 export default EggFried;
 export { EggFried };

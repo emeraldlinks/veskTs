@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ReceiptSwissFranc = createLucideIcon("receipt-swiss-franc", __iconNode);
+const ReceiptSwissFranc = /* @__PURE__ */ createLucideIcon("receipt-swiss-franc", __iconNode);
 
 export default ReceiptSwissFranc;
 export { ReceiptSwissFranc };

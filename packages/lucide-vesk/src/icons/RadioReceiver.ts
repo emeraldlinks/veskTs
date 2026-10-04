@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RadioReceiver = createLucideIcon("radio-receiver", __iconNode);
+const RadioReceiver = /* @__PURE__ */ createLucideIcon("radio-receiver", __iconNode);
 
 export default RadioReceiver;
 export { RadioReceiver };

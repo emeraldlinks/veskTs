@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Vibrate = createLucideIcon("vibrate", __iconNode);
+const Vibrate = /* @__PURE__ */ createLucideIcon("vibrate", __iconNode);
 
 export default Vibrate;
 export { Vibrate };

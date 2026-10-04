@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Braces = createLucideIcon("braces", __iconNode);
+const Braces = /* @__PURE__ */ createLucideIcon("braces", __iconNode);
 
 export default Braces;
 export { Braces };

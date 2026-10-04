@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleOff = createLucideIcon("circle-off", __iconNode);
+const CircleOff = /* @__PURE__ */ createLucideIcon("circle-off", __iconNode);
 
 export default CircleOff;
 export { CircleOff };

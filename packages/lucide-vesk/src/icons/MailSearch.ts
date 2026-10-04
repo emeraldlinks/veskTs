@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MailSearch = createLucideIcon("mail-search", __iconNode);
+const MailSearch = /* @__PURE__ */ createLucideIcon("mail-search", __iconNode);
 
 export default MailSearch;
 export { MailSearch };

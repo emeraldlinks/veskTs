@@ -63,7 +63,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ImageUpscale = createLucideIcon("image-upscale", __iconNode);
+const ImageUpscale = /* @__PURE__ */ createLucideIcon("image-upscale", __iconNode);
 
 export default ImageUpscale;
 export { ImageUpscale };

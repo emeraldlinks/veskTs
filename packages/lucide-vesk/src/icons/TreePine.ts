@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TreePine = createLucideIcon("tree-pine", __iconNode);
+const TreePine = /* @__PURE__ */ createLucideIcon("tree-pine", __iconNode);
 
 export default TreePine;
 export { TreePine };

@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BugPlay = createLucideIcon("bug-play", __iconNode);
+const BugPlay = /* @__PURE__ */ createLucideIcon("bug-play", __iconNode);
 
 export default BugPlay;
 export { BugPlay };

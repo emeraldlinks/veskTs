@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleCheck = createLucideIcon("circle-check", __iconNode);
+const CircleCheck = /* @__PURE__ */ createLucideIcon("circle-check", __iconNode);
 
 export default CircleCheck;
 export { CircleCheck };

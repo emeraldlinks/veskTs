@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WifiLow = createLucideIcon("wifi-low", __iconNode);
+const WifiLow = /* @__PURE__ */ createLucideIcon("wifi-low", __iconNode);
 
 export default WifiLow;
 export { WifiLow };

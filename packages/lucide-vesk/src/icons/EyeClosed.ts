@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EyeClosed = createLucideIcon("eye-closed", __iconNode);
+const EyeClosed = /* @__PURE__ */ createLucideIcon("eye-closed", __iconNode);
 
 export default EyeClosed;
 export { EyeClosed };

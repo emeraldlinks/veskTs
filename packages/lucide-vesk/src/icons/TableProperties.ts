@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TableProperties = createLucideIcon("table-properties", __iconNode);
+const TableProperties = /* @__PURE__ */ createLucideIcon("table-properties", __iconNode);
 
 export default TableProperties;
 export { TableProperties };

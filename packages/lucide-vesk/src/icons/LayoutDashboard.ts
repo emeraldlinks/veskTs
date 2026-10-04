@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LayoutDashboard = createLucideIcon("layout-dashboard", __iconNode);
+const LayoutDashboard = /* @__PURE__ */ createLucideIcon("layout-dashboard", __iconNode);
 
 export default LayoutDashboard;
 export { LayoutDashboard };

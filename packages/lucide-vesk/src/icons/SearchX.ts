@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SearchX = createLucideIcon("search-x", __iconNode);
+const SearchX = /* @__PURE__ */ createLucideIcon("search-x", __iconNode);
 
 export default SearchX;
 export { SearchX };

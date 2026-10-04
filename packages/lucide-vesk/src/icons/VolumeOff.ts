@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const VolumeOff = createLucideIcon("volume-off", __iconNode);
+const VolumeOff = /* @__PURE__ */ createLucideIcon("volume-off", __iconNode);
 
 export default VolumeOff;
 export { VolumeOff };

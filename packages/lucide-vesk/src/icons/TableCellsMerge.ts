@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TableCellsMerge = createLucideIcon("table-cells-merge", __iconNode);
+const TableCellsMerge = /* @__PURE__ */ createLucideIcon("table-cells-merge", __iconNode);
 
 export default TableCellsMerge;
 export { TableCellsMerge };

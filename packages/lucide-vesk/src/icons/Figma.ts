@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Figma = createLucideIcon("figma", __iconNode);
+const Figma = /* @__PURE__ */ createLucideIcon("figma", __iconNode);
 
 export default Figma;
 export { Figma };

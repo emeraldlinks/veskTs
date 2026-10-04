@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Underline = createLucideIcon("underline", __iconNode);
+const Underline = /* @__PURE__ */ createLucideIcon("underline", __iconNode);
 
 export default Underline;
 export { Underline };

@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageCircleDashed = createLucideIcon("message-circle-dashed", __iconNode);
+const MessageCircleDashed = /* @__PURE__ */ createLucideIcon("message-circle-dashed", __iconNode);
 
 export default MessageCircleDashed;
 export { MessageCircleDashed };

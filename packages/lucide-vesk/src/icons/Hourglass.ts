@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Hourglass = createLucideIcon("hourglass", __iconNode);
+const Hourglass = /* @__PURE__ */ createLucideIcon("hourglass", __iconNode);
 
 export default Hourglass;
 export { Hourglass };

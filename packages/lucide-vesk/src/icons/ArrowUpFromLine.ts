@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArrowUpFromLine = createLucideIcon("arrow-up-from-line", __iconNode);
+const ArrowUpFromLine = /* @__PURE__ */ createLucideIcon("arrow-up-from-line", __iconNode);
 
 export default ArrowUpFromLine;
 export { ArrowUpFromLine };

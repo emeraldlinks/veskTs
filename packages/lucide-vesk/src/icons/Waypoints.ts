@@ -61,7 +61,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Waypoints = createLucideIcon("waypoints", __iconNode);
+const Waypoints = /* @__PURE__ */ createLucideIcon("waypoints", __iconNode);
 
 export default Waypoints;
 export { Waypoints };

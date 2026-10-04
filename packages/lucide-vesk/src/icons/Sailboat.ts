@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sailboat = createLucideIcon("sailboat", __iconNode);
+const Sailboat = /* @__PURE__ */ createLucideIcon("sailboat", __iconNode);
 
 export default Sailboat;
 export { Sailboat };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Syringe = createLucideIcon("syringe", __iconNode);
+const Syringe = /* @__PURE__ */ createLucideIcon("syringe", __iconNode);
 
 export default Syringe;
 export { Syringe };

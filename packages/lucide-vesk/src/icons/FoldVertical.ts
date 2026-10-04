@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FoldVertical = createLucideIcon("fold-vertical", __iconNode);
+const FoldVertical = /* @__PURE__ */ createLucideIcon("fold-vertical", __iconNode);
 
 export default FoldVertical;
 export { FoldVertical };

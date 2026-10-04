@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShieldBan = createLucideIcon("shield-ban", __iconNode);
+const ShieldBan = /* @__PURE__ */ createLucideIcon("shield-ban", __iconNode);
 
 export default ShieldBan;
 export { ShieldBan };

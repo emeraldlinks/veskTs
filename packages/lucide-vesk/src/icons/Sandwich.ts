@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sandwich = createLucideIcon("sandwich", __iconNode);
+const Sandwich = /* @__PURE__ */ createLucideIcon("sandwich", __iconNode);
 
 export default Sandwich;
 export { Sandwich };

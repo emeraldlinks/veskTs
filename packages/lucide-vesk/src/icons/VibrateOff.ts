@@ -44,7 +44,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const VibrateOff = createLucideIcon("vibrate-off", __iconNode);
+const VibrateOff = /* @__PURE__ */ createLucideIcon("vibrate-off", __iconNode);
 
 export default VibrateOff;
 export { VibrateOff };

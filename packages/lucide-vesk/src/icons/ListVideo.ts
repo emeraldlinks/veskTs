@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListVideo = createLucideIcon("list-video", __iconNode);
+const ListVideo = /* @__PURE__ */ createLucideIcon("list-video", __iconNode);
 
 export default ListVideo;
 export { ListVideo };

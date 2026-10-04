@@ -34,7 +34,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareFunction = createLucideIcon("square-function", __iconNode);
+const SquareFunction = /* @__PURE__ */ createLucideIcon("square-function", __iconNode);
 
 export default SquareFunction;
 export { SquareFunction };

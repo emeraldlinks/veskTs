@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartColumnDecreasing = createLucideIcon("chart-column-decreasing", __iconNode);
+const ChartColumnDecreasing = /* @__PURE__ */ createLucideIcon("chart-column-decreasing", __iconNode);
 
 export default ChartColumnDecreasing;
 export { ChartColumnDecreasing };

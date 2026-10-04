@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SignalMedium = createLucideIcon("signal-medium", __iconNode);
+const SignalMedium = /* @__PURE__ */ createLucideIcon("signal-medium", __iconNode);
 
 export default SignalMedium;
 export { SignalMedium };

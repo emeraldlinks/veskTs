@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DiamondPercent = createLucideIcon("diamond-percent", __iconNode);
+const DiamondPercent = /* @__PURE__ */ createLucideIcon("diamond-percent", __iconNode);
 
 export default DiamondPercent;
 export { DiamondPercent };

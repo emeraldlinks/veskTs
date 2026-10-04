@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileTerminal = createLucideIcon("file-terminal", __iconNode);
+const FileTerminal = /* @__PURE__ */ createLucideIcon("file-terminal", __iconNode);
 
 export default FileTerminal;
 export { FileTerminal };

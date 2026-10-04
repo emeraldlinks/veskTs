@@ -67,7 +67,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SunDim = createLucideIcon("sun-dim", __iconNode);
+const SunDim = /* @__PURE__ */ createLucideIcon("sun-dim", __iconNode);
 
 export default SunDim;
 export { SunDim };

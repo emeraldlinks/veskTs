@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ToggleRight = createLucideIcon("toggle-right", __iconNode);
+const ToggleRight = /* @__PURE__ */ createLucideIcon("toggle-right", __iconNode);
 
 export default ToggleRight;
 export { ToggleRight };

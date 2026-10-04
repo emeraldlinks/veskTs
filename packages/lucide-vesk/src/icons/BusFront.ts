@@ -69,7 +69,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BusFront = createLucideIcon("bus-front", __iconNode);
+const BusFront = /* @__PURE__ */ createLucideIcon("bus-front", __iconNode);
 
 export default BusFront;
 export { BusFront };

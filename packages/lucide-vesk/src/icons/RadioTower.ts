@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RadioTower = createLucideIcon("radio-tower", __iconNode);
+const RadioTower = /* @__PURE__ */ createLucideIcon("radio-tower", __iconNode);
 
 export default RadioTower;
 export { RadioTower };

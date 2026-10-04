@@ -71,7 +71,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Heater = createLucideIcon("heater", __iconNode);
+const Heater = /* @__PURE__ */ createLucideIcon("heater", __iconNode);
 
 export default Heater;
 export { Heater };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClockArrowUp = createLucideIcon("clock-arrow-up", __iconNode);
+const ClockArrowUp = /* @__PURE__ */ createLucideIcon("clock-arrow-up", __iconNode);
 
 export default ClockArrowUp;
 export { ClockArrowUp };

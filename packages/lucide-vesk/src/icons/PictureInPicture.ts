@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PictureInPicture = createLucideIcon("picture-in-picture", __iconNode);
+const PictureInPicture = /* @__PURE__ */ createLucideIcon("picture-in-picture", __iconNode);
 
 export default PictureInPicture;
 export { PictureInPicture };

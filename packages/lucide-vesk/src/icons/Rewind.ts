@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Rewind = createLucideIcon("rewind", __iconNode);
+const Rewind = /* @__PURE__ */ createLucideIcon("rewind", __iconNode);
 
 export default Rewind;
 export { Rewind };

@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LifeBuoy = createLucideIcon("life-buoy", __iconNode);
+const LifeBuoy = /* @__PURE__ */ createLucideIcon("life-buoy", __iconNode);
 
 export default LifeBuoy;
 export { LifeBuoy };

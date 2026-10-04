@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileOutput = createLucideIcon("file-output", __iconNode);
+const FileOutput = /* @__PURE__ */ createLucideIcon("file-output", __iconNode);
 
 export default FileOutput;
 export { FileOutput };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ContactRound = createLucideIcon("contact-round", __iconNode);
+const ContactRound = /* @__PURE__ */ createLucideIcon("contact-round", __iconNode);
 
 export default ContactRound;
 export { ContactRound };

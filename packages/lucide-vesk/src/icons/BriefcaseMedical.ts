@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BriefcaseMedical = createLucideIcon("briefcase-medical", __iconNode);
+const BriefcaseMedical = /* @__PURE__ */ createLucideIcon("briefcase-medical", __iconNode);
 
 export default BriefcaseMedical;
 export { BriefcaseMedical };

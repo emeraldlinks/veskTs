@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MemoryStick = createLucideIcon("memory-stick", __iconNode);
+const MemoryStick = /* @__PURE__ */ createLucideIcon("memory-stick", __iconNode);
 
 export default MemoryStick;
 export { MemoryStick };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pyramid = createLucideIcon("pyramid", __iconNode);
+const Pyramid = /* @__PURE__ */ createLucideIcon("pyramid", __iconNode);
 
 export default Pyramid;
 export { Pyramid };

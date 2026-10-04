@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TicketPlus = createLucideIcon("ticket-plus", __iconNode);
+const TicketPlus = /* @__PURE__ */ createLucideIcon("ticket-plus", __iconNode);
 
 export default TicketPlus;
 export { TicketPlus };

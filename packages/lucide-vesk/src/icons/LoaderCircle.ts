@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LoaderCircle = createLucideIcon("loader-circle", __iconNode);
+const LoaderCircle = /* @__PURE__ */ createLucideIcon("loader-circle", __iconNode);
 
 export default LoaderCircle;
 export { LoaderCircle };

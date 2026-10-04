@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Bell = createLucideIcon("bell", __iconNode);
+const Bell = /* @__PURE__ */ createLucideIcon("bell", __iconNode);
 
 export default Bell;
 export { Bell };

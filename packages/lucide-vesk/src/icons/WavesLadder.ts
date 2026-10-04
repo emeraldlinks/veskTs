@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WavesLadder = createLucideIcon("waves-ladder", __iconNode);
+const WavesLadder = /* @__PURE__ */ createLucideIcon("waves-ladder", __iconNode);
 
 export default WavesLadder;
 export { WavesLadder };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PersonStanding = createLucideIcon("person-standing", __iconNode);
+const PersonStanding = /* @__PURE__ */ createLucideIcon("person-standing", __iconNode);
 
 export default PersonStanding;
 export { PersonStanding };

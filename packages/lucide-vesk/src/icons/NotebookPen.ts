@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NotebookPen = createLucideIcon("notebook-pen", __iconNode);
+const NotebookPen = /* @__PURE__ */ createLucideIcon("notebook-pen", __iconNode);
 
 export default NotebookPen;
 export { NotebookPen };

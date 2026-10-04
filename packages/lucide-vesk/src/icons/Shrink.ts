@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shrink = createLucideIcon("shrink", __iconNode);
+const Shrink = /* @__PURE__ */ createLucideIcon("shrink", __iconNode);
 
 export default Shrink;
 export { Shrink };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Merge = createLucideIcon("merge", __iconNode);
+const Merge = /* @__PURE__ */ createLucideIcon("merge", __iconNode);
 
 export default Merge;
 export { Merge };

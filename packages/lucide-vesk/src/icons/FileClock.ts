@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileClock = createLucideIcon("file-clock", __iconNode);
+const FileClock = /* @__PURE__ */ createLucideIcon("file-clock", __iconNode);
 
 export default FileClock;
 export { FileClock };

@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Dock = createLucideIcon("dock", __iconNode);
+const Dock = /* @__PURE__ */ createLucideIcon("dock", __iconNode);
 
 export default Dock;
 export { Dock };

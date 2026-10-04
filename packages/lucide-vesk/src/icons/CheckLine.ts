@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CheckLine = createLucideIcon("check-line", __iconNode);
+const CheckLine = /* @__PURE__ */ createLucideIcon("check-line", __iconNode);
 
 export default CheckLine;
 export { CheckLine };

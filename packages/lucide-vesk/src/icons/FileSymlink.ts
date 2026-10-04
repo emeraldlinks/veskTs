@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileSymlink = createLucideIcon("file-symlink", __iconNode);
+const FileSymlink = /* @__PURE__ */ createLucideIcon("file-symlink", __iconNode);
 
 export default FileSymlink;
 export { FileSymlink };

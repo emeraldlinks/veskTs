@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileArchive = createLucideIcon("file-archive", __iconNode);
+const FileArchive = /* @__PURE__ */ createLucideIcon("file-archive", __iconNode);
 
 export default FileArchive;
 export { FileArchive };

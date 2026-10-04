@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircuitBoard = createLucideIcon("circuit-board", __iconNode);
+const CircuitBoard = /* @__PURE__ */ createLucideIcon("circuit-board", __iconNode);
 
 export default CircuitBoard;
 export { CircuitBoard };

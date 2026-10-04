@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleFadingPlus = createLucideIcon("circle-fading-plus", __iconNode);
+const CircleFadingPlus = /* @__PURE__ */ createLucideIcon("circle-fading-plus", __iconNode);
 
 export default CircleFadingPlus;
 export { CircleFadingPlus };

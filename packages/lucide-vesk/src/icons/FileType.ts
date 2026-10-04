@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileType = createLucideIcon("file-type", __iconNode);
+const FileType = /* @__PURE__ */ createLucideIcon("file-type", __iconNode);
 
 export default FileType;
 export { FileType };

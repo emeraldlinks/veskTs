@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArrowBigUpDash = createLucideIcon("arrow-big-up-dash", __iconNode);
+const ArrowBigUpDash = /* @__PURE__ */ createLucideIcon("arrow-big-up-dash", __iconNode);
 
 export default ArrowBigUpDash;
 export { ArrowBigUpDash };

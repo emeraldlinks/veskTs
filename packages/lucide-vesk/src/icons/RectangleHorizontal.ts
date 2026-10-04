@@ -21,7 +21,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RectangleHorizontal = createLucideIcon("rectangle-horizontal", __iconNode);
+const RectangleHorizontal = /* @__PURE__ */ createLucideIcon("rectangle-horizontal", __iconNode);
 
 export default RectangleHorizontal;
 export { RectangleHorizontal };

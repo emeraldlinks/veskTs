@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UndoDot = createLucideIcon("undo-dot", __iconNode);
+const UndoDot = /* @__PURE__ */ createLucideIcon("undo-dot", __iconNode);
 
 export default UndoDot;
 export { UndoDot };

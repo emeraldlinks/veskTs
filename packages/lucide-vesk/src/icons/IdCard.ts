@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const IdCard = createLucideIcon("id-card", __iconNode);
+const IdCard = /* @__PURE__ */ createLucideIcon("id-card", __iconNode);
 
 export default IdCard;
 export { IdCard };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderKanban = createLucideIcon("folder-kanban", __iconNode);
+const FolderKanban = /* @__PURE__ */ createLucideIcon("folder-kanban", __iconNode);
 
 export default FolderKanban;
 export { FolderKanban };

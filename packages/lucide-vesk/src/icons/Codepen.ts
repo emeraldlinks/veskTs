@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Codepen = createLucideIcon("codepen", __iconNode);
+const Codepen = /* @__PURE__ */ createLucideIcon("codepen", __iconNode);
 
 export default Codepen;
 export { Codepen };

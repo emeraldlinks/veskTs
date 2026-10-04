@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SpellCheck = createLucideIcon("spell-check", __iconNode);
+const SpellCheck = /* @__PURE__ */ createLucideIcon("spell-check", __iconNode);
 
 export default SpellCheck;
 export { SpellCheck };

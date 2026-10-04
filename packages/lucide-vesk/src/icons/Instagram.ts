@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Instagram = createLucideIcon("instagram", __iconNode);
+const Instagram = /* @__PURE__ */ createLucideIcon("instagram", __iconNode);
 
 export default Instagram;
 export { Instagram };

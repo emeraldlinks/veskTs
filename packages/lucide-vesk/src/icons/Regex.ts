@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Regex = createLucideIcon("regex", __iconNode);
+const Regex = /* @__PURE__ */ createLucideIcon("regex", __iconNode);
 
 export default Regex;
 export { Regex };

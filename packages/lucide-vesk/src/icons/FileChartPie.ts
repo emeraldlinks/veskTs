@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileChartPie = createLucideIcon("file-chart-pie", __iconNode);
+const FileChartPie = /* @__PURE__ */ createLucideIcon("file-chart-pie", __iconNode);
 
 export default FileChartPie;
 export { FileChartPie };

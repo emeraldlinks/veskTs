@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MouseOff = createLucideIcon("mouse-off", __iconNode);
+const MouseOff = /* @__PURE__ */ createLucideIcon("mouse-off", __iconNode);
 
 export default MouseOff;
 export { MouseOff };

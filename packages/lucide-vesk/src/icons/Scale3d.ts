@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Scale3d = createLucideIcon("scale-3d", __iconNode);
+const Scale3d = /* @__PURE__ */ createLucideIcon("scale-3d", __iconNode);
 
 export default Scale3d;
 export { Scale3d };

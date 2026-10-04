@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Eraser = createLucideIcon("eraser", __iconNode);
+const Eraser = /* @__PURE__ */ createLucideIcon("eraser", __iconNode);
 
 export default Eraser;
 export { Eraser };

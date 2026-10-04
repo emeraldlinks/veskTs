@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShieldEllipsis = createLucideIcon("shield-ellipsis", __iconNode);
+const ShieldEllipsis = /* @__PURE__ */ createLucideIcon("shield-ellipsis", __iconNode);
 
 export default ShieldEllipsis;
 export { ShieldEllipsis };

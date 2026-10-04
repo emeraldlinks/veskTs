@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeJapaneseYen = createLucideIcon("badge-japanese-yen", __iconNode);
+const BadgeJapaneseYen = /* @__PURE__ */ createLucideIcon("badge-japanese-yen", __iconNode);
 
 export default BadgeJapaneseYen;
 export { BadgeJapaneseYen };

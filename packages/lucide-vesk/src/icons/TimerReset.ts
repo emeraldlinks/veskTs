@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TimerReset = createLucideIcon("timer-reset", __iconNode);
+const TimerReset = /* @__PURE__ */ createLucideIcon("timer-reset", __iconNode);
 
 export default TimerReset;
 export { TimerReset };

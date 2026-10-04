@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cookie = createLucideIcon("cookie", __iconNode);
+const Cookie = /* @__PURE__ */ createLucideIcon("cookie", __iconNode);
 
 export default Cookie;
 export { Cookie };

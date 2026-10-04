@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TrendingUp = createLucideIcon("trending-up", __iconNode);
+const TrendingUp = /* @__PURE__ */ createLucideIcon("trending-up", __iconNode);
 
 export default TrendingUp;
 export { TrendingUp };

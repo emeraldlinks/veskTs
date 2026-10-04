@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Luggage = createLucideIcon("luggage", __iconNode);
+const Luggage = /* @__PURE__ */ createLucideIcon("luggage", __iconNode);
 
 export default Luggage;
 export { Luggage };

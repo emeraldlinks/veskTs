@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeCheck = createLucideIcon("badge-check", __iconNode);
+const BadgeCheck = /* @__PURE__ */ createLucideIcon("badge-check", __iconNode);
 
 export default BadgeCheck;
 export { BadgeCheck };

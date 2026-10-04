@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileScan = createLucideIcon("file-scan", __iconNode);
+const FileScan = /* @__PURE__ */ createLucideIcon("file-scan", __iconNode);
 
 export default FileScan;
 export { FileScan };

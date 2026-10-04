@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Signature = createLucideIcon("signature", __iconNode);
+const Signature = /* @__PURE__ */ createLucideIcon("signature", __iconNode);
 
 export default Signature;
 export { Signature };

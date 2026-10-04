@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BugOff = createLucideIcon("bug-off", __iconNode);
+const BugOff = /* @__PURE__ */ createLucideIcon("bug-off", __iconNode);
 
 export default BugOff;
 export { BugOff };

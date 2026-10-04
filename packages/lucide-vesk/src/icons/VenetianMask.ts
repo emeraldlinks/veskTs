@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const VenetianMask = createLucideIcon("venetian-mask", __iconNode);
+const VenetianMask = /* @__PURE__ */ createLucideIcon("venetian-mask", __iconNode);
 
 export default VenetianMask;
 export { VenetianMask };

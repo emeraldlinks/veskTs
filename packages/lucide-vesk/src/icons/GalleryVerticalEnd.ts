@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GalleryVerticalEnd = createLucideIcon("gallery-vertical-end", __iconNode);
+const GalleryVerticalEnd = /* @__PURE__ */ createLucideIcon("gallery-vertical-end", __iconNode);
 
 export default GalleryVerticalEnd;
 export { GalleryVerticalEnd };

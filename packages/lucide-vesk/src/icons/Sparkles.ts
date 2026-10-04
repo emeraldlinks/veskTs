@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sparkles = createLucideIcon("sparkles", __iconNode);
+const Sparkles = /* @__PURE__ */ createLucideIcon("sparkles", __iconNode);
 
 export default Sparkles;
 export { Sparkles };

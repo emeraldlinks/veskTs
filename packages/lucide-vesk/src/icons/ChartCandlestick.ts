@@ -61,7 +61,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartCandlestick = createLucideIcon("chart-candlestick", __iconNode);
+const ChartCandlestick = /* @__PURE__ */ createLucideIcon("chart-candlestick", __iconNode);
 
 export default ChartCandlestick;
 export { ChartCandlestick };

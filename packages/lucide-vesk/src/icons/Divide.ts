@@ -36,7 +36,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Divide = createLucideIcon("divide", __iconNode);
+const Divide = /* @__PURE__ */ createLucideIcon("divide", __iconNode);
 
 export default Divide;
 export { Divide };

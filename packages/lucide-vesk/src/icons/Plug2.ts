@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Plug2 = createLucideIcon("plug-2", __iconNode);
+const Plug2 = /* @__PURE__ */ createLucideIcon("plug-2", __iconNode);
 
 export default Plug2;
 export { Plug2 };

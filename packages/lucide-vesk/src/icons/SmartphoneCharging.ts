@@ -28,7 +28,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SmartphoneCharging = createLucideIcon("smartphone-charging", __iconNode);
+const SmartphoneCharging = /* @__PURE__ */ createLucideIcon("smartphone-charging", __iconNode);
 
 export default SmartphoneCharging;
 export { SmartphoneCharging };

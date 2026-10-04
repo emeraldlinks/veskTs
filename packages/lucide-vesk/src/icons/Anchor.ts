@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Anchor = createLucideIcon("anchor", __iconNode);
+const Anchor = /* @__PURE__ */ createLucideIcon("anchor", __iconNode);
 
 export default Anchor;
 export { Anchor };

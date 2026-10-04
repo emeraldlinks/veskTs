@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LocationEdit = createLucideIcon("location-edit", __iconNode);
+const LocationEdit = /* @__PURE__ */ createLucideIcon("location-edit", __iconNode);
 
 export default LocationEdit;
 export { LocationEdit };

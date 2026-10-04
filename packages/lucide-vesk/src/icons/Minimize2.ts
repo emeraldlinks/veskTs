@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Minimize2 = createLucideIcon("minimize-2", __iconNode);
+const Minimize2 = /* @__PURE__ */ createLucideIcon("minimize-2", __iconNode);
 
 export default Minimize2;
 export { Minimize2 };

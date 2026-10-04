@@ -101,7 +101,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareDashedKanban = createLucideIcon("square-dashed-kanban", __iconNode);
+const SquareDashedKanban = /* @__PURE__ */ createLucideIcon("square-dashed-kanban", __iconNode);
 
 export default SquareDashedKanban;
 export { SquareDashedKanban };

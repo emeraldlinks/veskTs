@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Radical = createLucideIcon("radical", __iconNode);
+const Radical = /* @__PURE__ */ createLucideIcon("radical", __iconNode);
 
 export default Radical;
 export { Radical };

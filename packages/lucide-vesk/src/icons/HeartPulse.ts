@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HeartPulse = createLucideIcon("heart-pulse", __iconNode);
+const HeartPulse = /* @__PURE__ */ createLucideIcon("heart-pulse", __iconNode);
 
 export default HeartPulse;
 export { HeartPulse };

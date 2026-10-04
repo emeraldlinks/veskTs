@@ -61,7 +61,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BoomBox = createLucideIcon("boom-box", __iconNode);
+const BoomBox = /* @__PURE__ */ createLucideIcon("boom-box", __iconNode);
 
 export default BoomBox;
 export { BoomBox };

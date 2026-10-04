@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MoonStar = createLucideIcon("moon-star", __iconNode);
+const MoonStar = /* @__PURE__ */ createLucideIcon("moon-star", __iconNode);
 
 export default MoonStar;
 export { MoonStar };

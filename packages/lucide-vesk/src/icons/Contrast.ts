@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Contrast = createLucideIcon("contrast", __iconNode);
+const Contrast = /* @__PURE__ */ createLucideIcon("contrast", __iconNode);
 
 export default Contrast;
 export { Contrast };

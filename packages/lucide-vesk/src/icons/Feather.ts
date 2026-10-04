@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Feather = createLucideIcon("feather", __iconNode);
+const Feather = /* @__PURE__ */ createLucideIcon("feather", __iconNode);
 
 export default Feather;
 export { Feather };

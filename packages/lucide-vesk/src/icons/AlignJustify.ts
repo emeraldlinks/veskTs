@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignJustify = createLucideIcon("align-justify", __iconNode);
+const AlignJustify = /* @__PURE__ */ createLucideIcon("align-justify", __iconNode);
 
 export default AlignJustify;
 export { AlignJustify };

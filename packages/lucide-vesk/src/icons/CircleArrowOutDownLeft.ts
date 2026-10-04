@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleArrowOutDownLeft = createLucideIcon("circle-arrow-out-down-left", __iconNode);
+const CircleArrowOutDownLeft = /* @__PURE__ */ createLucideIcon("circle-arrow-out-down-left", __iconNode);
 
 export default CircleArrowOutDownLeft;
 export { CircleArrowOutDownLeft };

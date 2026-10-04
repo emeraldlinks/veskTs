@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BedDouble = createLucideIcon("bed-double", __iconNode);
+const BedDouble = /* @__PURE__ */ createLucideIcon("bed-double", __iconNode);
 
 export default BedDouble;
 export { BedDouble };

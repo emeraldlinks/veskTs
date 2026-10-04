@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pocket = createLucideIcon("pocket", __iconNode);
+const Pocket = /* @__PURE__ */ createLucideIcon("pocket", __iconNode);
 
 export default Pocket;
 export { Pocket };

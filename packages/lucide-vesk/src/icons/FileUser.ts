@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileUser = createLucideIcon("file-user", __iconNode);
+const FileUser = /* @__PURE__ */ createLucideIcon("file-user", __iconNode);
 
 export default FileUser;
 export { FileUser };

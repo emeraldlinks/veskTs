@@ -71,7 +71,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShowerHead = createLucideIcon("shower-head", __iconNode);
+const ShowerHead = /* @__PURE__ */ createLucideIcon("shower-head", __iconNode);
 
 export default ShowerHead;
 export { ShowerHead };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CopySlash = createLucideIcon("copy-slash", __iconNode);
+const CopySlash = /* @__PURE__ */ createLucideIcon("copy-slash", __iconNode);
 
 export default CopySlash;
 export { CopySlash };

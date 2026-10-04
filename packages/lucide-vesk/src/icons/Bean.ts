@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Bean = createLucideIcon("bean", __iconNode);
+const Bean = /* @__PURE__ */ createLucideIcon("bean", __iconNode);
 
 export default Bean;
 export { Bean };

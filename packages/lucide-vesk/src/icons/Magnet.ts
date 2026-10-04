@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Magnet = createLucideIcon("magnet", __iconNode);
+const Magnet = /* @__PURE__ */ createLucideIcon("magnet", __iconNode);
 
 export default Magnet;
 export { Magnet };

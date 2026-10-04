@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Camera = createLucideIcon("camera", __iconNode);
+const Camera = /* @__PURE__ */ createLucideIcon("camera", __iconNode);
 
 export default Camera;
 export { Camera };

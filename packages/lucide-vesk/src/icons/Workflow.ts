@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Workflow = createLucideIcon("workflow", __iconNode);
+const Workflow = /* @__PURE__ */ createLucideIcon("workflow", __iconNode);
 
 export default Workflow;
 export { Workflow };

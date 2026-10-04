@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShieldUser = createLucideIcon("shield-user", __iconNode);
+const ShieldUser = /* @__PURE__ */ createLucideIcon("shield-user", __iconNode);
 
 export default ShieldUser;
 export { ShieldUser };

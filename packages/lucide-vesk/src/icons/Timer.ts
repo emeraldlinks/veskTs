@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Timer = createLucideIcon("timer", __iconNode);
+const Timer = /* @__PURE__ */ createLucideIcon("timer", __iconNode);
 
 export default Timer;
 export { Timer };

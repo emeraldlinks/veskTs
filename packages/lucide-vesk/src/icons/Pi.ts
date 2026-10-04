@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pi = createLucideIcon("pi", __iconNode);
+const Pi = /* @__PURE__ */ createLucideIcon("pi", __iconNode);
 
 export default Pi;
 export { Pi };

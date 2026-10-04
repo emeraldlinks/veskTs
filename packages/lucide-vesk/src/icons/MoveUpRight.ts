@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MoveUpRight = createLucideIcon("move-up-right", __iconNode);
+const MoveUpRight = /* @__PURE__ */ createLucideIcon("move-up-right", __iconNode);
 
 export default MoveUpRight;
 export { MoveUpRight };

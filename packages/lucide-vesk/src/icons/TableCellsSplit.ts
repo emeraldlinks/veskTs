@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TableCellsSplit = createLucideIcon("table-cells-split", __iconNode);
+const TableCellsSplit = /* @__PURE__ */ createLucideIcon("table-cells-split", __iconNode);
 
 export default TableCellsSplit;
 export { TableCellsSplit };

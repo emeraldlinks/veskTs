@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Hamburger = createLucideIcon("hamburger", __iconNode);
+const Hamburger = /* @__PURE__ */ createLucideIcon("hamburger", __iconNode);
 
 export default Hamburger;
 export { Hamburger };

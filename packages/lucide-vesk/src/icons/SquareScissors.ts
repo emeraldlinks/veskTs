@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareScissors = createLucideIcon("square-scissors", __iconNode);
+const SquareScissors = /* @__PURE__ */ createLucideIcon("square-scissors", __iconNode);
 
 export default SquareScissors;
 export { SquareScissors };

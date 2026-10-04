@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const StarHalf = createLucideIcon("star-half", __iconNode);
+const StarHalf = /* @__PURE__ */ createLucideIcon("star-half", __iconNode);
 
 export default StarHalf;
 export { StarHalf };

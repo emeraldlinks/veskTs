@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareLibrary = createLucideIcon("square-library", __iconNode);
+const SquareLibrary = /* @__PURE__ */ createLucideIcon("square-library", __iconNode);
 
 export default SquareLibrary;
 export { SquareLibrary };

@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignVerticalSpaceBetween = createLucideIcon("align-vertical-space-between", __iconNode);
+const AlignVerticalSpaceBetween = /* @__PURE__ */ createLucideIcon("align-vertical-space-between", __iconNode);
 
 export default AlignVerticalSpaceBetween;
 export { AlignVerticalSpaceBetween };

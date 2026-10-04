@@ -46,7 +46,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ZoomIn = createLucideIcon("zoom-in", __iconNode);
+const ZoomIn = /* @__PURE__ */ createLucideIcon("zoom-in", __iconNode);
 
 export default ZoomIn;
 export { ZoomIn };

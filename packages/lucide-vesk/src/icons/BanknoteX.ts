@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BanknoteX = createLucideIcon("banknote-x", __iconNode);
+const BanknoteX = /* @__PURE__ */ createLucideIcon("banknote-x", __iconNode);
 
 export default BanknoteX;
 export { BanknoteX };

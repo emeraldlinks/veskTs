@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClockFading = createLucideIcon("clock-fading", __iconNode);
+const ClockFading = /* @__PURE__ */ createLucideIcon("clock-fading", __iconNode);
 
 export default ClockFading;
 export { ClockFading };

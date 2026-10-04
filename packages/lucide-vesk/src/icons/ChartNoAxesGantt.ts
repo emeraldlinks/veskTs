@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartNoAxesGantt = createLucideIcon("chart-no-axes-gantt", __iconNode);
+const ChartNoAxesGantt = /* @__PURE__ */ createLucideIcon("chart-no-axes-gantt", __iconNode);
 
 export default ChartNoAxesGantt;
 export { ChartNoAxesGantt };

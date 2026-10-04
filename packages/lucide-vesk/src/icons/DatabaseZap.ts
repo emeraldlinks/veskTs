@@ -44,7 +44,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DatabaseZap = createLucideIcon("database-zap", __iconNode);
+const DatabaseZap = /* @__PURE__ */ createLucideIcon("database-zap", __iconNode);
 
 export default DatabaseZap;
 export { DatabaseZap };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Paperclip = createLucideIcon("paperclip", __iconNode);
+const Paperclip = /* @__PURE__ */ createLucideIcon("paperclip", __iconNode);
 
 export default Paperclip;
 export { Paperclip };

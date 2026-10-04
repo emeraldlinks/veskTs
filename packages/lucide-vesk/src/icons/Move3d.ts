@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Move3d = createLucideIcon("move-3d", __iconNode);
+const Move3d = /* @__PURE__ */ createLucideIcon("move-3d", __iconNode);
 
 export default Move3d;
 export { Move3d };

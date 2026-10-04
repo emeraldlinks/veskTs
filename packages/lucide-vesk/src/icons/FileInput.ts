@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileInput = createLucideIcon("file-input", __iconNode);
+const FileInput = /* @__PURE__ */ createLucideIcon("file-input", __iconNode);
 
 export default FileInput;
 export { FileInput };

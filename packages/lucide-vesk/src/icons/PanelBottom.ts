@@ -27,7 +27,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PanelBottom = createLucideIcon("panel-bottom", __iconNode);
+const PanelBottom = /* @__PURE__ */ createLucideIcon("panel-bottom", __iconNode);
 
 export default PanelBottom;
 export { PanelBottom };

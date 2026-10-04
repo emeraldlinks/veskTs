@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Forklift = createLucideIcon("forklift", __iconNode);
+const Forklift = /* @__PURE__ */ createLucideIcon("forklift", __iconNode);
 
 export default Forklift;
 export { Forklift };

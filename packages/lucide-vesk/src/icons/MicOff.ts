@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MicOff = createLucideIcon("mic-off", __iconNode);
+const MicOff = /* @__PURE__ */ createLucideIcon("mic-off", __iconNode);
 
 export default MicOff;
 export { MicOff };

@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Route = createLucideIcon("route", __iconNode);
+const Route = /* @__PURE__ */ createLucideIcon("route", __iconNode);
 
 export default Route;
 export { Route };

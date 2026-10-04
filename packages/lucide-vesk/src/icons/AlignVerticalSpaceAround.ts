@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignVerticalSpaceAround = createLucideIcon("align-vertical-space-around", __iconNode);
+const AlignVerticalSpaceAround = /* @__PURE__ */ createLucideIcon("align-vertical-space-around", __iconNode);
 
 export default AlignVerticalSpaceAround;
 export { AlignVerticalSpaceAround };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Microscope = createLucideIcon("microscope", __iconNode);
+const Microscope = /* @__PURE__ */ createLucideIcon("microscope", __iconNode);
 
 export default Microscope;
 export { Microscope };

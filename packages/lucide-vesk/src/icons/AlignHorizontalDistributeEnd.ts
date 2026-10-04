@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignHorizontalDistributeEnd = createLucideIcon("align-horizontal-distribute-end", __iconNode);
+const AlignHorizontalDistributeEnd = /* @__PURE__ */ createLucideIcon("align-horizontal-distribute-end", __iconNode);
 
 export default AlignHorizontalDistributeEnd;
 export { AlignHorizontalDistributeEnd };

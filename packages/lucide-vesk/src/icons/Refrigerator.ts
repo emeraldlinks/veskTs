@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Refrigerator = createLucideIcon("refrigerator", __iconNode);
+const Refrigerator = /* @__PURE__ */ createLucideIcon("refrigerator", __iconNode);
 
 export default Refrigerator;
 export { Refrigerator };

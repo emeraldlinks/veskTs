@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BellElectric = createLucideIcon("bell-electric", __iconNode);
+const BellElectric = /* @__PURE__ */ createLucideIcon("bell-electric", __iconNode);
 
 export default BellElectric;
 export { BellElectric };

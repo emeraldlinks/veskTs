@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LibraryBig = createLucideIcon("library-big", __iconNode);
+const LibraryBig = /* @__PURE__ */ createLucideIcon("library-big", __iconNode);
 
 export default LibraryBig;
 export { LibraryBig };

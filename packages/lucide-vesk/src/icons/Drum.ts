@@ -56,7 +56,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Drum = createLucideIcon("drum", __iconNode);
+const Drum = /* @__PURE__ */ createLucideIcon("drum", __iconNode);
 
 export default Drum;
 export { Drum };

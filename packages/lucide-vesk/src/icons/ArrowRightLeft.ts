@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArrowRightLeft = createLucideIcon("arrow-right-left", __iconNode);
+const ArrowRightLeft = /* @__PURE__ */ createLucideIcon("arrow-right-left", __iconNode);
 
 export default ArrowRightLeft;
 export { ArrowRightLeft };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileStack = createLucideIcon("file-stack", __iconNode);
+const FileStack = /* @__PURE__ */ createLucideIcon("file-stack", __iconNode);
 
 export default FileStack;
 export { FileStack };

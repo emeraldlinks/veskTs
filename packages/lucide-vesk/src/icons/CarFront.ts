@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CarFront = createLucideIcon("car-front", __iconNode);
+const CarFront = /* @__PURE__ */ createLucideIcon("car-front", __iconNode);
 
 export default CarFront;
 export { CarFront };

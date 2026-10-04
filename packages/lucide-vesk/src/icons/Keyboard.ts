@@ -69,7 +69,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Keyboard = createLucideIcon("keyboard", __iconNode);
+const Keyboard = /* @__PURE__ */ createLucideIcon("keyboard", __iconNode);
 
 export default Keyboard;
 export { Keyboard };

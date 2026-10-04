@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RailSymbol = createLucideIcon("rail-symbol", __iconNode);
+const RailSymbol = /* @__PURE__ */ createLucideIcon("rail-symbol", __iconNode);
 
 export default RailSymbol;
 export { RailSymbol };

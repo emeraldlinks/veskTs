@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlagOff = createLucideIcon("flag-off", __iconNode);
+const FlagOff = /* @__PURE__ */ createLucideIcon("flag-off", __iconNode);
 
 export default FlagOff;
 export { FlagOff };

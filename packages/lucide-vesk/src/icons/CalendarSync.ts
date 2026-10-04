@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CalendarSync = createLucideIcon("calendar-sync", __iconNode);
+const CalendarSync = /* @__PURE__ */ createLucideIcon("calendar-sync", __iconNode);
 
 export default CalendarSync;
 export { CalendarSync };

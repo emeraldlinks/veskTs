@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CirclePause = createLucideIcon("circle-pause", __iconNode);
+const CirclePause = /* @__PURE__ */ createLucideIcon("circle-pause", __iconNode);
 
 export default CirclePause;
 export { CirclePause };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Megaphone = createLucideIcon("megaphone", __iconNode);
+const Megaphone = /* @__PURE__ */ createLucideIcon("megaphone", __iconNode);
 
 export default Megaphone;
 export { Megaphone };

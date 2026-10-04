@@ -20,6 +20,7 @@ import {
   resolveImportPath,
   resolveAliasModule,
   findTsconfigPath,
+  readSsrSource,
 } from '@vesk/compiler/src/module-imports';
 
 let passed = 0;
@@ -41,6 +42,19 @@ function expect(actual: unknown) {
       const a = JSON.stringify(actual);
       const b = JSON.stringify(expected);
       if (a !== b) throw new Error(`expected ${b}, got ${a}`);
+    },
+    toThrow(match: RegExp) {
+      if (typeof actual === 'function') {
+        try {
+          (actual as () => unknown)();
+        } catch (e) {
+          const msg = (e as Error).message || '';
+          if (!match.test(msg)) throw new Error(`expected error matching ${match}, got ${JSON.stringify(msg).slice(0, 300)}`);
+          return;
+        }
+        throw new Error('expected the call to throw, but it returned');
+      }
+      throw new Error('toThrow() expects a function');
     },
   };
 }
@@ -830,6 +844,113 @@ test('resolveSsrModule: unaliased bare specifier still uses node_modules when ts
     writeTsconfig(fx, `{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["src/*"] } } }`);
     const resolved = resolveSsrModule('fixpkg', fx.dir);
     expect(resolved).toEqual(fx.file('node_modules/fixpkg/dist/lib.js'));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+// ============================================================
+// A module that fails to parse must FAIL THE BUILD, naming the file.
+//
+// It used to be silent: `readSsrSource` returned `ast: null` and the caller
+// substituted the RAW source, so the file's TypeScript reached `new Function`
+// and surfaced as a bare `Unexpected token ':'` in whichever module imported
+// it — no file, no line — with the module's exports undefined behind it, so
+// unrelated consumers then failed with `X is not iterable`.
+//
+// Two ordinary TypeScript constructs reached this path: a parameter annotation
+// that survived the stripper only when the parameter also had a default value,
+// and a generic arrow's type parameter list. Both are fixed; these tests pin
+// that the class of failure itself is now reported instead of swallowed.
+// ============================================================
+test('readSsrSource: an unparseable module reports a located error instead of null', () => {
+  const fx = makeFixture();
+  try {
+    const p = fx.file('broken.ts');
+    writeFileSync(p, 'export const f = (=> {\n');
+    const src = readSsrSource(p);
+    expect(src.ast === null).toEqual(true);
+    expect(src.parseError !== undefined).toEqual(true);
+    expect(src.parseError?.file).toEqual(p);
+    // The line is what makes this actionable; the old path had no position at all.
+    expect(src.parseError?.line > 0).toEqual(true);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: an unparseable module THROWS rather than loading', () => {
+  const fx = makeFixture();
+  try {
+    const p = fx.file('broken.ts');
+    writeFileSync(p, 'export const f = (=> {\n');
+    expect(() => loadSsrModule(p)).toThrow(/broken\.ts/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: a parameter annotation WITH a default loads and runs', () => {
+  const fx = makeFixture();
+  try {
+    const p = fx.file('auth.ts');
+    writeFileSync(p, `export const keys = (a: Partial<Record<string, number>> = {}) => Object.keys(a).length;\n`);
+    const mod = loadSsrModule(p);
+    expect(typeof mod!.keys).toEqual('function');
+    expect((mod!.keys as (a: Record<string, number>) => number)({ x: 1 })).toEqual(1);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: an inline object-literal type with a default loads and runs', () => {
+  const fx = makeFixture();
+  try {
+    const p = fx.file('cert.ts');
+    writeFileSync(p, `export const issuable = (o: { isIssuable?: boolean } = {}) => !!o.isIssuable;\n`);
+    const mod = loadSsrModule(p);
+    expect((mod!.issuable as (o: { isIssuable?: boolean }) => boolean)({ isIssuable: true })).toEqual(true);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: a default EXPRESSION parameter annotation loads and runs', () => {
+  const fx = makeFixture();
+  try {
+    const p = fx.file('theme.ts');
+    writeFileSync(p, `const cell = { get: () => 'dark' };\nexport const variant = (v: string = cell.get()) => v;\n`);
+    const mod = loadSsrModule(p);
+    expect((mod!.variant as () => string)()).toEqual('dark');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: a generic arrow function loads and runs', () => {
+  const fx = makeFixture();
+  try {
+    const p = fx.file('storage.ts');
+    writeFileSync(p, `export const readStorage = <T,>(key: string, fallback: T): T => fallback;\nexport const two = <A, B>(k: A): B => k as any;\n`);
+    const mod = loadSsrModule(p);
+    expect((mod!.readStorage as (k: string, f: number) => number)('missing', 42)).toEqual(42);
+    expect((mod!.two as (k: string) => string)('kept')).toEqual('kept');
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('loadSsrModule: one bad module no longer poisons an unrelated good one', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('good.ts'), `export const IDS = ['a', 'b'];\n`);
+    writeFileSync(fx.file('bad.ts'), `export const f = (=> {\n`);
+    const good = loadSsrModule(fx.file('good.ts'));
+    expect(Array.isArray(good!.IDS)).toEqual(true);
+    expect(() => loadSsrModule(fx.file('bad.ts'))).toThrow(/bad\.ts/);
+    // The good module is still usable after the failure — the old shared-graph
+    // path left exports undefined, which is what produced `X is not iterable`.
+    expect((good!.IDS as string[]).length).toEqual(2);
   } finally {
     fx.cleanup();
   }

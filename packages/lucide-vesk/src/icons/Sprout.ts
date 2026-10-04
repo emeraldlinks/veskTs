@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sprout = createLucideIcon("sprout", __iconNode);
+const Sprout = /* @__PURE__ */ createLucideIcon("sprout", __iconNode);
 
 export default Sprout;
 export { Sprout };

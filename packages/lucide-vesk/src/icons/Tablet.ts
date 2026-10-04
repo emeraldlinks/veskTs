@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tablet = createLucideIcon("tablet", __iconNode);
+const Tablet = /* @__PURE__ */ createLucideIcon("tablet", __iconNode);
 
 export default Tablet;
 export { Tablet };

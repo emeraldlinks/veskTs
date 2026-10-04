@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BluetoothConnected = createLucideIcon("bluetooth-connected", __iconNode);
+const BluetoothConnected = /* @__PURE__ */ createLucideIcon("bluetooth-connected", __iconNode);
 
 export default BluetoothConnected;
 export { BluetoothConnected };

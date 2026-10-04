@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Superscript = createLucideIcon("superscript", __iconNode);
+const Superscript = /* @__PURE__ */ createLucideIcon("superscript", __iconNode);
 
 export default Superscript;
 export { Superscript };

@@ -34,7 +34,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Linkedin = createLucideIcon("linkedin", __iconNode);
+const Linkedin = /* @__PURE__ */ createLucideIcon("linkedin", __iconNode);
 
 export default Linkedin;
 export { Linkedin };

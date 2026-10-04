@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WebhookOff = createLucideIcon("webhook-off", __iconNode);
+const WebhookOff = /* @__PURE__ */ createLucideIcon("webhook-off", __iconNode);
 
 export default WebhookOff;
 export { WebhookOff };

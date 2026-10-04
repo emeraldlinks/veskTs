@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shovel = createLucideIcon("shovel", __iconNode);
+const Shovel = /* @__PURE__ */ createLucideIcon("shovel", __iconNode);
 
 export default Shovel;
 export { Shovel };

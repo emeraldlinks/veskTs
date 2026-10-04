@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScrollText = createLucideIcon("scroll-text", __iconNode);
+const ScrollText = /* @__PURE__ */ createLucideIcon("scroll-text", __iconNode);
 
 export default ScrollText;
 export { ScrollText };

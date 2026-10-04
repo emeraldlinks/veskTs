@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ungroup = createLucideIcon("ungroup", __iconNode);
+const Ungroup = /* @__PURE__ */ createLucideIcon("ungroup", __iconNode);
 
 export default Ungroup;
 export { Ungroup };

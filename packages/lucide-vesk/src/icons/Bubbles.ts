@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Bubbles = createLucideIcon("bubbles", __iconNode);
+const Bubbles = /* @__PURE__ */ createLucideIcon("bubbles", __iconNode);
 
 export default Bubbles;
 export { Bubbles };

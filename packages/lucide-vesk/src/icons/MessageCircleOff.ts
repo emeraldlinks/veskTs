@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageCircleOff = createLucideIcon("message-circle-off", __iconNode);
+const MessageCircleOff = /* @__PURE__ */ createLucideIcon("message-circle-off", __iconNode);
 
 export default MessageCircleOff;
 export { MessageCircleOff };

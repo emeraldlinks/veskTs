@@ -85,7 +85,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Columns3Cog = createLucideIcon("columns-3-cog", __iconNode);
+const Columns3Cog = /* @__PURE__ */ createLucideIcon("columns-3-cog", __iconNode);
 
 export default Columns3Cog;
 export { Columns3Cog };

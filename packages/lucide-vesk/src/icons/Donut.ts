@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Donut = createLucideIcon("donut", __iconNode);
+const Donut = /* @__PURE__ */ createLucideIcon("donut", __iconNode);
 
 export default Donut;
 export { Donut };

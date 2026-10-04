@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileChartColumnIncreasing = createLucideIcon("file-chart-column-increasing", __iconNode);
+const FileChartColumnIncreasing = /* @__PURE__ */ createLucideIcon("file-chart-column-increasing", __iconNode);
 
 export default FileChartColumnIncreasing;
 export { FileChartColumnIncreasing };

@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UserRoundMinus = createLucideIcon("user-round-minus", __iconNode);
+const UserRoundMinus = /* @__PURE__ */ createLucideIcon("user-round-minus", __iconNode);
 
 export default UserRoundMinus;
 export { UserRoundMinus };

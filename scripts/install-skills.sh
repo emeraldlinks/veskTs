@@ -15,20 +15,26 @@
 #   VESK_REPO             git source used for the raw file base
 #                         (default: the veskTs monorepo).
 #   VESK_SKILL_PLATFORMS  comma-separated list to pin (e.g. opencode,cursor).
-#                         Default: auto-detect platforms whose skill dir exists.
-#   VESK_FORCE            1 to re-copy even if already installed.
+#                         Default: every platform listed below.
+#   VESK_FORCE            accepted for backwards compatibility; installs are
+#                         always overwriting, so it is a no-op.
+#
+# Installs are ALWAYS overwriting and ALWAYS target every platform: an existing
+# skill directory is refreshed with the current source, never skipped, and a
+# missing one is created. Re-running this script is the supported way to install
+# and to update skills, so there is no stale-copy and no missing-tool failure mode.
 #
 # Flags:
 #   --list   show target paths and exit
-#   --all    provision every platform (even absent)
-#   --force  re-copy installed skills
+#   --all    accepted, no-op (every platform is installed by default)
+#   --force  accepted, no-op (installs always overwrite)
 #
 set -euo pipefail
 
 REPO="${VESK_REPO:-https://github.com/emeraldlinks/veskTs.git}"
 RAW_BASE="${VESK_RAW_BASE:-https://raw.githubusercontent.com/emeraldlinks/veskTs/main}"
 PREFIX="${VESK_DIR:-$HOME}"
-FORCE="${VESK_FORCE:-0}"
+
 
 SKILLS=(vesk react-to-vesk nuxt-to-vesk bun-to-vesk)
 
@@ -85,12 +91,11 @@ install_one() {
   local dir scope
   dir="$(platform_dir "$platform")"
   scope="$(platform_scope "$platform")"
-  if [[ ! -d "$dir/$name" ]]; then
-    mkdir -p "$dir/$name"
-  elif [[ "$FORCE" != 1 ]]; then
-    log "  $name already installed at $dir/$name (skip; --force to reinstall)"
-    return
+  local refreshed="installed"
+  if [[ -f "$dir/$name/SKILL.md" ]]; then
+    refreshed="refreshed"
   fi
+  mkdir -p "$dir/$name"
   fetch_skill "$name" SKILL.md "$dir/$name/SKILL.md"
   # Best-effort README, if the skill ships one.
   if [[ -n "$SKILLS_DIR" && -f "$SKILLS_DIR/$name/README.md" ]]; then
@@ -98,7 +103,7 @@ install_one() {
   else
     curl -fsSL "$RAW_BASE/skills/$name/README.md" -o "$dir/$name/README.md" 2>/dev/null || true
   fi
-  log "  $name ($scope) -> $dir/$name/SKILL.md"
+  log "  $name ($scope, $refreshed) -> $dir/$name/SKILL.md"
 }
 
 # ---- main -------------------------------------------------------------------
@@ -107,7 +112,7 @@ for argv in "$@"; do
   case "$argv" in
     --list) FLAG_LIST=1 ;;
     --all) FLAG_ALL=1 ;;
-    --force) FORCE=1 ;;
+    --force) ;; # installs always overwrite; flag kept for compatibility
     *) die "unknown flag: $argv" ;;
   esac
 done
@@ -134,19 +139,14 @@ if [[ -n "${VESK_SKILL_PLATFORMS:-}" ]]; then
     done
     [[ -n "$found" ]] && SELECTED+=("$found") || warn "unknown platform \"$want\", ignoring"
   done
-elif [[ "$FLAG_ALL" == 1 ]]; then
-  SELECTED=("${PLATFORMS[@]}")
 else
-  for p in "${PLATFORMS[@]}"; do
-    [[ -d "$(platform_dir "$p")" ]] && SELECTED+=("$p")
-  done
+  # Default: every platform. Skill dirs are created if missing, so there is no
+  # reason to guess which tools are installed.
+  SELECTED=("${PLATFORMS[@]}")
 fi
 
 if [[ "${#SELECTED[@]}" == 0 ]]; then
-  warn "no AI tool skill directories detected."
-  warn "Install to every tool with: curl -fsSL ...install-skills.sh | bash -s -- --all"
-  warn "or pin a list: VESK_SKILL_PLATFORMS=opencode,cursor bash scripts/install-skills.sh"
-  exit 0
+  die "no platforms selected — pin a list with VESK_SKILL_PLATFORMS (see --list)"
 fi
 
 echo "Installing Vesk skills:"

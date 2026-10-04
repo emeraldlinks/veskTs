@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Worm = createLucideIcon("worm", __iconNode);
+const Worm = /* @__PURE__ */ createLucideIcon("worm", __iconNode);
 
 export default Worm;
 export { Worm };

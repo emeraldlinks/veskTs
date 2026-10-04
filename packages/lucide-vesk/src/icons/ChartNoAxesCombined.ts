@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartNoAxesCombined = createLucideIcon("chart-no-axes-combined", __iconNode);
+const ChartNoAxesCombined = /* @__PURE__ */ createLucideIcon("chart-no-axes-combined", __iconNode);
 
 export default ChartNoAxesCombined;
 export { ChartNoAxesCombined };

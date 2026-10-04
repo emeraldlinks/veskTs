@@ -63,7 +63,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NotebookText = createLucideIcon("notebook-text", __iconNode);
+const NotebookText = /* @__PURE__ */ createLucideIcon("notebook-text", __iconNode);
 
 export default NotebookText;
 export { NotebookText };

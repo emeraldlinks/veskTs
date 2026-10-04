@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArrowsUpFromLine = createLucideIcon("arrows-up-from-line", __iconNode);
+const ArrowsUpFromLine = /* @__PURE__ */ createLucideIcon("arrows-up-from-line", __iconNode);
 
 export default ArrowsUpFromLine;
 export { ArrowsUpFromLine };

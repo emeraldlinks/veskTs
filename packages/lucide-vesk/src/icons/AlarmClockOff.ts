@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlarmClockOff = createLucideIcon("alarm-clock-off", __iconNode);
+const AlarmClockOff = /* @__PURE__ */ createLucideIcon("alarm-clock-off", __iconNode);
 
 export default AlarmClockOff;
 export { AlarmClockOff };

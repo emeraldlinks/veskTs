@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitMerge = createLucideIcon("git-merge", __iconNode);
+const GitMerge = /* @__PURE__ */ createLucideIcon("git-merge", __iconNode);
 
 export default GitMerge;
 export { GitMerge };

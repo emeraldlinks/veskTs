@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CloudMoon = createLucideIcon("cloud-moon", __iconNode);
+const CloudMoon = /* @__PURE__ */ createLucideIcon("cloud-moon", __iconNode);
 
 export default CloudMoon;
 export { CloudMoon };

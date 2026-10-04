@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartNoAxesColumn = createLucideIcon("chart-no-axes-column", __iconNode);
+const ChartNoAxesColumn = /* @__PURE__ */ createLucideIcon("chart-no-axes-column", __iconNode);
 
 export default ChartNoAxesColumn;
 export { ChartNoAxesColumn };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ribbon = createLucideIcon("ribbon", __iconNode);
+const Ribbon = /* @__PURE__ */ createLucideIcon("ribbon", __iconNode);
 
 export default Ribbon;
 export { Ribbon };

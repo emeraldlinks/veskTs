@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LassoSelect = createLucideIcon("lasso-select", __iconNode);
+const LassoSelect = /* @__PURE__ */ createLucideIcon("lasso-select", __iconNode);
 
 export default LassoSelect;
 export { LassoSelect };

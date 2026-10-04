@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NonBinary = createLucideIcon("non-binary", __iconNode);
+const NonBinary = /* @__PURE__ */ createLucideIcon("non-binary", __iconNode);
 
 export default NonBinary;
 export { NonBinary };

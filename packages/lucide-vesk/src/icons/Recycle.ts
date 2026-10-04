@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Recycle = createLucideIcon("recycle", __iconNode);
+const Recycle = /* @__PURE__ */ createLucideIcon("recycle", __iconNode);
 
 export default Recycle;
 export { Recycle };

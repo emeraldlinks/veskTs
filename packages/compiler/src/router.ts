@@ -458,6 +458,21 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
           if (node.layout) pushWithStandalone(node);
           return true;
         }
+        // A group can also BE the page at this position: `app/(public)/page.vsk`
+        // serves `/`. The recursion above only ever considers the group's
+        // CHILDREN, and at `/` none of them match (they all carry a path
+        // segment), so the group was skipped entirely and the match fell
+        // through to the page-less root node — which produced a 404 for the
+        // zero-segment path while every nested route (`/about`, `/login`)
+        // matched fine.
+        //
+        // A group is transparent for PREFIX matching, and it has to be
+        // transparent here too: a group with no page at this position is not a
+        // match, a group WITH one is.
+        if (partIndex >= parts.length && node.page && node.fullPath === '/' + parts.join('/')) {
+          pushWithStandalone(node);
+          return true;
+        }
         continue;
       }
 

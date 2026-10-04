@@ -54,7 +54,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Chrome = createLucideIcon("chrome", __iconNode);
+const Chrome = /* @__PURE__ */ createLucideIcon("chrome", __iconNode);
 
 export default Chrome;
 export { Chrome };

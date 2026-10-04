@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WholeWord = createLucideIcon("whole-word", __iconNode);
+const WholeWord = /* @__PURE__ */ createLucideIcon("whole-word", __iconNode);
 
 export default WholeWord;
 export { WholeWord };

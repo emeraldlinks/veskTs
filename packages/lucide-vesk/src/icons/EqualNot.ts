@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EqualNot = createLucideIcon("equal-not", __iconNode);
+const EqualNot = /* @__PURE__ */ createLucideIcon("equal-not", __iconNode);
 
 export default EqualNot;
 export { EqualNot };

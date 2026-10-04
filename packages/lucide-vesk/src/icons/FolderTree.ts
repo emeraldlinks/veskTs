@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderTree = createLucideIcon("folder-tree", __iconNode);
+const FolderTree = /* @__PURE__ */ createLucideIcon("folder-tree", __iconNode);
 
 export default FolderTree;
 export { FolderTree };

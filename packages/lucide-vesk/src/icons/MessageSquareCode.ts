@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageSquareCode = createLucideIcon("message-square-code", __iconNode);
+const MessageSquareCode = /* @__PURE__ */ createLucideIcon("message-square-code", __iconNode);
 
 export default MessageSquareCode;
 export { MessageSquareCode };

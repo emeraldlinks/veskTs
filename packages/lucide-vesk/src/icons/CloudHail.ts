@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CloudHail = createLucideIcon("cloud-hail", __iconNode);
+const CloudHail = /* @__PURE__ */ createLucideIcon("cloud-hail", __iconNode);
 
 export default CloudHail;
 export { CloudHail };

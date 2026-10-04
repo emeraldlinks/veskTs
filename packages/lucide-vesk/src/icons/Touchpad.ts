@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Touchpad = createLucideIcon("touchpad", __iconNode);
+const Touchpad = /* @__PURE__ */ createLucideIcon("touchpad", __iconNode);
 
 export default Touchpad;
 export { Touchpad };

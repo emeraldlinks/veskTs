@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Guitar = createLucideIcon("guitar", __iconNode);
+const Guitar = /* @__PURE__ */ createLucideIcon("guitar", __iconNode);
 
 export default Guitar;
 export { Guitar };

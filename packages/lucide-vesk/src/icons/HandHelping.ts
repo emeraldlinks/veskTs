@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HandHelping = createLucideIcon("hand-helping", __iconNode);
+const HandHelping = /* @__PURE__ */ createLucideIcon("hand-helping", __iconNode);
 
 export default HandHelping;
 export { HandHelping };

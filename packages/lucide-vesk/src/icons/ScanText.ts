@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScanText = createLucideIcon("scan-text", __iconNode);
+const ScanText = /* @__PURE__ */ createLucideIcon("scan-text", __iconNode);
 
 export default ScanText;
 export { ScanText };

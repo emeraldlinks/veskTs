@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileLock = createLucideIcon("file-lock", __iconNode);
+const FileLock = /* @__PURE__ */ createLucideIcon("file-lock", __iconNode);
 
 export default FileLock;
 export { FileLock };

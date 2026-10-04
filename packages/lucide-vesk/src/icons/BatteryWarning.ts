@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BatteryWarning = createLucideIcon("battery-warning", __iconNode);
+const BatteryWarning = /* @__PURE__ */ createLucideIcon("battery-warning", __iconNode);
 
 export default BatteryWarning;
 export { BatteryWarning };

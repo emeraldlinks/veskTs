@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NotepadText = createLucideIcon("notepad-text", __iconNode);
+const NotepadText = /* @__PURE__ */ createLucideIcon("notepad-text", __iconNode);
 
 export default NotepadText;
 export { NotepadText };

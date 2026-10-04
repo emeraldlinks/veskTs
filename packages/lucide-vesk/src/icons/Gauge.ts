@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Gauge = createLucideIcon("gauge", __iconNode);
+const Gauge = /* @__PURE__ */ createLucideIcon("gauge", __iconNode);
 
 export default Gauge;
 export { Gauge };

@@ -92,7 +92,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SlidersVertical = createLucideIcon("sliders-vertical", __iconNode);
+const SlidersVertical = /* @__PURE__ */ createLucideIcon("sliders-vertical", __iconNode);
 
 export default SlidersVertical;
 export { SlidersVertical };

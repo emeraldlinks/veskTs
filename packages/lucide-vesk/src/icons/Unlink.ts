@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Unlink = createLucideIcon("unlink", __iconNode);
+const Unlink = /* @__PURE__ */ createLucideIcon("unlink", __iconNode);
 
 export default Unlink;
 export { Unlink };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlashlightOff = createLucideIcon("flashlight-off", __iconNode);
+const FlashlightOff = /* @__PURE__ */ createLucideIcon("flashlight-off", __iconNode);
 
 export default FlashlightOff;
 export { FlashlightOff };

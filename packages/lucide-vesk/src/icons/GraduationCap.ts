@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GraduationCap = createLucideIcon("graduation-cap", __iconNode);
+const GraduationCap = /* @__PURE__ */ createLucideIcon("graduation-cap", __iconNode);
 
 export default GraduationCap;
 export { GraduationCap };

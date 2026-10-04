@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Spade = createLucideIcon("spade", __iconNode);
+const Spade = /* @__PURE__ */ createLucideIcon("spade", __iconNode);
 
 export default Spade;
 export { Spade };

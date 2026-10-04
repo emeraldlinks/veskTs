@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Stamp = createLucideIcon("stamp", __iconNode);
+const Stamp = /* @__PURE__ */ createLucideIcon("stamp", __iconNode);
 
 export default Stamp;
 export { Stamp };

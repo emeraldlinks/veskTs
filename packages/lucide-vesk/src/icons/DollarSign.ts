@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DollarSign = createLucideIcon("dollar-sign", __iconNode);
+const DollarSign = /* @__PURE__ */ createLucideIcon("dollar-sign", __iconNode);
 
 export default DollarSign;
 export { DollarSign };

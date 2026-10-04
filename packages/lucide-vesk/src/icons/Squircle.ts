@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Squircle = createLucideIcon("squircle", __iconNode);
+const Squircle = /* @__PURE__ */ createLucideIcon("squircle", __iconNode);
 
 export default Squircle;
 export { Squircle };

@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareMenu = createLucideIcon("square-menu", __iconNode);
+const SquareMenu = /* @__PURE__ */ createLucideIcon("square-menu", __iconNode);
 
 export default SquareMenu;
 export { SquareMenu };

@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Music4 = createLucideIcon("music-4", __iconNode);
+const Music4 = /* @__PURE__ */ createLucideIcon("music-4", __iconNode);
 
 export default Music4;
 export { Music4 };

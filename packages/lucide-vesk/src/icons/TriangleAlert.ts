@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TriangleAlert = createLucideIcon("triangle-alert", __iconNode);
+const TriangleAlert = /* @__PURE__ */ createLucideIcon("triangle-alert", __iconNode);
 
 export default TriangleAlert;
 export { TriangleAlert };

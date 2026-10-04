@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartPie = createLucideIcon("chart-pie", __iconNode);
+const ChartPie = /* @__PURE__ */ createLucideIcon("chart-pie", __iconNode);
 
 export default ChartPie;
 export { ChartPie };

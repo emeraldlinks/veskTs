@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeAlert = createLucideIcon("badge-alert", __iconNode);
+const BadgeAlert = /* @__PURE__ */ createLucideIcon("badge-alert", __iconNode);
 
 export default BadgeAlert;
 export { BadgeAlert };

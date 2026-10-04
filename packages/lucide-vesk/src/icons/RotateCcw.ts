@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RotateCcw = createLucideIcon("rotate-ccw", __iconNode);
+const RotateCcw = /* @__PURE__ */ createLucideIcon("rotate-ccw", __iconNode);
 
 export default RotateCcw;
 export { RotateCcw };

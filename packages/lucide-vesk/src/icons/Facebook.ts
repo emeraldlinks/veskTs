@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Facebook = createLucideIcon("facebook", __iconNode);
+const Facebook = /* @__PURE__ */ createLucideIcon("facebook", __iconNode);
 
 export default Facebook;
 export { Facebook };

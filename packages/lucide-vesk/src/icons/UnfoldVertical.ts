@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UnfoldVertical = createLucideIcon("unfold-vertical", __iconNode);
+const UnfoldVertical = /* @__PURE__ */ createLucideIcon("unfold-vertical", __iconNode);
 
 export default UnfoldVertical;
 export { UnfoldVertical };

@@ -6,7 +6,7 @@ import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { htmlTagName, htmlTagEnd } from '@vesk/compiler/src/scan';
 import { importModuleTarget, extractImportNames, stripTrackDeclMarkers } from '@vesk/compiler/src/tokens';
 
-const VOID_ELEMENTS = new Set([
+export const VOID_ELEMENTS = new Set([
   'area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr',
 ]);
 const RAW_TEXT_ELEMENTS = new Set(['style','script','title']);

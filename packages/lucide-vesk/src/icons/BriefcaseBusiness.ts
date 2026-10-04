@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BriefcaseBusiness = createLucideIcon("briefcase-business", __iconNode);
+const BriefcaseBusiness = /* @__PURE__ */ createLucideIcon("briefcase-business", __iconNode);
 
 export default BriefcaseBusiness;
 export { BriefcaseBusiness };

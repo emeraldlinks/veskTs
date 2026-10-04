@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PhilippinePeso = createLucideIcon("philippine-peso", __iconNode);
+const PhilippinePeso = /* @__PURE__ */ createLucideIcon("philippine-peso", __iconNode);
 
 export default PhilippinePeso;
 export { PhilippinePeso };

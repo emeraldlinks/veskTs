@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PocketKnife = createLucideIcon("pocket-knife", __iconNode);
+const PocketKnife = /* @__PURE__ */ createLucideIcon("pocket-knife", __iconNode);
 
 export default PocketKnife;
 export { PocketKnife };

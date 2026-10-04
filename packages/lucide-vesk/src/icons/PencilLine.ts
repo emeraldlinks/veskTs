@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PencilLine = createLucideIcon("pencil-line", __iconNode);
+const PencilLine = /* @__PURE__ */ createLucideIcon("pencil-line", __iconNode);
 
 export default PencilLine;
 export { PencilLine };

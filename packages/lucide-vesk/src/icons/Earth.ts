@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Earth = createLucideIcon("earth", __iconNode);
+const Earth = /* @__PURE__ */ createLucideIcon("earth", __iconNode);
 
 export default Earth;
 export { Earth };

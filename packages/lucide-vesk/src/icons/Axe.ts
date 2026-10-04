@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Axe = createLucideIcon("axe", __iconNode);
+const Axe = /* @__PURE__ */ createLucideIcon("axe", __iconNode);
 
 export default Axe;
 export { Axe };

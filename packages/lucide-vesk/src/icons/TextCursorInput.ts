@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TextCursorInput = createLucideIcon("text-cursor-input", __iconNode);
+const TextCursorInput = /* @__PURE__ */ createLucideIcon("text-cursor-input", __iconNode);
 
 export default TextCursorInput;
 export { TextCursorInput };

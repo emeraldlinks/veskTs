@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Parentheses = createLucideIcon("parentheses", __iconNode);
+const Parentheses = /* @__PURE__ */ createLucideIcon("parentheses", __iconNode);
 
 export default Parentheses;
 export { Parentheses };

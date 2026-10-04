@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BriefcaseConveyorBelt = createLucideIcon("briefcase-conveyor-belt", __iconNode);
+const BriefcaseConveyorBelt = /* @__PURE__ */ createLucideIcon("briefcase-conveyor-belt", __iconNode);
 
 export default BriefcaseConveyorBelt;
 export { BriefcaseConveyorBelt };

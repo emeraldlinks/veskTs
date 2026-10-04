@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderArchive = createLucideIcon("folder-archive", __iconNode);
+const FolderArchive = /* @__PURE__ */ createLucideIcon("folder-archive", __iconNode);
 
 export default FolderArchive;
 export { FolderArchive };

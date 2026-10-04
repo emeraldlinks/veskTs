@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleArrowUp = createLucideIcon("circle-arrow-up", __iconNode);
+const CircleArrowUp = /* @__PURE__ */ createLucideIcon("circle-arrow-up", __iconNode);
 
 export default CircleArrowUp;
 export { CircleArrowUp };

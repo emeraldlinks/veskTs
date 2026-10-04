@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ratio = createLucideIcon("ratio", __iconNode);
+const Ratio = /* @__PURE__ */ createLucideIcon("ratio", __iconNode);
 
 export default Ratio;
 export { Ratio };

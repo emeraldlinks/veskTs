@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HouseWifi = createLucideIcon("house-wifi", __iconNode);
+const HouseWifi = /* @__PURE__ */ createLucideIcon("house-wifi", __iconNode);
 
 export default HouseWifi;
 export { HouseWifi };

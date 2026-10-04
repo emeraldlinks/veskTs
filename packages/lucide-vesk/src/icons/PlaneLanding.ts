@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PlaneLanding = createLucideIcon("plane-landing", __iconNode);
+const PlaneLanding = /* @__PURE__ */ createLucideIcon("plane-landing", __iconNode);
 
 export default PlaneLanding;
 export { PlaneLanding };

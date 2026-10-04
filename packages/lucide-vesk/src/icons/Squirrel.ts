@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Squirrel = createLucideIcon("squirrel", __iconNode);
+const Squirrel = /* @__PURE__ */ createLucideIcon("squirrel", __iconNode);
 
 export default Squirrel;
 export { Squirrel };

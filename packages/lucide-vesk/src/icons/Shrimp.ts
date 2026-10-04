@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shrimp = createLucideIcon("shrimp", __iconNode);
+const Shrimp = /* @__PURE__ */ createLucideIcon("shrimp", __iconNode);
 
 export default Shrimp;
 export { Shrimp };

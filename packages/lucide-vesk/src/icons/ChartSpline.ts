@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartSpline = createLucideIcon("chart-spline", __iconNode);
+const ChartSpline = /* @__PURE__ */ createLucideIcon("chart-spline", __iconNode);
 
 export default ChartSpline;
 export { ChartSpline };

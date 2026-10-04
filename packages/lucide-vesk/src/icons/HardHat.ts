@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HardHat = createLucideIcon("hard-hat", __iconNode);
+const HardHat = /* @__PURE__ */ createLucideIcon("hard-hat", __iconNode);
 
 export default HardHat;
 export { HardHat };

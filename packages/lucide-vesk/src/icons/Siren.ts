@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Siren = createLucideIcon("siren", __iconNode);
+const Siren = /* @__PURE__ */ createLucideIcon("siren", __iconNode);
 
 export default Siren;
 export { Siren };

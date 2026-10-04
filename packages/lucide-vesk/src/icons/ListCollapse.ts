@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListCollapse = createLucideIcon("list-collapse", __iconNode);
+const ListCollapse = /* @__PURE__ */ createLucideIcon("list-collapse", __iconNode);
 
 export default ListCollapse;
 export { ListCollapse };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FireExtinguisher = createLucideIcon("fire-extinguisher", __iconNode);
+const FireExtinguisher = /* @__PURE__ */ createLucideIcon("fire-extinguisher", __iconNode);
 
 export default FireExtinguisher;
 export { FireExtinguisher };

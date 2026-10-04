@@ -36,7 +36,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Percent = createLucideIcon("percent", __iconNode);
+const Percent = /* @__PURE__ */ createLucideIcon("percent", __iconNode);
 
 export default Percent;
 export { Percent };

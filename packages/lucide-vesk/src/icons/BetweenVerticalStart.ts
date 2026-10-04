@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BetweenVerticalStart = createLucideIcon("between-vertical-start", __iconNode);
+const BetweenVerticalStart = /* @__PURE__ */ createLucideIcon("between-vertical-start", __iconNode);
 
 export default BetweenVerticalStart;
 export { BetweenVerticalStart };

@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Crosshair = createLucideIcon("crosshair", __iconNode);
+const Crosshair = /* @__PURE__ */ createLucideIcon("crosshair", __iconNode);
 
 export default Crosshair;
 export { Crosshair };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListRestart = createLucideIcon("list-restart", __iconNode);
+const ListRestart = /* @__PURE__ */ createLucideIcon("list-restart", __iconNode);
 
 export default ListRestart;
 export { ListRestart };

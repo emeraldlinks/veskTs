@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitCommitHorizontal = createLucideIcon("git-commit-horizontal", __iconNode);
+const GitCommitHorizontal = /* @__PURE__ */ createLucideIcon("git-commit-horizontal", __iconNode);
 
 export default GitCommitHorizontal;
 export { GitCommitHorizontal };

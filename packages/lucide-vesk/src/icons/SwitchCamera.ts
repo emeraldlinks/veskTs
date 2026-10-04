@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SwitchCamera = createLucideIcon("switch-camera", __iconNode);
+const SwitchCamera = /* @__PURE__ */ createLucideIcon("switch-camera", __iconNode);
 
 export default SwitchCamera;
 export { SwitchCamera };

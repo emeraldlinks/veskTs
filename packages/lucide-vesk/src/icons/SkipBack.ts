@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SkipBack = createLucideIcon("skip-back", __iconNode);
+const SkipBack = /* @__PURE__ */ createLucideIcon("skip-back", __iconNode);
 
 export default SkipBack;
 export { SkipBack };

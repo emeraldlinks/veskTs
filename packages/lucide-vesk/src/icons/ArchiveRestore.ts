@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArchiveRestore = createLucideIcon("archive-restore", __iconNode);
+const ArchiveRestore = /* @__PURE__ */ createLucideIcon("archive-restore", __iconNode);
 
 export default ArchiveRestore;
 export { ArchiveRestore };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Gavel = createLucideIcon("gavel", __iconNode);
+const Gavel = /* @__PURE__ */ createLucideIcon("gavel", __iconNode);
 
 export default Gavel;
 export { Gavel };

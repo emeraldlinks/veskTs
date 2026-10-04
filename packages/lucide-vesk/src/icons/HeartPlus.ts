@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HeartPlus = createLucideIcon("heart-plus", __iconNode);
+const HeartPlus = /* @__PURE__ */ createLucideIcon("heart-plus", __iconNode);
 
 export default HeartPlus;
 export { HeartPlus };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Variable = createLucideIcon("variable", __iconNode);
+const Variable = /* @__PURE__ */ createLucideIcon("variable", __iconNode);
 
 export default Variable;
 export { Variable };

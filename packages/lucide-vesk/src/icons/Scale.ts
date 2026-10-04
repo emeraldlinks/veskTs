@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Scale = createLucideIcon("scale", __iconNode);
+const Scale = /* @__PURE__ */ createLucideIcon("scale", __iconNode);
 
 export default Scale;
 export { Scale };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pickaxe = createLucideIcon("pickaxe", __iconNode);
+const Pickaxe = /* @__PURE__ */ createLucideIcon("pickaxe", __iconNode);
 
 export default Pickaxe;
 export { Pickaxe };

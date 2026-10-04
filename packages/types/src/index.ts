@@ -365,6 +365,11 @@ export interface BuildOptions {
   plugins?: VeskPlugin[];
   seo?: boolean;
   strictSeo?: boolean;
+  /**
+   * `vesk build --strict`: fail the build on a degraded client chunk instead
+   * of logging and shipping a chunk with dangling bindings.
+   */
+  strict?: boolean;
   siteUrl?: string;
   ssg?: boolean;
   codeSplit?: boolean;
@@ -492,6 +497,14 @@ export interface ClientBundleOptions {
    * bundle (`main`) and any code-split `chunk` sources.
    */
   plugins?: VeskPlugin[];
+  /**
+   * Fail instead of degrading when a chunk cannot be bundled (see
+   * `BuildOptions.strict`). Without it the fallback below keeps a typo'd
+   * import from breaking CI, which is exactly how `lucide-vesk/icons/terminal`
+   * (wrong case) shipped: a `console.error` nobody reads, exit code 0, and a
+   * chunk whose every icon binding was dangling.
+   */
+  strict?: boolean;
 }
 
 export interface ChunkEntry {

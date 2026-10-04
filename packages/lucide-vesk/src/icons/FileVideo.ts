@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileVideo = createLucideIcon("file-video", __iconNode);
+const FileVideo = /* @__PURE__ */ createLucideIcon("file-video", __iconNode);
 
 export default FileVideo;
 export { FileVideo };

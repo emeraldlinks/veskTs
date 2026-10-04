@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListFilter = createLucideIcon("list-filter", __iconNode);
+const ListFilter = /* @__PURE__ */ createLucideIcon("list-filter", __iconNode);
 
 export default ListFilter;
 export { ListFilter };

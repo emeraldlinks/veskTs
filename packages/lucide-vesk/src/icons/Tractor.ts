@@ -69,7 +69,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tractor = createLucideIcon("tractor", __iconNode);
+const Tractor = /* @__PURE__ */ createLucideIcon("tractor", __iconNode);
 
 export default Tractor;
 export { Tractor };

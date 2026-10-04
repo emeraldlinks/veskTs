@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitGraph = createLucideIcon("git-graph", __iconNode);
+const GitGraph = /* @__PURE__ */ createLucideIcon("git-graph", __iconNode);
 
 export default GitGraph;
 export { GitGraph };

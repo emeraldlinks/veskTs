@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const History = createLucideIcon("history", __iconNode);
+const History = /* @__PURE__ */ createLucideIcon("history", __iconNode);
 
 export default History;
 export { History };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderInput = createLucideIcon("folder-input", __iconNode);
+const FolderInput = /* @__PURE__ */ createLucideIcon("folder-input", __iconNode);
 
 export default FolderInput;
 export { FolderInput };

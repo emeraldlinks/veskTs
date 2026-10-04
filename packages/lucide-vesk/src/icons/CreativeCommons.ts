@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CreativeCommons = createLucideIcon("creative-commons", __iconNode);
+const CreativeCommons = /* @__PURE__ */ createLucideIcon("creative-commons", __iconNode);
 
 export default CreativeCommons;
 export { CreativeCommons };

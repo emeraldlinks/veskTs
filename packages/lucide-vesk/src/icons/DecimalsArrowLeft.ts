@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DecimalsArrowLeft = createLucideIcon("decimals-arrow-left", __iconNode);
+const DecimalsArrowLeft = /* @__PURE__ */ createLucideIcon("decimals-arrow-left", __iconNode);
 
 export default DecimalsArrowLeft;
 export { DecimalsArrowLeft };

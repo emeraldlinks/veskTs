@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Headphones = createLucideIcon("headphones", __iconNode);
+const Headphones = /* @__PURE__ */ createLucideIcon("headphones", __iconNode);
 
 export default Headphones;
 export { Headphones };

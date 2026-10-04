@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MapPlus = createLucideIcon("map-plus", __iconNode);
+const MapPlus = /* @__PURE__ */ createLucideIcon("map-plus", __iconNode);
 
 export default MapPlus;
 export { MapPlus };

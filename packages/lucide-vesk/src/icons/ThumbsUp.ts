@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ThumbsUp = createLucideIcon("thumbs-up", __iconNode);
+const ThumbsUp = /* @__PURE__ */ createLucideIcon("thumbs-up", __iconNode);
 
 export default ThumbsUp;
 export { ThumbsUp };

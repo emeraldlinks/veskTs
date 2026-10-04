@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BanknoteArrowUp = createLucideIcon("banknote-arrow-up", __iconNode);
+const BanknoteArrowUp = /* @__PURE__ */ createLucideIcon("banknote-arrow-up", __iconNode);
 
 export default BanknoteArrowUp;
 export { BanknoteArrowUp };

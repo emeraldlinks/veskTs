@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Piano = createLucideIcon("piano", __iconNode);
+const Piano = /* @__PURE__ */ createLucideIcon("piano", __iconNode);
 
 export default Piano;
 export { Piano };

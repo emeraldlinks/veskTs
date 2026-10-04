@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MoveDiagonal = createLucideIcon("move-diagonal", __iconNode);
+const MoveDiagonal = /* @__PURE__ */ createLucideIcon("move-diagonal", __iconNode);
 
 export default MoveDiagonal;
 export { MoveDiagonal };

@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartColumnStacked = createLucideIcon("chart-column-stacked", __iconNode);
+const ChartColumnStacked = /* @__PURE__ */ createLucideIcon("chart-column-stacked", __iconNode);
 
 export default ChartColumnStacked;
 export { ChartColumnStacked };

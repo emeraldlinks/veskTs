@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CandyOff = createLucideIcon("candy-off", __iconNode);
+const CandyOff = /* @__PURE__ */ createLucideIcon("candy-off", __iconNode);
 
 export default CandyOff;
 export { CandyOff };

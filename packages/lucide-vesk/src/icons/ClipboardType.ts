@@ -46,7 +46,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClipboardType = createLucideIcon("clipboard-type", __iconNode);
+const ClipboardType = /* @__PURE__ */ createLucideIcon("clipboard-type", __iconNode);
 
 export default ClipboardType;
 export { ClipboardType };

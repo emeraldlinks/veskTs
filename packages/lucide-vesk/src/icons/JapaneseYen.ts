@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const JapaneseYen = createLucideIcon("japanese-yen", __iconNode);
+const JapaneseYen = /* @__PURE__ */ createLucideIcon("japanese-yen", __iconNode);
 
 export default JapaneseYen;
 export { JapaneseYen };

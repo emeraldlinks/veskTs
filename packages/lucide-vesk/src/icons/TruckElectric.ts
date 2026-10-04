@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TruckElectric = createLucideIcon("truck-electric", __iconNode);
+const TruckElectric = /* @__PURE__ */ createLucideIcon("truck-electric", __iconNode);
 
 export default TruckElectric;
 export { TruckElectric };

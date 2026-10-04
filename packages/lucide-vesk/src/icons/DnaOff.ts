@@ -71,7 +71,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DnaOff = createLucideIcon("dna-off", __iconNode);
+const DnaOff = /* @__PURE__ */ createLucideIcon("dna-off", __iconNode);
 
 export default DnaOff;
 export { DnaOff };

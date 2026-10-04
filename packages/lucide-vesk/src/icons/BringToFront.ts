@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BringToFront = createLucideIcon("bring-to-front", __iconNode);
+const BringToFront = /* @__PURE__ */ createLucideIcon("bring-to-front", __iconNode);
 
 export default BringToFront;
 export { BringToFront };

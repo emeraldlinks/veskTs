@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MousePointerBan = createLucideIcon("mouse-pointer-ban", __iconNode);
+const MousePointerBan = /* @__PURE__ */ createLucideIcon("mouse-pointer-ban", __iconNode);
 
 export default MousePointerBan;
 export { MousePointerBan };

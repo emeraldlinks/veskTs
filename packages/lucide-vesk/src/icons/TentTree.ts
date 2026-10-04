@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TentTree = createLucideIcon("tent-tree", __iconNode);
+const TentTree = /* @__PURE__ */ createLucideIcon("tent-tree", __iconNode);
 
 export default TentTree;
 export { TentTree };

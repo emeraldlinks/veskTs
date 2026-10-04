@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Flashlight = createLucideIcon("flashlight", __iconNode);
+const Flashlight = /* @__PURE__ */ createLucideIcon("flashlight", __iconNode);
 
 export default Flashlight;
 export { Flashlight };

@@ -50,7 +50,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Codesandbox = createLucideIcon("codesandbox", __iconNode);
+const Codesandbox = /* @__PURE__ */ createLucideIcon("codesandbox", __iconNode);
 
 export default Codesandbox;
 export { Codesandbox };

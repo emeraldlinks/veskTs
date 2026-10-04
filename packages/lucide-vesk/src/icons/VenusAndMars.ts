@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const VenusAndMars = createLucideIcon("venus-and-mars", __iconNode);
+const VenusAndMars = /* @__PURE__ */ createLucideIcon("venus-and-mars", __iconNode);
 
 export default VenusAndMars;
 export { VenusAndMars };

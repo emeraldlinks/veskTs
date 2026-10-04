@@ -48,7 +48,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitPullRequestDraft = createLucideIcon("git-pull-request-draft", __iconNode);
+const GitPullRequestDraft = /* @__PURE__ */ createLucideIcon("git-pull-request-draft", __iconNode);
 
 export default GitPullRequestDraft;
 export { GitPullRequestDraft };

@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlarmClockCheck = createLucideIcon("alarm-clock-check", __iconNode);
+const AlarmClockCheck = /* @__PURE__ */ createLucideIcon("alarm-clock-check", __iconNode);
 
 export default AlarmClockCheck;
 export { AlarmClockCheck };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShoppingBag = createLucideIcon("shopping-bag", __iconNode);
+const ShoppingBag = /* @__PURE__ */ createLucideIcon("shopping-bag", __iconNode);
 
 export default ShoppingBag;
 export { ShoppingBag };

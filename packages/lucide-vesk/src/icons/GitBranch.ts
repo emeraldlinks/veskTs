@@ -42,7 +42,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitBranch = createLucideIcon("git-branch", __iconNode);
+const GitBranch = /* @__PURE__ */ createLucideIcon("git-branch", __iconNode);
 
 export default GitBranch;
 export { GitBranch };

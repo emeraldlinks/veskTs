@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const InspectionPanel = createLucideIcon("inspection-panel", __iconNode);
+const InspectionPanel = /* @__PURE__ */ createLucideIcon("inspection-panel", __iconNode);
 
 export default InspectionPanel;
 export { InspectionPanel };

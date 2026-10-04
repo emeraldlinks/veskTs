@@ -273,9 +273,10 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
 
   markPhase('scan routes');
   console.error('vesk build: bundling client runtime...');
-  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[] } = {};
+  const bundleOpts: { codeSplit?: boolean; hmr?: boolean; routeDataCache?: number; plugins?: import('@vesk/types').VeskPlugin[]; strict?: boolean } = {};
   if (options?.codeSplit) bundleOpts.codeSplit = true;
   if (options?.hmr) bundleOpts.hmr = true;
+  if (options?.strict) bundleOpts.strict = true;
   if (options?.routeDataCache !== undefined) bundleOpts.routeDataCache = options.routeDataCache;
   if (pluginsPipelines.length > 0) bundleOpts.plugins = pluginsPipelines;
   const { main, chunks } = await generateClientBundle(routeTree, appDir, componentMap, bundleOpts);

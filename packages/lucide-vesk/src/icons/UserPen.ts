@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UserPen = createLucideIcon("user-pen", __iconNode);
+const UserPen = /* @__PURE__ */ createLucideIcon("user-pen", __iconNode);
 
 export default UserPen;
 export { UserPen };

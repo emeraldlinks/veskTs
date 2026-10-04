@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AppWindowMac = createLucideIcon("app-window-mac", __iconNode);
+const AppWindowMac = /* @__PURE__ */ createLucideIcon("app-window-mac", __iconNode);
 
 export default AppWindowMac;
 export { AppWindowMac };

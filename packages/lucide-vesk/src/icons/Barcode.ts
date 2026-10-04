@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Barcode = createLucideIcon("barcode", __iconNode);
+const Barcode = /* @__PURE__ */ createLucideIcon("barcode", __iconNode);
 
 export default Barcode;
 export { Barcode };

@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Zap = createLucideIcon("zap", __iconNode);
+const Zap = /* @__PURE__ */ createLucideIcon("zap", __iconNode);
 
 export default Zap;
 export { Zap };

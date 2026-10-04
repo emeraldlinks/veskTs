@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SoapDispenserDroplet = createLucideIcon("soap-dispenser-droplet", __iconNode);
+const SoapDispenserDroplet = /* @__PURE__ */ createLucideIcon("soap-dispenser-droplet", __iconNode);
 
 export default SoapDispenserDroplet;
 export { SoapDispenserDroplet };

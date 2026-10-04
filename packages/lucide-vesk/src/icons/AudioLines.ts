@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AudioLines = createLucideIcon("audio-lines", __iconNode);
+const AudioLines = /* @__PURE__ */ createLucideIcon("audio-lines", __iconNode);
 
 export default AudioLines;
 export { AudioLines };

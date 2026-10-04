@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Gamepad = createLucideIcon("gamepad", __iconNode);
+const Gamepad = /* @__PURE__ */ createLucideIcon("gamepad", __iconNode);
 
 export default Gamepad;
 export { Gamepad };

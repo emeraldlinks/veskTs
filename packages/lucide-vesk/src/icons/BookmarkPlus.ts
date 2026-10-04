@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BookmarkPlus = createLucideIcon("bookmark-plus", __iconNode);
+const BookmarkPlus = /* @__PURE__ */ createLucideIcon("bookmark-plus", __iconNode);
 
 export default BookmarkPlus;
 export { BookmarkPlus };

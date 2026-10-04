@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlarmSmoke = createLucideIcon("alarm-smoke", __iconNode);
+const AlarmSmoke = /* @__PURE__ */ createLucideIcon("alarm-smoke", __iconNode);
 
 export default AlarmSmoke;
 export { AlarmSmoke };

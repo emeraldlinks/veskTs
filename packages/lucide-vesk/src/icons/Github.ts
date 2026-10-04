@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Github = createLucideIcon("github", __iconNode);
+const Github = /* @__PURE__ */ createLucideIcon("github", __iconNode);
 
 export default Github;
 export { Github };

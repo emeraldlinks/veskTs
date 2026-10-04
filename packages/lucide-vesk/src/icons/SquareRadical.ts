@@ -27,7 +27,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareRadical = createLucideIcon("square-radical", __iconNode);
+const SquareRadical = /* @__PURE__ */ createLucideIcon("square-radical", __iconNode);
 
 export default SquareRadical;
 export { SquareRadical };

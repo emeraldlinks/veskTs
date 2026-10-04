@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TicketMinus = createLucideIcon("ticket-minus", __iconNode);
+const TicketMinus = /* @__PURE__ */ createLucideIcon("ticket-minus", __iconNode);
 
 export default TicketMinus;
 export { TicketMinus };

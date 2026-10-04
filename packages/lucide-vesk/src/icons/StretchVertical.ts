@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const StretchVertical = createLucideIcon("stretch-vertical", __iconNode);
+const StretchVertical = /* @__PURE__ */ createLucideIcon("stretch-vertical", __iconNode);
 
 export default StretchVertical;
 export { StretchVertical };

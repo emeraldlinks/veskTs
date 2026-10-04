@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Wrench = createLucideIcon("wrench", __iconNode);
+const Wrench = /* @__PURE__ */ createLucideIcon("wrench", __iconNode);
 
 export default Wrench;
 export { Wrench };

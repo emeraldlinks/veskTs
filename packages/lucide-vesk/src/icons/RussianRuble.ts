@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RussianRuble = createLucideIcon("russian-ruble", __iconNode);
+const RussianRuble = /* @__PURE__ */ createLucideIcon("russian-ruble", __iconNode);
 
 export default RussianRuble;
 export { RussianRuble };

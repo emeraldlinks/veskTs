@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tags = createLucideIcon("tags", __iconNode);
+const Tags = /* @__PURE__ */ createLucideIcon("tags", __iconNode);
 
 export default Tags;
 export { Tags };

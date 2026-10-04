@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TextQuote = createLucideIcon("text-quote", __iconNode);
+const TextQuote = /* @__PURE__ */ createLucideIcon("text-quote", __iconNode);
 
 export default TextQuote;
 export { TextQuote };

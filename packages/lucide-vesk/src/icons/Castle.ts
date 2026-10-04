@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Castle = createLucideIcon("castle", __iconNode);
+const Castle = /* @__PURE__ */ createLucideIcon("castle", __iconNode);
 
 export default Castle;
 export { Castle };

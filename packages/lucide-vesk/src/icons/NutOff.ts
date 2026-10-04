@@ -44,7 +44,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NutOff = createLucideIcon("nut-off", __iconNode);
+const NutOff = /* @__PURE__ */ createLucideIcon("nut-off", __iconNode);
 
 export default NutOff;
 export { NutOff };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Soup = createLucideIcon("soup", __iconNode);
+const Soup = /* @__PURE__ */ createLucideIcon("soup", __iconNode);
 
 export default Soup;
 export { Soup };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChevronsLeftRightEllipsis = createLucideIcon("chevrons-left-right-ellipsis", __iconNode);
+const ChevronsLeftRightEllipsis = /* @__PURE__ */ createLucideIcon("chevrons-left-right-ellipsis", __iconNode);
 
 export default ChevronsLeftRightEllipsis;
 export { ChevronsLeftRightEllipsis };

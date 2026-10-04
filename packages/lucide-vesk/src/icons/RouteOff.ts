@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RouteOff = createLucideIcon("route-off", __iconNode);
+const RouteOff = /* @__PURE__ */ createLucideIcon("route-off", __iconNode);
 
 export default RouteOff;
 export { RouteOff };

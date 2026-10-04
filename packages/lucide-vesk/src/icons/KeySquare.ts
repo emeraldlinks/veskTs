@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const KeySquare = createLucideIcon("key-square", __iconNode);
+const KeySquare = /* @__PURE__ */ createLucideIcon("key-square", __iconNode);
 
 export default KeySquare;
 export { KeySquare };

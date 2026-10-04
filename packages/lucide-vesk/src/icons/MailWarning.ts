@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MailWarning = createLucideIcon("mail-warning", __iconNode);
+const MailWarning = /* @__PURE__ */ createLucideIcon("mail-warning", __iconNode);
 
 export default MailWarning;
 export { MailWarning };

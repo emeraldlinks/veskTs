@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileCheck2 = createLucideIcon("file-check-2", __iconNode);
+const FileCheck2 = /* @__PURE__ */ createLucideIcon("file-check-2", __iconNode);
 
 export default FileCheck2;
 export { FileCheck2 };

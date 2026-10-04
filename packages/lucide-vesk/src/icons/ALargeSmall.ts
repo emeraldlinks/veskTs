@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ALargeSmall = createLucideIcon("a-large-small", __iconNode);
+const ALargeSmall = /* @__PURE__ */ createLucideIcon("a-large-small", __iconNode);
 
 export default ALargeSmall;
 export { ALargeSmall };

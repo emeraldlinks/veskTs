@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeHelp = createLucideIcon("badge-help", __iconNode);
+const BadgeHelp = /* @__PURE__ */ createLucideIcon("badge-help", __iconNode);
 
 export default BadgeHelp;
 export { BadgeHelp };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DiamondPlus = createLucideIcon("diamond-plus", __iconNode);
+const DiamondPlus = /* @__PURE__ */ createLucideIcon("diamond-plus", __iconNode);
 
 export default DiamondPlus;
 export { DiamondPlus };

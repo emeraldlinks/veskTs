@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Glasses = createLucideIcon("glasses", __iconNode);
+const Glasses = /* @__PURE__ */ createLucideIcon("glasses", __iconNode);
 
 export default Glasses;
 export { Glasses };

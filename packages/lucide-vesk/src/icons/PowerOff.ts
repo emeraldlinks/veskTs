@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PowerOff = createLucideIcon("power-off", __iconNode);
+const PowerOff = /* @__PURE__ */ createLucideIcon("power-off", __iconNode);
 
 export default PowerOff;
 export { PowerOff };

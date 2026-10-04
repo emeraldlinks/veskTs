@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Undo2 = createLucideIcon("undo-2", __iconNode);
+const Undo2 = /* @__PURE__ */ createLucideIcon("undo-2", __iconNode);
 
 export default Undo2;
 export { Undo2 };

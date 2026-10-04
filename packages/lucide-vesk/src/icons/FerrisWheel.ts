@@ -67,7 +67,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FerrisWheel = createLucideIcon("ferris-wheel", __iconNode);
+const FerrisWheel = /* @__PURE__ */ createLucideIcon("ferris-wheel", __iconNode);
 
 export default FerrisWheel;
 export { FerrisWheel };

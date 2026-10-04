@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BeanOff = createLucideIcon("bean-off", __iconNode);
+const BeanOff = /* @__PURE__ */ createLucideIcon("bean-off", __iconNode);
 
 export default BeanOff;
 export { BeanOff };

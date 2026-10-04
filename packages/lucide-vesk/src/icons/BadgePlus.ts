@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgePlus = createLucideIcon("badge-plus", __iconNode);
+const BadgePlus = /* @__PURE__ */ createLucideIcon("badge-plus", __iconNode);
 
 export default BadgePlus;
 export { BadgePlus };

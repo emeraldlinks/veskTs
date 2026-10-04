@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EthernetPort = createLucideIcon("ethernet-port", __iconNode);
+const EthernetPort = /* @__PURE__ */ createLucideIcon("ethernet-port", __iconNode);
 
 export default EthernetPort;
 export { EthernetPort };

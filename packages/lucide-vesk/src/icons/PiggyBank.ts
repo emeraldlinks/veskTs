@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PiggyBank = createLucideIcon("piggy-bank", __iconNode);
+const PiggyBank = /* @__PURE__ */ createLucideIcon("piggy-bank", __iconNode);
 
 export default PiggyBank;
 export { PiggyBank };

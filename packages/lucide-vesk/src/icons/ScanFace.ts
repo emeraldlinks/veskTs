@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScanFace = createLucideIcon("scan-face", __iconNode);
+const ScanFace = /* @__PURE__ */ createLucideIcon("scan-face", __iconNode);
 
 export default ScanFace;
 export { ScanFace };

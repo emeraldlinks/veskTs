@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PaintBucket = createLucideIcon("paint-bucket", __iconNode);
+const PaintBucket = /* @__PURE__ */ createLucideIcon("paint-bucket", __iconNode);
 
 export default PaintBucket;
 export { PaintBucket };

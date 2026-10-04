@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shredder = createLucideIcon("shredder", __iconNode);
+const Shredder = /* @__PURE__ */ createLucideIcon("shredder", __iconNode);
 
 export default Shredder;
 export { Shredder };

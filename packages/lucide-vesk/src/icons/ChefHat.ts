@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChefHat = createLucideIcon("chef-hat", __iconNode);
+const ChefHat = /* @__PURE__ */ createLucideIcon("chef-hat", __iconNode);
 
 export default ChefHat;
 export { ChefHat };

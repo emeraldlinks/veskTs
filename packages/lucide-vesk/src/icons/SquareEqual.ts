@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareEqual = createLucideIcon("square-equal", __iconNode);
+const SquareEqual = /* @__PURE__ */ createLucideIcon("square-equal", __iconNode);
 
 export default SquareEqual;
 export { SquareEqual };

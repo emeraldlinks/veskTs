@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartColumnBig = createLucideIcon("chart-column-big", __iconNode);
+const ChartColumnBig = /* @__PURE__ */ createLucideIcon("chart-column-big", __iconNode);
 
 export default ChartColumnBig;
 export { ChartColumnBig };

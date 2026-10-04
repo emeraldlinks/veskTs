@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Equal = createLucideIcon("equal", __iconNode);
+const Equal = /* @__PURE__ */ createLucideIcon("equal", __iconNode);
 
 export default Equal;
 export { Equal };

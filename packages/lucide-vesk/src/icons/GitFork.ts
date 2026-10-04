@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitFork = createLucideIcon("git-fork", __iconNode);
+const GitFork = /* @__PURE__ */ createLucideIcon("git-fork", __iconNode);
 
 export default GitFork;
 export { GitFork };

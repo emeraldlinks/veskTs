@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PawPrint = createLucideIcon("paw-print", __iconNode);
+const PawPrint = /* @__PURE__ */ createLucideIcon("paw-print", __iconNode);
 
 export default PawPrint;
 export { PawPrint };

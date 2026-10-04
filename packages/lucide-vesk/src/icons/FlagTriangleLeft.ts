@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlagTriangleLeft = createLucideIcon("flag-triangle-left", __iconNode);
+const FlagTriangleLeft = /* @__PURE__ */ createLucideIcon("flag-triangle-left", __iconNode);
 
 export default FlagTriangleLeft;
 export { FlagTriangleLeft };

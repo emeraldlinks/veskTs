@@ -40,7 +40,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClipboardX = createLucideIcon("clipboard-x", __iconNode);
+const ClipboardX = /* @__PURE__ */ createLucideIcon("clipboard-x", __iconNode);
 
 export default ClipboardX;
 export { ClipboardX };

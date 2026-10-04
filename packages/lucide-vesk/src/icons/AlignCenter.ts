@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignCenter = createLucideIcon("align-center", __iconNode);
+const AlignCenter = /* @__PURE__ */ createLucideIcon("align-center", __iconNode);
 
 export default AlignCenter;
 export { AlignCenter };

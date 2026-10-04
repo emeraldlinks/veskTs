@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CaseLower = createLucideIcon("case-lower", __iconNode);
+const CaseLower = /* @__PURE__ */ createLucideIcon("case-lower", __iconNode);
 
 export default CaseLower;
 export { CaseLower };

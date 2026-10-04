@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Speaker = createLucideIcon("speaker", __iconNode);
+const Speaker = /* @__PURE__ */ createLucideIcon("speaker", __iconNode);
 
 export default Speaker;
 export { Speaker };

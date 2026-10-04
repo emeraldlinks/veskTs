@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeSwissFranc = createLucideIcon("badge-swiss-franc", __iconNode);
+const BadgeSwissFranc = /* @__PURE__ */ createLucideIcon("badge-swiss-franc", __iconNode);
 
 export default BadgeSwissFranc;
 export { BadgeSwissFranc };

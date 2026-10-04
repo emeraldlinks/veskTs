@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Trophy = createLucideIcon("trophy", __iconNode);
+const Trophy = /* @__PURE__ */ createLucideIcon("trophy", __iconNode);
 
 export default Trophy;
 export { Trophy };

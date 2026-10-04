@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PlugZap = createLucideIcon("plug-zap", __iconNode);
+const PlugZap = /* @__PURE__ */ createLucideIcon("plug-zap", __iconNode);
 
 export default PlugZap;
 export { PlugZap };

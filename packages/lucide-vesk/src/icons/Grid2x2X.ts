@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Grid2x2X = createLucideIcon("grid-2x2-x", __iconNode);
+const Grid2x2X = /* @__PURE__ */ createLucideIcon("grid-2x2-x", __iconNode);
 
 export default Grid2x2X;
 export { Grid2x2X };

@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PartyPopper = createLucideIcon("party-popper", __iconNode);
+const PartyPopper = /* @__PURE__ */ createLucideIcon("party-popper", __iconNode);
 
 export default PartyPopper;
 export { PartyPopper };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClockAlert = createLucideIcon("clock-alert", __iconNode);
+const ClockAlert = /* @__PURE__ */ createLucideIcon("clock-alert", __iconNode);
 
 export default ClockAlert;
 export { ClockAlert };

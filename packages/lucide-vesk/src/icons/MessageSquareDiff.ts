@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageSquareDiff = createLucideIcon("message-square-diff", __iconNode);
+const MessageSquareDiff = /* @__PURE__ */ createLucideIcon("message-square-diff", __iconNode);
 
 export default MessageSquareDiff;
 export { MessageSquareDiff };

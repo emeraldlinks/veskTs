@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignStartVertical = createLucideIcon("align-start-vertical", __iconNode);
+const AlignStartVertical = /* @__PURE__ */ createLucideIcon("align-start-vertical", __iconNode);
 
 export default AlignStartVertical;
 export { AlignStartVertical };

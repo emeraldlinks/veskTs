@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BicepsFlexed = createLucideIcon("biceps-flexed", __iconNode);
+const BicepsFlexed = /* @__PURE__ */ createLucideIcon("biceps-flexed", __iconNode);
 
 export default BicepsFlexed;
 export { BicepsFlexed };

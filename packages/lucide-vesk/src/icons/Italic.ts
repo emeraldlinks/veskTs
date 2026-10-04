@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Italic = createLucideIcon("italic", __iconNode);
+const Italic = /* @__PURE__ */ createLucideIcon("italic", __iconNode);
 
 export default Italic;
 export { Italic };

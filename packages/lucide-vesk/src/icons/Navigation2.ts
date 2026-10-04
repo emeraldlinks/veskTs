@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Navigation2 = createLucideIcon("navigation-2", __iconNode);
+const Navigation2 = /* @__PURE__ */ createLucideIcon("navigation-2", __iconNode);
 
 export default Navigation2;
 export { Navigation2 };

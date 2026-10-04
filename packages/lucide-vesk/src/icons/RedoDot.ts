@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RedoDot = createLucideIcon("redo-dot", __iconNode);
+const RedoDot = /* @__PURE__ */ createLucideIcon("redo-dot", __iconNode);
 
 export default RedoDot;
 export { RedoDot };

@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignVerticalDistributeStart = createLucideIcon("align-vertical-distribute-start", __iconNode);
+const AlignVerticalDistributeStart = /* @__PURE__ */ createLucideIcon("align-vertical-distribute-start", __iconNode);
 
 export default AlignVerticalDistributeStart;
 export { AlignVerticalDistributeStart };

@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Proportions = createLucideIcon("proportions", __iconNode);
+const Proportions = /* @__PURE__ */ createLucideIcon("proportions", __iconNode);
 
 export default Proportions;
 export { Proportions };

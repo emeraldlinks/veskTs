@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LaptopMinimalCheck = createLucideIcon("laptop-minimal-check", __iconNode);
+const LaptopMinimalCheck = /* @__PURE__ */ createLucideIcon("laptop-minimal-check", __iconNode);
 
 export default LaptopMinimalCheck;
 export { LaptopMinimalCheck };

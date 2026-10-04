@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Twitter = createLucideIcon("twitter", __iconNode);
+const Twitter = /* @__PURE__ */ createLucideIcon("twitter", __iconNode);
 
 export default Twitter;
 export { Twitter };

@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const KeyRound = createLucideIcon("key-round", __iconNode);
+const KeyRound = /* @__PURE__ */ createLucideIcon("key-round", __iconNode);
 
 export default KeyRound;
 export { KeyRound };

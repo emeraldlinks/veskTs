@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ConciergeBell = createLucideIcon("concierge-bell", __iconNode);
+const ConciergeBell = /* @__PURE__ */ createLucideIcon("concierge-bell", __iconNode);
 
 export default ConciergeBell;
 export { ConciergeBell };

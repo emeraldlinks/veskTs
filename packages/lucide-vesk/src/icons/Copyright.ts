@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Copyright = createLucideIcon("copyright", __iconNode);
+const Copyright = /* @__PURE__ */ createLucideIcon("copyright", __iconNode);
 
 export default Copyright;
 export { Copyright };

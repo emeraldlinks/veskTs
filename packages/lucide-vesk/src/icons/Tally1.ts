@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tally1 = createLucideIcon("tally-1", __iconNode);
+const Tally1 = /* @__PURE__ */ createLucideIcon("tally-1", __iconNode);
 
 export default Tally1;
 export { Tally1 };

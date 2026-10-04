@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TvMinimalPlay = createLucideIcon("tv-minimal-play", __iconNode);
+const TvMinimalPlay = /* @__PURE__ */ createLucideIcon("tv-minimal-play", __iconNode);
 
 export default TvMinimalPlay;
 export { TvMinimalPlay };

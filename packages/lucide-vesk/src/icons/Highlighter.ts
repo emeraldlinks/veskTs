@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Highlighter = createLucideIcon("highlighter", __iconNode);
+const Highlighter = /* @__PURE__ */ createLucideIcon("highlighter", __iconNode);
 
 export default Highlighter;
 export { Highlighter };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LockKeyholeOpen = createLucideIcon("lock-keyhole-open", __iconNode);
+const LockKeyholeOpen = /* @__PURE__ */ createLucideIcon("lock-keyhole-open", __iconNode);
 
 export default LockKeyholeOpen;
 export { LockKeyholeOpen };

@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cast = createLucideIcon("cast", __iconNode);
+const Cast = /* @__PURE__ */ createLucideIcon("cast", __iconNode);
 
 export default Cast;
 export { Cast };

@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Stethoscope = createLucideIcon("stethoscope", __iconNode);
+const Stethoscope = /* @__PURE__ */ createLucideIcon("stethoscope", __iconNode);
 
 export default Stethoscope;
 export { Stethoscope };

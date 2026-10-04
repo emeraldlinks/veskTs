@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquarePi = createLucideIcon("square-pi", __iconNode);
+const SquarePi = /* @__PURE__ */ createLucideIcon("square-pi", __iconNode);
 
 export default SquarePi;
 export { SquarePi };

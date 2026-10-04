@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartArea = createLucideIcon("chart-area", __iconNode);
+const ChartArea = /* @__PURE__ */ createLucideIcon("chart-area", __iconNode);
 
 export default ChartArea;
 export { ChartArea };

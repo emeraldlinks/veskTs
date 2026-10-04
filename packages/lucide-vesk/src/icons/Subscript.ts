@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Subscript = createLucideIcon("subscript", __iconNode);
+const Subscript = /* @__PURE__ */ createLucideIcon("subscript", __iconNode);
 
 export default Subscript;
 export { Subscript };

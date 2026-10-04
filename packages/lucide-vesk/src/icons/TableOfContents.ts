@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TableOfContents = createLucideIcon("table-of-contents", __iconNode);
+const TableOfContents = /* @__PURE__ */ createLucideIcon("table-of-contents", __iconNode);
 
 export default TableOfContents;
 export { TableOfContents };

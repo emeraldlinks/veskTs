@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareCheckBig = createLucideIcon("square-check-big", __iconNode);
+const SquareCheckBig = /* @__PURE__ */ createLucideIcon("square-check-big", __iconNode);
 
 export default SquareCheckBig;
 export { SquareCheckBig };

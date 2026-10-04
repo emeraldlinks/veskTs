@@ -104,7 +104,14 @@ import type { IconNode } from "../types.js";
 
 export const __iconNode: IconNode = ${nodeJson} as unknown as IconNode;
 
-const ${pascal} = createLucideIcon("${kebab}", __iconNode);
+// @__PURE__ lets a bundler DROP an icon the app never renders. Without it
+// every one of the ~1600 barrel exports survives, because esbuild must assume
+// a bare call has side effects — measured 1.20 MB for a two-icon page vs
+// 350 KB annotated, and 11.7 KB once `legalComments: 'none'` drops the
+// per-file license banners too. Together these are what make `import { X } from
+// 'lucide-vesk'` viable; deep imports are not a workaround we want to keep
+// documenting.
+const ${pascal} = /* @__PURE__ */ createLucideIcon("${kebab}", __iconNode);
 
 export default ${pascal};
 export { ${pascal} };

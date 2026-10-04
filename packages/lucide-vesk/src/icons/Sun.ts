@@ -67,7 +67,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sun = createLucideIcon("sun", __iconNode);
+const Sun = /* @__PURE__ */ createLucideIcon("sun", __iconNode);
 
 export default Sun;
 export { Sun };

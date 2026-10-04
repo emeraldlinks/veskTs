@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Eclipse = createLucideIcon("eclipse", __iconNode);
+const Eclipse = /* @__PURE__ */ createLucideIcon("eclipse", __iconNode);
 
 export default Eclipse;
 export { Eclipse };

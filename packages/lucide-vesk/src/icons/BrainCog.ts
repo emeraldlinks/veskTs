@@ -103,7 +103,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BrainCog = createLucideIcon("brain-cog", __iconNode);
+const BrainCog = /* @__PURE__ */ createLucideIcon("brain-cog", __iconNode);
 
 export default BrainCog;
 export { BrainCog };

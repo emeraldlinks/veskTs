@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LandPlot = createLucideIcon("land-plot", __iconNode);
+const LandPlot = /* @__PURE__ */ createLucideIcon("land-plot", __iconNode);
 
 export default LandPlot;
 export { LandPlot };

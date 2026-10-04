@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WalletMinimal = createLucideIcon("wallet-minimal", __iconNode);
+const WalletMinimal = /* @__PURE__ */ createLucideIcon("wallet-minimal", __iconNode);
 
 export default WalletMinimal;
 export { WalletMinimal };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Asterisk = createLucideIcon("asterisk", __iconNode);
+const Asterisk = /* @__PURE__ */ createLucideIcon("asterisk", __iconNode);
 
 export default Asterisk;
 export { Asterisk };

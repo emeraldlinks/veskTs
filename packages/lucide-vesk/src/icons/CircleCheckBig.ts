@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleCheckBig = createLucideIcon("circle-check-big", __iconNode);
+const CircleCheckBig = /* @__PURE__ */ createLucideIcon("circle-check-big", __iconNode);
 
 export default CircleCheckBig;
 export { CircleCheckBig };

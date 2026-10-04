@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileBadge2 = createLucideIcon("file-badge-2", __iconNode);
+const FileBadge2 = /* @__PURE__ */ createLucideIcon("file-badge-2", __iconNode);
 
 export default FileBadge2;
 export { FileBadge2 };

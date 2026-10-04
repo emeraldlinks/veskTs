@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LogOut = createLucideIcon("log-out", __iconNode);
+const LogOut = /* @__PURE__ */ createLucideIcon("log-out", __iconNode);
 
 export default LogOut;
 export { LogOut };

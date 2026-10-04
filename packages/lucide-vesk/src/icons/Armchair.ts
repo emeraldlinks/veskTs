@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Armchair = createLucideIcon("armchair", __iconNode);
+const Armchair = /* @__PURE__ */ createLucideIcon("armchair", __iconNode);
 
 export default Armchair;
 export { Armchair };

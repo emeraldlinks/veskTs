@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Accessibility = createLucideIcon("accessibility", __iconNode);
+const Accessibility = /* @__PURE__ */ createLucideIcon("accessibility", __iconNode);
 
 export default Accessibility;
 export { Accessibility };

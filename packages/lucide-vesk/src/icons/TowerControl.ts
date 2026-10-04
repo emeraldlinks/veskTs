@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TowerControl = createLucideIcon("tower-control", __iconNode);
+const TowerControl = /* @__PURE__ */ createLucideIcon("tower-control", __iconNode);
 
 export default TowerControl;
 export { TowerControl };

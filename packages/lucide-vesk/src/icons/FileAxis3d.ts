@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileAxis3d = createLucideIcon("file-axis-3d", __iconNode);
+const FileAxis3d = /* @__PURE__ */ createLucideIcon("file-axis-3d", __iconNode);
 
 export default FileAxis3d;
 export { FileAxis3d };

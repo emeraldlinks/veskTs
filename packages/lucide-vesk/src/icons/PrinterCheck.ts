@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PrinterCheck = createLucideIcon("printer-check", __iconNode);
+const PrinterCheck = /* @__PURE__ */ createLucideIcon("printer-check", __iconNode);
 
 export default PrinterCheck;
 export { PrinterCheck };

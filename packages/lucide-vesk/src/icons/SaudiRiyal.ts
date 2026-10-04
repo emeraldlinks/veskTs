@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SaudiRiyal = createLucideIcon("saudi-riyal", __iconNode);
+const SaudiRiyal = /* @__PURE__ */ createLucideIcon("saudi-riyal", __iconNode);
 
 export default SaudiRiyal;
 export { SaudiRiyal };

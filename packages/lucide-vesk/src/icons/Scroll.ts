@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Scroll = createLucideIcon("scroll", __iconNode);
+const Scroll = /* @__PURE__ */ createLucideIcon("scroll", __iconNode);
 
 export default Scroll;
 export { Scroll };

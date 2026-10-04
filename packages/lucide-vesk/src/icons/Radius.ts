@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Radius = createLucideIcon("radius", __iconNode);
+const Radius = /* @__PURE__ */ createLucideIcon("radius", __iconNode);
 
 export default Radius;
 export { Radius };

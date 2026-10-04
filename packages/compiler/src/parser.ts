@@ -252,6 +252,181 @@ export function preprocessForClauses(source: string): { code: string; annotation
   return { code: chars.join(''), annotations };
 }
 
+/**
+ * Blanks the type parameter list of a GENERIC ARROW function:
+ *
+ *   const read = <T,>(key: string, fallback: T): T => fallback;
+ *
+ * The list is type-only information the TS stripper deletes anyway, and it is
+ * unrepresentable in the tokenizer this parser uses: a `<` in expression
+ * position is read as `jsxTagStart`, and inside it the tokenizer emits
+ * `jsxName` / `jsxTagEnd` — never type tokens. So the construct could not be
+ * parsed at all, while `function f<T>(…)` and `async <T,>(…)` both could.
+ *
+ * That failure was silent rather than loud. `readSsrSource` treats a parse
+ * error as "not a module we understand" and substitutes the RAW, untranspiled
+ * source, so the parse error surfaced much later as
+ * `Unexpected token ':'` while the emitted module was being evaluated.
+ *
+ * Blanked IN PLACE — same character length, so every source offset, and
+ * therefore every AST node position, is preserved. This runs alongside the
+ * `{#clause}` and specifier-export passes for the same reason.
+ *
+ * The disambiguation is structural, not textual: the `>` must be followed by the
+ * arrow's PARAMETER list and then (after an optional return type) by `=>`. That
+ * is what separates `const f = <T,>(k: T): T => k` from the JSX
+ * `const a = <div>(hi)</div>`, where the `>` is also followed by `(` but never
+ * by `=>`. Type arguments (`f<T>(x)`) and comparisons fail the same test, so
+ * they are left untouched. A `<` inside a string, template or comment is
+ * skipped by the lexical scan before any of this runs.
+ */
+export function blankGenericArrowTypeParams(source: string): string {
+  let changed = false;
+  const chars = source.split('');
+  let i = 0;
+
+  const isSpace = (ch: string): boolean => isSpaceChar(ch);
+
+  while (i < source.length) {
+    const ch = source[i];
+    // Skip strings, templates and comments — the same lexical discipline the
+    // clause pass uses, so a `<T,>` inside a string or comment is never touched.
+    if (ch === '"' || ch === "'" || ch === '`') {
+      const quote = ch;
+      let j = i + 1;
+      while (j < source.length) {
+        if (source[j] === '\\') { j += 2; continue; }
+        if (source[j] === quote) { j++; break; }
+        if (quote === '`' && source[j] === '$' && source[j + 1] === '{') {
+          let depth = 1; j += 2;
+          while (j < source.length && depth > 0) {
+            if (source[j] === '{') depth++;
+            else if (source[j] === '}') depth--;
+            j++;
+          }
+          continue;
+        }
+        j++;
+      }
+      i = j;
+      continue;
+    }
+    if (ch === '/' && source[i + 1] === '/') {
+      while (i < source.length && source[i] !== '\n') i++;
+      continue;
+    }
+    if (ch === '/' && source[i + 1] === '*') {
+      i += 2;
+      while (i < source.length && !(source[i] === '*' && source[i + 1] === '/')) i++;
+      i += 2;
+      continue;
+    }
+    if (ch !== '<') { i++; continue; }
+
+    // A candidate `<` in expression position: find the matching `>`, tracking
+    // angle depth and skipping bracketed groups (a `>` inside `(…)`/`[…]`/`{…}`
+    // is a comparison or a nested type argument, never the terminator).
+    let j = i + 1;
+    let angle = 1;
+    let end = -1;
+    let bail = false;
+    while (j < source.length) {
+      const c = source[j];
+      if (c === '<') { angle++; j++; continue; }
+      if (c === '>') {
+        angle--;
+        j++;
+        if (angle === 0) { end = j; break; }
+        continue;
+      }
+      if (c === '(' || c === '[' || c === '{') {
+        const close = c === '(' ? ')' : c === '[' ? ']' : '}';
+        let depth = 0;
+        while (j < source.length) {
+          const d = source[j];
+          if (d === c) depth++;
+          else if (d === close) { depth--; if (depth === 0) { j++; break; } }
+          j++;
+        }
+        continue;
+      }
+      if (c === ';' || c === '\n') { bail = true; break; }
+      j++;
+    }
+    if (bail || end < 0) { i++; continue; }
+
+    // Must be an arrow: `>` then a parameter list, then an optional return
+    // type, then `=>`. Scanning to the `=>` is what distinguishes this from a
+    // JSX element that happens to be followed by a parenthesized text run.
+    if (!isArrowParameterList(source, end)) { i = end; continue; }
+
+    for (let p = i; p < end; p++) {
+      if (chars[p] !== '\n') chars[p] = ' ';
+    }
+    changed = true;
+    i = end;
+  }
+
+  return changed ? chars.join('') : source;
+}
+
+/**
+ * True when `source` continues from `from` with `( … )` — optionally followed
+ * by a `: ReturnType` — and then `=>`. Balances brackets so the arrow inside a
+ * default value (`(cb = () => 1) => …`) is not mistaken for the terminator.
+ */
+function isArrowParameterList(source: string, from: number): boolean {
+  let i = from;
+  while (i < source.length && isSpaceChar(source[i])) i++;
+  if (source[i] !== '(') return false;
+  let depth = 0;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '(' || ch === '[' || ch === '{') { depth++; i++; continue; }
+    if (ch === ')' || ch === ']' || ch === '}') {
+      depth--;
+      i++;
+      if (depth === 0) break;
+      continue;
+    }
+    i++;
+  }
+  if (depth !== 0) return false;
+  while (i < source.length && isSpaceChar(source[i])) i++;
+  // Optional return type: `: T` up to the `=>` at depth zero.
+  if (source[i] === ':') {
+    i++;
+    let tdepth = 0;
+    while (i < source.length) {
+      const ch = source[i];
+      if (ch === '(' || ch === '[' || ch === '{') { tdepth++; i++; continue; }
+      if (ch === ')' || ch === ']' || ch === '}') {
+        if (tdepth === 0) return false;
+        tdepth--;
+        i++;
+        continue;
+      }
+      if (tdepth === 0 && ch === '=' && source[i + 1] === '>') return true;
+      // A statement boundary ends the scan ONLY at depth zero. An object
+      // LITERAL type is full of them and is perfectly legal inside a return
+      // annotation: `{ roles: R[]; changed: boolean }` has a `;` (and, when it
+      // wraps, a newline) inside the braces. Bailing on those is what made
+      // `<R extends { id: string }>(a: R[], b: R[]): { roles: R[]; changed:
+      // boolean } => a` the one generic-arrow shape that still failed — it needs
+      // a generic arrow AND a braced constraint AND a return annotation, which
+      // is why dropping any ONE of the three parsed cleanly.
+      if (tdepth === 0 && (ch === ';' || ch === '\n')) return false;
+      i++;
+    }
+    return false;
+  }
+  return source[i] === '=' && source[i + 1] === '>';
+}
+
+function isSpaceChar(ch: string): boolean {
+  return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v';
+}
+
 export function createBaseParser(): typeof acorn.Parser {
   return acorn.Parser.extend(tsPlugin({}) as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser, VeskParserPlugin() as unknown as (BaseParser: typeof acorn.Parser) => typeof acorn.Parser);
 }
@@ -283,7 +458,7 @@ export function parseGeneratedJs(source: string): Program | null {
 
 export function parse(source: string, options: ParseOptions = {}): Program {
   const ParserClass = createBaseParser();
-  const { code, annotations } = preprocessForClauses(blankComments(source));
+  const { code, annotations } = preprocessForClauses(blankGenericArrowTypeParams(blankComments(source)));
   // Acorn validates that every `export { X }` names a real top-level binding.
   // A `.vsk` component is a registry entry, not a binding, so acorn rejects
   // `export { MyComponent }`. Remove only those specifier lists — one whose

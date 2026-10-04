@@ -44,7 +44,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HardDrive = createLucideIcon("hard-drive", __iconNode);
+const HardDrive = /* @__PURE__ */ createLucideIcon("hard-drive", __iconNode);
 
 export default HardDrive;
 export { HardDrive };

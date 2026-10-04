@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PenOff = createLucideIcon("pen-off", __iconNode);
+const PenOff = /* @__PURE__ */ createLucideIcon("pen-off", __iconNode);
 
 export default PenOff;
 export { PenOff };

@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BotOff = createLucideIcon("bot-off", __iconNode);
+const BotOff = /* @__PURE__ */ createLucideIcon("bot-off", __iconNode);
 
 export default BotOff;
 export { BotOff };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Joystick = createLucideIcon("joystick", __iconNode);
+const Joystick = /* @__PURE__ */ createLucideIcon("joystick", __iconNode);
 
 export default Joystick;
 export { Joystick };

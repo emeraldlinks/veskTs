@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AppWindow = createLucideIcon("app-window", __iconNode);
+const AppWindow = /* @__PURE__ */ createLucideIcon("app-window", __iconNode);
 
 export default AppWindow;
 export { AppWindow };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignHorizontalJustifyCenter = createLucideIcon("align-horizontal-justify-center", __iconNode);
+const AlignHorizontalJustifyCenter = /* @__PURE__ */ createLucideIcon("align-horizontal-justify-center", __iconNode);
 
 export default AlignHorizontalJustifyCenter;
 export { AlignHorizontalJustifyCenter };

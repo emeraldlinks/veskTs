@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GlobeLock = createLucideIcon("globe-lock", __iconNode);
+const GlobeLock = /* @__PURE__ */ createLucideIcon("globe-lock", __iconNode);
 
 export default GlobeLock;
 export { GlobeLock };

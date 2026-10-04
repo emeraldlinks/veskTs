@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShoppingBasket = createLucideIcon("shopping-basket", __iconNode);
+const ShoppingBasket = /* @__PURE__ */ createLucideIcon("shopping-basket", __iconNode);
 
 export default ShoppingBasket;
 export { ShoppingBasket };

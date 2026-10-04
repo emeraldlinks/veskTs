@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleEqual = createLucideIcon("circle-equal", __iconNode);
+const CircleEqual = /* @__PURE__ */ createLucideIcon("circle-equal", __iconNode);
 
 export default CircleEqual;
 export { CircleEqual };

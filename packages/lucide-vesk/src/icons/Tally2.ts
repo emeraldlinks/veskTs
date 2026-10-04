@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tally2 = createLucideIcon("tally-2", __iconNode);
+const Tally2 = /* @__PURE__ */ createLucideIcon("tally-2", __iconNode);
 
 export default Tally2;
 export { Tally2 };

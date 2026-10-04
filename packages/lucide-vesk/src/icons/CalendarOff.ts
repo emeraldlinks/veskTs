@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CalendarOff = createLucideIcon("calendar-off", __iconNode);
+const CalendarOff = /* @__PURE__ */ createLucideIcon("calendar-off", __iconNode);
 
 export default CalendarOff;
 export { CalendarOff };

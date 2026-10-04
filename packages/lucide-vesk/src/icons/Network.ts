@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Network = createLucideIcon("network", __iconNode);
+const Network = /* @__PURE__ */ createLucideIcon("network", __iconNode);
 
 export default Network;
 export { Network };

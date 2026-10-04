@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Dribbble = createLucideIcon("dribbble", __iconNode);
+const Dribbble = /* @__PURE__ */ createLucideIcon("dribbble", __iconNode);
 
 export default Dribbble;
 export { Dribbble };

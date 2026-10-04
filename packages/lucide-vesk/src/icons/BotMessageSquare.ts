@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BotMessageSquare = createLucideIcon("bot-message-square", __iconNode);
+const BotMessageSquare = /* @__PURE__ */ createLucideIcon("bot-message-square", __iconNode);
 
 export default BotMessageSquare;
 export { BotMessageSquare };

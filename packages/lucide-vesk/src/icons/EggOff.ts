@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EggOff = createLucideIcon("egg-off", __iconNode);
+const EggOff = /* @__PURE__ */ createLucideIcon("egg-off", __iconNode);
 
 export default EggOff;
 export { EggOff };

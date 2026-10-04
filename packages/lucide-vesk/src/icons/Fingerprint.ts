@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Fingerprint = createLucideIcon("fingerprint", __iconNode);
+const Fingerprint = /* @__PURE__ */ createLucideIcon("fingerprint", __iconNode);
 
 export default Fingerprint;
 export { Fingerprint };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MapPinOff = createLucideIcon("map-pin-off", __iconNode);
+const MapPinOff = /* @__PURE__ */ createLucideIcon("map-pin-off", __iconNode);
 
 export default MapPinOff;
 export { MapPinOff };

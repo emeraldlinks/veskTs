@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BluetoothSearching = createLucideIcon("bluetooth-searching", __iconNode);
+const BluetoothSearching = /* @__PURE__ */ createLucideIcon("bluetooth-searching", __iconNode);
 
 export default BluetoothSearching;
 export { BluetoothSearching };

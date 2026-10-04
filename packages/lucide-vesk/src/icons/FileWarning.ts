@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileWarning = createLucideIcon("file-warning", __iconNode);
+const FileWarning = /* @__PURE__ */ createLucideIcon("file-warning", __iconNode);
 
 export default FileWarning;
 export { FileWarning };

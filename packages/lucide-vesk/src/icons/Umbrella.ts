@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Umbrella = createLucideIcon("umbrella", __iconNode);
+const Umbrella = /* @__PURE__ */ createLucideIcon("umbrella", __iconNode);
 
 export default Umbrella;
 export { Umbrella };

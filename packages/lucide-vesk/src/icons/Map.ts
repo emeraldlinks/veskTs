@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Map = createLucideIcon("map", __iconNode);
+const Map = /* @__PURE__ */ createLucideIcon("map", __iconNode);
 
 export default Map;
 export { Map };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Split = createLucideIcon("split", __iconNode);
+const Split = /* @__PURE__ */ createLucideIcon("split", __iconNode);
 
 export default Split;
 export { Split };

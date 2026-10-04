@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WashingMachine = createLucideIcon("washing-machine", __iconNode);
+const WashingMachine = /* @__PURE__ */ createLucideIcon("washing-machine", __iconNode);
 
 export default WashingMachine;
 export { WashingMachine };

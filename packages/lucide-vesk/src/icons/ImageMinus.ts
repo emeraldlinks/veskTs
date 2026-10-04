@@ -40,7 +40,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ImageMinus = createLucideIcon("image-minus", __iconNode);
+const ImageMinus = /* @__PURE__ */ createLucideIcon("image-minus", __iconNode);
 
 export default ImageMinus;
 export { ImageMinus };

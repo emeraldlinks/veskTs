@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Landmark = createLucideIcon("landmark", __iconNode);
+const Landmark = /* @__PURE__ */ createLucideIcon("landmark", __iconNode);
 
 export default Landmark;
 export { Landmark };

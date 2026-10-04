@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SignpostBig = createLucideIcon("signpost-big", __iconNode);
+const SignpostBig = /* @__PURE__ */ createLucideIcon("signpost-big", __iconNode);
 
 export default SignpostBig;
 export { SignpostBig };

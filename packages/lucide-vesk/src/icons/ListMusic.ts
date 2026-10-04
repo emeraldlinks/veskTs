@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListMusic = createLucideIcon("list-music", __iconNode);
+const ListMusic = /* @__PURE__ */ createLucideIcon("list-music", __iconNode);
 
 export default ListMusic;
 export { ListMusic };

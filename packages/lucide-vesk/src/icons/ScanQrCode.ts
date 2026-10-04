@@ -63,7 +63,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScanQrCode = createLucideIcon("scan-qr-code", __iconNode);
+const ScanQrCode = /* @__PURE__ */ createLucideIcon("scan-qr-code", __iconNode);
 
 export default ScanQrCode;
 export { ScanQrCode };

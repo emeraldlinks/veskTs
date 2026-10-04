@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WandSparkles = createLucideIcon("wand-sparkles", __iconNode);
+const WandSparkles = /* @__PURE__ */ createLucideIcon("wand-sparkles", __iconNode);
 
 export default WandSparkles;
 export { WandSparkles };

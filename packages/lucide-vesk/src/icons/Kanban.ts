@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Kanban = createLucideIcon("kanban", __iconNode);
+const Kanban = /* @__PURE__ */ createLucideIcon("kanban", __iconNode);
 
 export default Kanban;
 export { Kanban };

@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartNetwork = createLucideIcon("chart-network", __iconNode);
+const ChartNetwork = /* @__PURE__ */ createLucideIcon("chart-network", __iconNode);
 
 export default ChartNetwork;
 export { ChartNetwork };

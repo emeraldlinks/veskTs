@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageCircleReply = createLucideIcon("message-circle-reply", __iconNode);
+const MessageCircleReply = /* @__PURE__ */ createLucideIcon("message-circle-reply", __iconNode);
 
 export default MessageCircleReply;
 export { MessageCircleReply };

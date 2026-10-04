@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Compass = createLucideIcon("compass", __iconNode);
+const Compass = /* @__PURE__ */ createLucideIcon("compass", __iconNode);
 
 export default Compass;
 export { Compass };

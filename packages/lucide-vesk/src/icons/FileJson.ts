@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileJson = createLucideIcon("file-json", __iconNode);
+const FileJson = /* @__PURE__ */ createLucideIcon("file-json", __iconNode);
 
 export default FileJson;
 export { FileJson };

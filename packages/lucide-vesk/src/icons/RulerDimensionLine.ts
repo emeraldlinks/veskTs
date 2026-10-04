@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RulerDimensionLine = createLucideIcon("ruler-dimension-line", __iconNode);
+const RulerDimensionLine = /* @__PURE__ */ createLucideIcon("ruler-dimension-line", __iconNode);
 
 export default RulerDimensionLine;
 export { RulerDimensionLine };

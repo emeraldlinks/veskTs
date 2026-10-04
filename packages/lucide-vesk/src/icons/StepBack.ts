@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const StepBack = createLucideIcon("step-back", __iconNode);
+const StepBack = /* @__PURE__ */ createLucideIcon("step-back", __iconNode);
 
 export default StepBack;
 export { StepBack };

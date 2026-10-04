@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageCircle = createLucideIcon("message-circle", __iconNode);
+const MessageCircle = /* @__PURE__ */ createLucideIcon("message-circle", __iconNode);
 
 export default MessageCircle;
 export { MessageCircle };

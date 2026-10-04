@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BookUp2 = createLucideIcon("book-up-2", __iconNode);
+const BookUp2 = /* @__PURE__ */ createLucideIcon("book-up-2", __iconNode);
 
 export default BookUp2;
 export { BookUp2 };

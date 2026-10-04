@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Factory = createLucideIcon("factory", __iconNode);
+const Factory = /* @__PURE__ */ createLucideIcon("factory", __iconNode);
 
 export default Factory;
 export { Factory };

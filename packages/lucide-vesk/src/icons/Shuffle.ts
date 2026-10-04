@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Shuffle = createLucideIcon("shuffle", __iconNode);
+const Shuffle = /* @__PURE__ */ createLucideIcon("shuffle", __iconNode);
 
 export default Shuffle;
 export { Shuffle };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Dumbbell = createLucideIcon("dumbbell", __iconNode);
+const Dumbbell = /* @__PURE__ */ createLucideIcon("dumbbell", __iconNode);
 
 export default Dumbbell;
 export { Dumbbell };

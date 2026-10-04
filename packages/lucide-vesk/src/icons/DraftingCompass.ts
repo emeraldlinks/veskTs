@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const DraftingCompass = createLucideIcon("drafting-compass", __iconNode);
+const DraftingCompass = /* @__PURE__ */ createLucideIcon("drafting-compass", __iconNode);
 
 export default DraftingCompass;
 export { DraftingCompass };

@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignVerticalJustifyEnd = createLucideIcon("align-vertical-justify-end", __iconNode);
+const AlignVerticalJustifyEnd = /* @__PURE__ */ createLucideIcon("align-vertical-justify-end", __iconNode);
 
 export default AlignVerticalJustifyEnd;
 export { AlignVerticalJustifyEnd };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Euro = createLucideIcon("euro", __iconNode);
+const Euro = /* @__PURE__ */ createLucideIcon("euro", __iconNode);
 
 export default Euro;
 export { Euro };

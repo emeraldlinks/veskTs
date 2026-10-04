@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SwatchBook = createLucideIcon("swatch-book", __iconNode);
+const SwatchBook = /* @__PURE__ */ createLucideIcon("swatch-book", __iconNode);
 
 export default SwatchBook;
 export { SwatchBook };

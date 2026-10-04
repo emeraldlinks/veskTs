@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CirclePercent = createLucideIcon("circle-percent", __iconNode);
+const CirclePercent = /* @__PURE__ */ createLucideIcon("circle-percent", __iconNode);
 
 export default CirclePercent;
 export { CirclePercent };

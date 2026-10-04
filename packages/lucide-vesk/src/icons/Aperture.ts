@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Aperture = createLucideIcon("aperture", __iconNode);
+const Aperture = /* @__PURE__ */ createLucideIcon("aperture", __iconNode);
 
 export default Aperture;
 export { Aperture };

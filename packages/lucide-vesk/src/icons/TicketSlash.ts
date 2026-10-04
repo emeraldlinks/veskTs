@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TicketSlash = createLucideIcon("ticket-slash", __iconNode);
+const TicketSlash = /* @__PURE__ */ createLucideIcon("ticket-slash", __iconNode);
 
 export default TicketSlash;
 export { TicketSlash };

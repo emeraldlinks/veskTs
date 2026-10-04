@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CloudLightning = createLucideIcon("cloud-lightning", __iconNode);
+const CloudLightning = /* @__PURE__ */ createLucideIcon("cloud-lightning", __iconNode);
 
 export default CloudLightning;
 export { CloudLightning };

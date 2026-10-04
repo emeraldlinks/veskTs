@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Rss = createLucideIcon("rss", __iconNode);
+const Rss = /* @__PURE__ */ createLucideIcon("rss", __iconNode);
 
 export default Rss;
 export { Rss };

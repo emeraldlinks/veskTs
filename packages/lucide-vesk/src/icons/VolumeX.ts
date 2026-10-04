@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const VolumeX = createLucideIcon("volume-x", __iconNode);
+const VolumeX = /* @__PURE__ */ createLucideIcon("volume-x", __iconNode);
 
 export default VolumeX;
 export { VolumeX };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Brackets = createLucideIcon("brackets", __iconNode);
+const Brackets = /* @__PURE__ */ createLucideIcon("brackets", __iconNode);
 
 export default Brackets;
 export { Brackets };

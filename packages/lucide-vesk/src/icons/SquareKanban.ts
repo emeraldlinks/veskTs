@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareKanban = createLucideIcon("square-kanban", __iconNode);
+const SquareKanban = /* @__PURE__ */ createLucideIcon("square-kanban", __iconNode);
 
 export default SquareKanban;
 export { SquareKanban };

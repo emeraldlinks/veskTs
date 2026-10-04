@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BookAudio = createLucideIcon("book-audio", __iconNode);
+const BookAudio = /* @__PURE__ */ createLucideIcon("book-audio", __iconNode);
 
 export default BookAudio;
 export { BookAudio };

@@ -95,7 +95,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const QrCode = createLucideIcon("qr-code", __iconNode);
+const QrCode = /* @__PURE__ */ createLucideIcon("qr-code", __iconNode);
 
 export default QrCode;
 export { QrCode };

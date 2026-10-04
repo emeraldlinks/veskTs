@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScreenShareOff = createLucideIcon("screen-share-off", __iconNode);
+const ScreenShareOff = /* @__PURE__ */ createLucideIcon("screen-share-off", __iconNode);
 
 export default ScreenShareOff;
 export { ScreenShareOff };

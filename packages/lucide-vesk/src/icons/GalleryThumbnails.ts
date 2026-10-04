@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GalleryThumbnails = createLucideIcon("gallery-thumbnails", __iconNode);
+const GalleryThumbnails = /* @__PURE__ */ createLucideIcon("gallery-thumbnails", __iconNode);
 
 export default GalleryThumbnails;
 export { GalleryThumbnails };

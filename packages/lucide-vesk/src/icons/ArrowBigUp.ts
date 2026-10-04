@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArrowBigUp = createLucideIcon("arrow-big-up", __iconNode);
+const ArrowBigUp = /* @__PURE__ */ createLucideIcon("arrow-big-up", __iconNode);
 
 export default ArrowBigUp;
 export { ArrowBigUp };

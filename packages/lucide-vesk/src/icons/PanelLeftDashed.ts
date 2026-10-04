@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PanelLeftDashed = createLucideIcon("panel-left-dashed", __iconNode);
+const PanelLeftDashed = /* @__PURE__ */ createLucideIcon("panel-left-dashed", __iconNode);
 
 export default PanelLeftDashed;
 export { PanelLeftDashed };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ligature = createLucideIcon("ligature", __iconNode);
+const Ligature = /* @__PURE__ */ createLucideIcon("ligature", __iconNode);
 
 export default Ligature;
 export { Ligature };

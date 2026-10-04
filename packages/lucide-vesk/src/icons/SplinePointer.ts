@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SplinePointer = createLucideIcon("spline-pointer", __iconNode);
+const SplinePointer = /* @__PURE__ */ createLucideIcon("spline-pointer", __iconNode);
 
 export default SplinePointer;
 export { SplinePointer };

@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Mails = createLucideIcon("mails", __iconNode);
+const Mails = /* @__PURE__ */ createLucideIcon("mails", __iconNode);
 
 export default Mails;
 export { Mails };

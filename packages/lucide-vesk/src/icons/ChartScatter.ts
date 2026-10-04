@@ -62,7 +62,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartScatter = createLucideIcon("chart-scatter", __iconNode);
+const ChartScatter = /* @__PURE__ */ createLucideIcon("chart-scatter", __iconNode);
 
 export default ChartScatter;
 export { ChartScatter };

@@ -30,7 +30,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CreditCard = createLucideIcon("credit-card", __iconNode);
+const CreditCard = /* @__PURE__ */ createLucideIcon("credit-card", __iconNode);
 
 export default CreditCard;
 export { CreditCard };

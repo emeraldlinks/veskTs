@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CirclePlay = createLucideIcon("circle-play", __iconNode);
+const CirclePlay = /* @__PURE__ */ createLucideIcon("circle-play", __iconNode);
 
 export default CirclePlay;
 export { CirclePlay };

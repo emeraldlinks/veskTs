@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ambulance = createLucideIcon("ambulance", __iconNode);
+const Ambulance = /* @__PURE__ */ createLucideIcon("ambulance", __iconNode);
 
 export default Ambulance;
 export { Ambulance };

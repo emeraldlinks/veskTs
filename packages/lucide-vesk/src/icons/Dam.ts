@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Dam = createLucideIcon("dam", __iconNode);
+const Dam = /* @__PURE__ */ createLucideIcon("dam", __iconNode);
 
 export default Dam;
 export { Dam };

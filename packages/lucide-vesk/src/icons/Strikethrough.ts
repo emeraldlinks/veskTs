@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Strikethrough = createLucideIcon("strikethrough", __iconNode);
+const Strikethrough = /* @__PURE__ */ createLucideIcon("strikethrough", __iconNode);
 
 export default Strikethrough;
 export { Strikethrough };

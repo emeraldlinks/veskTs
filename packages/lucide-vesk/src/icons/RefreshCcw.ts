@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RefreshCcw = createLucideIcon("refresh-ccw", __iconNode);
+const RefreshCcw = /* @__PURE__ */ createLucideIcon("refresh-ccw", __iconNode);
 
 export default RefreshCcw;
 export { RefreshCcw };

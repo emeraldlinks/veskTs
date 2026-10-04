@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlameKindling = createLucideIcon("flame-kindling", __iconNode);
+const FlameKindling = /* @__PURE__ */ createLucideIcon("flame-kindling", __iconNode);
 
 export default FlameKindling;
 export { FlameKindling };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Terminal = createLucideIcon("terminal", __iconNode);
+const Terminal = /* @__PURE__ */ createLucideIcon("terminal", __iconNode);
 
 export default Terminal;
 export { Terminal };

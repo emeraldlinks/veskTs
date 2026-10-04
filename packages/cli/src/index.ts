@@ -140,7 +140,7 @@ if (cmd === 'build') {
   const config = rawConfig;
   const plugins = config.plugins || [];
   const mdCfg = config.md;
-  const opts: Record<string, unknown> = { outDir, publicDir, plugins, seo, strictSeo: strict, codeSplit: !restArgs.includes('--skip-split'), target };
+  const opts: Record<string, unknown> = { outDir, publicDir, plugins, seo, strictSeo: strict, strict, codeSplit: !restArgs.includes('--skip-split'), target };
   if (mdCfg) opts.md = mdCfg;
   if (config.routeDataCache !== undefined) opts.routeDataCache = config.routeDataCache;
   if (platform) opts.platform = platform;

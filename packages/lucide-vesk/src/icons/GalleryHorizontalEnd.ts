@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GalleryHorizontalEnd = createLucideIcon("gallery-horizontal-end", __iconNode);
+const GalleryHorizontalEnd = /* @__PURE__ */ createLucideIcon("gallery-horizontal-end", __iconNode);
 
 export default GalleryHorizontalEnd;
 export { GalleryHorizontalEnd };

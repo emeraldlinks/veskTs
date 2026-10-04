@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HeartHandshake = createLucideIcon("heart-handshake", __iconNode);
+const HeartHandshake = /* @__PURE__ */ createLucideIcon("heart-handshake", __iconNode);
 
 export default HeartHandshake;
 export { HeartHandshake };

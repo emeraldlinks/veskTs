@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MoveVertical = createLucideIcon("move-vertical", __iconNode);
+const MoveVertical = /* @__PURE__ */ createLucideIcon("move-vertical", __iconNode);
 
 export default MoveVertical;
 export { MoveVertical };

@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileSpreadsheet = createLucideIcon("file-spreadsheet", __iconNode);
+const FileSpreadsheet = /* @__PURE__ */ createLucideIcon("file-spreadsheet", __iconNode);
 
 export default FileSpreadsheet;
 export { FileSpreadsheet };

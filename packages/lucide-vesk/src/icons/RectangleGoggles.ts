@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RectangleGoggles = createLucideIcon("rectangle-goggles", __iconNode);
+const RectangleGoggles = /* @__PURE__ */ createLucideIcon("rectangle-goggles", __iconNode);
 
 export default RectangleGoggles;
 export { RectangleGoggles };

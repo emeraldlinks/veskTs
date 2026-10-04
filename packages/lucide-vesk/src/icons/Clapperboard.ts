@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Clapperboard = createLucideIcon("clapperboard", __iconNode);
+const Clapperboard = /* @__PURE__ */ createLucideIcon("clapperboard", __iconNode);
 
 export default Clapperboard;
 export { Clapperboard };

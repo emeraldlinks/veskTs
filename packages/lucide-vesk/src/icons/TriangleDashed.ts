@@ -65,7 +65,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TriangleDashed = createLucideIcon("triangle-dashed", __iconNode);
+const TriangleDashed = /* @__PURE__ */ createLucideIcon("triangle-dashed", __iconNode);
 
 export default TriangleDashed;
 export { TriangleDashed };

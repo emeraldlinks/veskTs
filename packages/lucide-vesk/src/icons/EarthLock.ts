@@ -51,7 +51,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const EarthLock = createLucideIcon("earth-lock", __iconNode);
+const EarthLock = /* @__PURE__ */ createLucideIcon("earth-lock", __iconNode);
 
 export default EarthLock;
 export { EarthLock };

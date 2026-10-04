@@ -46,7 +46,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Dice4 = createLucideIcon("dice-4", __iconNode);
+const Dice4 = /* @__PURE__ */ createLucideIcon("dice-4", __iconNode);
 
 export default Dice4;
 export { Dice4 };

@@ -58,7 +58,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BatteryFull = createLucideIcon("battery-full", __iconNode);
+const BatteryFull = /* @__PURE__ */ createLucideIcon("battery-full", __iconNode);
 
 export default BatteryFull;
 export { BatteryFull };

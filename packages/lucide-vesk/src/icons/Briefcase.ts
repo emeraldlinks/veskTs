@@ -27,7 +27,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Briefcase = createLucideIcon("briefcase", __iconNode);
+const Briefcase = /* @__PURE__ */ createLucideIcon("briefcase", __iconNode);
 
 export default Briefcase;
 export { Briefcase };

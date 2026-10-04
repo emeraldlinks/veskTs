@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tangent = createLucideIcon("tangent", __iconNode);
+const Tangent = /* @__PURE__ */ createLucideIcon("tangent", __iconNode);
 
 export default Tangent;
 export { Tangent };

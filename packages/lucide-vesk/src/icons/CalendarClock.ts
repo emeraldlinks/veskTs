@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CalendarClock = createLucideIcon("calendar-clock", __iconNode);
+const CalendarClock = /* @__PURE__ */ createLucideIcon("calendar-clock", __iconNode);
 
 export default CalendarClock;
 export { CalendarClock };

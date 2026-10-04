@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ScanHeart = createLucideIcon("scan-heart", __iconNode);
+const ScanHeart = /* @__PURE__ */ createLucideIcon("scan-heart", __iconNode);
 
 export default ScanHeart;
 export { ScanHeart };

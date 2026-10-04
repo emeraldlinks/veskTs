@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Fan = createLucideIcon("fan", __iconNode);
+const Fan = /* @__PURE__ */ createLucideIcon("fan", __iconNode);
 
 export default Fan;
 export { Fan };

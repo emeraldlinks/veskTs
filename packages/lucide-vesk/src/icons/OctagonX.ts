@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const OctagonX = createLucideIcon("octagon-x", __iconNode);
+const OctagonX = /* @__PURE__ */ createLucideIcon("octagon-x", __iconNode);
 
 export default OctagonX;
 export { OctagonX };

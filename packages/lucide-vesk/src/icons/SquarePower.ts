@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquarePower = createLucideIcon("square-power", __iconNode);
+const SquarePower = /* @__PURE__ */ createLucideIcon("square-power", __iconNode);
 
 export default SquarePower;
 export { SquarePower };

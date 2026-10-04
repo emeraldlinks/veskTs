@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Webcam = createLucideIcon("webcam", __iconNode);
+const Webcam = /* @__PURE__ */ createLucideIcon("webcam", __iconNode);
 
 export default Webcam;
 export { Webcam };

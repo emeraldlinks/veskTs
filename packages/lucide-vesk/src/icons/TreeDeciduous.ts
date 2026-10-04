@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TreeDeciduous = createLucideIcon("tree-deciduous", __iconNode);
+const TreeDeciduous = /* @__PURE__ */ createLucideIcon("tree-deciduous", __iconNode);
 
 export default TreeDeciduous;
 export { TreeDeciduous };

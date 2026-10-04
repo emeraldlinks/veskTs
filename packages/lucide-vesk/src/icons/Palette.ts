@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Palette = createLucideIcon("palette", __iconNode);
+const Palette = /* @__PURE__ */ createLucideIcon("palette", __iconNode);
 
 export default Palette;
 export { Palette };

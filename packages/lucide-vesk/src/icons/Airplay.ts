@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Airplay = createLucideIcon("airplay", __iconNode);
+const Airplay = /* @__PURE__ */ createLucideIcon("airplay", __iconNode);
 
 export default Airplay;
 export { Airplay };

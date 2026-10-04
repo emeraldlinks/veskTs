@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareCode = createLucideIcon("square-code", __iconNode);
+const SquareCode = /* @__PURE__ */ createLucideIcon("square-code", __iconNode);
 
 export default SquareCode;
 export { SquareCode };

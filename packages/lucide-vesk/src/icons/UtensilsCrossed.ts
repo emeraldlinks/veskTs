@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UtensilsCrossed = createLucideIcon("utensils-crossed", __iconNode);
+const UtensilsCrossed = /* @__PURE__ */ createLucideIcon("utensils-crossed", __iconNode);
 
 export default UtensilsCrossed;
 export { UtensilsCrossed };

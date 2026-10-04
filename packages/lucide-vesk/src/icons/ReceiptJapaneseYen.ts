@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ReceiptJapaneseYen = createLucideIcon("receipt-japanese-yen", __iconNode);
+const ReceiptJapaneseYen = /* @__PURE__ */ createLucideIcon("receipt-japanese-yen", __iconNode);
 
 export default ReceiptJapaneseYen;
 export { ReceiptJapaneseYen };

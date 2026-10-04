@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Banknote = createLucideIcon("banknote", __iconNode);
+const Banknote = /* @__PURE__ */ createLucideIcon("banknote", __iconNode);
 
 export default Banknote;
 export { Banknote };

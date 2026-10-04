@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CalendarFold = createLucideIcon("calendar-fold", __iconNode);
+const CalendarFold = /* @__PURE__ */ createLucideIcon("calendar-fold", __iconNode);
 
 export default CalendarFold;
 export { CalendarFold };

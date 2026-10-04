@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquarePercent = createLucideIcon("square-percent", __iconNode);
+const SquarePercent = /* @__PURE__ */ createLucideIcon("square-percent", __iconNode);
 
 export default SquarePercent;
 export { SquarePercent };

@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cherry = createLucideIcon("cherry", __iconNode);
+const Cherry = /* @__PURE__ */ createLucideIcon("cherry", __iconNode);
 
 export default Cherry;
 export { Cherry };

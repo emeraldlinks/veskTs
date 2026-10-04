@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TextCursor = createLucideIcon("text-cursor", __iconNode);
+const TextCursor = /* @__PURE__ */ createLucideIcon("text-cursor", __iconNode);
 
 export default TextCursor;
 export { TextCursor };

@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleUser = createLucideIcon("circle-user", __iconNode);
+const CircleUser = /* @__PURE__ */ createLucideIcon("circle-user", __iconNode);
 
 export default CircleUser;
 export { CircleUser };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LetterText = createLucideIcon("letter-text", __iconNode);
+const LetterText = /* @__PURE__ */ createLucideIcon("letter-text", __iconNode);
 
 export default LetterText;
 export { LetterText };

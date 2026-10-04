@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Thermometer = createLucideIcon("thermometer", __iconNode);
+const Thermometer = /* @__PURE__ */ createLucideIcon("thermometer", __iconNode);
 
 export default Thermometer;
 export { Thermometer };

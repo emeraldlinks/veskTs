@@ -59,7 +59,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Loader = createLucideIcon("loader", __iconNode);
+const Loader = /* @__PURE__ */ createLucideIcon("loader", __iconNode);
 
 export default Loader;
 export { Loader };

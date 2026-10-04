@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderSearch = createLucideIcon("folder-search", __iconNode);
+const FolderSearch = /* @__PURE__ */ createLucideIcon("folder-search", __iconNode);
 
 export default FolderSearch;
 export { FolderSearch };

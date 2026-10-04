@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MoveHorizontal = createLucideIcon("move-horizontal", __iconNode);
+const MoveHorizontal = /* @__PURE__ */ createLucideIcon("move-horizontal", __iconNode);
 
 export default MoveHorizontal;
 export { MoveHorizontal };

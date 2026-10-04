@@ -28,7 +28,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Lock = createLucideIcon("lock", __iconNode);
+const Lock = /* @__PURE__ */ createLucideIcon("lock", __iconNode);
 
 export default Lock;
 export { Lock };

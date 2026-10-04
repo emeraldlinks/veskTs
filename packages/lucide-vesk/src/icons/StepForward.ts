@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const StepForward = createLucideIcon("step-forward", __iconNode);
+const StepForward = /* @__PURE__ */ createLucideIcon("step-forward", __iconNode);
 
 export default StepForward;
 export { StepForward };

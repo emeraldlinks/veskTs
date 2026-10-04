@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Wallpaper = createLucideIcon("wallpaper", __iconNode);
+const Wallpaper = /* @__PURE__ */ createLucideIcon("wallpaper", __iconNode);
 
 export default Wallpaper;
 export { Wallpaper };

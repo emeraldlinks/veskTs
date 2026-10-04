@@ -89,7 +89,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NotepadTextDashed = createLucideIcon("notepad-text-dashed", __iconNode);
+const NotepadTextDashed = /* @__PURE__ */ createLucideIcon("notepad-text-dashed", __iconNode);
 
 export default NotepadTextDashed;
 export { NotepadTextDashed };

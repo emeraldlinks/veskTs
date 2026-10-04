@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MessageSquareLock = createLucideIcon("message-square-lock", __iconNode);
+const MessageSquareLock = /* @__PURE__ */ createLucideIcon("message-square-lock", __iconNode);
 
 export default MessageSquareLock;
 export { MessageSquareLock };

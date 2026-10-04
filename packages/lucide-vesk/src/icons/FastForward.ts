@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FastForward = createLucideIcon("fast-forward", __iconNode);
+const FastForward = /* @__PURE__ */ createLucideIcon("fast-forward", __iconNode);
 
 export default FastForward;
 export { FastForward };

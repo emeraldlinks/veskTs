@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CookingPot = createLucideIcon("cooking-pot", __iconNode);
+const CookingPot = /* @__PURE__ */ createLucideIcon("cooking-pot", __iconNode);
 
 export default CookingPot;
 export { CookingPot };

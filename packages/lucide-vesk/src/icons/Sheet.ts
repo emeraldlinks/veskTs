@@ -58,7 +58,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Sheet = createLucideIcon("sheet", __iconNode);
+const Sheet = /* @__PURE__ */ createLucideIcon("sheet", __iconNode);
 
 export default Sheet;
 export { Sheet };

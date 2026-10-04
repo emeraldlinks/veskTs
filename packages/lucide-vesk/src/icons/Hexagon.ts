@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Hexagon = createLucideIcon("hexagon", __iconNode);
+const Hexagon = /* @__PURE__ */ createLucideIcon("hexagon", __iconNode);
 
 export default Hexagon;
 export { Hexagon };

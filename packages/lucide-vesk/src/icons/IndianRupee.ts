@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const IndianRupee = createLucideIcon("indian-rupee", __iconNode);
+const IndianRupee = /* @__PURE__ */ createLucideIcon("indian-rupee", __iconNode);
 
 export default IndianRupee;
 export { IndianRupee };

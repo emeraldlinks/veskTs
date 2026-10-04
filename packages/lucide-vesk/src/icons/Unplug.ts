@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Unplug = createLucideIcon("unplug", __iconNode);
+const Unplug = /* @__PURE__ */ createLucideIcon("unplug", __iconNode);
 
 export default Unplug;
 export { Unplug };

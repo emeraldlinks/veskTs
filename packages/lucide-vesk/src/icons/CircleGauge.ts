@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleGauge = createLucideIcon("circle-gauge", __iconNode);
+const CircleGauge = /* @__PURE__ */ createLucideIcon("circle-gauge", __iconNode);
 
 export default CircleGauge;
 export { CircleGauge };

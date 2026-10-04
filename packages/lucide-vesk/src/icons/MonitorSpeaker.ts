@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MonitorSpeaker = createLucideIcon("monitor-speaker", __iconNode);
+const MonitorSpeaker = /* @__PURE__ */ createLucideIcon("monitor-speaker", __iconNode);
 
 export default MonitorSpeaker;
 export { MonitorSpeaker };

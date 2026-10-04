@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SignalZero = createLucideIcon("signal-zero", __iconNode);
+const SignalZero = /* @__PURE__ */ createLucideIcon("signal-zero", __iconNode);
 
 export default SignalZero;
 export { SignalZero };

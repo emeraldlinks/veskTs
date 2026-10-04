@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Maximize = createLucideIcon("maximize", __iconNode);
+const Maximize = /* @__PURE__ */ createLucideIcon("maximize", __iconNode);
 
 export default Maximize;
 export { Maximize };

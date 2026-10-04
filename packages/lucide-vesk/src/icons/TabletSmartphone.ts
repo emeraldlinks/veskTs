@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TabletSmartphone = createLucideIcon("tablet-smartphone", __iconNode);
+const TabletSmartphone = /* @__PURE__ */ createLucideIcon("tablet-smartphone", __iconNode);
 
 export default TabletSmartphone;
 export { TabletSmartphone };

@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderDot = createLucideIcon("folder-dot", __iconNode);
+const FolderDot = /* @__PURE__ */ createLucideIcon("folder-dot", __iconNode);
 
 export default FolderDot;
 export { FolderDot };

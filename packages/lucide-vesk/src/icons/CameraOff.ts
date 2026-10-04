@@ -38,7 +38,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CameraOff = createLucideIcon("camera-off", __iconNode);
+const CameraOff = /* @__PURE__ */ createLucideIcon("camera-off", __iconNode);
 
 export default CameraOff;
 export { CameraOff };

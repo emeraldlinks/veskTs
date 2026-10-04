@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Antenna = createLucideIcon("antenna", __iconNode);
+const Antenna = /* @__PURE__ */ createLucideIcon("antenna", __iconNode);
 
 export default Antenna;
 export { Antenna };

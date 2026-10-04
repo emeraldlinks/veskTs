@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderLock = createLucideIcon("folder-lock", __iconNode);
+const FolderLock = /* @__PURE__ */ createLucideIcon("folder-lock", __iconNode);
 
 export default FolderLock;
 export { FolderLock };

@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PilcrowRight = createLucideIcon("pilcrow-right", __iconNode);
+const PilcrowRight = /* @__PURE__ */ createLucideIcon("pilcrow-right", __iconNode);
 
 export default PilcrowRight;
 export { PilcrowRight };

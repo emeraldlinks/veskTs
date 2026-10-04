@@ -103,7 +103,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Cpu = createLucideIcon("cpu", __iconNode);
+const Cpu = /* @__PURE__ */ createLucideIcon("cpu", __iconNode);
 
 export default Cpu;
 export { Cpu };

@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ListTodo = createLucideIcon("list-todo", __iconNode);
+const ListTodo = /* @__PURE__ */ createLucideIcon("list-todo", __iconNode);
 
 export default ListTodo;
 export { ListTodo };

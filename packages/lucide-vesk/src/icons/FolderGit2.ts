@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderGit2 = createLucideIcon("folder-git-2", __iconNode);
+const FolderGit2 = /* @__PURE__ */ createLucideIcon("folder-git-2", __iconNode);
 
 export default FolderGit2;
 export { FolderGit2 };

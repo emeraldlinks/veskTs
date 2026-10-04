@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderClosed = createLucideIcon("folder-closed", __iconNode);
+const FolderClosed = /* @__PURE__ */ createLucideIcon("folder-closed", __iconNode);
 
 export default FolderClosed;
 export { FolderClosed };

@@ -63,7 +63,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CableCar = createLucideIcon("cable-car", __iconNode);
+const CableCar = /* @__PURE__ */ createLucideIcon("cable-car", __iconNode);
 
 export default CableCar;
 export { CableCar };

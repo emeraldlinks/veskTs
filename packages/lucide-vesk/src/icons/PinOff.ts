@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PinOff = createLucideIcon("pin-off", __iconNode);
+const PinOff = /* @__PURE__ */ createLucideIcon("pin-off", __iconNode);
 
 export default PinOff;
 export { PinOff };

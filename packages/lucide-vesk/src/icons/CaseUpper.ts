@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CaseUpper = createLucideIcon("case-upper", __iconNode);
+const CaseUpper = /* @__PURE__ */ createLucideIcon("case-upper", __iconNode);
 
 export default CaseUpper;
 export { CaseUpper };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CornerRightUp = createLucideIcon("corner-right-up", __iconNode);
+const CornerRightUp = /* @__PURE__ */ createLucideIcon("corner-right-up", __iconNode);
 
 export default CornerRightUp;
 export { CornerRightUp };

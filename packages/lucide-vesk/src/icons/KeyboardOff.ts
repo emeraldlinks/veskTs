@@ -71,7 +71,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const KeyboardOff = createLucideIcon("keyboard-off", __iconNode);
+const KeyboardOff = /* @__PURE__ */ createLucideIcon("keyboard-off", __iconNode);
 
 export default KeyboardOff;
 export { KeyboardOff };

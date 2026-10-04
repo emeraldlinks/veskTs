@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MountainSnow = createLucideIcon("mountain-snow", __iconNode);
+const MountainSnow = /* @__PURE__ */ createLucideIcon("mountain-snow", __iconNode);
 
 export default MountainSnow;
 export { MountainSnow };

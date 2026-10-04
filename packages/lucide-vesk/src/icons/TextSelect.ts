@@ -101,7 +101,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const TextSelect = createLucideIcon("text-select", __iconNode);
+const TextSelect = /* @__PURE__ */ createLucideIcon("text-select", __iconNode);
 
 export default TextSelect;
 export { TextSelect };

@@ -26,7 +26,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SkipForward = createLucideIcon("skip-forward", __iconNode);
+const SkipForward = /* @__PURE__ */ createLucideIcon("skip-forward", __iconNode);
 
 export default SkipForward;
 export { SkipForward };

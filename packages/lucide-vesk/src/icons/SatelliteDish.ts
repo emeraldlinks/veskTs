@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SatelliteDish = createLucideIcon("satellite-dish", __iconNode);
+const SatelliteDish = /* @__PURE__ */ createLucideIcon("satellite-dish", __iconNode);
 
 export default SatelliteDish;
 export { SatelliteDish };

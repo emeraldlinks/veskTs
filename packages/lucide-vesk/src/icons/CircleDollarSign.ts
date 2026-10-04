@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleDollarSign = createLucideIcon("circle-dollar-sign", __iconNode);
+const CircleDollarSign = /* @__PURE__ */ createLucideIcon("circle-dollar-sign", __iconNode);
 
 export default CircleDollarSign;
 export { CircleDollarSign };

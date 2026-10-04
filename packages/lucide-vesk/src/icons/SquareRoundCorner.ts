@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareRoundCorner = createLucideIcon("square-round-corner", __iconNode);
+const SquareRoundCorner = /* @__PURE__ */ createLucideIcon("square-round-corner", __iconNode);
 
 export default SquareRoundCorner;
 export { SquareRoundCorner };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FolderPlus = createLucideIcon("folder-plus", __iconNode);
+const FolderPlus = /* @__PURE__ */ createLucideIcon("folder-plus", __iconNode);
 
 export default FolderPlus;
 export { FolderPlus };

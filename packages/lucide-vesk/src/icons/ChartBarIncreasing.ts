@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChartBarIncreasing = createLucideIcon("chart-bar-increasing", __iconNode);
+const ChartBarIncreasing = /* @__PURE__ */ createLucideIcon("chart-bar-increasing", __iconNode);
 
 export default ChartBarIncreasing;
 export { ChartBarIncreasing };

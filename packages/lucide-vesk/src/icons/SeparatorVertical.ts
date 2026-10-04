@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SeparatorVertical = createLucideIcon("separator-vertical", __iconNode);
+const SeparatorVertical = /* @__PURE__ */ createLucideIcon("separator-vertical", __iconNode);
 
 export default SeparatorVertical;
 export { SeparatorVertical };

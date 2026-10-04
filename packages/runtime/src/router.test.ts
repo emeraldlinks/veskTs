@@ -16,6 +16,10 @@ function describe(name, fn) {
 	fn();
 }
 
+function test_assert(cond: unknown, message: string): void {
+	if (!cond) throw new Error(message);
+}
+
 let asyncQueue: Promise<void> = Promise.resolve();
 function testAsync(name, fn) {
 	asyncQueue = asyncQueue.then(async () => {
@@ -2325,6 +2329,79 @@ describe('router — async guard redirect loop cap', () => {
 		expect(hops).toBe(2);
 		expect(container.textContent).toContain('login');
 	});
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A route group can BE the page: `app/(public)/page.vsk` serves `/`.
+//
+// Two places in the client matcher dropped the group:
+///
+///  1. The group branch recursed into children and discarded the group node, so
+///     `app/(public)/page.vsk` could never be found.
+///  2. The root node matches EVERY url and, at a terminal position, stopped the
+///     walk before reaching any group at all — so the chain collapsed onto the
+///     page-less root.
+///
+/// Together: `/` produced a chain with no page node, i.e. a client-side 404 with
+// no hydration, while `/about` and every nested route matched fine. SSR was
+// unaffected because the server routes from the build manifest, which is what
+// made it look like a hydration-only bug.
+// ─────────────────────────────────────────────────────────────────────────────
+function groupTree(overrides: Record<string, unknown> = {}) {
+	const node = (o: Record<string, unknown>) => ({ path: '', fullPath: '/', isGroup: false, isDynamic: false, isCatchAll: false, page: null, layout: null, children: [], segmentCount: 1, ...o }) as never;
+	return [
+		node({
+			fullPath: '/', segmentCount: 0,
+			children: [
+				node({ isGroup: true, segmentCount: 0, layout: 'L_ADMIN' }),
+				node({ isGroup: true, segmentCount: 0, layout: 'L_PORTAL' }),
+				node({
+					isGroup: true, segmentCount: 0, layout: 'L_PUBLIC', page: 'PAGE_PUBLIC',
+					children: [
+						node({ path: 'about', fullPath: '/about', page: 'PAGE_ABOUT' }),
+					],
+					...overrides,
+				}),
+			],
+		}),
+	];
+}
+
+test('a route group with its own page serves the zero-segment path', () => {
+	const m = matchRoute(groupTree(), '/');
+	test_assert(m !== null, 'expected a match for /');
+	const pages = m!.matchChain.filter((n) => n.page).map((n) => n.page as string);
+	test_assert(pages.length > 0, 'chain carried no page node — this is the 404');
+	test_assert(pages.includes('PAGE_PUBLIC'), `expected PAGE_PUBLIC in chain, got ${JSON.stringify(pages)}`);
+});
+
+test('a nested route under that group still wins', () => {
+	const m = matchRoute(groupTree(), '/about');
+	test_assert(m !== null, 'expected a match for /about');
+	const pages = m!.matchChain.filter((n) => n.page).map((n) => n.page as string);
+	test_assert(pages.includes('PAGE_ABOUT'), `expected PAGE_ABOUT, got ${JSON.stringify(pages)}`);
+	// The group's own page must not shadow a nested route.
+	test_assert(pages[pages.length - 1] === 'PAGE_ABOUT', `group page shadowed the nested route: ${JSON.stringify(pages)}`);
+});
+
+test('a group with no page does not match the zero-segment path', () => {
+	const tree = groupTree({ page: null });
+	const m = matchRoute(tree, '/');
+	test_assert(m !== null, 'root still matches /');
+	const pages = m!.matchChain.filter((n) => n.page).map((n) => n.page as string);
+	test_assert(pages.length === 0, `expected no page node, got ${JSON.stringify(pages)}`);
+	// And its nested route is still reachable.
+	const about = matchRoute(tree, '/about');
+	test_assert(about !== null && about.matchChain.filter((n) => n.page).length === 1, 'nested route broke');
+});
+
+test('a group page does not shadow a root page', () => {
+	const tree = groupTree();
+	// Give the root its own page; the root must win for `/`.
+	(tree[0] as unknown as { page: string }).page = 'PAGE_ROOT';
+	const m = matchRoute(tree, '/');
+	const pages = m!.matchChain.filter((n) => n.page).map((n) => n.page as string);
+	test_assert(pages[pages.length - 1] === 'PAGE_ROOT', `root page was shadowed: ${JSON.stringify(pages)}`);
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

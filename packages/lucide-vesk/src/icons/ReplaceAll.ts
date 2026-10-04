@@ -69,7 +69,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ReplaceAll = createLucideIcon("replace-all", __iconNode);
+const ReplaceAll = /* @__PURE__ */ createLucideIcon("replace-all", __iconNode);
 
 export default ReplaceAll;
 export { ReplaceAll };

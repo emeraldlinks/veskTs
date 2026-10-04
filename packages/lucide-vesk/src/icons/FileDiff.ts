@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileDiff = createLucideIcon("file-diff", __iconNode);
+const FileDiff = /* @__PURE__ */ createLucideIcon("file-diff", __iconNode);
 
 export default FileDiff;
 export { FileDiff };

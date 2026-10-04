@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Link2Off = createLucideIcon("link-2-off", __iconNode);
+const Link2Off = /* @__PURE__ */ createLucideIcon("link-2-off", __iconNode);
 
 export default Link2Off;
 export { Link2Off };

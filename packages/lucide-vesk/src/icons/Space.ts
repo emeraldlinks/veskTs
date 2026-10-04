@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Space = createLucideIcon("space", __iconNode);
+const Space = /* @__PURE__ */ createLucideIcon("space", __iconNode);
 
 export default Space;
 export { Space };

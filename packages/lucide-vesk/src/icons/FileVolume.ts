@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileVolume = createLucideIcon("file-volume", __iconNode);
+const FileVolume = /* @__PURE__ */ createLucideIcon("file-volume", __iconNode);
 
 export default FileVolume;
 export { FileVolume };

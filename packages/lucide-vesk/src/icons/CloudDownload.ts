@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CloudDownload = createLucideIcon("cloud-download", __iconNode);
+const CloudDownload = /* @__PURE__ */ createLucideIcon("cloud-download", __iconNode);
 
 export default CloudDownload;
 export { CloudDownload };

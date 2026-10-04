@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const UtilityPole = createLucideIcon("utility-pole", __iconNode);
+const UtilityPole = /* @__PURE__ */ createLucideIcon("utility-pole", __iconNode);
 
 export default UtilityPole;
 export { UtilityPole };

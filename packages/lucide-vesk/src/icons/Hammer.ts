@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Hammer = createLucideIcon("hammer", __iconNode);
+const Hammer = /* @__PURE__ */ createLucideIcon("hammer", __iconNode);
 
 export default Hammer;
 export { Hammer };

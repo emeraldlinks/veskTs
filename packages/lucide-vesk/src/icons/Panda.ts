@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Panda = createLucideIcon("panda", __iconNode);
+const Panda = /* @__PURE__ */ createLucideIcon("panda", __iconNode);
 
 export default Panda;
 export { Panda };

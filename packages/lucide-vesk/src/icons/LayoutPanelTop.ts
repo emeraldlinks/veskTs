@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LayoutPanelTop = createLucideIcon("layout-panel-top", __iconNode);
+const LayoutPanelTop = /* @__PURE__ */ createLucideIcon("layout-panel-top", __iconNode);
 
 export default LayoutPanelTop;
 export { LayoutPanelTop };

@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ArchiveX = createLucideIcon("archive-x", __iconNode);
+const ArchiveX = /* @__PURE__ */ createLucideIcon("archive-x", __iconNode);
 
 export default ArchiveX;
 export { ArchiveX };

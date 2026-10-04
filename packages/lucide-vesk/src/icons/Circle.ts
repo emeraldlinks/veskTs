@@ -19,7 +19,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Circle = createLucideIcon("circle", __iconNode);
+const Circle = /* @__PURE__ */ createLucideIcon("circle", __iconNode);
 
 export default Circle;
 export { Circle };

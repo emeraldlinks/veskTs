@@ -46,7 +46,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ClipboardCopy = createLucideIcon("clipboard-copy", __iconNode);
+const ClipboardCopy = /* @__PURE__ */ createLucideIcon("clipboard-copy", __iconNode);
 
 export default ClipboardCopy;
 export { ClipboardCopy };

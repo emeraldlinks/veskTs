@@ -71,7 +71,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareDashedMousePointer = createLucideIcon("square-dashed-mouse-pointer", __iconNode);
+const SquareDashedMousePointer = /* @__PURE__ */ createLucideIcon("square-dashed-mouse-pointer", __iconNode);
 
 export default SquareDashedMousePointer;
 export { SquareDashedMousePointer };

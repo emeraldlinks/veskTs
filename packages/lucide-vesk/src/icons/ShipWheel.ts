@@ -75,7 +75,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ShipWheel = createLucideIcon("ship-wheel", __iconNode);
+const ShipWheel = /* @__PURE__ */ createLucideIcon("ship-wheel", __iconNode);
 
 export default ShipWheel;
 export { ShipWheel };

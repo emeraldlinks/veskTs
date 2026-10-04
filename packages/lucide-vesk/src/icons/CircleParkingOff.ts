@@ -37,7 +37,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleParkingOff = createLucideIcon("circle-parking-off", __iconNode);
+const CircleParkingOff = /* @__PURE__ */ createLucideIcon("circle-parking-off", __iconNode);
 
 export default CircleParkingOff;
 export { CircleParkingOff };

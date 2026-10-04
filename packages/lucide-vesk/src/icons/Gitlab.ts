@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Gitlab = createLucideIcon("gitlab", __iconNode);
+const Gitlab = /* @__PURE__ */ createLucideIcon("gitlab", __iconNode);
 
 export default Gitlab;
 export { Gitlab };

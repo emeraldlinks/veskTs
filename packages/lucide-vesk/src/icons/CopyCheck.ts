@@ -34,7 +34,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CopyCheck = createLucideIcon("copy-check", __iconNode);
+const CopyCheck = /* @__PURE__ */ createLucideIcon("copy-check", __iconNode);
 
 export default CopyCheck;
 export { CopyCheck };

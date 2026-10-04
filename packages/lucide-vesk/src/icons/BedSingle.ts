@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BedSingle = createLucideIcon("bed-single", __iconNode);
+const BedSingle = /* @__PURE__ */ createLucideIcon("bed-single", __iconNode);
 
 export default BedSingle;
 export { BedSingle };

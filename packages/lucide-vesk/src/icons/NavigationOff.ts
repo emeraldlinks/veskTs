@@ -32,7 +32,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const NavigationOff = createLucideIcon("navigation-off", __iconNode);
+const NavigationOff = /* @__PURE__ */ createLucideIcon("navigation-off", __iconNode);
 
 export default NavigationOff;
 export { NavigationOff };

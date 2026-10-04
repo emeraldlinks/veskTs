@@ -30,3 +30,15 @@ packages/runtime/*.tgz
 test-app/.vesk-smoke/
 test-app/.vesk-hydr/
 test-app/tarballs/
+
+# Standalone example apps maintained as their OWN repositories.
+# `academy/` is tracked in its own repo (see academy/.git) — it is an
+# application, not part of the framework, and its dependency tarballs
+# (academy/tarballs/*.tgz) are build artifacts of this workspace.
+academy/
+academy-vite-/
+academy-vite/
+
+# Scratch probe output from browser/measurement runs.
+.probe/
+tmp/

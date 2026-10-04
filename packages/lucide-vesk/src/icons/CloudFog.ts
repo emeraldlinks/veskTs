@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CloudFog = createLucideIcon("cloud-fog", __iconNode);
+const CloudFog = /* @__PURE__ */ createLucideIcon("cloud-fog", __iconNode);
 
 export default CloudFog;
 export { CloudFog };

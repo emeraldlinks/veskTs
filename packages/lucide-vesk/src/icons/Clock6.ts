@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Clock6 = createLucideIcon("clock-6", __iconNode);
+const Clock6 = /* @__PURE__ */ createLucideIcon("clock-6", __iconNode);
 
 export default Clock6;
 export { Clock6 };

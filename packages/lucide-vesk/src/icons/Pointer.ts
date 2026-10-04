@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pointer = createLucideIcon("pointer", __iconNode);
+const Pointer = /* @__PURE__ */ createLucideIcon("pointer", __iconNode);
 
 export default Pointer;
 export { Pointer };

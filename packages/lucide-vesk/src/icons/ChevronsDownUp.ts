@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ChevronsDownUp = createLucideIcon("chevrons-down-up", __iconNode);
+const ChevronsDownUp = /* @__PURE__ */ createLucideIcon("chevrons-down-up", __iconNode);
 
 export default ChevronsDownUp;
 export { ChevronsDownUp };

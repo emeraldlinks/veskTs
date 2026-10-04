@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const LampDesk = createLucideIcon("lamp-desk", __iconNode);
+const LampDesk = /* @__PURE__ */ createLucideIcon("lamp-desk", __iconNode);
 
 export default LampDesk;
 export { LampDesk };

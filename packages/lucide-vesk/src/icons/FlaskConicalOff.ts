@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FlaskConicalOff = createLucideIcon("flask-conical-off", __iconNode);
+const FlaskConicalOff = /* @__PURE__ */ createLucideIcon("flask-conical-off", __iconNode);
 
 export default FlaskConicalOff;
 export { FlaskConicalOff };

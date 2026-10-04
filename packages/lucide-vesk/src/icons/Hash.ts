@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Hash = createLucideIcon("hash", __iconNode);
+const Hash = /* @__PURE__ */ createLucideIcon("hash", __iconNode);
 
 export default Hash;
 export { Hash };

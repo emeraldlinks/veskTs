@@ -55,7 +55,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Combine = createLucideIcon("combine", __iconNode);
+const Combine = /* @__PURE__ */ createLucideIcon("combine", __iconNode);
 
 export default Combine;
 export { Combine };

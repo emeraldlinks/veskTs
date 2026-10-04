@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const AlignHorizontalSpaceAround = createLucideIcon("align-horizontal-space-around", __iconNode);
+const AlignHorizontalSpaceAround = /* @__PURE__ */ createLucideIcon("align-horizontal-space-around", __iconNode);
 
 export default AlignHorizontalSpaceAround;
 export { AlignHorizontalSpaceAround };

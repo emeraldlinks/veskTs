@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquaresExclude = createLucideIcon("squares-exclude", __iconNode);
+const SquaresExclude = /* @__PURE__ */ createLucideIcon("squares-exclude", __iconNode);
 
 export default SquaresExclude;
 export { SquaresExclude };

@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SearchSlash = createLucideIcon("search-slash", __iconNode);
+const SearchSlash = /* @__PURE__ */ createLucideIcon("search-slash", __iconNode);
 
 export default SearchSlash;
 export { SearchSlash };

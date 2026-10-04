@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const WifiPen = createLucideIcon("wifi-pen", __iconNode);
+const WifiPen = /* @__PURE__ */ createLucideIcon("wifi-pen", __iconNode);
 
 export default WifiPen;
 export { WifiPen };

@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Framer = createLucideIcon("framer", __iconNode);
+const Framer = /* @__PURE__ */ createLucideIcon("framer", __iconNode);
 
 export default Framer;
 export { Framer };

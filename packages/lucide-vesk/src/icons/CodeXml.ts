@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CodeXml = createLucideIcon("code-xml", __iconNode);
+const CodeXml = /* @__PURE__ */ createLucideIcon("code-xml", __iconNode);
 
 export default CodeXml;
 export { CodeXml };

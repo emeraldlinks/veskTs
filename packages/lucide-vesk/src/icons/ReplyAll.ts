@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const ReplyAll = createLucideIcon("reply-all", __iconNode);
+const ReplyAll = /* @__PURE__ */ createLucideIcon("reply-all", __iconNode);
 
 export default ReplyAll;
 export { ReplyAll };

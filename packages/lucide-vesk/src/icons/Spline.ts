@@ -33,7 +33,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Spline = createLucideIcon("spline", __iconNode);
+const Spline = /* @__PURE__ */ createLucideIcon("spline", __iconNode);
 
 export default Spline;
 export { Spline };

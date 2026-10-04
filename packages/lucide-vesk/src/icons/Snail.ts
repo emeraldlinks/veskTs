@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Snail = createLucideIcon("snail", __iconNode);
+const Snail = /* @__PURE__ */ createLucideIcon("snail", __iconNode);
 
 export default Snail;
 export { Snail };

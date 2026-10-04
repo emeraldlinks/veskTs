@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Footprints = createLucideIcon("footprints", __iconNode);
+const Footprints = /* @__PURE__ */ createLucideIcon("footprints", __iconNode);
 
 export default Footprints;
 export { Footprints };

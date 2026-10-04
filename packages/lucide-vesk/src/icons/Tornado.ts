@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Tornado = createLucideIcon("tornado", __iconNode);
+const Tornado = /* @__PURE__ */ createLucideIcon("tornado", __iconNode);
 
 export default Tornado;
 export { Tornado };

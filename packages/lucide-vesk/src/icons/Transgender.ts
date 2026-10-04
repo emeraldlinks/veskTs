@@ -61,7 +61,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Transgender = createLucideIcon("transgender", __iconNode);
+const Transgender = /* @__PURE__ */ createLucideIcon("transgender", __iconNode);
 
 export default Transgender;
 export { Transgender };

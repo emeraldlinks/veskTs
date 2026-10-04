@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeRussianRuble = createLucideIcon("badge-russian-ruble", __iconNode);
+const BadgeRussianRuble = /* @__PURE__ */ createLucideIcon("badge-russian-ruble", __iconNode);
 
 export default BadgeRussianRuble;
 export { BadgeRussianRuble };

@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CircleFadingArrowUp = createLucideIcon("circle-fading-arrow-up", __iconNode);
+const CircleFadingArrowUp = /* @__PURE__ */ createLucideIcon("circle-fading-arrow-up", __iconNode);
 
 export default CircleFadingArrowUp;
 export { CircleFadingArrowUp };

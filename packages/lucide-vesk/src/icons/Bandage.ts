@@ -57,7 +57,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Bandage = createLucideIcon("bandage", __iconNode);
+const Bandage = /* @__PURE__ */ createLucideIcon("bandage", __iconNode);
 
 export default Bandage;
 export { Bandage };

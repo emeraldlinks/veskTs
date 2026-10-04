@@ -25,7 +25,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MapPin = createLucideIcon("map-pin", __iconNode);
+const MapPin = /* @__PURE__ */ createLucideIcon("map-pin", __iconNode);
 
 export default MapPin;
 export { MapPin };

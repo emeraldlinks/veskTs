@@ -45,7 +45,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileDigit = createLucideIcon("file-digit", __iconNode);
+const FileDigit = /* @__PURE__ */ createLucideIcon("file-digit", __iconNode);
 
 export default FileDigit;
 export { FileDigit };

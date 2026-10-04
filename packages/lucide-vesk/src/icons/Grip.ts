@@ -83,7 +83,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Grip = createLucideIcon("grip", __iconNode);
+const Grip = /* @__PURE__ */ createLucideIcon("grip", __iconNode);
 
 export default Grip;
 export { Grip };

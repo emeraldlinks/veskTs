@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Diff = createLucideIcon("diff", __iconNode);
+const Diff = /* @__PURE__ */ createLucideIcon("diff", __iconNode);
 
 export default Diff;
 export { Diff };

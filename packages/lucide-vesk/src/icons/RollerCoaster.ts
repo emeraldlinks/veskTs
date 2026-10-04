@@ -53,7 +53,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const RollerCoaster = createLucideIcon("roller-coaster", __iconNode);
+const RollerCoaster = /* @__PURE__ */ createLucideIcon("roller-coaster", __iconNode);
 
 export default RollerCoaster;
 export { RollerCoaster };

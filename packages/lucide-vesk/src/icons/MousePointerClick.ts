@@ -41,7 +41,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const MousePointerClick = createLucideIcon("mouse-pointer-click", __iconNode);
+const MousePointerClick = /* @__PURE__ */ createLucideIcon("mouse-pointer-click", __iconNode);
 
 export default MousePointerClick;
 export { MousePointerClick };

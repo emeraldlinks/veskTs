@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquareAsterisk = createLucideIcon("square-asterisk", __iconNode);
+const SquareAsterisk = /* @__PURE__ */ createLucideIcon("square-asterisk", __iconNode);
 
 export default SquareAsterisk;
 export { SquareAsterisk };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GlassWater = createLucideIcon("glass-water", __iconNode);
+const GlassWater = /* @__PURE__ */ createLucideIcon("glass-water", __iconNode);
 
 export default GlassWater;
 export { GlassWater };

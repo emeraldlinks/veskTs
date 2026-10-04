@@ -47,7 +47,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const PencilRuler = createLucideIcon("pencil-ruler", __iconNode);
+const PencilRuler = /* @__PURE__ */ createLucideIcon("pencil-ruler", __iconNode);
 
 export default PencilRuler;
 export { PencilRuler };

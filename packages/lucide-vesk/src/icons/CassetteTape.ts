@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const CassetteTape = createLucideIcon("cassette-tape", __iconNode);
+const CassetteTape = /* @__PURE__ */ createLucideIcon("cassette-tape", __iconNode);
 
 export default CassetteTape;
 export { CassetteTape };

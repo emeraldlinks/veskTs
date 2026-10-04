@@ -17,7 +17,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Pentagon = createLucideIcon("pentagon", __iconNode);
+const Pentagon = /* @__PURE__ */ createLucideIcon("pentagon", __iconNode);
 
 export default Pentagon;
 export { Pentagon };

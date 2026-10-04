@@ -43,7 +43,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Smile = createLucideIcon("smile", __iconNode);
+const Smile = /* @__PURE__ */ createLucideIcon("smile", __iconNode);
 
 export default Smile;
 export { Smile };

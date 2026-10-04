@@ -31,7 +31,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Globe = createLucideIcon("globe", __iconNode);
+const Globe = /* @__PURE__ */ createLucideIcon("globe", __iconNode);
 
 export default Globe;
 export { Globe };

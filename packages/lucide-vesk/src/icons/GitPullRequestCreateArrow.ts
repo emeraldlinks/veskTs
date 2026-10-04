@@ -49,7 +49,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const GitPullRequestCreateArrow = createLucideIcon("git-pull-request-create-arrow", __iconNode);
+const GitPullRequestCreateArrow = /* @__PURE__ */ createLucideIcon("git-pull-request-create-arrow", __iconNode);
 
 export default GitPullRequestCreateArrow;
 export { GitPullRequestCreateArrow };

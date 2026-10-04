@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const BadgeEuro = createLucideIcon("badge-euro", __iconNode);
+const BadgeEuro = /* @__PURE__ */ createLucideIcon("badge-euro", __iconNode);
 
 export default BadgeEuro;
 export { BadgeEuro };

@@ -29,7 +29,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FilePen = createLucideIcon("file-pen", __iconNode);
+const FilePen = /* @__PURE__ */ createLucideIcon("file-pen", __iconNode);
 
 export default FilePen;
 export { FilePen };

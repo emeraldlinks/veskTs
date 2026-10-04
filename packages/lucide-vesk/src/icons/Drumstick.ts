@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Drumstick = createLucideIcon("drumstick", __iconNode);
+const Drumstick = /* @__PURE__ */ createLucideIcon("drumstick", __iconNode);
 
 export default Drumstick;
 export { Drumstick };

@@ -23,7 +23,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const HdmiPort = createLucideIcon("hdmi-port", __iconNode);
+const HdmiPort = /* @__PURE__ */ createLucideIcon("hdmi-port", __iconNode);
 
 export default HdmiPort;
 export { HdmiPort };

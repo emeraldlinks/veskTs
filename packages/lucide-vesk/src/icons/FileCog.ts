@@ -79,7 +79,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const FileCog = createLucideIcon("file-cog", __iconNode);
+const FileCog = /* @__PURE__ */ createLucideIcon("file-cog", __iconNode);
 
 export default FileCog;
 export { FileCog };

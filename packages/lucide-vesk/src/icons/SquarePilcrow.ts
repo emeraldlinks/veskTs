@@ -39,7 +39,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const SquarePilcrow = createLucideIcon("square-pilcrow", __iconNode);
+const SquarePilcrow = /* @__PURE__ */ createLucideIcon("square-pilcrow", __iconNode);
 
 export default SquarePilcrow;
 export { SquarePilcrow };

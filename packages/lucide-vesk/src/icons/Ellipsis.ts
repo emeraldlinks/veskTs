@@ -35,7 +35,7 @@ export const __iconNode: IconNode = [
   ]
 ] as unknown as IconNode;
 
-const Ellipsis = createLucideIcon("ellipsis", __iconNode);
+const Ellipsis = /* @__PURE__ */ createLucideIcon("ellipsis", __iconNode);
 
 export default Ellipsis;
 export { Ellipsis };
