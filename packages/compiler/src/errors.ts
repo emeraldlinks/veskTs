@@ -96,6 +96,8 @@ export interface VeskErrorOptions {
   nextSteps?: string[];
   tip?: string;
   code?: string;
+  /** Rendered code frame (see `codeFrame`). Never a V-code. */
+  frame?: string;
   [key: string]: unknown;
 }
 
@@ -121,7 +123,10 @@ export class VeskError extends Error {
   suggestions: string[];
   nextSteps: string[];
   tip: string;
+  /** The V-diagnostic code, e.g. `V0501`. */
   code?: string;
+  /** The rendered code frame. Used to be written into `code`, which silently replaced the V-code. */
+  frame?: string;
 
   constructor(message: string, opts: VeskErrorOptions = {}) {
     super(message);
@@ -132,7 +137,11 @@ export class VeskError extends Error {
     this.suggestions = opts.suggestions || [];
     this.nextSteps = opts.nextSteps || [];
     this.tip = opts.tip || '';
-    if (opts.code !== undefined) this.code = opts.code;
+    // The diagnostic code owns `code`. The code frame used to be written there
+    // too, which silently replaced `V0501` with a wall of source text — the
+    // report lost the one thing that identifies it.
+    if (opts.code !== undefined && !opts.code.includes('\n')) this.code = opts.code;
+    if (opts.frame !== undefined) this.frame = opts.frame;
   }
 
   static notFound(name: string, candidates: string[] = [], context: VeskErrorOptions = {}): VeskError {
@@ -221,6 +230,97 @@ export class VeskError extends Error {
           'Vesk components compile to reactive blocks — classes cannot participate in signal tracking.',
         ],
         tip: 'Use plain objects for data and factory functions for constructors inside .vsk files.',
+      },
+    );
+  }
+
+  /**
+   * A browser-only global used in code the SERVER evaluates.
+   *
+   * On the server these are either absent (`window is not defined`) or, worse,
+   * silently present-but-wrong (`navigator` exists in modern Node, so
+   * `navigator.onLine` is `undefined` and a page renders as if it were offline).
+   * A raw `ReferenceError` at request time is the worst possible report: it
+   * names neither the component nor the fix. This points at the line.
+   */
+  static ssrUnsafeGlobal(
+    name: string,
+    context: Partial<VeskErrorOptions> & { inComponent?: string } = {},
+  ): VeskError {
+    return new VeskError(
+      `\`${name}\` is browser-only, and this component body runs during SSR.`,
+      {
+        ...context,
+        code: context.code || 'V0501',
+        suggestions: [
+          `Wrap the part that needs the DOM in a {#client} block.`,
+          `Move the code into an event handler — handlers never run on the server.`,
+          `Do the setup in on_destroy(), which the compiler only emits on the client.`,
+        ],
+        nextSteps: [
+          `component ${context.inComponent ?? 'this component'}: wrap the \`${name}\` access in {#client}...{/client}.`,
+          `Or guard it: if (typeof ${name} !== 'undefined') { ... }`,
+        ],
+        tip:
+          'SSR renders this component before the client exists. Reading a browser global here either throws during the request or (for `navigator`) silently returns undefined.',
+      },
+    );
+  }
+
+  /**
+   * The second name from `track()` called as a function.
+   *
+   * `const &[count, setCount] = track(0)` returns a CELL, not a setter function, so
+   * `setCount(1)` throws `setCount is not a function` from generated code with
+   * no line of user code in the message. The cell is the writer: `.set(v)`.
+   */
+  static cellCalledAsFunction(
+    name: string,
+    context: Partial<VeskErrorOptions> & { value?: string; cell?: string } = {},
+  ): VeskError {
+    return new VeskError(
+      `\`${name}\` is a cell, not a function — cells are written with \`.set()\`.`,
+      {
+        ...context,
+        code: context.code || 'V0502',
+        suggestions: [
+          `Use \`${name}.set(...)\` instead of \`${name}(...)\`.`,
+          `Or use the tracked spelling inside an event handler: set(${context.value ?? 'value'}, ...)`,
+        ],
+        nextSteps: [
+          `const &[${context.value ?? 'value'}, ${name}] = track(0) → \`${name}.set(v)\``,
+          'The value read in markup is the first name; the second is the cell object.',
+        ],
+        tip: `\`track()\` returns [value, cell]. \`${name}\` is the cell half.`,
+      },
+    );
+  }
+
+  /**
+   * `set(value, …)` used outside a rewritten expression.
+   *
+   * The compiler rewrites `set(count, v)` to `countCell.set(v)` inside JSX and
+   * event handlers — but a bare statement in the component body is NOT
+   * rewritten, so the runtime `set` receives the value and throws
+   * "Cannot read properties of undefined". Pass the CELL, not the value.
+   */
+  static setWithValueName(
+    name: string,
+    context: Partial<VeskErrorOptions> & { cell?: string } = {},
+  ): VeskError {
+    return new VeskError(
+      `\`set(${name}, …)\` needs the CELL, and \`${name}\` is the value half of track().`,
+      {
+        ...context,
+        code: context.code || 'V0503',
+        suggestions: [
+          `Use \`set(${context.cell ?? 'cell'}, …)\` or \`${context.cell ?? 'cell'}.set(…)\`.`,
+          `Or move the set() into an event handler, where the compiler rewrites it for you.`,
+        ],
+        nextSteps: [
+          `const &[${name}, ${context.cell ?? 'cell'}] = track(0) → \`${context.cell ?? 'cell'}.set(v)\``,
+        ],
+        tip: 'set(cell, value) is only rewritten inside JSX and handlers; in a body statement it reaches the runtime untouched.',
       },
     );
   }

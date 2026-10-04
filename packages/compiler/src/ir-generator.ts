@@ -1446,7 +1446,7 @@ function validateBlocks(compName: string, isClient: boolean, body: IRNode[], fil
           const { line, column } = offsetToLineCol(source, pos);
           (opts as { line: number; column: number; code: string }).line = line;
           (opts as { line: number; column: number; code: string }).column = column;
-          (opts as { code: string }).code = codeFrame(source, line, column);
+          (opts as { frame: string }).frame = codeFrame(source, line, column);
         }
         throw VeskError.serverBlockInClient(compName, opts as { file?: string });
       }
@@ -1458,7 +1458,7 @@ function validateBlocks(compName: string, isClient: boolean, body: IRNode[], fil
           const { line, column } = offsetToLineCol(source, pos);
           (opts as { line: number; column: number; code: string }).line = line;
           (opts as { line: number; column: number; code: string }).column = column;
-          (opts as { code: string }).code = codeFrame(source, line, column);
+          (opts as { frame: string }).frame = codeFrame(source, line, column);
         }
         throw VeskError.clientBlockInServer(compName, opts as { file?: string });
       }

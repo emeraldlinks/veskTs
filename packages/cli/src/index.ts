@@ -180,9 +180,11 @@ if (cmd === 'build') {
       const l = (err as unknown as { line?: number }).line;
       const c = (err as unknown as { column?: number }).column;
       const code = (err as unknown as { code?: string }).code;
+      const frame = (err as unknown as { frame?: string }).frame;
       let out = `vesk build: error — ${err.message}`;
+      if (code) out = `vesk build: [${code}] ${err.message}`;
       if (f) out += `\n  File: ${f}${l ? `:${l}${c ? `:${c}` : ''}` : ''}`;
-      if (code) out += `\n\n${code}`;
+      if (frame) out += `\n\n${frame}`;
       console.error(out);
       if (err.stack && !String(err.stack).includes(err.message)) console.error(err.stack);
     } else {
