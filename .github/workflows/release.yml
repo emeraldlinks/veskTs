@@ -4,13 +4,12 @@ on:
   push:
     branches: [main]
   pull_request:
-  # A stable release is a human decision: run this workflow and pick a channel.
-  # `canary` (also the default for pushes to main) publishes a prerelease under
-  # the canary dist-tag; `stable` moves `latest`, writes CHANGELOG.md and tags.
+  # A green run on main publishes `latest` (bump + changelog + tag + release).
+  # `workflow_dispatch` is for publishing a prerelease channel by hand.
   workflow_dispatch:
     inputs:
       channel:
-        description: Release channel (stable moves the npm `latest` tag)
+        description: Release channel (stable moves `latest`; the default for pushes)
         type: choice
         default: stable
         options: [stable, beta, canary]
@@ -83,7 +82,7 @@ jobs:
           exit $RC
 
   publish:
-    name: Publish (canary by default, stable on dispatch)
+    name: Publish to npm + GitHub tag & release
     needs: [tests-js, dev-test, prod-hydration, dev-hydration]
     if: >-
       github.event_name == 'push' && github.ref == 'refs/heads/main' ||
@@ -105,10 +104,13 @@ jobs:
       - name: Resolve channel
         id: channel
         run: |
+          # Every green run on main publishes to `latest` — that is the
+          # contract, and a merge that does not ship is a merge that lied.
+          # `workflow_dispatch` can publish a prerelease channel instead.
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             CHANNEL="${{ inputs.channel }}"
           else
-            CHANNEL=canary
+            CHANNEL=stable
           fi
           echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
           echo "publishing channel: $CHANNEL"

@@ -21,3 +21,6 @@ export { defineAction, getAction, clearActions, validateActionInput, issuesToFie
 
 export { defineMetadata, mergeMetadata, resolveTitle, metadataToHtml } from '@vesk/runtime/src/metadata';
 export type { VeskMetadata, MetadataTitle, OpenGraphMetadata } from '@vesk/runtime/src/metadata';
+
+export { setIn, updateIn, getIn } from '@vesk/runtime/src/nested-update';
+export type { Path } from '@vesk/runtime/src/nested-update';

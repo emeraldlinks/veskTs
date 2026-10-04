@@ -2,24 +2,25 @@
 
 How Vesk ships. The short version: **`latest` only moves when a human says so.**
 
-## The train
+## The contract: a green run on `main` ships
 
 | channel | published | npm dist-tag | version in the repo | when |
 |---|---|---|---|---|
-| `canary` | on every push to `main` that touches `packages/**` | `canary` | unchanged | automatic, after all four test jobs pass |
-| `beta` | manual | `beta` | unchanged | `workflow_dispatch` with `channel: beta` |
-| `stable` | manual | `latest` | bumped | `workflow_dispatch` with `channel: stable` |
+| `stable` | **every** push to `main` that touches `packages/**` | `latest` | bumped | automatic, after all four test jobs pass |
+| `beta` / `canary` | manual | `beta` / `canary` | unchanged | `workflow_dispatch` with the channel picked |
 
 ```bash
-npm i @vesk/runtime            # stable
-npm i @vesk/runtime@canary     # whatever main is right now
+npm i @vesk/runtime            # stable — the last green build on main
 ```
 
-A canary **never** touches `CHANGELOG.md`, the git tag, or the version committed
-in the repo. That is the whole point: before the train, every merge to `main`
-published a new version to `latest`, bumped every `package.json`, and committed
-the bump — 38 releases in 400 commits. Nobody could pin a version, and "stable"
-meant "whatever merged last".
+A merge that does not ship is a merge that lied, so **every successful CI run
+publishes `latest`**, writes `CHANGELOG.md`, tags the release, and bumps the
+committed version. The prerelease channels exist for rehearsing a change before it
+becomes `latest`; they are opt-in, never automatic.
+
+What this keeps from the old pipeline: one version per green run, `latest` moving
+on every merge. What it adds: a generated `CHANGELOG.md` per release, so what
+changed between two versions is readable rather than inferred from git log.
 
 A stable release **promotes a base that canaries already tested**: if canaries
 for `0.2.48` are out, `stable` ships `0.2.48`, not a freshly cut `0.2.49`.
