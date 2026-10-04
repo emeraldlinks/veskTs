@@ -2,6 +2,57 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.50 — 2026-10-04
+
+_No breaking changes._
+
+### Features
+
+- **runtime:** webhook() gains algorithm + signedPayload, so Paystack verifies
+- **runtime:** a typed metadata API, and island data that stops holding the document
+- **extension:** ship Vesk logo as .vsk file icon, package 0.3.15 VSIX
+- **testing:** @vesk/testing — a component harness (no server, no browser)
+- **compiler:** resolve workspace packages through their exports map
+- **server:** an onError seam for production error reporting, with a build id
+- **build:** content-hashed assets with SRI
+- **cli:** vesk migrate — codemods, so breaking changes can fix your code
+
+### Fixes
+
+- **ci:** every green run on main publishes `latest` again
+- **ssr:** For renders its rows on the server
+- **compiler:** plain `const x = track()` took the whole page down on the server
+- **seo:** vesk seo must accept the head style the docs recommend
+
+### Tests
+
+- A5 + A8 abuse matrices — 22 tests, and a diagnostic built then switched off
+- **docs:** verify every docs example — and fix the 24 that were broken
+
+### Docs
+
+- **todo:** close 48 items that were already done, with evidence
+- two stale bug reports closed by measurement, one namespace page added
+- **todo:** correct the For/SSR diagnosis after the obvious fix failed
+- **vesk-doc:** one page per concept, with every example verified
+- **vesk-doc:** a /docs/metadata page for the metadata API and ssr: 'defer'
+- record #6 and #9 as planned-not-shipped, with the shape each needs
+
+### CI
+
+- give the size budget a 2% drift allowance
+- ratchet a client-bundle size budget
+
+### Chores
+
+- refresh test-app/vesk-doc CI tarball pins, collapse a duplicated TODO entry
+
+### Other
+
+- rebuild stale bundle, fix knowledge.ts hallucinations, remove dead semantic.ts
+- remove hallucinated {#if} sigil, fix idle-hydration and security-field claims
+- a train, so `latest` only moves when a human says so
+
 ## 0.2.48 — 2026-09-28
 
 _No breaking changes._
