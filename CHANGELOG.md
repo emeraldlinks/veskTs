@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.51 — 2026-10-05
+
+_No breaking changes._
+
+### Other
+
+- Icon patterns, lucide tree-shaking, TS-parsing and SSR/route bugs found converting a real app
+
 ## 0.2.50 — 2026-10-04
 
 _No breaking changes._
