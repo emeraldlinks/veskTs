@@ -1086,9 +1086,25 @@ export function resolveComponentName(source: string): string | null {
     const ir = generateIR(parse(source), source);
     const defaultComp = ir.components.find((c) => c.defaultExport);
     if (defaultComp) return defaultComp.name;
-    if (ir.components.length > 0) return ir.components[0].name;
     const exportedComp = ir.components.find((c) => c.exported);
     if (exportedComp) return exportedComp.name;
+    // Several components and none marked: the intent is genuinely ambiguous.
+    //
+    // Falling back to `components[0]` is how a helper silently BECAME a
+    // route's layout: a `layout.vsk` declaring `component ChildToggle` above
+    // `component PublicLayout` resolved to ChildToggle, and because
+    // ChildToggle has no `{props.children}` the page body it was handed was
+    // discarded — every nested route came back 200 with an empty body, with no
+    // error anywhere. Report it instead of guessing.
+    if (ir.components.length > 1) {
+      console.warn(
+        `[vesk] ${ir.components.map((c) => c.name).join(', ')}: this file declares several ` +
+          `components and none is the default export, so which one is the route's ` +
+          `page/layout is ambiguous. Add \`export default\` to the one that is — otherwise ` +
+          `a helper declared first silently becomes the layout.`
+      );
+    }
+    if (ir.components.length > 0) return ir.components[ir.components.length - 1].name;
     return null;
   } catch {
     return null;
