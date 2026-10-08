@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.54 — 2026-10-08
+
+_No breaking changes._
+
+### Fixes
+
+- **router:** chain order must be root -> group -> page, or dev SSR renders the wrong page
+
 ## 0.2.53 — 2026-10-08
 
 _No breaking changes._
