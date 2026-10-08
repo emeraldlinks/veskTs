@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.52 — 2026-10-08
+
+_No breaking changes._
+
+### Fixes
+
+- **router:** group layouts in the client chain, and the missing match pathname
+
 ## 0.2.51 — 2026-10-05
 
 _No breaking changes._
