@@ -76,6 +76,21 @@ function isRouteHref(href: string): boolean {
 	return !href.startsWith('#') || href.startsWith('#/');
 }
 
+/**
+ * Adds an active-state class that may contain SEVERAL tokens.
+ *
+ * `classList.add()` takes a list of tokens, not a class string: passing
+ * `"is-active font-bold"` throws `InvalidCharacterError`, because the whole
+ * string is validated as ONE token. That exception is thrown while the link is
+ * being built, so it propagates out of the render and kills SPA routing for the
+ * whole page — which is how a two-token `activeClass` in one app took
+ * navigation down. Splitting the value is what every caller already assumes.
+ */
+function addActiveClass(el: Element, activeClass: string | undefined | null): void {
+	const tokens = String(activeClass || 'active').split(/\s+/);
+	for (const t of tokens) if (t) el.classList.add(t);
+}
+
 export let __isHydrating = false;
 
 export function setIsHydrating(v: boolean): void {
@@ -469,7 +484,7 @@ export function NavLink(
 		const routeHref = routeHrefOf(props.href);
 		const isActive = routeHref === path || (routeHref !== '/' && path.startsWith(routeHref) && (path.length === routeHref.length || path[routeHref.length] === '/' || path[routeHref.length] === '?'));
 		if (isActive) {
-			a.classList.add(props.activeClass || 'active');
+			addActiveClass(a, props.activeClass);
 			if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
 		}
 		return claimed ? document.createDocumentFragment() : a;
@@ -499,7 +514,7 @@ export function NavLink(
 			const routeHref = routeHrefOf(props.href);
 			const isActive = routeHref === path || (routeHref !== '/' && path.startsWith(routeHref) && (path.length === routeHref.length || path[routeHref.length] === '/' || path[routeHref.length] === '?'));
 			if (isActive) {
-				q.classList.add(props.activeClass || 'active');
+				addActiveClass(q, props.activeClass);
 				if (props.ariaCurrent !== false) q.setAttribute('aria-current', 'page');
 			}
 			const claimed = q.parentNode !== null;
@@ -511,7 +526,7 @@ export function NavLink(
 	const routeHref = routeHrefOf(props.href);
 	const isActive = routeHref === path || (routeHref !== '/' && path.startsWith(routeHref) && (path.length === routeHref.length || path[routeHref.length] === '/' || path[routeHref.length] === '?'));
 	if (isActive) {
-		a.classList.add(props.activeClass || 'active');
+		addActiveClass(a, props.activeClass);
 		if (props.ariaCurrent !== false) a.setAttribute('aria-current', 'page');
 	}
 	return a;

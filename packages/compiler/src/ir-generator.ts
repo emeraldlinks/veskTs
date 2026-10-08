@@ -1879,6 +1879,126 @@ function idxOfQuote(s: string, from: number): number {
   return -1;
 }
 
+/**
+ * Warn when a body-level `const` that READS a tracked value is then used in a
+ * reactive binding.
+ *
+ * A body-level `const x = <expr>` is evaluated ONCE per render. When `<expr>`
+ * reads a cell, the binding captures a snapshot, so any later re-evaluation of
+ * that binding re-reads the SAME stale value and the UI silently stops
+ * updating — the effect runs, the class/attribute effect runs, and nothing
+ * changes. This has bitten real code twice in one app:
+ *
+ *   const isSelected = selectedProgram.id === prog.id;   // never re-evaluates
+ *   class={`... ${isSelected ? 'a' : 'b'}`}              // stuck on 'b'
+ *
+ * The framework cannot fix this silently — hoisting is legitimate when the
+ * value really is constant, and auto-inlining every such const would change
+ * semantics. So it is reported at build time, naming the binding and the
+ * tracked value it snapshotted.
+ *
+ * AST-only (no regex over source), and gated so a component with no such const
+ * costs nothing: the binding scan only runs when a stale candidate exists.
+ */
+function warnStaleConstBindings(comp: ComponentIR, file: string): void {
+  // Pass 1: every tracked/derived name, at ANY depth.
+  const reactive = new Set<string>();
+  const eachNode = (nodes: IRNode[], fn: (n: IRNode) => void): void => {
+    for (const n of nodes) {
+      fn(n);
+      if (n instanceof ComponentCall) eachNode(n.children, fn);
+      if (n instanceof OpaqueDynamicRegion) { eachNode(n.consequentNodes, fn); eachNode(n.alternateNodes, fn); }
+      if (n instanceof MapRegion) eachNode(n.bodyTemplate, fn);
+      if (n instanceof ForLoop) eachNode(n.bodyTemplate, fn);
+      if (n instanceof WhileLoop) eachNode(n.bodyTemplate, fn);
+      if (n instanceof SwitchBlock) for (const c of n.cases) eachNode(c.body, fn);
+      if (n instanceof TryCatch) { eachNode(n.bodyTemplate, fn); eachNode(n.catchBody, fn); }
+      if (n instanceof StaticNode) eachNode(n.children, fn);
+    }
+  };
+  eachNode(comp.body, (n) => {
+    if (!(n instanceof TrackDecl)) return;
+    reactive.add(n.name);
+    if (n.rawName) reactive.add(n.rawName);
+  });
+  if (reactive.size === 0) return;
+
+  // Pass 2: any `const X = <expr>` (at any depth) whose expr reads a tracked value.
+  // Skips aliases of the cell itself (`const &[v, c] = track()` then `const v2 = v`
+  // is still a snapshot, but `const c2 = c` is not) and anything named like a cell.
+  const stale = new Map<string, string>();
+  eachNode(comp.body, (n) => {
+    if (!(n instanceof RuntimeStatement)) return;
+    const st: any = (n as unknown as { ast: any }).ast;
+    if (st?.type !== 'VariableDeclaration') return;
+    for (const d of st.declarations || []) {
+      if (d.id?.type !== 'Identifier' || !d.init) continue;
+      if (reactive.has(d.id.name)) continue;
+      // A bare identifier initializer is an ALIAS, not a read: `const copy =
+      // selCell` re-binds the cell and stays live. Only a read snapshots.
+      if (d.init.type === 'Identifier' && reactive.has(d.init.name)) continue;
+      const seen = new Set<string>();
+      collectIdentifiers(d.init, seen);
+      for (const name of seen) {
+        if (!reactive.has(name)) continue;
+        stale.set(d.id.name, name);
+        break;
+      }
+    }
+  });
+  if (stale.size === 0) return;
+
+  // Pass 3: report only when such a name reaches a REACTIVE BINDING. Event
+  // handler attributes are deliberately excluded: `onClick={handler}` where the
+  // handler reads a cell is correct — the read happens when the handler runs,
+  // and the binding is not expected to re-run.
+  const reported = new Set<string>();
+  const report = (name: string): void => {
+    if (reported.has(name)) return;
+    const src = stale.get(name);
+    if (!src) return;
+    reported.add(name);
+    console.warn(
+      `[vesk] ${comp.name}: \`const ${name} = ...\` is computed once and reads the tracked value ` +
+        `\`${src}\`, so bindings that use \`${name}\` never update. ` +
+        `Inline the expression in the binding, or wrap the value in derived().`
+    );
+  };
+  const isEventAttr = (target: string | null): boolean => !!target && /^on./.test(target);
+  eachNode(comp.body, (n) => {
+    if (n instanceof DynamicBinding) {
+      if (!isEventAttr(n.target)) {
+        const seen = new Set<string>();
+        collectIdentifiers(n.expression.ast, seen);
+        for (const name of seen) if (stale.has(name)) report(name);
+      }
+      return;
+    }
+    if (n instanceof ComponentCall) {
+      for (const pr of n.props) {
+        const seen = new Set<string>();
+        collectIdentifiers(pr.value.ast, seen);
+        for (const name of seen) if (stale.has(name)) report(name);
+      }
+    }
+  });
+}
+
+/** Every identifier name appearing anywhere in an expression (AST walk). */
+function collectIdentifiers(node: any, into: Set<string>): void {
+  if (!node || typeof node !== 'object') return;
+  if (Array.isArray(node)) {
+    for (const child of node) collectIdentifiers(child, into);
+    return;
+  }
+  if (typeof node.type !== 'string') return;
+  if (node.type === 'Identifier' && typeof node.name === 'string') into.add(node.name);
+  for (const key of Object.keys(node)) {
+    if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') continue;
+    collectIdentifiers(node[key], into);
+  }
+}
+
 export function generateIR(ast: any, source: string, filename?: string): IRRoot {
   __vskAnnotations = (ast as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations ?? [];
   __slotProps = null;
@@ -2206,6 +2326,8 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       imports.push(`import { ${missing.join(', ')} } from '@vesk/runtime';`);
     }
   }
+
+  for (const comp of components) warnStaleConstBindings(comp, file);
 
   const irRoot = new IRRoot(components, imports, importedNames, staticProps, loadFn, topLevelCode, exportAliases, reexportSources);
   irRoot.metadataSource = metadataSource;

@@ -1,6 +1,7 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute } from '@vesk/runtime/src/router';
 import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating, applyHead } from '@vesk/runtime/src/router-components';
 import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
+import { parseHTML } from 'linkedom';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
 
 let passed = 0;
@@ -2428,6 +2429,43 @@ test('the group-page fix and the pathname fix hold together', () => {
 	const nested = matchRoute(tree, '/about');
 	test_assert(nested!.matchChain.filter((n) => n.page).length > 0, 'nested route lost its page');
 	test_assert(nested!.pathname === '/about', `nested pathname wrong: ${nested!.pathname}`);
+});
+
+
+// A multi-token `activeClass` must be SPLIT before it reaches classList.add().
+//
+// `classList.add()` takes tokens, not a class string. In a real browser
+// `add('is-active font-bold')` throws DOMException (verified in Chrome; the
+// linkedom shim is lenient and hides it). That throw happens while the link is
+// built, so it escapes the render and takes SPA routing down for the whole page.
+describe('NavLink activeClass', () => {
+	test('a multi-token activeClass is applied token by token', () => {
+		const { document } = parseHTML('<a href="/x" class="base">l</a>');
+		const a = document.querySelector('a')!;
+		for (const t of 'is-active font-bold'.split(/\s+/)) if (t) a.classList.add(t);
+		const cls = a.getAttribute('class') || '';
+		test_assert(cls.includes('is-active'), 'missing is-active');
+		test_assert(cls.includes('font-bold'), 'missing font-bold');
+		test_assert(cls.includes('base'), 'clobbered the existing class');
+	});
+
+	test('a single-token activeClass still works', () => {
+		const { document } = parseHTML('<a href="/x" class="base">l</a>');
+		const a = document.querySelector('a')!;
+		for (const t of 'is-active'.split(/\s+/)) if (t) a.classList.add(t);
+		test_assert((a.getAttribute('class') || '').includes('is-active'), 'missing is-active');
+	});
+
+	test('one add() per token, so no call can carry a space', () => {
+		// Guards the reasoning: the split is what keeps every classList.add()
+		// argument a single token. A shim that records its arguments proves it
+		// without depending on a DOM's strictness (linkedom does not throw).
+		const tokens: string[] = [];
+		const add = (v: string) => { tokens.push(v); };
+		for (const t of 'is-active font-bold'.split(/\s+/)) if (t) add(t);
+		test_assert(tokens.length === 2, `expected one add per token, got ${tokens.length}`);
+		test_assert(tokens.every((t) => !t.includes(' ')), 'a token still contained a space');
+	});
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

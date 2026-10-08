@@ -92,6 +92,101 @@ it('calling the cell half of track() as a function FAILS (no silent wrong answer
     threw = true;
   }
   assert(threw, 'calling a cell as a function compiled and rendered — silently wrong is the one outcome not allowed');
+// ─────────────────────────────────────────────────────────────────────────────
+// A body-level `const` that READS a tracked value snapshots it.
+//
+// `const isSelected = selectedProgram.id === prog.id` is evaluated once, so the
+// binding that uses it re-runs against a frozen value and the UI silently stops
+// updating — the effect fires, nothing changes, no error. This bit one real app
+// TWICE (once for the selection itself, once more for a sibling binding), so it
+// is now reported at build time rather than left to be discovered in Chrome.
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Captures console.warn output while compiling `src`. */
+function compileCapturing(src: string): string[] {
+  const seen: string[] = [];
+  const original = console.warn;
+  console.warn = (...args: unknown[]) => { seen.push(args.map(String).join(' ')); };
+  try {
+    generateIR(parse(src), src);
+  } finally {
+    console.warn = original;
+  }
+  return seen;
+}
+
+it('warns when a hoisted const reading a cell feeds a binding', () => {
+  const src = `component P {
+  const &[sel, selCell] = track('a');
+  const isSelected = sel === 'b';
+  <div class={isSelected ? 'on' : 'off'}>{isSelected}</div>
+}`;
+  const seen = compileCapturing(src);
+  const hit = seen.filter((w) => /isSelected/.test(w) && /sel/.test(w));
+  assert(hit.length === 1, `expected 1 warning naming isSelected, got ${JSON.stringify(seen)}`);
+  assert(/never update/.test(hit[0]), 'warning should say the binding never updates');
+  assert(/derived\(\)/.test(hit[0]), 'warning should name the two fixes');
+});
+
+it('warns for a hoisted const inside a loop', () => {
+  // The reported real case: `isSelected` was declared inside `for (const prog ...)`.
+  const src = `component P {
+  const &[sel] = track('a');
+  for (const item of items) {
+    const isSelected = sel === item.id;
+    <div class={isSelected ? 'on' : 'off'} />
+  }
+}`;
+  assert(compileCapturing(src).some((w) => /isSelected/.test(w)), 'expected a warning for the loop-local const');
+});
+
+it('warns for a hoisted const reading a derived cell', () => {
+  const src = `component P {
+  const &[sel] = derived(() => 'a');
+  const isSelected = sel === 'b';
+  <div class={isSelected ? 'on' : 'off'} />
+}`;
+  assert(compileCapturing(src).some((w) => /isSelected/.test(w)), 'expected a warning for a derived source');
+});
+
+it('does NOT warn when the expression is inlined in the binding', () => {
+  const src = `component P {
+  const &[sel] = track('a');
+  <div class={sel === 'b' ? 'on' : 'off'} />
+}`;
+  assert(compileCapturing(src).length === 0, 'inlined binding should be silent');
+});
+
+it('does NOT warn for a genuinely constant const', () => {
+  const src = `component P {
+  const &[sel] = track('a');
+  const label = 'hello';
+  <div class={label}>{label}</div>
+}`;
+  assert(compileCapturing(src).length === 0, 'a constant const is not stale');
+});
+
+it('does NOT warn when a cell is only read by an EVENT HANDLER', () => {
+  // `onClick={handler}` where handler reads a cell is correct — the read happens
+  // when the handler runs. Flagging this produced pure noise (three warnings in
+  // one real app).
+  const src = `component P {
+  const &[step, stepCell] = track(1);
+  const handleNext = () => { step = step + 1; };
+  <button onClick={handleNext}>next</button>
+}`;
+  assert(compileCapturing(src).length === 0, 'event handlers are not bindings and must not warn');
+});
+
+it('does NOT warn for a cell alias', () => {
+  const src = `component P {
+  const &[sel, selCell] = track('a');
+  const copy = selCell;
+  <div class={copy} />
+}`;
+  assert(compileCapturing(src).length === 0, 'aliasing a cell is not stale');
+});
+
 });
 
 it('set(count, …) in a body statement FAILS rather than throwing a null-deref', async () => {
