@@ -1,3 +1,298 @@
+# Handoff: app-driven bug hunt — 1 open bug, everything else fixed and pushed
+
+> **Read this first.**
+>
+> The previous (resolved) handoff starts at line 294. `veskTs` is clean and green except for ONE bug at the
+> bottom, which is diagnosed but **not** fixed. Sections 1–3 are done work (do
+> not re-investigate). Section 4 is the open bug. Section 5 is the environment
+> traps that cost the most time on this attempt — read it before you edit
+> anything.
+
+Everything below was reproduced against a real server and a real browser first.
+`curl` is green for the open bug and `node scripts/test.js` is green; the failure
+is only visible in a browser.
+
+---
+
+## 0. State at handoff
+
+| | |
+|---|---|
+| branch / HEAD | `main` @ `1e0152625` (all fixes pushed to `origin`) |
+| uncommitted | **0** — every experiment reverted |
+| full suite | running at handoff; last clean run **106 files / 3793 assertions / 0 failed** |
+| `academy` | separate repo, pushed to `cofoundr-academy` (force-pushed) |
+| backup | the 29 commits / 483 files that force-push overwrote: `~/cofoundr-academy-backup/repo` (bare git dir) |
+| test app | `academy` — dev `:3230`, prod `:3160` when running |
+
+The prior handoff (SSR request scope + build duration, both resolved) follows
+this one in the file.
+
+---
+
+## 1. Fixed and verified — do not redo
+
+All browser-verified on `vesk dev` **and** `vesk start` unless noted.
+
+### Compiler
+- **Self-closing JSX is not self-closing HTML.** `<div class="dot" />` opened a
+  div and swallowed every following sibling (9 sites in one app, including the
+  login page's "or enter credentials" divider). Explicit end tag now; void
+  elements and `<svg>`/`<math>` subtrees keep `/>`.
+- **Dynamic attribute on a self-closed element** was appended *after* the tag,
+  where the parser drops it — `style={{…}}` served with no `style` at all.
+- **A bare `{props.children}` — the whole body of a layout — was silently
+  dropped** by client codegen (`if (!parentVar) return null`). Nothing below the
+  root layout hydrated. Proof: SSR emits zero `aria-current="page"` (NavLink sets
+  it client-side only); after the fix the live DOM has it.
+- **Route groups could not be the page** for `/`; the match fell through to the
+  page-less root → chain with no page node → 404. Fixed in both matchers.
+- **`matchRoute()` declared `pathname` on `RouteMatch` and never set it**, so
+  `usePathname()` returned `/` everywhere → NavLink active state permanently
+  dead.
+- **Route groups were dropped from the client chain** when a child matched, so
+  `app/(public)/layout.vsk` never applied client-side
+  (`hyd-dbg` showed `layoutNames:["Layout_Index"]`).
+- **Chain order:** dev SSR renders the page only for the LAST chain node, and
+  the group was emitted last → `/about` served the **index** page
+  (`dev /about` 46,961 b "PROFESSIONAL CERTIFICATION" vs prod 17,954 b). Group
+  now precedes its child; both matchers agree on `root → group → page`.
+- **Generic arrow functions couldn't be parsed** (`<T,>(x): T => x`). The
+  vendored acorn-typescript branch is gated on an `options.jsx` flag `parse()`
+  never sets, and the JSX tokenizer emits `jsxName`/`jsxTagEnd` instead of type
+  tokens. Blank the type-param list in place before acorn runs; disambiguate
+  structurally (`>` → params → optional return type → `=>`), **not**
+  `>`-followed-by-`(`, which `<div>(hi)</div>` also matches.
+- **Parameter annotation survived TS stripping only with a default value** (an
+  `AssignmentPattern` keeps the annotation on `.left`). Also fixed
+  `(a?: string = "x")`.
+- **A parse failure in an imported module was silent** → raw source substituted
+  → `Unexpected token ':'` blamed on an unrelated module. Now `V0901` located.
+- **`@vesk/*` bypassed the module loader's tsconfig-alias path** and was parsed
+  with the `.vsk` grammar; a module importing BOTH a `@vesk/*` package and a
+  relative module lost every export. Now loaded natively.
+- **A route file declaring several components with no default export** resolved
+  via `components[0]` — so a helper declared above the layout silently became
+  the layout (`_layoutCompList = ["RootLayout","ChildToggle"]`), the page body
+  was discarded, and every route returned **200 with an empty body**. Resolution
+  order is now *exactly* as before (default → first → exported); what was added
+  is a build-time **warning** on ambiguity. **Do not change the order** — see §5.
+- A component call in expression position (`{Terminal({size:14})}`,
+  `{cond ? Terminal({…}) : null}`) is now a real `ComponentCall`; a
+  component-valued tag (`const Icon = item.icon; <Icon/>`) resolves.
+
+### Runtime
+- **A multi-token `activeClass` threw `DOMException`** (verified in Chrome) and
+  killed SPA routing for the whole page — `classList.add()` takes tokens, not a
+  class string. Now split.
+
+### Warnings added
+- **Stale `const` reading a tracked value** freezes every binding that uses it
+  (`const isSelected = a.id === b.id` → evaluated once; the effect re-runs but
+  re-reads a stale value). Reported at build time. Deliberately silent for event
+  handlers that read a cell, and for cell aliasing — the first cut warned on
+  those and produced three noise warnings in one file.
+
+### Build
+- `vesk build --strict` now fails on an unresolvable chunk import instead of
+  exiting 0 with dangling bindings.
+- **lucide-vesk tree-shakes:** `@__PURE__` + `legalComments:'none'`. An
+  icon-bearing chunk went 866,126 b / 1,594 icon modules → 18,220 b / 2.
+
+---
+
+## 2. The open bug — child components under a layout never re-render
+
+### Symptom
+A component with `track()` + a button, rendered inside a layout, **renders but
+is inert**: click fires nothing, state never re-renders. Interactivity that
+only exists after leaving and re-entering the route "works", because a route
+change rebuilds it.
+
+### Minimal repro (`tmp/o`, three files + a group layout)
+
+```vsk
+// app/eff.vsk
+component EffectIsland() { effect(() => {}); <span class="hidden" /> }
+export default EffectIsland;
+
+// app/toggle.vsk
+component ChildToggle {
+  const &[c, cCell] = track(false);
+  <div><span class="cn">{c ? 'CHILD-ON' : 'CHILD-OFF'}</span>
+       <button class="cb" onClick={() => { c = !c; }}>cb</button></div>
+}
+export default ChildToggle;
+
+// app/(public)/layout.vsk
+import ChildToggle from '../toggle.vsk';
+component PublicLayout(props: { children?: any }) {
+  <div class="gl"><ChildToggle /><main class="slot">{props.children}</main></div>
+}
+export default PublicLayout;
+
+// app/layout.vsk   <-- THE VARIABLE PART
+import EffectIsland from './eff.vsk';
+component RootLayout(props: { children?: any }) {
+  <EffectIsland />        // sibling BEFORE the slot  => BROKEN
+  {props.children}
+}
+```
+
+Reverse the last two lines and it works. It is **order-dependent**:
+
+| root layout | result |
+|---|---|
+| `<EffectIsland />` then `{props.children}` | ❌ inert |
+| `{props.children}` then `<EffectIsland />` | ✅ works |
+
+### Measured facts (do not re-derive these)
+1. Both components **do** hydrate — `console.log` at the top of each body
+   prints `ISLAND-RENDER | CHILD-RENDER`.
+2. The click handler **never runs** — a `console.log` in `onClick` prints
+   nothing. So it is **not** an orphaned effect and **not** a missing flush.
+3. Live DOM: `.cb` exists, `typeof .cb.__evh_click === "undefined"`,
+   exactly one `.cb`, and `islandInDom === false` (the sibling's own output is
+   gone too).
+4. **The emitted child hydrator DOES the right thing.** From the built chunk:
+   ```js
+   const $n032 = $n020.nextElement("button", 0);        // claims the SSR button
+   $n032.__evh_click = () => set(cCell, !get(cCell));   // handler attached
+   ```
+   So the node that receives the handler **is not the node in the document**.
+
+### Current best hypothesis
+The child's subtree is hydrated correctly and then **replaced by a fresh copy of
+the SSR markup after hydration**, which drops `__evh_click` and all reactive
+wiring. Something re-inserts `#root`'s children after the page hydrates. This
+also explains `islandInDom:false` — the same replacement wipes the sibling's
+output, and the layout's `return __pendingChild || $mount` already discards
+`$mount`.
+
+**The one measurement that would settle it** — never obtained: log, in document
+order, every node attached to or removed from `#root` *after* the child hydrates.
+That names the code doing the replacement.
+
+### Things already ruled out — do not retry these
+- **Orphaned effect** — ruled out by fact 2 (no click log at all).
+- **Block attachment** — `runInBlockWindow` (`runtime/src/router.ts:704`) keeps
+  one active root block for the whole synchronous render; both effects land in
+  it regardless of order.
+- **Spent walker budget / positional claiming** — the change reached the bundle
+  (verified in the emitted chunk) and the child was still inert.
+- **`createLayoutSlot` for the bare slot** — a **no-op**: it returns the *same*
+  walker when `findSlotRange` finds nothing (markerless mode), so it cannot fix
+  a budget problem.
+- **Emitting top-level slots before siblings** — also verified present in the
+  emitted chunk; child still inert.
+
+### Where to look
+- `packages/compiler/src/client-codegen.ts` — the bare-slot branch
+  (`if (!parentVar)`, emits `__pendingChild = props.children(__hydrate)` then
+  `return __pendingChild || $mount`), and `maybeReplace`'s adoption branch
+  (`if (__sr && __sr.parentNode) … replaceChild` — a claim **miss** silently
+  drops the rendered node).
+- `packages/runtime/src/hydrate.ts` — `StructuralWalker.claimAt` / `claimOnly` /
+  `subWalker`, and `auditHydration`'s orphan sweep.
+- `packages/runtime/src/router.ts:1208+` — `renderLayoutChain`, which passes the
+  *same* walker down to each layout rather than creating a scoped one.
+
+---
+
+## 3. What is verified working in `academy`
+
+- All routes 200, correct content, **no index flash** (confirmed correct page from
+  the first paint at 16 ms with a `MutationObserver`).
+- SPA nav `SAME_DOC`; hydration live (`aria-current="page"` present live, absent
+  in SSR); icons render as real `<svg>`; no console errors.
+- `/programs` selection moves (`Digital Marketing` → `Cybersecurity`) — the
+  hoisted-`const` fix, applied and browser-verified.
+- Only non-2xx request on either server is `404 favicon.ico`.
+
+Verification scripts used live in `/tmp` (wiped between sessions) — recreate
+them. The shape that matters: `puppeteer-core` from the repo's `node_modules`,
+Chrome at
+`$HOME/.cache/puppeteer/chrome/linux-154.0.8037.57/chrome-linux64/chrome`,
+`--no-sandbox --disable-dev-shm-usage --disable-gpu`, `timeout: 120000`.
+
+---
+
+## 4. How to run things
+
+```bash
+npx tsx packages/cli/src/build-packages.ts      # REQUIRED after any packages/ edit
+node scripts/test.js                             # full suite
+npx tsx packages/compiler/src/<file>.test.ts     # one suite
+npm run typecheck
+```
+
+Editing an app against the framework needs a repack — **skip this and you test
+stale code** (see §5):
+
+```bash
+node scripts/refresh-testapp-deps.mjs academy   # repack + reinstall into the app
+cd academy && npx vesk build
+```
+
+---
+
+## 5. Environment traps that cost the most time — read before editing
+
+1. **Stale builds are the single biggest hazard.** Four separate times a change
+   was made, `build-packages` ran, the app was rebuilt — and the served bundle
+   did **not** contain it. One time even `require.resolve('@vesk/compiler/src/…')`
+   pointed at the updated `dist` while the emitted chunk was still old.
+   **Always grep the emitted output** for a marker unique to your change
+   (e.g. `grep -c 'createLayoutSlot' dist/static/client.*.js`) and check the
+   hash the page actually loads:
+   ```bash
+   C=$(curl -s $URL/about | grep -o 'client\.[a-z0-9]*\.js' | head -1)
+   curl -s "$URL/_vesk/static/$C" | grep -c '<your-marker>'
+   ```
+   Never trust "I rebuilt" — trust the artifact.
+
+2. **Do not change `resolveComponentName`'s lookup order.** It is
+   `default export → first component → any export`, and that order is load-bearing
+   twice over: `test-app/app/page.vsk` holds module-level markup (implicit first
+   component `Home`) alongside `Throws, Appx, Throw, Appxx`. Checking `exported`
+   first swapped the page for `Appx`; preferring `last` swapped it for `Appxx`.
+   Both cost real failures. The fix for ambiguous files is the **warning**, and
+   `export default` in the app.
+
+3. **A 200 response is not proof a page rendered.** The wrong-layout bug
+   returned **200 with an empty body** and nothing in any log. Assert on rendered
+   content (an `h1`, a non-zero `#root` length), not on status. One weak
+   assertion here reported "ALL PASS" on an empty page.
+
+4. **Chrome needs a long launch timeout** on this 2-vCPU box when the suite is
+   also running — `timeout: 120000`, `protocolTimeout: 180000`. The 30 s default
+   fails with `Timed out waiting for the WS endpoint`.
+
+5. **The machine overheats.** This session ran the suite and several app servers
+   concurrently; kill stragglers between runs
+   (`pkill -f "vesk start"`, `pkill -f chrome-linux64`, `pkill -f scripts/test.js`)
+   and avoid building while Chrome is driving pages.
+
+6. **`node scripts/test.js` writes to `/tmp`, which gets wiped.** Write the log
+   somewhere durable (`tmp/logs/suite.log`) or it disappears before you read it.
+
+---
+
+## 6. Suggested next steps for the open bug
+
+1. Establish a **verified** edit→build→serve loop using the marker-grep above
+   before changing behaviour. Four attempts were invalidated by stale builds.
+2. Instrument the post-hydration replacement: log every `appendChild`/`remove`/
+   `replaceChild` on `#root` and its children, in document order, after the
+   child hydrates. That single trace names the culprit.
+3. Only then change code. Given §5.1, prove the change is in the served bundle
+   **and** re-run the minimal repro from §2 before touching `academy`.
+
+Two claims in this session were wrong and were corrected in git history: a
+"static sibling dropped next to a bare slot" gap (hydrate mode deliberately
+skips static subtrees SSR already rendered) and an earlier "child state never
+re-renders" bug that could not be reproduced in three layouts. Keep verifying
+through the real pipeline before writing anything into a commit message.
 # SSR request-scope handoff (resolved) + build duration (8x faster)
 
 > Two work items from one session. The first is done and merged; the second is
