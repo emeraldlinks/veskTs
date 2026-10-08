@@ -1086,30 +1086,31 @@ export function resolveComponentName(source: string): string | null {
     const ir = generateIR(parse(source), source);
     const defaultComp = ir.components.find((c) => c.defaultExport);
     if (defaultComp) return defaultComp.name;
-    const exportedComp = ir.components.find((c) => c.exported);
-    if (exportedComp) return exportedComp.name;
-    // Several components and none marked: the intent is genuinely ambiguous.
-    //
-    // Falling back to `components[0]` is how a helper silently BECAME a
-    // route's layout: a `layout.vsk` declaring `component ChildToggle` above
-    // `component PublicLayout` resolved to ChildToggle, and because
-    // ChildToggle has no `{props.children}` the page body it was handed was
-    // discarded — every nested route came back 200 with an empty body, with no
-    // error anywhere. Report it instead of guessing.
+    // A file with several components and no default export is AMBIGUOUS: the
+    // resolution below picks the first one, which is a guess. Report it rather
+    // than changing the guess — switching to "last wins" fixed one app and broke
+    // another, which is exactly what an arbitrary rule does.
     if (ir.components.length > 1) {
       console.warn(
         `[vesk] ${ir.components.map((c) => c.name).join(', ')}: this file declares several ` +
           `components and none is the default export, so which one is the route's ` +
-          `page/layout is ambiguous. Add \`export default\` to the one that is — otherwise ` +
-          `a helper declared first silently becomes the layout.`
+          `page/layout is a guess. Add \`export default\` to the one that is.`
       );
     }
-    if (ir.components.length > 0) return ir.components[ir.components.length - 1].name;
+    // FIRST, then an export. The order is load-bearing: a route file may hold
+    // module-level markup (which becomes an implicit first component, e.g.
+    // `Home`) alongside several exported components used for abuse testing.
+    // Checking `exported` before the first component silently swapped the page
+    // for one of those exports and the route rendered the wrong component.
+    if (ir.components.length > 0) return ir.components[0].name;
+    const exportedComp = ir.components.find((c) => c.exported);
+    if (exportedComp) return exportedComp.name;
     return null;
   } catch {
     return null;
   }
 }
+
 
 let __cachedRuntimeModule: Record<string, unknown> | null = null;
 
