@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.56 — 2026-10-08
+
+_No breaking changes._
+
+### Fixes
+
+- **router:** multi-token activeClass threw DOMException; warn on stale const bindings
+
 ## 0.2.55 — 2026-10-08
 
 _No breaking changes._
