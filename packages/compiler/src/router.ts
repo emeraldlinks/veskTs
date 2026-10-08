@@ -454,17 +454,25 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
   function matchNodes(nodes: RouteNode[], partIndex: number): boolean {
     for (const node of nodes) {
       if (node.isGroup) {
-        if (matchNodes(node.children, partIndex)) {
-          if (node.layout) pushWithStandalone(node);
-          return true;
-        }
+        // The group goes into the chain BEFORE its matched child, so the chain
+        // reads root -> group -> page, exactly like the client's
+        // `flattenLayoutChain`. Order is load-bearing: the dev SSR renders the
+        // page only for the LAST chain node, so with the group emitted last,
+        // `/about` resolved to the group's own page.vsk — the index — and dev
+        // served the home page for every nested route. That is why SSR looked
+        // right in `vesk start` (which routes from the build manifest) and
+        // wrong in `vesk dev`, and why the client had to correct the page after
+        // hydration.
+        const marker = chain.length;
+        if (node.layout || node.page) pushWithStandalone(node);
+        if (matchNodes(node.children, partIndex)) return true;
+        chain.length = marker;
         // A group can also BE the page at this position: `app/(public)/page.vsk`
         // serves `/`. The recursion above only ever considers the group's
         // CHILDREN, and at `/` none of them match (they all carry a path
-        // segment), so the group was skipped entirely and the match fell
-        // through to the page-less root node — which produced a 404 for the
-        // zero-segment path while every nested route (`/about`, `/login`)
-        // matched fine.
+        // segment), so without this the group was skipped and the match fell
+        // through to the page-less root node — a 404 for the zero-segment path
+        // while every nested route matched fine.
         //
         // A group is transparent for PREFIX matching, and it has to be
         // transparent here too: a group with no page at this position is not a

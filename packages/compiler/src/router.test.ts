@@ -490,6 +490,54 @@ test('a group with NO page does not match / (still a 404)', () => {
 	} finally { cleanup(tmp); }
 });
 
+
+console.log('chain order is root -> group -> page\n');
+
+test('the page is the LAST node in the chain (dev SSR depends on it)', () => {
+	// `dev-server.ts` renders the page only for `i === chain.length - 1`. When
+	// the group was emitted last, `/about` resolved to the GROUP's own
+	// page.vsk — the index — so `vesk dev` served the home page for every
+	// nested route while `vesk start` (which routes from the build manifest)
+	// served the right one. The client then corrected the page after hydration,
+	// which read as "the index flashes first".
+	const tmp = createFixture({
+		'app/layout.vsk': 'component layout { <div>{props.children}</div> }',
+		'app/(public)/layout.vsk': 'component layout { <div>{props.children}</div> }',
+		'app/(public)/page.vsk': 'component page { <h1>HOME</h1> }',
+		'app/(public)/about/page.vsk': 'component page { <h1>About</h1> }',
+	});
+	try {
+		const tree = scanRoutes(join(tmp, 'app'));
+		const chain = (u: string) => matchUrl(tree, u).nodes;
+		const last = chain('/about')[chain('/about').length - 1];
+		expect(last.fullPath).toEqual('/about');
+		expect(last.page).toEqual('Page_Public_about');
+		// The group precedes its matched child, and still carries its layout.
+		const group = chain('/about').find((n) => n.isGroup);
+		expect(group !== undefined).toEqual(true);
+		expect(group.layout).toEqual('Layout_Public');
+		// For `/` the group IS last (it owns the page there).
+		expect(chain('/')[chain('/').length - 1].isGroup).toEqual(true);
+	} finally { cleanup(tmp); }
+});
+
+test('a group that does not match leaves no trace in the chain', () => {
+	const tmp = createFixture({
+		'app/layout.vsk': 'component layout { <div>{props.children}</div> }',
+		'app/(admin)/layout.vsk': 'component layout { <div>{props.children}</div> }',
+		'app/(public)/layout.vsk': 'component layout { <div>{props.children}</div> }',
+		'app/(public)/page.vsk': 'component page { <h1>HOME</h1> }',
+		'app/(public)/about/page.vsk': 'component page { <h1>About</h1> }',
+	});
+	try {
+		const tree = scanRoutes(join(tmp, 'app'));
+		const names = (u: string) => matchUrl(tree, u).nodes.filter((n) => n.page).map((n) => n.page);
+		expect(names('/about')).toContain('Page_Public_about');
+		// The empty (admin) group must not appear for a (public) route.
+		expect(names('/about')).not.toContain('Page_Admin');
+	} finally { cleanup(tmp); }
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
 console.log('All router tests passed!');
