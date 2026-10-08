@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.55 — 2026-10-08
+
+_No breaking changes._
+
+### Tests
+
+- **codegen:** correct a wrong claim about dropped siblings next to a bare slot
+
 ## 0.2.54 — 2026-10-08
 
 _No breaking changes._
