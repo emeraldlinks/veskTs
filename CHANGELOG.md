@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.53 — 2026-10-08
+
+_No breaking changes._
+
+### Fixes
+
+- **codegen:** a top-level {props.children} in a layout was silently dropped
+
 ## 0.2.52 — 2026-10-08
 
 _No breaking changes._
