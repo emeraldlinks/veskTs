@@ -2404,6 +2404,32 @@ test('a group page does not shadow a root page', () => {
 	test_assert(pages[pages.length - 1] === 'PAGE_ROOT', `root page was shadowed: ${JSON.stringify(pages)}`);
 });
 
+test('the match reports the pathname it was computed FOR', () => {
+	// `matchRoute` declares `pathname` on RouteMatch but never populated it, so
+	// `usePathname()` read `pathname || ''` and every route reported `/`. That
+	// made NavLink's active class and `aria-current` permanently inert on every
+	// page — one missing field, three symptoms.
+	const tree = groupTree();
+	for (const url of ['/', '/about']) {
+		const m = matchRoute(tree, url);
+		test_assert(m !== null, `expected a match for ${url}`);
+		test_assert(m!.pathname === url, `expected pathname ${JSON.stringify(url)}, got ${JSON.stringify(m!.pathname)}`);
+	}
+});
+
+test('the group-page fix and the pathname fix hold together', () => {
+	// The two were reported as separate bugs; both are in the matcher, and the
+	// second is invisible unless the first already works.
+	const tree = groupTree();
+	const root = matchRoute(tree, '/');
+	test_assert(root!.matchChain.filter((n) => n.page).length > 0, 'root 404: no page node');
+	test_assert(root!.pathname === '/', 'root pathname wrong');
+
+	const nested = matchRoute(tree, '/about');
+	test_assert(nested!.matchChain.filter((n) => n.page).length > 0, 'nested route lost its page');
+	test_assert(nested!.pathname === '/about', `nested pathname wrong: ${nested!.pathname}`);
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
 console.log('All runtime router tests passed!');

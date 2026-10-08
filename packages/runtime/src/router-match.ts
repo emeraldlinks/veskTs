@@ -24,6 +24,12 @@ export interface RouteNode {
 export interface RouteMatch {
 	matchChain: RouteNode[];
 	params: Record<string, string>;
+	/**
+	 * The pathname this match was computed FOR — not the pattern that matched.
+	 * `usePathname()` and `NavLink`'s active state read it, so leaving it unset
+	 * made every route report `/` (via `pathname || ''`), which is what made
+	 * NavLink highlighting permanently inert.
+	 */
 	pathname?: string;
 }
 
@@ -111,9 +117,27 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 	for (let i = 0; i < tree.length; i++) {
 		const node = tree[i];
 		if (node.isGroup) {
+			// A group contributes its LAYOUT to every route beneath it, so it has
+			// to be in the chain even when one of its children is the match.
+			// Dropping it meant `app/(public)/layout.vsk` never applied on the
+			// client — the framework's own hyd-dbg output showed
+			// `layoutNames:["Layout_Index"]` for `/about`, i.e. the root layout
+			// only, and the page rendered outside its shell. SSR kept the group
+			// (the server routes from the build manifest), which is why the page
+			// looked right until the client took over.
+			//
+			// A group consumes no path segment, so children are matched against
+			// the SAME parts.
+			const contributes = !!(node.layout || node.page);
+			const marker = result.length;
+			if (contributes) result.push(node);
 			const before = result.length;
 			flattenLayoutChain(node.children || [], pathParts, result);
-			if (result.length > before) continue;
+			if (result.length > before) break;
+			// No child matched at this position; if the group is not itself the
+			// page here, it contributes nothing and must not stay in the chain.
+			// (If it IS the page, the push above is the match.)
+			if (contributes) result.length = marker;
 			// A group can BE the page at this position: `app/(public)/page.vsk`
 			// serves `/`. Recursing into its children was the only thing this
 			// branch did, and at `/` none of them match (each carries a path
@@ -199,7 +223,7 @@ export function matchRoute(tree: RouteNode[], pathname: string): RouteMatch | nu
 		partIdx += segCount;
 	}
 
-	return { matchChain, params };
+	return { matchChain, params, pathname };
 }
 
 export function buildTreeFromMap(

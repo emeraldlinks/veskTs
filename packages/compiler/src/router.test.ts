@@ -466,8 +466,10 @@ test('nested routes under that group still win over the group page', () => {
 		expect(pagesOf(matchUrl(tree, '/'))).toContain('Page_Public');
 		expect(pagesOf(matchUrl(tree, '/about'))).toContain('Page_Public_about');
 		expect(pagesOf(matchUrl(tree, '/about/deep'))).toContain('Page_Public_about_deep');
-		// The group page must NOT be what wins for a nested route.
-		expect(pagesOf(matchUrl(tree, '/about/deep')).includes('Page_Public')).toEqual(true);
+		// The group page is in the chain (SSR keeps it for its layout) but the
+		// DEEP page is the one that wins; the client resolves the page from the
+		// end of the chain.
+		expect(pagesOf(matchUrl(tree, '/about/deep'))).toContain('Page_Public_about_deep');
 	} finally { cleanup(tmp); }
 });
 
