@@ -2,6 +2,19 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.57 — 2026-10-08
+
+_No breaking changes._
+
+### Fixes
+
+- **router:** restore resolveComponentName lookup order; warn on ambiguity instead
+- **codegen:** a route file with several components silently resolved to the wrong one
+
+### Docs
+
+- **todo:** record the app-driven bug hunt and the two corrections
+
 ## 0.2.56 — 2026-10-08
 
 _No breaking changes._
