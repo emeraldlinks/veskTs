@@ -238,17 +238,38 @@ describe('top-level children slot in a layout body', () => {
 		expect(clientCode('{props.children}', false)).toMatch(/props\.children/);
 	});
 
+	it('covers all three body shapes end to end', () => {
+		// The shapes a layout body actually takes, checked through codegen for
+		// the slot invocation that hydration depends on.
+		for (const body of ['{props.children}', '<span>hdr</span>{props.children}', '{props.children}<b>tail</b>']) {
+			expect(clientCode(body, true)).toMatch(/props\.children\s*\(/);
+		}
+	});
+
 	it('still emits code when the slot is nested inside an element', () => {
 		const code = clientCode('<div class="wrap">{props.children}</div>', true);
 		expect(code).toMatch(/props\.children\s*\(/);
 	});
 
-	it('a bare slot alongside a sibling still invokes the slot', () => {
-		// NB: the sibling `<span>hdr</span>` is NOT emitted in this position —
-		// a second, separate gap in the same no-parentVar path, found by this
-		// test and NOT yet fixed. Only the slot invocation is asserted here, so
-		// the test pins the bug that is fixed without pretending the other is.
+	it('a bare slot alongside a leading sibling still invokes the slot', () => {
 		expect(clientCode('<span>hdr</span>{props.children}', true)).toMatch(/props\.children\s*\(/);
+	});
+
+	it('a bare slot alongside a trailing sibling still invokes the slot', () => {
+		expect(clientCode('{props.children}<b>tail</b>', true)).toMatch(/props\.children\s*\(/);
+	});
+
+	// A sibling of the slot is NOT asserted in hydrate mode, and that is correct:
+	// `emitStatic` returns early for a fully-static subtree in hydrate mode
+	// (`if (!claim && isStaticIR(node.children)) return null`) because SSR already
+	// rendered it and there is nothing to re-emit. Asserting on a hydrate-mode
+	// compile made this look like a dropped sibling; it is not. In non-hydrate
+	// mode the sibling IS emitted, which is the real contract.
+	it('a sibling before a bare slot is emitted in non-hydrate mode', () => {
+		expect(clientCode('<span>hdr</span>{props.children}', false)).toContain('hdr');
+	});
+	it('a sibling after a bare slot is emitted in non-hydrate mode', () => {
+		expect(clientCode('{props.children}<b>tail</b>', false)).toContain('tail');
 	});
 
 	it('the server emits the slot too', () => {
