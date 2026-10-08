@@ -26,6 +26,7 @@ function expect(value) {
     toBe(e) { if (value !== e) throw new Error(`Expected ${JSON.stringify(e)}, got ${JSON.stringify(value)}`); },
     toBeTruthy() { if (!value) throw new Error(`Expected truthy, got ${JSON.stringify(value)}`); },
     toContain(s) { if (!String(value).includes(s)) throw new Error(`Expected to contain ${JSON.stringify(s)} in ${JSON.stringify(value)}`); },
+    toMatch(re) { if (!re.test(String(value))) throw new Error(`Expected to match ${re} in ${JSON.stringify(String(value).slice(0, 300))}`); },
     get not() {
       return {
         toContain(s) { if (String(value).includes(s)) throw new Error(`Expected NOT to contain ${JSON.stringify(s)}`); },
@@ -202,6 +203,58 @@ component App() { return <Child trigger={<Button label="Go"/>} />; }
 `;
     expect(render(src, 'App', {})).toBe('<div><button>Go</button></div>');
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// A TOP-LEVEL `{props.children}` — the whole body of a layout is one slot.
+//
+// This was dropped SILENTLY by the client codegen: the SlotNode branch opened
+// with `if (!parentVar) return null`, and a bare slot has no parent element to
+// hang off. No code was emitted at all, so the children hydrator was never
+// invoked, nothing below the layout hydrated, and links fell back to full page
+// loads. The layout still rendered its static parts, so it looked alive and
+// behaved dead.
+//
+// Only a layout written with a BARE `{props.children}` as its entire body hits
+// this — `{props.children}` nested inside an element takes the normal path.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('top-level children slot in a layout body', () => {
+	const clientCode = (layoutBody: string, hydrate: boolean): string =>
+		compileClient(`component L(props: { children?: any }) { ${layoutBody} }`, 'L', { hydrate });
+
+	it('emits code for a bare {props.children}', () => {
+		const code = clientCode('{props.children}', true);
+		// The regression: zero occurrences, because the node was dropped.
+		expect(code).toContain('props.children');
+	});
+
+	it('INVOKES the children hydrator (not merely reads it)', () => {
+		// Reading it is not enough — a bare slot must CALL it, or the nested
+		// layout/page never renders.
+		expect(clientCode('{props.children}', true)).toMatch(/props\.children\s*\(/);
+	});
+
+	it('invokes it in non-hydrate mode too', () => {
+		expect(clientCode('{props.children}', false)).toMatch(/props\.children/);
+	});
+
+	it('still emits code when the slot is nested inside an element', () => {
+		const code = clientCode('<div class="wrap">{props.children}</div>', true);
+		expect(code).toMatch(/props\.children\s*\(/);
+	});
+
+	it('a bare slot alongside a sibling still invokes the slot', () => {
+		// NB: the sibling `<span>hdr</span>` is NOT emitted in this position —
+		// a second, separate gap in the same no-parentVar path, found by this
+		// test and NOT yet fixed. Only the slot invocation is asserted here, so
+		// the test pins the bug that is fixed without pretending the other is.
+		expect(clientCode('<span>hdr</span>{props.children}', true)).toMatch(/props\.children\s*\(/);
+	});
+
+	it('the server emits the slot too', () => {
+		const ir = compileFile('component L(props: { children?: any }) { {props.children} }', {});
+		expect(JSON.stringify(ir.ir.components[0].body)).toContain('{}');
+	});
 });
 
 console.log(`\n${'='.repeat(50)}`);

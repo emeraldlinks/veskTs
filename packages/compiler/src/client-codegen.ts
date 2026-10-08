@@ -545,7 +545,29 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
     return null;
   }
   if (node instanceof SlotNode) {
-    if (!parentVar) return null;
+    if (!parentVar) {
+      // A TOP-LEVEL `{props.children}` — the whole body of a layout is one
+      // slot, with no element to hang it off. This used to `return null`
+      // silently: no code was emitted at all, so the children hydrator was
+      // never invoked, nothing below the layout ever hydrated, and every link
+      // fell back to a full page load. The layout rendered (its static parts),
+      // which is why it looked alive and behaved dead.
+      //
+      // The children ARE this layout's output, so they take the component's
+      // return value rather than being appended to a parent that does not exist.
+      if (ctx.hydrate) {
+        ctx.push(`if (props.children !== undefined && props.children !== null) {`);
+        ctx.push(`  if (typeof props.children === 'function') {`);
+        ctx.push(`    __pendingChild = props.children(__hydrate);`);
+        ctx.push(`  } else if (__hydrate && __hydrate.root) {`);
+        ctx.push(`    __hydrate.root.appendChild(toDomNode(props.children));`);
+        ctx.push(`  }`);
+        ctx.push(`}`);
+      } else {
+        ctx.push(`if (props.children !== undefined && props.children !== null) __pendingChild = toDomNode(props.children);`);
+      }
+      return null;
+    }
     if (ctx.hydrate) {
       ctx.push(`if (props.children !== undefined && props.children !== null) {`);
       ctx.push(`  if (typeof props.children === 'function') {`);
