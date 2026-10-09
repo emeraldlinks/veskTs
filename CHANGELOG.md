@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.58 — 2026-10-09
+
+_No breaking changes._
+
+### Fixes
+
+- **codegen:** a claim-less component left its SSR root ownerless, and the next claim detached it
+
+### Docs
+
+- handoff for the app-driven bug hunt
+
 ## 0.2.57 — 2026-10-08
 
 _No breaking changes._
