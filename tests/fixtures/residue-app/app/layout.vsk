@@ -1,0 +1,17 @@
+import { NavLink } from '@vesk/runtime/router';
+import ResidueIsland from './island.vsk';
+
+// The reported shape verbatim: a no-claim component sibling BEFORE a bare
+// `{props.children}` slot — the entire body of the layout is the slot.
+component RootLayout(props: { children?: any }) {
+	<Head>
+		<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+	</Head>
+	<ResidueIsland />
+	<nav class="nav">
+		<NavLink href="/">home</NavLink>
+		<NavLink href="/other">other</NavLink>
+	</nav>
+	{props.children}
+}
+export default RootLayout;

@@ -1,0 +1,11 @@
+// The interactive sibling that follows ResidueIsland. Against the unfixed
+// runtime this rendered but was completely inert: the handler was attached to a
+// node that never reached the document.
+component ResidueCounter() {
+	const &[count, countCell] = track(0)
+	<div class="residue-counter">
+		<span class="rcount">count:{count}</span>
+		<button class="rbtn" onClick={() => { count = count + 1 }}>bump</button>
+	</div>
+}
+export default ResidueCounter;

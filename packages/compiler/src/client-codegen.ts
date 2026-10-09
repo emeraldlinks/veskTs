@@ -2256,6 +2256,42 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
     topBudget = regionBudgetVar(ctx, 0, undefined,
       `(typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)`);
   }
+  if (ctx.hydrate) {
+    // A component whose body emits NO claim still rendered SSR content: hydrate
+    // mode never re-creates a static subtree, so that content stays in the DOM
+    // with nobody to own it. The NEXT sibling's claim then landed on it, read
+    // the tag mismatch as a divergence, consumed the slot and DETACHED it —
+    // handing back a fresh element that never reached the document, so this
+    // component rendered but was inert. A bare `effect()` plus static markup is
+    // exactly this case: not "fully static" (so it gets no claimOnly stub from
+    // the component map below) and yet it claims nothing.
+    //
+    // The component claims its OWN slots instead, which is what the fully-static
+    // stub already does. Counting is exact here because the guard below admits
+    // only top-level static/text/runtime nodes: each StaticNode is one server
+    // element, and fragments are flattened into the node list by the IR
+    // generator rather than wrapped. If anything in the body could claim, or
+    // anything is a region/loop/call whose slot count depends on which branch
+    // ran, no prelude is emitted — the callee stays exactly as it was.
+    //
+    // This is compile-time only: no runtime walker change and no per-call-site
+    // marker, so it costs nothing in the client bundle.
+    const bodyNodes = comp.body.filter((node) => !(node instanceof TrackDecl));
+    // Text is never a walker slot: a top-level text binding and a bare text
+    // statement both render into an element's interior, so they neither claim
+    // nor occupy a top-level slot.
+    const slotless = (node: IRNode): boolean =>
+      node instanceof StaticNode || node instanceof TextNode || node instanceof RuntimeStatement
+      || (node instanceof DynamicBinding && node.kind === 'text');
+    const claimless = bodyNodes.every((node) => slotless(node) && !claimsWalkerNode(ctx, node));
+    if (claimless) {
+      const slots = bodyNodes.filter((node) => node instanceof StaticNode).length;
+      for (let i = 0; i < slots; i++) {
+        ctx.push(indent(`__hydrate.claimOnly(undefined, ${i === 0 && topBudget ? topBudget : '0'});`));
+        if (i === 0 && topBudget) ctx.push(indent(`${topBudget} = 0;`));
+      }
+    }
+  }
   for (const node of comp.body) {
     if (node instanceof TrackDecl) continue;
     const v = emitNode(ctx, node, tracked, null, undefined, '__components', topPendingSkip, topBudget || undefined);
@@ -2293,7 +2329,31 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
     ctx.push(indent(`if ($mount === null) $mount = document.createDocumentFragment();`));
     ctx.push(indent(`return __pendingChild || $mount;`));
   } else {
-    ctx.push(indent(`return __pendingChild || $root;`));
+    // A bare `{props.children}` slot is this layout's output, but the layout may
+    // ALSO have siblings of its own (a static island, a `<nav>`). Those land in
+    // `$root`, and returning only the slot threw them away on every FRESH
+    // render — after any SPA navigation the layout was just the page with no
+    // nav, while a hard load of the same URL was fine (SSR emits the whole
+    // chain). Hydrate mode is deliberately untouched: there the return value is
+    // ignored by the router and the claims are already in place in the DOM.
+    //
+    // GATED on the body actually holding a bare slot. In a fresh render
+    // `__pendingChild` is assigned ONLY by the bare-slot branch (every other
+    // slot appends into its parent element), so without a top-level SlotNode
+    // this code is unreachable — and emitting five lines per component cost
+    // ~18 KB across test-app, which is the whole app's route payload. The
+    // promise branch is not dead weight either: the router hands a suspending
+    // page to the layout as a promise, so the slot content really can be one.
+    const hasBareSlot = comp.body.some((node) => node instanceof SlotNode);
+    if (hasBareSlot) {
+      ctx.push(indent(`if (__pendingChild !== null && __pendingChild !== undefined) {`));
+      ctx.push(indent(`  if (typeof __pendingChild.then === 'function') return __pendingChild.then((__c) => { $root.appendChild(toDomNode(__c)); return $root; });`));
+      ctx.push(indent(`  const __c = toDomNode(__pendingChild);`));
+      ctx.push(indent(`  if ($root.childNodes.length === 0) return __c;`));
+      ctx.push(indent(`  $root.appendChild(__c);`));
+      ctx.push(indent(`}`));
+    }
+    ctx.push(indent(hasBareSlot ? `return $root;` : `return __pendingChild || $root;`));
   }
   ctx.push(indent(`} finally {`));
   ctx.push(indent(`\tsetActiveComponent(__prev);`));

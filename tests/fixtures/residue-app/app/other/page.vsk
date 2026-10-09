@@ -1,0 +1,5 @@
+// A second route, so SPA navigation has somewhere to go and come back from.
+component OtherPage() {
+	<h1 class="other-title">other route</h1>
+}
+export default OtherPage;

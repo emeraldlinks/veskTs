@@ -1,12 +1,14 @@
-# Handoff: app-driven bug hunt — 1 open bug, everything else fixed and pushed
+# Handoff: app-driven bug hunt — ALL BUGS FIXED (the last one landed this session)
 
 > **Read this first.**
 >
-> The previous (resolved) handoff starts at line 294. `veskTs` is clean and green except for ONE bug at the
-> bottom, which is diagnosed but **not** fixed. Sections 1–3 are done work (do
-> not re-investigate). Section 4 is the open bug. Section 5 is the environment
-> traps that cost the most time on this attempt — read it before you edit
-> anything.
+> **The one open bug from the previous handoff is FIXED and verified end-to-end** — see
+> "§2 RESOLVED" below. Root cause, fix, and the byte-cost lesson. Everything else in
+> sections 1–3 was already done and is not to be re-investigated; §5 still holds and
+> still costs the most time.
+>
+> Sections 1–3 are earlier done work (do not re-investigate). Section 5 is the
+> environment traps that cost the most time — read it before you edit anything.
 
 Everything below was reproduced against a real server and a real browser first.
 `curl` is green for the open bug and `node scripts/test.js` is green; the failure
@@ -14,7 +16,7 @@ is only visible in a browser.
 
 ---
 
-## 0. State at handoff
+## 0. State at handoff (SUPERSEDED — see the header)
 
 | | |
 |---|---|
@@ -101,7 +103,65 @@ All browser-verified on `vesk dev` **and** `vesk start` unless noted.
 
 ---
 
-## 2. The open bug — child components under a layout never re-render
+## 2. RESOLVED — the child-components-under-a-layout bug (+ a second bug it exposed)
+
+**Bug 1 — a component that claims nothing left its SSR root ownerless, and the next
+claim tore it off.** A component whose hydrate-mode body emits no claim — a bare
+`effect()` plus static markup — is deliberately NOT the "fully static" bucket (the
+bundler gives that one a `claimOnly` stub that consumes its own slot), but it has no
+claimable node either. Its server-rendered root stayed in the DOM with nobody owning
+it, and the next sibling's claim landed on it, read the tag mismatch as a divergence,
+and the structural walker's one-slot recovery **consumed the slot, detached the node,
+and returned a fresh element that never reached the document**. That is every measured
+fact in the old §2, including the paradox of a hydrator that correctly attaches
+`__evh_click` to a node outside the document.
+
+It was **not** specific to the bare `{props.children}` slot: a no-claim component
+before a plain `<main>` broke identically — a much more common shape.
+
+**Bug 2 — a bare-slot layout dropped its OWN siblings on every fresh render.** The
+layout emitted `return __pendingChild || $root`, so when the bare slot rendered
+anything, `$root` (the layout's own `<nav>` and island) was discarded and the router
+mounted only the page. Hydration looked perfect; after any SPA navigation the layout
+was the page with **no nav at all**, while a hard load of the same URL was fine. The
+tail is now gated on the body actually holding a bare slot — emitted unconditionally it
+cost ~18 KB of route payload, because `__pendingChild` is assigned only by that branch.
+
+**The fix that shipped is not the fix I wrote first.** The walker-tracking design worked
+but cost 11.3 KB (per-call-site `beginCall`/`endCall` bracket), then 2.3 KB after
+simplifying to a single `beginCall()` — either way `asset-budget.mjs` went red. The
+design that costs nothing is at the source: **a claim-less component now claims its own
+slots**, reusing the `claimOnly` stub the fully-static path already used. Compile-time
+only; no runtime change and no per-call-site marker. The walker rule was reverted
+entirely rather than kept alongside. Measured on test-app: **+0.2 KB** (732.6 → 732.8),
+budget gate green, `perf-budget.json` untouched.
+
+**Verification (all real, none inferred).**
+- `packages/compiler/src/client-codegen.test.ts` +8 — claim-less prelude, one slot per
+  top-level element, a component that renders nothing stays silent (claiming there would
+  steal the next sibling's slot), already-claiming components untouched,
+  branch-dependent bodies untouched, normal mode untouched.
+- `tests/residue-hydration-test.mjs` (new): **40/40 on the production build AND the dev
+  server**, real Chromium — handler on the connected node, click 0→1→2, SPA navigation
+  both ways, the layout's nav surviving navigation, no console errors, no failed
+  requests. Reverting the fix turns it red in a real browser.
+- The fixture lives in its own app (`tests/fixtures/residue-app/`), NOT in `test-app`:
+  a test-only route there added a 30th chunk and ~13.5 KB, which the payload gate is
+  right to flag — a test fixture is not framework payload.
+- `client-codegen` 379, `hydrate` 101, `router` 105, integration, statement-mode 33,
+  expression-mode 26, `npm run typecheck` clean.
+
+### The red herring, recorded because I shipped a fixture that proved nothing
+
+A **fully static** component is NOT this bug — the bundler emits a `claimOnly` stub for
+those, so its slot is consumed correctly. My first browser fixture used exactly that
+shape and **passed against the broken runtime**; it only started failing once the fixture
+used a bare `effect()`. Any regression test for this must keep that `effect()` or it
+stops testing anything.
+
+---
+
+## 2 (old). The open bug — child components under a layout never re-render
 
 ### Symptom
 A component with `track()` + a button, rendered inside a layout, **renders but
@@ -278,7 +338,7 @@ cd academy && npx vesk build
 
 ---
 
-## 6. Suggested next steps for the open bug
+## 6. Suggested next steps for the open bug (DONE — see §2; the residue fix replaced every item here)
 
 1. Establish a **verified** edit→build→serve loop using the marker-grep above
    before changing behaviour. Four attempts were invalidated by stale builds.

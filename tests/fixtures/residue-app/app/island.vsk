@@ -1,0 +1,16 @@
+// THE RESIDUE SOURCE.
+//
+// A component whose hydrate-mode body emits NO claim: `effect()` is a runtime
+// statement, so this is deliberately NOT the "fully static" bucket (the bundler
+// gives that one a `claimOnly` stub that consumes its own SSR slot) — but it
+// has no claimable node either. Its server-rendered root is therefore left in
+// the DOM with no owner, and the NEXT sibling's claim must step over it.
+//
+// If this component ever starts claiming (a tracked value, a handler, a
+// region), the fixture stops testing the bug and passes for the wrong reason —
+// see the "fully static" red herring noted in tests/residue-hydration-test.mjs.
+component ResidueIsland() {
+	effect(() => {})
+	<span class="residue-bit">static-island</span>
+}
+export default ResidueIsland;

@@ -26,8 +26,12 @@ function expect(value) {
 		not: {
 			toBe(expected) { if (value === expected) throw new Error(`Expected NOT ${JSON.stringify(expected)}`); },
 			toContain(sub) { if (String(value).includes(sub)) throw new Error(`Expected NOT to contain ${JSON.stringify(sub)} in ${JSON.stringify(value)}`); },
+			toMatch(re) { if (re.test(String(value))) throw new Error(`Expected NOT to match ${re} in ${JSON.stringify(value)}`); },
 		},
 		toContain(sub) { if (!String(value).includes(sub)) throw new Error(`Expected to contain ${JSON.stringify(sub)} in ${JSON.stringify(value)}`); },
+		toMatch(re) { if (!re.test(String(value))) throw new Error(`Expected to match ${re} in ${JSON.stringify(value)}`); },
+		toBeLessThan(n) { if (!(value < n)) throw new Error(`Expected ${value} < ${n}`); },
+		toBeGreaterThan(n) { if (!(value > n)) throw new Error(`Expected ${value} > ${n}`); },
 	};
 }
 
@@ -1863,7 +1867,12 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			expect(code).not.toContain('return __pendingChild || $root;');
 		} else {
 			expect(code).toContain('document.createDocumentFragment();');
+			// Fresh render: the fragment root is returned and never the hydrate
+			// `$mount`. This component has no bare slot, so it keeps the
+			// one-line return — the bare-slot tail is gated (emitting it for every
+			// component cost ~18 KB of route payload).
 			expect(code).toContain('return __pendingChild || $root;');
+			expect(code).not.toContain('$root.appendChild(__c)');
 			expect(code).not.toContain('$mount');
 			expect(code).not.toContain('__cl.push(');
 		}
@@ -2620,6 +2629,79 @@ describe('Client Codegen — Markerless Hydration', () => {
 		// The child reads the deposit exactly once at its first top-level claim.
 		expect(code).toContain("(typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)");
 		expect(code).toContain('nextElement("span", $n');
+	});
+
+	// A component whose hydrate-mode body emits NO claim still rendered SSR
+	// content, and that content stayed in the DOM with nobody to own it — so the
+	// NEXT sibling's claim landed on it, read the tag mismatch as a divergence,
+	// consumed the slot and DETACHED it. The component now claims its OWN slots,
+	// the way the fully-static stub already does. A bare `effect()` plus static
+	// markup is exactly this case: not "fully static" (no stub from the
+	// component map), yet it claims nothing.
+	it('[markerless hyd] a claim-less component claims its own SSR slot', () => {
+		const code = compileClient(`
+			component Island() { effect(() => {}); <span class="hidden" />; }
+			export default Island;
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('__hydrate.claimOnly(undefined, $n');
+		// And it consumes the caller's residue deposit, like any first claim.
+		expect(code).toContain("(typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)");
+		// The effect still runs — this is not a static stub.
+		expect(code).toContain('effect(() => {})');
+	});
+
+	it('[markerless hyd] a claim-less component claims one slot per top-level element', () => {
+		const code = compileClient(`
+			component Island() {
+				effect(() => {});
+				<span class="a" />
+				<span class="b" />
+				text
+				<span class="c" />
+			}
+			export default Island;
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		const claims = code.match(/__hydrate\.claimOnly\(undefined, /g) || [];
+		// Three elements; the bare text node is not a walker slot.
+		expect(claims.length).toBe(3);
+	});
+
+	it('[markerless hyd] a component that renders nothing claims nothing', () => {
+		const code = compileClient(`
+			component EffectOnly() { effect(() => {}); }
+			export default EffectOnly;
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		// SSR emitted no root, so claiming here would STEAL the next sibling's
+		// slot — the prelude must stay silent.
+		expect(code).not.toContain('claimOnly(undefined');
+	});
+
+	it('[markerless hyd] a component that already claims gets no prelude', () => {
+		const code = compileClient(`
+			component Counter() { const &[t] = track(0); <button onClick={() => { t = t + 1 }}>{t}</button>; }
+			export default Counter;
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).not.toContain('claimOnly(undefined');
+		expect(code).toContain('__hydrate.nextElement("button"');
+	});
+
+	it('[markerless hyd] a body that could claim in any branch gets no prelude', () => {
+		// A region's slot count depends on which branch ran at SSR time, so the
+		// prelude must not guess. Unchanged behaviour is the safe answer.
+		const code = compileClient(`
+			component Maybe(props: { open: boolean }) { effect(() => {}); if (props.open) { <b>x</b> } else { <i>y</i> } }
+			export default Maybe;
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).not.toContain('claimOnly(undefined');
+	});
+
+	it('[normal] a claim-less component is unaffected outside hydrate mode', () => {
+		const code = compileClient(`
+			component Island() { effect(() => {}); <span class="hidden" />; }
+			export default Island;
+		`, null, { forceClient: true });
+		expect(code).not.toContain('claimOnly');
+		expect(code).toContain('document.createElement("span")');
 	});
 
 	// Region variant: a ternary/if whose WINNING FIRST claim is a compiled

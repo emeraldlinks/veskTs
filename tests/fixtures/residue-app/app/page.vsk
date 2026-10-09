@@ -1,0 +1,11 @@
+import ResidueIsland from './island.vsk';
+import ResidueCounter from './counter.vsk';
+
+// The same residue seam one level deeper, inside the page: a no-claim sibling
+// before a claiming one. Covers both the bare-slot (root) and element-level
+// (page) shapes in a single page load.
+component HomePage() {
+	<ResidueIsland />
+	<ResidueCounter />
+}
+export default HomePage;

@@ -31,6 +31,10 @@ test-app/.vesk-smoke/
 test-app/.vesk-hydr/
 test-app/tarballs/
 
+# Build output for the browser-hydration fixture app (tests/residue-hydration-
+# test.mjs builds it on demand; the source under tests/fixtures/ IS tracked).
+tests/fixtures/residue-app/.vesk-build/
+
 # Standalone example apps maintained as their OWN repositories.
 # `academy/` is tracked in its own repo (see academy/.git) — it is an
 # application, not part of the framework, and its dependency tarballs

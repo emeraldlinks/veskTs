@@ -294,6 +294,41 @@ if (existsSync(prodHydrationPath)) {
   }
 }
 
+// Run standalone tests/residue-hydration-test.mjs (a component whose
+// hydrate-mode body claims nothing must claim its OWN SSR slot, or the next
+// sibling's claim lands on it, reads a tag mismatch, and detaches it — leaving
+// the sibling component rendered but inert. Real browser, prod AND dev, on its
+// own fixture app so the payload budget in scripts/asset-budget.mjs is not
+// measuring a test-only route).
+const residuePath = resolve(root, 'tests', 'residue-hydration-test.mjs')
+if (existsSync(residuePath)) {
+  totalFiles++
+  process.stdout.write('tests/residue-hydration-test.mjs ... ')
+  try {
+    const output = runTestFile(residuePath, e2eEnv)
+    const counts = parseCounts(output)
+    if (counts) {
+      const passed = counts.passed
+      const failed = counts.failed
+      totalPassed += passed
+      totalFailed += failed
+      if (failed > 0) {
+        console.log(`FAIL (${failed} failure${failed === 1 ? '' : 's'})`)
+        console.log(output)
+      } else {
+        console.log(`OK (${passed} tests)`)
+      }
+    } else {
+      console.log('OK')
+    }
+  } catch (e) {
+    totalFailed++
+    console.log('ERROR')
+    console.error(e.message.slice(0, 300))
+    if (e.stdout) console.log(e.stdout.slice(-500))
+  }
+}
+
 // Run standalone tests/edge-test.mjs (now in tests/; after prod hydration — edge build overwrites .vesk)
 const edgeTestPath = resolve(root, 'tests', 'edge-test.mjs')
 if (existsSync(edgeTestPath)) {
