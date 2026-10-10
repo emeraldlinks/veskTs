@@ -1,6 +1,6 @@
 {
   "name": "@vesk/plugin-tailwind",
-  "version": "0.2.58",
+  "version": "0.2.59",
   "type": "module",
   "description": "Tailwind CSS v4 plugin for Vesk",
   "main": "./dist/index.js",

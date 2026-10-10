@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.59 — 2026-10-10
+
+_No breaking changes._
+
+### Fixes
+
+- **hydration,codegen,bundler:** three bugs that made store-driven UI dead
+
 ## 0.2.58 — 2026-10-09
 
 _No breaking changes._
