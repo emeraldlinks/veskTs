@@ -600,6 +600,46 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     cleanupDocument();
   });
 
+  // A plain-JS target that claims through the walker (lucide-vesk icons) never
+  // calls takeSkipK, so the deposit has to apply implicitly to its first claim.
+  // Without it the claim landed on the STATIC residue in front of the icon,
+  // missed on the tag, and detached real server-rendered markup.
+  it('a deposit applies implicitly to the next claim that carries no explicit skipK', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const residue = document.createElement('span');
+    const target = document.createElement('svg');
+    parent.appendChild(residue);
+    parent.appendChild(target);
+    const walker = createHydrateWalker(parent);
+    walker.injectSkipK(1);
+    // A plain target asks for its tag with no skipK of its own.
+    const claimed = walker.nextElement('svg');
+    expect(claimed).toBe(target);
+    // The residue is still there: it was never claimed and never detached.
+    expect(residue.parentNode).toBe(parent);
+    // The deposit is consumed; the next positional claim sees a clean cursor.
+    expect(walker.takeSkipK()).toBe(0);
+    cleanupDocument();
+  });
+
+  // An explicit skipK wins over the deposit, and still clears it — otherwise a
+  // claim carrying its own offset would leak the deposit into the next one.
+  it('an explicit skipK wins over the deposit and clears it', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const a = document.createElement('span');
+    const b = document.createElement('span');
+    const c = document.createElement('span');
+    parent.appendChild(a); parent.appendChild(b); parent.appendChild(c);
+    const walker = createHydrateWalker(parent);
+    walker.injectSkipK(2);
+    const claimed = walker.nextElement('span', 1);
+    expect(claimed).toBe(b);
+    expect(walker.takeSkipK()).toBe(0);
+    cleanupDocument();
+  });
+
   it('the deposit does not leak into a sub-walker', () => {
     mockDocument();
     const parent = document.createElement('div');

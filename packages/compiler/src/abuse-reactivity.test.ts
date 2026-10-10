@@ -166,6 +166,19 @@ it('does NOT warn for a genuinely constant const', () => {
   assert(compileCapturing(src).length === 0, 'a constant const is not stale');
 });
 
+it('does NOT warn for a helper FUNCTION that reads a cell', () => {
+  // `const stepClass = (n) => n === step ? … : …` is not a snapshot: the body
+  // runs when the binding is evaluated, so the binding does update. Flagging it
+  // pushed authors to inline helpers that were already correct — and the noise
+  // buried the real warnings.
+  const src = `component P {
+  const &[step] = track(1);
+  const stepClass = (n) => (n === step ? 'on' : 'off');
+  <div class={stepClass(2)}>{step}</div>
+}`;
+  assert(compileCapturing(src).length === 0, 'a function helper is not a stale snapshot');
+});
+
 it('does NOT warn when a cell is only read by an EVENT HANDLER', () => {
   // `onClick={handler}` where handler reads a cell is correct — the read happens
   // when the handler runs. Flagging this produced pure noise (three warnings in

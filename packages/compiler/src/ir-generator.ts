@@ -1934,6 +1934,10 @@ function warnStaleConstBindings(comp: ComponentIR, file: string): void {
     for (const d of st.declarations || []) {
       if (d.id?.type !== 'Identifier' || !d.init) continue;
       if (reactive.has(d.id.name)) continue;
+      // A FUNCTION initializer is not a snapshot: the body runs whenever the
+      // binding is evaluated, so the tracked read happens there. Reporting it
+      // pushed authors to inline helpers that were already correct.
+      if (d.init.type === 'ArrowFunctionExpression' || d.init.type === 'FunctionExpression') continue;
       // A bare identifier initializer is an ALIAS, not a read: `const copy =
       // selCell` re-binds the cell and stays live. Only a read snapshots.
       if (d.init.type === 'Identifier' && reactive.has(d.init.name)) continue;

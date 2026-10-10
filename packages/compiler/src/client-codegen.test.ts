@@ -2556,6 +2556,43 @@ describe('Client Codegen — Markerless Hydration', () => {
 
 	// Statement-mode counterpart: `if … else` regions (emitOpaque) need the same
 	// budget treatment, not expression-mode ternaries only.
+	// A condition whose tracked state is hidden behind a CALL is still
+	// reactive. Module-scope store cells are the documented pattern
+	// (`export const drawerCell = track(false)` plus `drawerCell.get()` or an
+	// accessor like `isAuthenticated()`), and the compiler cannot see inside
+	// the call — treating the region as static made the panel render once and
+	// never again, so opening the notification drawer or the profile menu did
+	// nothing at all.
+	it('[normal] a condition calling a store accessor still gets a flip effect', () => {
+		const code = compileClient(`
+			import { drawerCell } from './store';
+			component App() {
+				if (drawerCell.get()) {
+					<Drawer />
+				}
+				<div>shell</div>
+			}
+		`, null, { forceClient: true });
+		expect(code).toContain('effect(');
+		expect(code).toContain('__iv');
+		expect(code).toContain('__cleanup(');
+	});
+
+	// Statement-mode counterpart: statement mode is what pages use, and the
+	// same call-through-accessor shape must work there too.
+	it('[normal] statement-mode condition calling a store accessor is reactive', () => {
+		const code = compileClient(`
+			import { isAuthenticated } from './store';
+			component App() {
+				if (isAuthenticated()) {
+					<Panel />
+				}
+				<div>shell</div>
+			}
+		`, null, { forceClient: true });
+		expect(code).toContain('effect(');
+	});
+
 	it('[markerless hyd] region first claim consumes the residue budget (statement-mode if)', () => {
 		const code = compileClient(`
 			component App({ open = false, t = 'x' }) {
@@ -2629,6 +2666,27 @@ describe('Client Codegen — Markerless Hydration', () => {
 		// The child reads the deposit exactly once at its first top-level claim.
 		expect(code).toContain("(typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)");
 		expect(code).toContain('nextElement("span", $n');
+	});
+
+	// An IMPORTED plain target is not necessarily claim-less: lucide-vesk icons
+	// are plain functions that follow the component protocol
+	// `(props, registry, walker)` and claim their own SSR root through the
+	// walker. Without the deposit they claimed the slot holding the STATIC
+	// residue in front of them (`<button><span>Apply Now</span><svg/></button>`),
+	// the descriptor missed on `<span>`, and the walker DETACHED real
+	// server-rendered content — a button lost its label on hydration.
+	it('[markerless hyd] imported claiming target preceded by residue receives injectSkipK deposit', () => {
+		const code = compileClient(`
+			import { ArrowRight } from 'lucide-vesk';
+			export default component App() {
+				<button><span>Apply Now</span><ArrowRight size={13} /></button>
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		// The <span> residue sits before the icon, so the caller deposits 1 on
+		// the SAME walker the icon claims through.
+		expect(code).toContain('injectSkipK(1)');
+		// The icon is still invoked with that walker (so the deposit is usable).
+		expect(code).toContain('ArrowRight(');
 	});
 
 	// A component whose hydrate-mode body emits NO claim still rendered SSR

@@ -1,510 +1,312 @@
-# Handoff: app-driven bug hunt — ALL BUGS FIXED (the last one landed this session)
+# Handoff: academy-vesk conversion — 3 framework bugs found & fixed, app conversion ~50% done
 
 > **Read this first.**
 >
-> **The one open bug from the previous handoff is FIXED and verified end-to-end** — see
-> "§2 RESOLVED" below. Root cause, fix, and the byte-cost lesson. Everything else in
-> sections 1–3 was already done and is not to be re-investigated; §5 still holds and
-> still costs the most time.
+> This session converted the React app `~/cofoundr-academy` to Vesk in
+> `~/academy-vesk`, and in doing so found and fixed **three real Vesk bugs** — each
+> reproduced in a browser first, fixed at the root, and covered by a new
+> regression test. Sections 1–4 are done work: **do not re-investigate**. Section 5
+> is the one OPEN BUG plus the environment traps that cost the most time.
 >
-> Sections 1–3 are earlier done work (do not re-investigate). Section 5 is the
-> environment traps that cost the most time — read it before you edit anything.
-
-Everything below was reproduced against a real server and a real browser first.
-`curl` is green for the open bug and `node scripts/test.js` is green; the failure
-is only visible in a browser.
+> Every claim below was measured in headless Chromium against a real
+> `vesk start` server, not inferred from the code.
 
 ---
 
-## 0. State at handoff (SUPERSEDED — see the header)
+## 0. State at handoff
 
 | | |
 |---|---|
-| branch / HEAD | `main` @ `1e0152625` (all fixes pushed to `origin`) |
-| uncommitted | **0** — every experiment reverted |
-| full suite | running at handoff; last clean run **106 files / 3793 assertions / 0 failed** |
-| `academy` | separate repo, pushed to `cofoundr-academy` (force-pushed) |
-| backup | the 29 commits / 483 files that force-push overwrote: `~/cofoundr-academy-backup/repo` (bare git dir) |
-| test app | `academy` — dev `:3230`, prod `:3160` when running |
-
-The prior handoff (SSR request scope + build duration, both resolved) follows
-this one in the file.
+| vesk branch / HEAD | `main`, all fixes committed and pushed to `origin` (`emeraldlinks/veskTs`) |
+| academy-vesk | `~/academy-vesk`, committed and pushed |
+| React source | `~/cofoundr-academy` — reference only, unmodified |
+| test harness | `~/academy-vesk/tests` (puppeteer-core + Termux chromium), ~15 cases green |
+| server | `scripts/restart-prod.sh` → prod build on `:3111` |
 
 ---
 
-## 1. Fixed and verified — do not redo
+## 1. Conversion progress — what is done
 
-All browser-verified on `vesk dev` **and** `vesk start` unless noted.
+**`app/(public)/`** — all 8 public routes converted and browser-tested:
+`/`, `/about`, `/apply`, `/certifications-info`, `/class-structure`,
+`/internship-info`, `/login`, `/programs`.
 
-### Compiler
-- **Self-closing JSX is not self-closing HTML.** `<div class="dot" />` opened a
-  div and swallowed every following sibling (9 sites in one app, including the
-  login page's "or enter credentials" divider). Explicit end tag now; void
-  elements and `<svg>`/`<math>` subtrees keep `/>`.
-- **Dynamic attribute on a self-closed element** was appended *after* the tag,
-  where the parser drops it — `style={{…}}` served with no `style` at all.
-- **A bare `{props.children}` — the whole body of a layout — was silently
-  dropped** by client codegen (`if (!parentVar) return null`). Nothing below the
-  root layout hydrated. Proof: SSR emits zero `aria-current="page"` (NavLink sets
-  it client-side only); after the fix the live DOM has it.
-- **Route groups could not be the page** for `/`; the match fell through to the
-  page-less root → chain with no page node → 404. Fixed in both matchers.
-- **`matchRoute()` declared `pathname` on `RouteMatch` and never set it**, so
-  `usePathname()` returned `/` everywhere → NavLink active state permanently
-  dead.
-- **Route groups were dropped from the client chain** when a child matched, so
-  `app/(public)/layout.vsk` never applied client-side
-  (`hyd-dbg` showed `layoutNames:["Layout_Index"]`).
-- **Chain order:** dev SSR renders the page only for the LAST chain node, and
-  the group was emitted last → `/about` served the **index** page
-  (`dev /about` 46,961 b "PROFESSIONAL CERTIFICATION" vs prod 17,954 b). Group
-  now precedes its child; both matchers agree on `root → group → page`.
-- **Generic arrow functions couldn't be parsed** (`<T,>(x): T => x`). The
-  vendored acorn-typescript branch is gated on an `options.jsx` flag `parse()`
-  never sets, and the JSX tokenizer emits `jsxName`/`jsxTagEnd` instead of type
-  tokens. Blank the type-param list in place before acorn runs; disambiguate
-  structurally (`>` → params → optional return type → `=>`), **not**
-  `>`-followed-by-`(`, which `<div>(hi)</div>` also matches.
-- **Parameter annotation survived TS stripping only with a default value** (an
-  `AssignmentPattern` keeps the annotation on `.left`). Also fixed
-  `(a?: string = "x")`.
-- **A parse failure in an imported module was silent** → raw source substituted
-  → `Unexpected token ':'` blamed on an unrelated module. Now `V0901` located.
-- **`@vesk/*` bypassed the module loader's tsconfig-alias path** and was parsed
-  with the `.vsk` grammar; a module importing BOTH a `@vesk/*` package and a
-  relative module lost every export. Now loaded natively.
-- **A route file declaring several components with no default export** resolved
-  via `components[0]` — so a helper declared above the layout silently became
-  the layout (`_layoutCompList = ["RootLayout","ChildToggle"]`), the page body
-  was discarded, and every route returned **200 with an empty body**. Resolution
-  order is now *exactly* as before (default → first → exported); what was added
-  is a build-time **warning** on ambiguity. **Do not change the order** — see §5.
-- A component call in expression position (`{Terminal({size:14})}`,
-  `{cond ? Terminal({…}) : null}`) is now a real `ComponentCall`; a
-  component-valued tag (`const Icon = item.icon; <Icon/>`) resolves.
+**`src/_lib/`** — all shared modules converted (auth store, teaching store,
+student store, theme, certificate builder, 11 mock data modules, types). These
+were already done before this session.
 
-### Runtime
-- **A multi-token `activeClass` threw `DOMException`** (verified in Chrome) and
-  killed SPA routing for the whole page — `classList.add()` takes tokens, not a
-  class string. Now split.
+**`app/components/`** — 20 shell components converted (AppShell, AdminShell,
+Sidebar, Topbar, Modal, CommandPalette, NotificationDrawer, ThemeSwitcher,
+StatusBadge, ProgressBar, Metric, Can/RequireCapability/RequireStaff guards).
+`AssignmentCard.vsk` and `CourseTree.vsk` were added this session.
 
-### Warnings added
-- **Stale `const` reading a tracked value** freezes every binding that uses it
-  (`const isSelected = a.id === b.id` → evaluated once; the effect re-runs but
-  re-reads a stale value). Reported at build time. Deliberately silent for event
-  handlers that read a cell, and for cell aliasing — the first cut warned on
-  those and produced three noise warnings in one file.
+**`app/(portal)/`** — `dashboard`, `curriculum`, `notifications` converted this
+session.
 
-### Build
-- `vesk build --strict` now fails on an unresolvable chunk import instead of
-  exiting 0 with dangling bindings.
-- **lucide-vesk tree-shakes:** `@__PURE__` + `legalComments:'none'`. An
-  icon-bearing chunk went 866,126 b / 1,594 icon modules → 18,220 b / 2.
+### Still to convert (the actual remaining work)
 
----
-
-## 2. RESOLVED — the child-components-under-a-layout bug (+ a second bug it exposed)
-
-**Bug 1 — a component that claims nothing left its SSR root ownerless, and the next
-claim tore it off.** A component whose hydrate-mode body emits no claim — a bare
-`effect()` plus static markup — is deliberately NOT the "fully static" bucket (the
-bundler gives that one a `claimOnly` stub that consumes its own slot), but it has no
-claimable node either. Its server-rendered root stayed in the DOM with nobody owning
-it, and the next sibling's claim landed on it, read the tag mismatch as a divergence,
-and the structural walker's one-slot recovery **consumed the slot, detached the node,
-and returned a fresh element that never reached the document**. That is every measured
-fact in the old §2, including the paradox of a hydrator that correctly attaches
-`__evh_click` to a node outside the document.
-
-It was **not** specific to the bare `{props.children}` slot: a no-claim component
-before a plain `<main>` broke identically — a much more common shape.
-
-**Bug 2 — a bare-slot layout dropped its OWN siblings on every fresh render.** The
-layout emitted `return __pendingChild || $root`, so when the bare slot rendered
-anything, `$root` (the layout's own `<nav>` and island) was discarded and the router
-mounted only the page. Hydration looked perfect; after any SPA navigation the layout
-was the page with **no nav at all**, while a hard load of the same URL was fine. The
-tail is now gated on the body actually holding a bare slot — emitted unconditionally it
-cost ~18 KB of route payload, because `__pendingChild` is assigned only by that branch.
-
-**The fix that shipped is not the fix I wrote first.** The walker-tracking design worked
-but cost 11.3 KB (per-call-site `beginCall`/`endCall` bracket), then 2.3 KB after
-simplifying to a single `beginCall()` — either way `asset-budget.mjs` went red. The
-design that costs nothing is at the source: **a claim-less component now claims its own
-slots**, reusing the `claimOnly` stub the fully-static path already used. Compile-time
-only; no runtime change and no per-call-site marker. The walker rule was reverted
-entirely rather than kept alongside. Measured on test-app: **+0.2 KB** (732.6 → 732.8),
-budget gate green, `perf-budget.json` untouched.
-
-**Verification (all real, none inferred).**
-- `packages/compiler/src/client-codegen.test.ts` +8 — claim-less prelude, one slot per
-  top-level element, a component that renders nothing stays silent (claiming there would
-  steal the next sibling's slot), already-claiming components untouched,
-  branch-dependent bodies untouched, normal mode untouched.
-- `tests/residue-hydration-test.mjs` (new): **40/40 on the production build AND the dev
-  server**, real Chromium — handler on the connected node, click 0→1→2, SPA navigation
-  both ways, the layout's nav surviving navigation, no console errors, no failed
-  requests. Reverting the fix turns it red in a real browser.
-- The fixture lives in its own app (`tests/fixtures/residue-app/`), NOT in `test-app`:
-  a test-only route there added a 30th chunk and ~13.5 KB, which the payload gate is
-  right to flag — a test fixture is not framework payload.
-- `client-codegen` 379, `hydrate` 101, `router` 105, integration, statement-mode 33,
-  expression-mode 26, `npm run typecheck` clean.
-
-### The red herring, recorded because I shipped a fixture that proved nothing
-
-A **fully static** component is NOT this bug — the bundler emits a `claimOnly` stub for
-those, so its slot is consumed correctly. My first browser fixture used exactly that
-shape and **passed against the broken runtime**; it only started failing once the fixture
-used a bare `effect()`. Any regression test for this must keep that `effect()` or it
-stops testing anything.
-
----
-
-## 2 (old). The open bug — child components under a layout never re-render
-
-### Symptom
-A component with `track()` + a button, rendered inside a layout, **renders but
-is inert**: click fires nothing, state never re-renders. Interactivity that
-only exists after leaving and re-entering the route "works", because a route
-change rebuilds it.
-
-### Minimal repro (`tmp/o`, three files + a group layout)
-
-```vsk
-// app/eff.vsk
-component EffectIsland() { effect(() => {}); <span class="hidden" /> }
-export default EffectIsland;
-
-// app/toggle.vsk
-component ChildToggle {
-  const &[c, cCell] = track(false);
-  <div><span class="cn">{c ? 'CHILD-ON' : 'CHILD-OFF'}</span>
-       <button class="cb" onClick={() => { c = !c; }}>cb</button></div>
-}
-export default ChildToggle;
-
-// app/(public)/layout.vsk
-import ChildToggle from '../toggle.vsk';
-component PublicLayout(props: { children?: any }) {
-  <div class="gl"><ChildToggle /><main class="slot">{props.children}</main></div>
-}
-export default PublicLayout;
-
-// app/layout.vsk   <-- THE VARIABLE PART
-import EffectIsland from './eff.vsk';
-component RootLayout(props: { children?: any }) {
-  <EffectIsland />        // sibling BEFORE the slot  => BROKEN
-  {props.children}
-}
-```
-
-Reverse the last two lines and it works. It is **order-dependent**:
-
-| root layout | result |
+| React source | Target |
 |---|---|
-| `<EffectIsland />` then `{props.children}` | ❌ inert |
-| `{props.children}` then `<EffectIsland />` | ✅ works |
+| `src/pages/portal/{AssignmentsPage,AssessmentPage,CertificationsPage,InternshipPage,LessonViewerPage,PerformancePage,PortfolioPage,ProfileSettingsPage,DesignSamplesPage}.tsx` | `app/(portal)/<route>/page.vsk` |
+| `src/components/certificate/CertificatePreview.tsx` | `app/components/CertificatePreview.vsk` |
+| `src/pages/admin/*.tsx` (9 pages) + `src/pages/admin/teaching/*.tsx` (8 pages) | `app/(admin)/<route>/page.vsk` |
 
-### Measured facts (do not re-derive these)
-1. Both components **do** hydrate — `console.log` at the top of each body
-   prints `ISLAND-RENDER | CHILD-RENDER`.
-2. The click handler **never runs** — a `console.log` in `onClick` prints
-   nothing. So it is **not** an orphaned effect and **not** a missing flush.
-3. Live DOM: `.cb` exists, `typeof .cb.__evh_click === "undefined"`,
-   exactly one `.cb`, and `islandInDom === false` (the sibling's own output is
-   gone too).
-4. **The emitted child hydrator DOES the right thing.** From the built chunk:
-   ```js
-   const $n032 = $n020.nextElement("button", 0);        // claims the SSR button
-   $n032.__evh_click = () => set(cCell, !get(cCell));   // handler attached
-   ```
-   So the node that receives the handler **is not the node in the document**.
-
-### Current best hypothesis
-The child's subtree is hydrated correctly and then **replaced by a fresh copy of
-the SSR markup after hydration**, which drops `__evh_click` and all reactive
-wiring. Something re-inserts `#root`'s children after the page hydrates. This
-also explains `islandInDom:false` — the same replacement wipes the sibling's
-output, and the layout's `return __pendingChild || $mount` already discards
-`$mount`.
-
-**The one measurement that would settle it** — never obtained: log, in document
-order, every node attached to or removed from `#root` *after* the child hydrates.
-That names the code doing the replacement.
-
-### Things already ruled out — do not retry these
-- **Orphaned effect** — ruled out by fact 2 (no click log at all).
-- **Block attachment** — `runInBlockWindow` (`runtime/src/router.ts:704`) keeps
-  one active root block for the whole synchronous render; both effects land in
-  it regardless of order.
-- **Spent walker budget / positional claiming** — the change reached the bundle
-  (verified in the emitted chunk) and the child was still inert.
-- **`createLayoutSlot` for the bare slot** — a **no-op**: it returns the *same*
-  walker when `findSlotRange` finds nothing (markerless mode), so it cannot fix
-  a budget problem.
-- **Emitting top-level slots before siblings** — also verified present in the
-  emitted chunk; child still inert.
-
-### Where to look
-- `packages/compiler/src/client-codegen.ts` — the bare-slot branch
-  (`if (!parentVar)`, emits `__pendingChild = props.children(__hydrate)` then
-  `return __pendingChild || $mount`), and `maybeReplace`'s adoption branch
-  (`if (__sr && __sr.parentNode) … replaceChild` — a claim **miss** silently
-  drops the rendered node).
-- `packages/runtime/src/hydrate.ts` — `StructuralWalker.claimAt` / `claimOnly` /
-  `subWalker`, and `auditHydration`'s orphan sweep.
-- `packages/runtime/src/router.ts:1208+` — `renderLayoutChain`, which passes the
-  *same* walker down to each layout rather than creating a scoped one.
+Roughly **10.5k lines of React → ~24 remaining `.vsk` pages**, all sharing the
+idioms already established (see §4).
 
 ---
 
-## 3. What is verified working in `academy`
+## 2. FIXED — hydration deleted server-rendered content (icon claims)
 
-- All routes 200, correct content, **no index flash** (confirmed correct page from
-  the first paint at 16 ms with a `MutationObserver`).
-- SPA nav `SAME_DOC`; hydration live (`aria-current="page"` present live, absent
-  in SSR); icons render as real `<svg>`; no console errors.
-- `/programs` selection moves (`Digital Marketing` → `Cybersecurity`) — the
-  hoisted-`const` fix, applied and browser-verified.
-- Only non-2xx request on either server is `404 favicon.ico`.
+**Symptom.** On `/about`, hydration *removed* a `<span>` containing the button
+label "Apply Now" and replaced it with the icon's `<svg>`. After hydration the
+button had lost its text. `Notification Center` and every other icon-adjacent
+static label had the same fate.
 
-Verification scripts used live in `/tmp` (wiped between sessions) — recreate
-them. The shape that matters: `puppeteer-core` from the repo's `node_modules`,
-Chrome at
-`$HOME/.cache/puppeteer/chrome/linux-154.0.8037.57/chrome-linux64/chrome`,
-`--no-sandbox --disable-dev-shm-usage --disable-gpu`, `timeout: 120000`.
+**Root cause — two compounding halves.**
 
----
+1. `packages/compiler/src/client-codegen.ts` emitted the residue offset for a
+   component call *only* when the callee was a compiled component
+   (`if (ctx.markerless && promptExpr && !plainTarget)`). An **imported** value —
+   which is exactly what every `lucide-vesk` icon is — was assumed to be
+   claim-less. The compiler computed the offset and then threw it away.
+2. `lucide-vesk`'s `Icon(props, registry, walker)` *does* claim, through the
+   walker it is handed. It called `nextElement("svg")` with `skipK = 0`, landed
+   on the **static residue** in front of it (`<button><span>Apply Now</span>
+   <svg/></button>`), read the tag mismatch as divergence, and the walker's
+   recovery path **detached the real `<span>`**.
 
-## 4. How to run things
+**Fixes.**
 
-```bash
-npx tsx packages/cli/src/build-packages.ts      # REQUIRED after any packages/ edit
-node scripts/test.js                             # full suite
-npx tsx packages/compiler/src/<file>.test.ts     # one suite
-npm run typecheck
-```
+- `client-codegen.ts`: the `injectSkipK(prompt)` deposit is now emitted for
+  **every** hydrate-mode component call, plain targets included. A plain target
+  that does not claim simply leaves the deposit for the post-call adoption
+  claim, which carries an explicit offset and therefore clears it.
+- `packages/runtime/src/hydrate.ts`: a walker applies an unconsumed deposit to
+  the next claim that carries no explicit `skipK` (a plain-JS callee never calls
+  `takeSkipK`). **Any** claim clears the deposit, so a claim with its own offset
+  cannot leak it into the next one.
 
-Editing an app against the framework needs a repack — **skip this and you test
-stale code** (see §5):
-
-```bash
-node scripts/refresh-testapp-deps.mjs academy   # repack + reinstall into the app
-cd academy && npx vesk build
-```
-
----
-
-## 5. Environment traps that cost the most time — read before editing
-
-1. **Stale builds are the single biggest hazard.** Four separate times a change
-   was made, `build-packages` ran, the app was rebuilt — and the served bundle
-   did **not** contain it. One time even `require.resolve('@vesk/compiler/src/…')`
-   pointed at the updated `dist` while the emitted chunk was still old.
-   **Always grep the emitted output** for a marker unique to your change
-   (e.g. `grep -c 'createLayoutSlot' dist/static/client.*.js`) and check the
-   hash the page actually loads:
-   ```bash
-   C=$(curl -s $URL/about | grep -o 'client\.[a-z0-9]*\.js' | head -1)
-   curl -s "$URL/_vesk/static/$C" | grep -c '<your-marker>'
-   ```
-   Never trust "I rebuilt" — trust the artifact.
-
-2. **Do not change `resolveComponentName`'s lookup order.** It is
-   `default export → first component → any export`, and that order is load-bearing
-   twice over: `test-app/app/page.vsk` holds module-level markup (implicit first
-   component `Home`) alongside `Throws, Appx, Throw, Appxx`. Checking `exported`
-   first swapped the page for `Appx`; preferring `last` swapped it for `Appxx`.
-   Both cost real failures. The fix for ambiguous files is the **warning**, and
-   `export default` in the app.
-
-3. **A 200 response is not proof a page rendered.** The wrong-layout bug
-   returned **200 with an empty body** and nothing in any log. Assert on rendered
-   content (an `h1`, a non-zero `#root` length), not on status. One weak
-   assertion here reported "ALL PASS" on an empty page.
-
-4. **Chrome needs a long launch timeout** on this 2-vCPU box when the suite is
-   also running — `timeout: 120000`, `protocolTimeout: 180000`. The 30 s default
-   fails with `Timed out waiting for the WS endpoint`.
-
-5. **The machine overheats.** This session ran the suite and several app servers
-   concurrently; kill stragglers between runs
-   (`pkill -f "vesk start"`, `pkill -f chrome-linux64`, `pkill -f scripts/test.js`)
-   and avoid building while Chrome is driving pages.
-
-6. **`node scripts/test.js` writes to `/tmp`, which gets wiped.** Write the log
-   somewhere durable (`tmp/logs/suite.log`) or it disappears before you read it.
+**Tests.** Two new cases in `packages/runtime/src/hydrate.test.ts` (implicit
+deposit; explicit skipK wins and clears), one in
+`packages/compiler/src/client-codegen.test.ts`.
 
 ---
 
-## 6. Suggested next steps for the open bug (DONE — see §2; the residue fix replaced every item here)
+## 3. FIXED — module state was duplicated per route chunk
 
-1. Establish a **verified** edit→build→serve loop using the marker-grep above
-   before changing behaviour. Four attempts were invalidated by stale builds.
-2. Instrument the post-hydration replacement: log every `appendChild`/`remove`/
-   `replaceChild` on `#root` and its children, in document order, after the
-   child hydrates. That single trace names the culprit.
-3. Only then change code. Given §5.1, prove the change is in the served bundle
-   **and** re-run the minimal repro from §2 before touching `academy`.
+**Symptom.** Signing in through `/login` persisted the session to localStorage
+but the portal rendered its **signed-out** view: `[session: anonymous]`, "Your
+role holds no learner-portal capabilities", the sidebar rail empty. Navigating
+away and back made it correct — the shell had re-read `localStorage`.
 
-Two claims in this session were wrong and were corrected in git history: a
-"static sibling dropped next to a bare slot" gap (hydrate mode deliberately
-skips static subtrees SSR already rendered) and an earlier "child state never
-re-renders" bug that could not be reproduced in three layouts. Keep verifying
-through the real pipeline before writing anything into a commit message.
-# SSR request-scope handoff (resolved) + build duration (8x faster)
+**Root cause.** Every route chunk was esbuild-bundled independently
+(`entryPoints: [tmpFile]` per chunk, `packages/adapter/src/client-bundle.ts`), so
+a module imported by two chunks was **inlined twice**. A duplicated module means
+a duplicated module scope: `src/_lib/auth/store.ts`'s module-scope
+`track()` cells existed once per chunk. Login wrote the *login chunk's* cell;
+the portal layout read the *portal chunk's* cell. Green build, no error.
 
-> Two work items from one session. The first is done and merged; the second is
-> the `vesk build` duration work, profiled and fixed below.
+**Fix.** A shared-module pass in `client-bundle.ts`:
 
-## The bug that remained
+- sources imported by **≥2 chunks** and app-local (never `node_modules`) are
+  bundled **once** into the entry bundle and published on
+  `globalThis.__veskShared`;
+- each route chunk imports a generated shim reading its bindings from there;
+- a resolver plugin (esbuild's `alias` only accepts bare package names, so this
+  had to be `onResolve`) performs the redirect;
+- a failed shared pass **falls back** to the old per-chunk inlining and logs,
+  rather than shipping dangling bindings.
 
-Concurrent requests to a page using `useFetch` lost their SSR data handoff: the
-document rendered without `<script src="/ssr-data.js?t=…">`, so the client had
-nothing to hydrate from and the page came up empty (or silently refetched) after
-load. Reproduced on `test-app/app/async/page.vsk` (`/async`, which fetches
-`/api/posts` during SSR) against the production build.
+**Second bug this exposed — a second `@vesk/runtime`.** The shared pass bundled
+`@vesk/runtime` too, giving the app a second `Cell` class and a second
+`currentEffect` variable: a store cell written from a click notified subscribers
+registered against the other copy, so nothing store-driven ever repainted — the
+write landed, no error, no update. Fixed by redirecting `@vesk/runtime*` to a
+shim that reads the entry bundle's bindings off `globalThis`, injecting the
+shared code **after** `runtimeGlobals + extraGlobals`, and adding the shared
+modules' runtime names to `runtimeImportNames` so they are always published.
 
-Signature, and the reason it survived three earlier theories: **the page body
-was always complete.** The multi-pass renderer reads the process-global data
-store to re-render, so a lost slot produced a perfect-looking page with no
-hydration payload. The size histogram was the tell — failures were 66 bytes
-shorter (4774 → 4708) and nothing else differed.
+**Tests.** New `packages/adapter/src/shared-modules.test.ts` (5): one body per
+shared module, entry publishes the map, chunks use shims, single-chunk modules
+are left alone, and the entry publishes the runtime **before** the shared
+modules run with no `class Cell` anywhere in the shared/chunk output.
 
-## Root cause: two copies of the request-scope store in the server bundle
+---
 
-`packages/adapter/src/runtime-bundle.ts` built its entry with
+## 4. FIXED — `if` regions reading store state never repainted
 
-```ts
-'export { withSsrStore } from "@vesk/compiler/src/ssr-store";'
+**Symptom (the user's report).** On `/dashboard`, the notification bell and the
+profile avatar button did nothing when clicked; the drawer/menu would appear
+only after navigating away and back. Same for the apply wizard's step chips —
+clicking step 02 did not swap the panel.
+
+**Root cause.** `isReactiveExpression()` in `client-codegen.ts` decided whether
+a condition was reactive by looking for `props` or a locally declared
+`track()` binding. A condition driven by module-scope store state —
+`if (notificationDrawerCell.get())`, `if (isAuthenticated())` — matched neither,
+so the region was emitted as a **one-shot** `if (cond) { render() }` with no flip
+effect at all. A local `let &[open] = track(false)` in the same position worked,
+which is what made it look app-specific.
+
+**Fix.** A **call expression** in the condition counts as potentially reactive:
+it is the only way to hide a cell read behind a function boundary, which is the
+documented store pattern. The runtime's `get()` records the dependency when the
+expression is evaluated inside the emitted effect, so dynamic subscription is
+enough — no static analysis required.
+
+**Cost.** A genuinely static condition now costs one never-firing effect. The
+opposite error is a component that renders once and never updates again.
+
+**Tests.** Two cases in `packages/compiler/src/client-codegen.test.ts`.
+
+---
+
+## 5. OPEN — Topbar bell/profile handler runs but the drawer still does not open
+
+**Last measured state.** With `src/_lib/ui.ts` instrumented with a `console.log`
+inside `openNotificationDrawer`, clicking the bell produced:
+
+```
+bell.__evh_click → "() => openNotificationDrawer()"   // handler IS attached
+document.__vesk_dlg_click → true                       // delegation IS installed
+clicking (dispatched AND native .click()) → zero DOM mutations
 ```
 
-while `server-render` (pulled in from the absolute `dist/server-codegen.js`
-path) imports the same module through its own specifier. Those two specifiers
-resolved to **different files** — the bare one through the tsconfig path
-mapping to `packages/compiler/src/ssr-store.ts`, the other to
-`packages/compiler/dist/ssr-store.js` — and esbuild dutifully bundled both.
+**The `console.log` never fired**, so the failure is *before* the store call —
+the handler closure is not reaching the store function. Everything else about
+the chain is verified working: the store module is evaluated exactly **once**
+(`globalThis.__uiEvalCount === 1`), the flip effects for
+`notificationDrawerCell.get()` are present in the `(portal)` group chunk's
+AppShell hydrator, and local `track()` cells in the same app react correctly.
 
-Two copies means two `AsyncLocalStorage`s, two `liveSlots` liveness maps, and a
-second `Object.defineProperty(globalThis, '__vsk_ssr_token')` accessor shadowing
-the first. The instrumented trace of a failing burst:
+**Strongest remaining hypothesis (not yet proven).** The `(portal)` group chunk
+inlines `src/_lib/ui.ts` (it is imported by exactly one chunk, so it is not in
+`sharedSources`) **and** esbuild bundles a private copy of `@vesk/runtime` into
+that same chunk. The chunk therefore contains its own `Cell` class. If the
+delegated click listener that actually fires was installed by a *different*
+chunk (e.g. the dashboard chunk, whose hydration ran later and whose
+`__evh_click` bindings came from `globalThis.__veskShared`), the write lands on
+the dashboard chunk's cell while the AppShell flip effect subscribes to the
+group chunk's cell — a write to one copy, a read from the other.
 
-```
-[ssrscope] enter existing=no   ← generated handler opens a scope (copy A)
-[ssrscope] minted eh3
-[ssrscope] enter existing=no   ← renderPage's own scope cannot see copy A
-[ssrscope] minted ku4
-[trace-stage] renderPage comp=AsyncPage store=3 tk=eh3   ← renders under A
-...
-[ssrprune] stale=47 total=48 live=1                        ← reaper (copy B) sees 1 live slot
-[ssrprune] reaping 8 of 48 __vsk_ssr_data_g614…, __vsk_ssr_data_p4i1…, …
-[render-trace] renderFullPage comp=Layout keys=∅ slot=∅ sink=∅   ← 8 documents ship no handoff
-```
+**How to confirm in one step.** Grep the built group chunk for a bundled
+runtime: `grep -c "class Cell" dist/static/page-\(portal\).*.js` (non-zero
+confirms a private copy) and check whether the dashboard chunk contains its own
+copy of `openNotificationDrawer`. If confirmed, the fix is in
+`client-bundle.ts`: the per-chunk esbuild pass must also treat
+`@vesk/runtime` as external, exactly as the shared pass now does.
 
-`stale=47 total=48 live=1` is the whole story: the reaper, running in copy B,
-could not see a single claim made in copy A, so past its 40-slot cap it deleted
-live slots — exactly 8 of them, and exactly the 8 documents that then shipped
-without their data script.
+**Note on the last build.** `dist/` was mid-rebuild when this handoff was
+written (`npm run build` was interrupted by the session ending). Run
+`rm -rf dist && npm run build` before trusting any measurement.
 
-### Fixes
+---
 
-1. **`runtime-bundle.ts` reaches the store through `server-codegen.js`**, which
-   re-exports it, so the bundle contains one copy. One specifier, one file.
-2. **`ssr-store.ts` pins its state to `globalThis`** (`__vsk_ssr_store_impl`):
-   one `AsyncLocalStorage`, one liveness map, and only the copy that created
-   the implementation installs the token accessor. A duplicate copy is now
-   harmless rather than a data-loss bug — belt and braces for any other bundler
-   path that duplicates a module.
-3. **`__vsk_ssr_data_store` → `__vsk_ssr_payload_store`** (runtime-bundle writer
-   + prod-server/dev-server/platform-handler readers). The CSP payload store
-   matched the `__vsk_ssr_data_<token>` prefix the reaper sweeps, so the reaper
-   could wipe every *pending* `/ssr-data.js` payload and turn a served page's
-   hydration script into a 404. It was in the reaper's kill list on every run.
+## 6. Conventions established in academy-vesk (follow these)
 
-## Causes investigated and dismissed
+- **Reactivity sugar, not raw cells.** `let &[count] = track(0)` and use
+  `count` / `count = count + 1` / `count++`. Bind the raw cell (`&[count,
+  countCell]`) **only** when an API demands it (`bindValue`, `peek`, `untrack`).
+  Module-scope store cells from `src/_lib/*.ts` are read with `.get()` — they
+  are not component TrackDecls.
+- **Never snapshot a tracked read into a `const`.** The compiler warns, and the
+  warning is real. Either call a body-level helper from the binding
+  (`stepClass(s.num)`) or wrap the value in `derived()`.
+- **A helper function that reads a cell is not a snapshot** and is no longer
+  warned about (§7).
+- **Statement mode for every page**; loops keyed (`for (const x of xs; key
+  x.id)`), index-keyed lists use `key i; index i`.
+- **`onNavigate(path)` becomes `useNavigate()`.** Search params are not props.
+- **`src/_lib/` stays plain `.ts`** — stores are module-scope `track()` cells
+  plus exported accessors, not components.
 
-- **Dev codegen never opened a request scope** (`hmr.ts`) — real, and fixed in
-  the previous commit; the generated dev functions did not wrap their rendering
-  in `withSsrStore`.
-- **A scope did not own a liveness claim for its lifetime** — real, fixed
-  (`liveSlots` is a refcounted `Map`, claimed for the whole scope).
-- **`renderPageStream` merged from a different token** — real, fixed
-  (`adoptSsrStore()` + `withSsrStoreOf` per `gen.next()`).
-- **Deduped fetches attributed only to the winning request** — *not* the cause.
-  With the module duplication fixed, the 48-request gate passes 48/48 both with
-  and without the extra attribution, because `useResource`'s SSR cache-hit path
-  already re-emits the shared result into the deduping render's token. The
-  speculative change in `resource.ts` was **reverted** rather than shipped
-  untested (see the file: the comment now explains why the dedupe path is fine).
+## 7. Incidental fix — false-positive reactivity warning
 
-## Incidental fixes (pre-existing, found on the way)
+`isReactiveExpression`'s sibling diagnostic in `packages/compiler/src/ir-generator.ts`
+flagged `const stepClass = (n) => … n === step …` as a stale snapshot. A function
+initializer is not a snapshot: its body runs when the binding is evaluated. Now
+skipped for `ArrowFunctionExpression` / `FunctionExpression`, with a test in
+`abuse-reactivity.test.ts`.
 
-- `dev-server.ts` shipped a **debug `globalThis.fetch` wrapper** that it
-  installed before every SSR render and never restored — one `new Error().stack`
-  per fetch, forever, and a permanently wrapped `fetch` in the dev process. It
-  also broke the dev handoff: `/async` in dev emitted no data script until it
-  was removed.
-- `dev-server.ts` `[nbsp-debug] DEV-SSR-ERROR` → a real `[vesk dev]` label.
-- Dev API-route 500s returned `{ error }` while every other error path returns
-  `{ ok: false, error }`.
-- `scripts/test.js` gave the e2e servers 60 s to build the app twice; a slower
-  box failed the whole suite before a single assertion. Now 300 s.
-- `hmr-snippet.test.ts` asserted a hard `mean < 55 ms` budget taken from one
-  fast machine. The same unchanged code measures 96 ms on a slow box, so the
-  test was a coin flip on hardware. It now asserts the fast path is not slower
-  than the two-pass chain it replaced (measured in the same process) plus a
-  generous absolute ceiling.
+## 8. Test harness (new this session)
 
-## Verification
+`~/academy-vesk/tests` — dependency-free runner + puppeteer-core against the
+Termux chromium:
 
-- `npx tsx packages/cli/src/build-packages.ts` — clean.
-- `npm run typecheck` — clean (types, compiler, runtime, adapter, cli, pwa).
-- Concurrency gate, 48 simultaneous `/async` requests, prod **and** dev:
-  **48/48 with the handoff**, three consecutive runs (was 41–46/48).
-- `node scripts/test.js` — **89 files, 3218 assertions, 0 failed** (exit 0),
-  including the new `tests/ssr-handoff-concurrency-test.mjs`.
-- `tests/vesk-doc-hydration-test.mjs` — **159/159 on dev and 159/159 on
-  production** (moved from the repo root to `tests/`).
-- `scripts/platform-smoke.mjs` vercel / netlify / cloudflare / deno / aws — all
-  green; `scripts/platform-hydration.mjs edge` — 9/9.
-- New tests: `packages/adapter/src/runtime-bundle.test.ts` (3 — one copy of the
-  store, `withSsrStore` still exported, payload store out of the slot
-  namespace; verified to fail against the old bundler entry), two new cases in
-  `packages/compiler/src/ssr-token-scope.test.ts` (14 total — a simulated
-  duplicate module copy shares the request scope, and a 48-request deduped
-  burst on one resource key ships 48 handoffs), and
-  `tests/ssr-handoff-concurrency-test.mjs` (8 — HTTP, prod + dev, wired into
-  `scripts/test.js`).
+- `lib/runner.mjs` — suites, assertions, exit code.
+- `lib/browser.mjs` — launch, mutation probe installed at document start (proves
+  hydration **claimed** the server DOM rather than replacing it), click/type,
+  localStorage seeding, `ssrHtml()`.
+- `lib/session.mjs` — session seeding per seeded role.
+- `public.test.mjs` — SSR status + rendered copy + hydration + interactions for
+  every public route.
+- `run-all.mjs` — `node tests/run-all.mjs`, `BASE=http://127.0.0.1:<port>`.
 
-## Measurement notes (this box)
+`domcontentloaded` + explicit settle, **not** `networkidle2`: the dev server's
+HMR socket never idles and `networkidle2` timed out on every page.
 
-- 2 vCPUs. Build timings swing wildly with load: the same test-app dev build
-  measured 25 s idle and 83 s under load average 14. Do not read a slow local
-  build as a regression; `scripts/test.js` now allows for it.
-- Chromium had to be installed (`npx puppeteer browsers install chrome`);
-  `CHROMIUM_PATH=$HOME/.cache/puppeteer/chrome/linux-*/chrome-linux64/chrome`.
-- Do not background a server with `&` from the agent shell — the tool kills the
-  process group on timeout and a dead port answers with an empty body, which
-  reads as a test failure. Every measurement here ran from a self-contained
-  script that starts its own server, measures, and exits.
+## 9. Environment traps (cost the most time — read before debugging)
 
-## Files changed
+- **`pkill -f "vesk start"` kills the invoking shell**, because the pattern
+  matches the agent's own command line. Use `scripts/restart-prod.sh`, which
+  kills by PID and starts detached.
+- **`vesk dev` OOMs on this box** (~7.7 GB total, ~2 GB available). The crash is
+  a bare `0x…` stack trace with no message. Test against `vesk start` (prod
+  build) instead; use dev only for quick compile-error checks.
+- **`node_modules/@vesk/*` resolves to the BUILT `dist/`, not `src/`.** After
+  editing framework source, run
+  `npx tsx packages/cli/src/build-packages.ts` **before** running any test that
+  imports `@vesk/...`, or you will test stale code and see phantom failures.
+- **Framework changes reach the app only through**
+  `cd ~/vesk && node scripts/refresh-testapp-deps.mjs ../academy-vesk`
+  (≈2–20 min; it rebuilds, repacks uniquely-versioned CI tarballs and verifies
+  the installed versions). Restart the dev/prod server afterwards — the running
+  server keeps the old bundle.
+- Chromium: `/data/data/com.termux/files/usr/bin/chromium-browser`, launched with
+  `--no-sandbox`. CDP input events crash some builds here; dispatch clicks in-page
+  with `el.click()`.
+- The academy app has no build-time route for a scratch page — add
+  `app/probe/page.vsk`, build, then delete it before committing.
+
+## 10. Verification performed
+
+- `npx tsx packages/compiler/src/{client-codegen,integration,expression-mode,ir-generator,abuse-reactivity,props-type,primitive-abi}.test.ts` — all green (382 / 128 / 26 / 9 / 12 / 12 / 22).
+- `npx tsx packages/runtime/src/{hydrate,router}.test.ts` — green (103, all router).
+- `npx tsx packages/adapter/src/{client-bundle,client-bundle-scope,client-bundle-cache,asset-hash,code-split,hydration,shared-modules}.test.ts` — all green.
+- `npm run typecheck` in `~/academy-vesk` — clean.
+- Browser: public routes render, hydrate, and update; login → portal navigation
+  works; module state is now shared across chunks (session survives SPA nav).
+
+`node scripts/test.js` (the full 4-hour suite) was **not** run this session; run
+the per-file suites above plus the e2e tests before a release.
+
+## 11. Files changed
+
+### `~/vesk`
 
 | File | Change |
 |------|--------|
-| `packages/adapter/src/runtime-bundle.ts` | `withSsrStore` via `server-codegen.js` (one copy of the store); payload store renamed out of the slot namespace |
-| `packages/compiler/src/ssr-store.ts` | Request-scope state pinned to `globalThis` so a duplicate module copy shares it |
-| `packages/compiler/src/server-codegen.ts` | Re-exports the ssr-store surface |
-| `packages/adapter/src/{prod-server,dev-server,platform-handler}.ts` | Read the renamed payload store |
-| `packages/adapter/src/dev-server.ts` | Removed the leaked debug `fetch` wrapper; error label; API 500 shape |
-| `packages/runtime/src/resource.ts` | Reverted the unproven dedupe attribution |
-| `packages/adapter/src/hmr-snippet.test.ts` | Machine-relative perf budget |
-| `scripts/test.js` | 300 s e2e startup budget; runs the new concurrency gate |
-| `packages/adapter/src/runtime-bundle.test.ts` | New — bundle-shape regression tests |
-| `packages/compiler/src/ssr-token-scope.test.ts` | +2 cases (duplicate copy, deduped burst) |
-| `tests/ssr-handoff-concurrency-test.mjs` | New — HTTP concurrency gate |
-| `tests/vesk-doc-hydration-test.mjs` | Moved from the repo root |
-| `test-app/`, `vesk-doc/package.json` + lock | Refreshed CI tarball pins (0.2.44) |
+| `packages/runtime/src/hydrate.ts` | Walker applies an unconsumed residue deposit to the next claim without an explicit skipK; any claim clears it |
+| `packages/compiler/src/client-codegen.ts` | `injectSkipK` for plain targets too; `isReactiveExpression` treats calls as reactive |
+| `packages/adapter/src/client-bundle.ts` | Shared-module extraction (entry bundle + per-chunk shims + `@vesk/runtime` external + ordering) |
+| `packages/compiler/src/ir-generator.ts` | Function initializers exempt from the stale-const warning |
+| `packages/runtime/src/hydrate.test.ts` | +2 cases |
+| `packages/compiler/src/client-codegen.test.ts` | +3 cases |
+| `packages/compiler/src/abuse-reactivity.test.ts` | +1 case |
+| `packages/adapter/src/shared-modules.test.ts` | **New** — 5 cases |
 
-`.probe/` is scratch and is not committed.
+### `~/academy-vesk`
+
+| File | Change |
+|------|--------|
+| `app/(portal)/dashboard/page.vsk`, `curriculum/page.vsk`, `notifications/page.vsk` | New |
+| `app/components/{AssignmentCard,CourseTree}.vsk` | New |
+| `app/components/{Sidebar,MobileNav}.vsk` | Missing `NavIcon` import (SSR 500) |
+| `app/(public)/login/page.vsk` | Sugar for `statusMessage`/`error`/`email` |
+| `app/(public)/apply/page.vsk` | Sugar for `form`; `stepClass()` helper replaces stale consts |
+| `app/(public)/programs/page.vsk` | `derived()` for `selectedProgram` |
+| `tests/**` | New browser harness + public suite |
+| `scripts/restart-prod.sh` | New — non-suicidal server restart |
+
+Scratch (`tmp/`, `.probe/`, `tmp-vesk-*`) is not committed.

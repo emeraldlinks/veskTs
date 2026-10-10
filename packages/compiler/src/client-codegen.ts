@@ -964,11 +964,33 @@ function emitClientHead(ctx: Ctx, node: HeadBlock, tracked: Map<string, TrackedI
   }
 }
 
+/**
+ * Whether an expression can change after first render.
+ *
+ * Two ways it can:
+ *  1. it reads `props` or a locally declared `track()` binding — visible
+ *     statically; or
+ *  2. it CALLS something. A call is the only way to hide a cell read behind a
+ *     function boundary, and hiding one is not exotic — it is the documented
+ *     store pattern: a module-scope `track()` cell published as an accessor
+ *     (`notificationDrawerCell.get()`, `isAuthenticated()`,
+ *     `unreadNotificationCount()`). The compiler cannot see inside those calls,
+ *     so it must assume they subscribe; the runtime's `get()` records the
+ *     dependency when the expression is evaluated inside the emitted effect,
+ *     which is exactly where these conditions are re-evaluated.
+ *
+ * Treating a call as reactive costs one never-firing effect for a genuinely
+ * static condition. The opposite mistake — treating a store-backed condition as
+ * static — is a component that renders once and never updates again.
+ */
 function isReactiveExpression(node: any, tracked: Map<string, TrackedInfo>): boolean {
   const ast = node && (node.ast || node);
   if (!ast) return false;
   let reactive = false;
   walk(ast, tracked, {
+    CallExpression() {
+      reactive = true;
+    },
     Identifier(n: any, context: any) {
       if (reactive) return;
       const parent = context.path.at(-1);
@@ -1206,10 +1228,20 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       ctx.push(`return $f; })();`);
       propsEntries.push(`children: ${frag}`);
     }
-    if (ctx.markerless && promptExpr && !plainTarget) {
-      // Deposit the residue for the child's first top-level claim (it runs on
-      // this same walker with its own zero `topPendingSkip`). A region budget is
-      // spent by THIS call, so sibling claims in the branch stay positional.
+    // Deposit the residue for the child's first top-level claim (it runs on
+    // this same walker with its own zero `topPendingSkip`). A region budget is
+    // spent by THIS call, so sibling claims in the branch stay positional.
+    //
+    // The deposit goes down for PLAIN targets too: "imported value" does not mean
+    // "cannot claim". lucide-vesk icons are imported functions that follow the
+    // framework component protocol `(props, registry, walker)` and claim their own
+    // SSR root through it, so without the deposit they claimed the slot holding the
+    // STATIC residue in front of them (`<button><span>Apply Now</span><svg/></button>`)
+    // — the descriptor missed on `<span>` and the walker detached real
+    // server-rendered content. A plain target that does NOT claim simply leaves the
+    // deposit for the post-call adoption claim below, which carries an explicit
+    // offset and therefore consumes/clears it.
+    if (ctx.markerless && promptExpr) {
       ctx.push(`${walkerArg}.injectSkipK(${promptExpr});`);
     }
     ctx.push(`let ${v} = undefined;`);

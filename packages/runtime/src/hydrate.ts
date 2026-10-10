@@ -1173,6 +1173,17 @@ class StructuralWalker implements HydrateWalker {
 	// callee's first claim and resets the deposit so later claims stay
 	// positional against the advancing cursor. Consumed synchronously on the
 	// same walker reference the call was made through.
+	//
+	// The deposit is ALSO consumed implicitly by the next claim made through this
+	// walker when the caller passed no explicit skipK. A component written in plain
+	// JS (lucide-vesk icons are the common case) never calls `takeSkipK`, so
+	// before this the deposit was silently dropped: the icon's `nextElement("svg")`
+	// claimed the slot still holding the STATIC residue in front of it
+	// (`<button><span>Apply Now</span><svg/></button>`), the descriptor missed on
+	// `<span>`, and the walker detached server-rendered content that no client
+	// program had any intention of replacing. Implicit consumption keeps static
+	// residue out of the way for plain-JS components exactly as it is for
+	// compiled ones.
 	private inheritOffset = 0;
 
 	injectSkipK(n: number): void {
@@ -1190,7 +1201,14 @@ class StructuralWalker implements HydrateWalker {
 			// eslint-disable-next-line no-console
 			console.error('[hyd-dbg] claimAt', tag, 'skip=', skipK, 'idx=', this.idx, 'els=', this.els.length);
 		}
-		let target = this.advancePastSkippable(this.idx + (skipK || 0));
+		// An explicit skipK always wins; otherwise the caller's residue deposit
+		// applies to this claim. ANY claim consumes the deposit, so a claim that
+		// carries its own offset cannot leak the deposit into the next one.
+		let offset = skipK || 0;
+		const inherited = this.inheritOffset;
+		this.inheritOffset = 0;
+		if (!offset) offset = inherited;
+		let target = this.advancePastSkippable(this.idx + offset);
 		// The caller's residue accounting may overshoot (region estimates use
 		// max over branches); back off to the cursor rather than past the list.
 		if (target > this.els.length) target = this.idx;
