@@ -56,6 +56,7 @@ export interface Tracked<T = unknown> {
 	c: number;
 	d: DeferredTrackedEntry[] | null;
 	f: number;
+	r: OwnerlessSubscribers | null;
 	__v: unknown;
 	get(): T;
 	set(value: T): void;
@@ -69,11 +70,20 @@ export interface Derived<T = unknown> {
 	co: Component | null;
 	d: Dependency | null;
 	f: number;
+	r: OwnerlessSubscribers | null;
 	fn: () => unknown;
 	__v: unknown;
 	get(): T;
 	set(value: T): void;
 }
+
+/**
+ * A cell that has no owner block — a module-scope `track()` (the documented
+ * store pattern), or any cell created while no block was active. `set()` on one
+ * cannot walk up to a root block to schedule a flush, so its readers are kept
+ * here and invalidated directly. See `schedule_ownerless_update`.
+ */
+export type OwnerlessSubscribers = Set<Block | Derived>;
 
 export interface Dependency {
 	c: number;
@@ -117,6 +127,51 @@ export let active_namespace: keyof typeof NAMESPACE_URI = DEFAULT_NAMESPACE;
 export let is_mutating_allowed = true;
 
 const old_values = new Map<Tracked | Derived, unknown>();
+
+let orphan_root: Block | null = null;
+
+/**
+ * The block every unparented block hangs off — a block created while no block
+ * was active (a component rendered outside a `root()`, a module-scope effect,
+ * a cell created at module scope).
+ *
+ * Without it `schedule_update()` walks an empty parent chain, pushes `null`
+ * into `queued_root_blocks`, and the update is dropped on the floor: the effect
+ * never runs, and a later write to its cell schedules nothing. Call sites used
+ * to each work around this privately (`runInBlockWindow` in the router,
+ * `runInHydrateBlock` in hydrate.ts) and every new one silently reintroduced the
+ * bug. The orphan root is the single place that makes "no active block" mean
+ * "rooted" instead of "disconnected".
+ *
+ * It is a plain object rather than a `block()` call because `block()` is what
+ * asks for it. It is never destroyed and never re-run: `is_block_dirty()`
+ * short-circuits on ROOT_BLOCK, so it only ever serves as the flush root that
+ * reaches its children.
+ */
+export function get_orphan_root(): Block {
+	if (orphan_root === null) {
+		orphan_root = {
+			co: null,
+			d: null,
+			first: null,
+			f: ROOT_BLOCK,
+			fn: null,
+			last: null,
+			next: null,
+			p: null,
+			prev: null,
+			s: null,
+			t: null,
+			tc: null,
+		} as Block;
+	}
+	return orphan_root;
+}
+
+/** True when `block` is a block with no real owner — it lives on the orphan root. */
+export function is_orphan(block: Block | null | undefined): boolean {
+	return block === null || block === undefined || block === orphan_root;
+}
 
 let scheduler_mode = FLUSH_MICROTASK;
 let is_micro_task_queued = false;
@@ -289,6 +344,7 @@ export function run_block(block: Block): void {
 	try {
 		active_block = block;
 		active_reaction = block;
+		unsubscribe_reaction(block);
 		active_component = block.co;
 
 		destroy_non_branch_children(block);
@@ -331,6 +387,7 @@ class TrackedValue<T = unknown> implements Tracked<T> {
 	c: number;
 	d: DeferredTrackedEntry[] | null;
 	f: number;
+	r: OwnerlessSubscribers | null;
 	__v: unknown;
 
 	constructor(v: unknown, block: Block, a: { get?: Function; set?: Function }) {
@@ -339,6 +396,7 @@ class TrackedValue<T = unknown> implements Tracked<T> {
 		this.c = 0;
 		this.d = null;
 		this.f = TRACKED;
+		this.r = null;
 		this.__v = v;
 	}
 
@@ -387,6 +445,7 @@ class DerivedValue<T = unknown> implements Derived<T> {
 	d: Dependency | null;
 	f: number;
 	fn: () => unknown;
+	r: OwnerlessSubscribers | null;
 	__v: unknown;
 
 	constructor(fn: () => unknown, block: Block, a: { get?: Function; set?: Function }) {
@@ -398,6 +457,7 @@ class DerivedValue<T = unknown> implements Derived<T> {
 		this.d = null;
 		this.f = DERIVED;
 		this.fn = fn;
+		this.r = null;
 		this.__v = UNINITIALIZED;
 	}
 
@@ -442,12 +502,15 @@ export type SetHook = (next: unknown, prev: unknown) => unknown;
 
 export function tracked<T>(v: T, block?: Block, get?: GetHook, set?: SetHook): Tracked<T>;
 export function tracked(v: unknown, block?: Block, get?: GetHook, set?: SetHook): Tracked {
-	return new TrackedValue(v, block || active_block!, get || set ? { get, set } : empty_get_set);
+	// `block || active_block!` used to store `null` here when nothing was
+	// active, which is what made a module-scope store cell unwritable: `set()`
+	// scheduled a `null` block and stopped.
+	return new TrackedValue(v, block || active_block || get_orphan_root(), get || set ? { get, set } : empty_get_set);
 }
 
 export function derived<T>(fn: () => T, block?: Block, get?: GetHook, set?: SetHook): Derived<T>;
 export function derived(fn: () => unknown, block?: Block, get?: GetHook, set?: SetHook): Derived {
-	return new DerivedValue(fn, block || active_block!, get || set ? { get, set } : empty_get_set);
+	return new DerivedValue(fn, block || active_block || get_orphan_root(), get || set ? { get, set } : empty_get_set);
 }
 
 export function track<T>(fn: () => T, b?: Block): Derived<T>;
@@ -477,6 +540,16 @@ export function track(v: unknown, b?: Block | GetHook, get?: GetHook | SetHook, 
 
 function create_dependency(tracked: Tracked | Derived): Dependency {
 	const reaction = active_reaction as Derived | Block;
+
+	// A cell on the orphan root is a shared one — the module-scope store
+	// pattern. Its readers can sit under ANY root (a component rendered inside
+	// the router's block window reads a store created at module scope), so
+	// walking up from the cell reaches nobody. They are recorded here and
+	// invalidated directly instead. Owned cells keep the scoped-flush path.
+	if (is_orphan(tracked.b)) {
+		((tracked as Tracked).r ??= new Set()).add(reaction);
+	}
+
 	const existing = reaction.d;
 
 	if (existing !== null) {
@@ -685,6 +758,9 @@ export function queue_post_block_flush_callback(fn: () => void): void {
 
 export function schedule_update(block: Block | null): void {
 	if (block === null) return;
+	// Skip initializing orphan-root-scheduled blocks on SSR to avoid running
+	// effects that access the browser (e.g., "document").
+	if (block.p === get_orphan_root() && (globalThis as any).__vsk_ssr) return;
 	if (scheduler_mode === FLUSH_MICROTASK) {
 		queue_microtask();
 	}
@@ -750,6 +826,56 @@ function register_dependency(tracked: Tracked | Derived): void {
 
 		dependency = create_dependency(tracked);
 		current!.n = dependency;
+	}
+}
+
+/**
+ * Drop `reaction` from every ownerless cell it read last time round. Called
+ * before a reaction re-runs (and when it is destroyed) so a dependency the new
+ * run no longer takes is not left subscribed forever.
+ */
+export function unsubscribe_reaction(reaction: Block | Derived | null): void {
+	if (reaction === null) return;
+	let dep = reaction.d;
+	while (dep !== null) {
+		const t = dep.t;
+		if (is_orphan(t.b) && t.r !== null) {
+			t.r.delete(reaction);
+		}
+		dep = dep.n;
+	}
+}
+
+/**
+ * `set()` on a cell with no owner block: there is no parent chain to walk, so
+ * schedule the readers themselves. A reader that is itself a derived value is
+ * followed through, because re-running the derived is what bumps its clock and
+ * marks the effects that read IT dirty — the same chain the scoped walk relies
+ * on. `visited` keeps a diamond in the graph from looping.
+ */
+function schedule_ownerless_update(tracked: Tracked | Derived, visited: Set<Block | Derived> | null): void {
+	const subscribers = tracked.r;
+
+	if (subscribers === null) return;
+
+	// Copy first: a reader that re-runs synchronously can re-subscribe.
+	for (const reaction of Array.from(subscribers)) {
+		if (visited !== null) {
+			if (visited.has(reaction)) continue;
+			visited.add(reaction);
+		}
+
+		if ((reaction as Block).f & DESTROYED) {
+			subscribers.delete(reaction);
+			continue;
+		}
+
+		if ((reaction.f & DERIVED) !== 0) {
+			schedule_ownerless_update(reaction as Derived, visited ?? new Set());
+			continue;
+		}
+
+		schedule_update(reaction as Block);
 	}
 }
 
@@ -853,7 +979,15 @@ export function set(tracked: Tracked | Derived, value: unknown): void {
 
 		tracked.__v = value;
 		tracked.c = increment_clock();
-		schedule_update(tracked_block);
+		if (!is_orphan(tracked_block)) {
+			schedule_update(tracked_block!);
+		} else {
+			// A shared cell (module-scope store, or any cell created with no
+			// active block) has no chain to walk up, and its readers can live
+			// under a different root than it does — scheduling it alone would
+			// reach nobody. Invalidate the readers themselves.
+			schedule_ownerless_update(tracked, null);
+		}
 	}
 }
 

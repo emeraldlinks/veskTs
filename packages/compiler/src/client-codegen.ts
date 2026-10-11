@@ -556,8 +556,15 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
       // The children ARE this layout's output, so they take the component's
       // return value rather than being appended to a parent that does not exist.
       if (ctx.hydrate) {
+        const promptExpr = ctx.markerless && (regionBudget || skipK > 0)
+          ? markerlessSkipExpr(regionBudget, skipK)
+          : null;
         ctx.push(`if (props.children !== undefined && props.children !== null) {`);
         ctx.push(`  if (typeof props.children === 'function') {`);
+        if (promptExpr) {
+          ctx.push(`    ${ctx.walker}.injectSkipK(${promptExpr});`);
+          if (regionBudget && ctx.markerless) ctx.push(`    ${regionBudget} = 0;`);
+        }
         ctx.push(`    __pendingChild = props.children(__hydrate);`);
         ctx.push(`  } else if (__hydrate && __hydrate.root) {`);
         ctx.push(`    __hydrate.root.appendChild(toDomNode(props.children));`);

@@ -19,10 +19,12 @@ import {
 	active_component,
 	active_reaction,
 	create_component_ctx,
+	get_orphan_root,
 	is_block_dirty,
 	run_block,
 	run_teardown,
 	schedule_update,
+	unsubscribe_reaction,
 	untrack,
 } from '@vesk/runtime/src/ripple-runtime';
 import type { Block, Component, Derived } from '@vesk/runtime/src/ripple-runtime';
@@ -121,6 +123,13 @@ export function block(
 
 	if (active_block !== null) {
 		push_block(newBlock, active_block);
+	} else {
+		// Nothing was active — hang it off the orphan root instead of leaving
+		// `p === null`, where scheduling it walks an empty chain and the update
+		// is discarded. `push_block` does not set `p` (it is always the active
+		// block on the normal path), so it is set here.
+		newBlock.p = get_orphan_root();
+		push_block(newBlock, newBlock.p);
 	}
 
 	if ((flags & EFFECT_BLOCK) !== 0) {
@@ -235,6 +244,10 @@ export function is_destroyed(target_block: Block): boolean {
 
 export function destroy_block(block: Block, remove_dom = true): void {
 	block.f ^= DESTROYED;
+
+	// A destroyed reaction must stop being a reader of any ownerless cell
+	// (module-scope store) — nothing will ever dirty-check it again.
+	unsubscribe_reaction(block);
 
 	let removed = false;
 	const f = block.f;
