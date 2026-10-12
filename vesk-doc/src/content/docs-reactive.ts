@@ -816,67 +816,92 @@ export const pages: { slug: string; title: string; description: string; group: s
       },
     ],
   },
-];    ],
-  },
   {
-    kind: "h2",
-    text: "Store",
-  },
-  {
-    kind: "p",
-    text:
-      "Vesk includes a reactive store implementation inspired by libraries like Zustand, built on top of Vesk's fine-grained reactivity system. The store provides a centralized state management solution with optional persistence, middleware, and derived stores.",
-  },
-  {
-    kind: "h3",
-    text: "Creating a Store",
-  },
-  {
-    kind: "p",
-    text:
-      "Stores are created with the `createStore` function from `@vesk/runtime`.",
-  },
-  {
-    kind: "pre",
-    text:
-      "import { createStore } from '@vesk/runtime';\n\nconst store = createStore({ count: 0, theme: 'dark' }, {\n  persist: true,\n  storageKey: 'my-store'\n});",
-  },
-  {
-    kind: "h3",
-    text: "Store API",
-  },
-  {
-    kind: "p",
-    text:
-      "The store returns an object with the following methods:",
-  },
-  {
-    kind: "pre",
-    text:
-      "// State access\nstore.get() // => { count: 0, theme: 'dark' }\n\n// State updates\nstore.update({ count: 1 })\nstore.set({ count: 5, theme: 'light' })\nstore.update(prev => ({ count: prev.count + 1 }))\n\n// Batch operations (prevents multiple subscriber calls)\nstore.batch(() => {\n  store.update({ a: 1 })\n  store.update({ b: 2 })\n  store.set({ c: 3 })\n})\n\n// Reset to initial state\nstore.reset()\n\n// Rehydrate with new initial state (keeps store identity)\nstore.rehydrate({ user: { id: 1, name: 'Ada' } })\n\n// Clear state and persistence\nstore.clear()\n\n// Subscribe to changes\nconst unsub = store.subscribe(state => console.log(state))\n\n// Watch specific values\nconst unwatch = store.watch(\n  s => s.count,\n  (n, o) => console.log(`count: ${o} → ${n}`),\n  (a, b) => a === b // shallow equality\n)\n\n// Middleware\nconst unuse = store.use((state, action) => console.log(`[${action}]`, state))\n\n// Derived stores\nconst themeStore = store.derive(s => s.theme)\nthemeStore.subscribe(v => console.log('theme:', v))\n\n// Debugging\nconsole.log(store.toJSON()) // deep clone of state",
-  },
-  {
-    kind: "h3",
-    text: "Server Safety",
-  },
-  {
-    kind: "p",
-    text:
-      "The store is SSR-safe. When running on the server (where `window` is undefined), persistence and devtools features are automatically disabled, but all other functionality works identically.",
-  },
-  {
-    kind: "h3",
-    text: "Example Stores",
-  },
-  {
-    kind: "p",
-    text:
-      "The runtime includes example stores that you can use or remove:",
-  },
-  {
-    kind: "pre",
-    text:
-// Assuming these are exported from the runtime
-"import { appStore, routeStore } from '@vesk/runtime'\n\n// appStore contains { user, count, theme } with persistence\n// routeStore contains { path } with persistence",
+    slug: "store",
+    title: "Store",
+    description:
+      "A centralized reactive store with optional persistence, middleware, and derived stores.",
+    group: "Runtime",
+    blocks: [
+      {
+        kind: "p",
+        text:
+          "Vesk includes a reactive store implementation inspired by libraries like Zustand, built on top of Vesk's fine-grained reactivity system. The store provides a centralized state management solution with optional persistence, middleware, and derived stores.",
+      },
+      {
+        kind: "h2",
+        text: "Creating a Store",
+      },
+      {
+        kind: "p",
+        text:
+          "Stores are created with the `createStore` function from `@vesk/runtime/store`.",
+      },
+      {
+        kind: "code",
+        filename: "app/store/counter.ts",
+        language: "ts",
+        code: "import { createStore } from '@vesk/runtime/store';\n\nconst store = createStore({ count: 0, theme: 'dark' }, {\n  persist: true,\n  storageKey: 'my-store'\n});",
+      },
+      {
+        kind: "h2",
+        text: "Store API",
+      },
+      {
+        kind: "p",
+        text:
+          "The store returns an object with the following methods:",
+      },
+      {
+        kind: "code",
+        filename: "app/store/usage.ts",
+        language: "ts",
+        code: "// State access\nstore.get() // => { count: 0, theme: 'dark' }\n\n// State updates\nstore.update({ count: 1 })\nstore.set({ count: 5, theme: 'light' })\nstore.update(prev => ({ count: prev.count + 1 }))\n\n// Batch operations (prevents multiple subscriber calls)\nstore.batch(() => {\n  store.update({ a: 1 })\n  store.update({ b: 2 })\n  store.set({ c: 3 })\n})\n\n// Reset to initial state\nstore.reset()\n\n// Rehydrate with new initial state (keeps store identity)\nstore.rehydrate({ user: { id: 1, name: 'Ada' } })\n\n// Clear state and persistence\nstore.clear()\n\n// Subscribe to changes\nconst unsub = store.subscribe(state => console.log(state))\n\n// Watch specific values\nconst unwatch = store.watch(\n  s => s.count,\n  (n, o) => console.log(`count: ${o} → ${n}`),\n  (a, b) => a === b // shallow equality\n)\n\n// Middleware\nconst unuse = store.use((state, action) => console.log(`[${action}]`, state))\n\n// Derived stores\nconst themeStore = store.derive(s => s.theme)\nthemeStore.subscribe(v => console.log('theme:', v))\n\n// Debugging\nconsole.log(store.toJSON()) // deep clone of state",
+      },
+      {
+        kind: "h2",
+        text: "Server Safety",
+      },
+      {
+        kind: "p",
+        text:
+          "The store is SSR-safe. When running on the server (where `window` is undefined), persistence and devtools features are automatically disabled, but all other functionality works identically.",
+      },
+      {
+        kind: "h2",
+        text: "Example Store",
+      },
+      {
+        kind: "p",
+        text:
+          "Build the store your app needs with `createStore`. The store is tree-shaken — it only ships in the client bundle when a component actually imports and uses it:",
+      },
+      {
+        kind: "code",
+        filename: "app/store/examples.ts",
+        language: "ts",
+        code: "import { createStore } from '@vesk/runtime/store'\n\nconst themeStore = createStore({ theme: 'dark' }, { persist: true, storageKey: 'theme-store' })",
+      },
+      {
+        kind: "h2",
+        text: "Path Store",
+      },
+      {
+        kind: "p",
+        text:
+          "For state that needs fine-grained path reactivity, causal provenance, or time travel, `createPathStore` from `@vesk/runtime/path-store` extends the same engine with three abilities `createStore` does not have: every value is a separate reactive dependency, every commit records which action wrote which paths, and `undo` / `redo` restore versions through structural sharing.",
+      },
+      {
+        kind: "code",
+        filename: "app/store/cart.ts",
+        language: "ts",
+        code: "import { createPathStore } from '@vesk/runtime/path-store';\n\nconst cart = createPathStore({ items: [{ price: 2 }, { price: 3 }], shipping: 5 });\n\n// Fine-grained: reading one path re-runs only when that path changes.\nconst subtotal = cart.at('items.0.price').get();\n\n// Derived nodes capture their selector's reads automatically.\nconst total = cart.derived('total', s =>\n  s.items.reduce((sum, item) => sum + item.price, 0) + s.shipping\n);\n\n// Causal provenance — why does total equal what it equals?\ncart.at('items.0.price').set(8, 'priceAdjusted');\nconsole.log(cart.explain('total'));\n\n// Time travel\ncart.undo();\ncart.redo();\n\n// Type-checked paths: cart.at('items.0.done') is a type error.",
+      },
+      {
+        kind: "p",
+        text:
+          "Both stores support optional SSR persistence. Pass `{ persist: true, storageKey: 'cart' }` and the first server render reads the value back from a same-site cookie; the value is handed to the client *before paint* through an origin-served `/store-init.js?t=<token>` script (never an inline `<script>`, so a strict `script-src` CSP without `unsafe-inline` cannot block it). On write, the client mirrors the JSON to `localStorage` and the cookie so the next request re-renders pre-hydrated. `store.clear()` drops both. No app code is required — the adapter injects the script and drains a per-request key registry (`getPersistedStoreKeys`/`resetPersistedStoreKeys`) at stream close.",
+      },
+    ],
   },
 ];

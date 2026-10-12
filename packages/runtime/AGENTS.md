@@ -118,6 +118,9 @@ reactivity/hydration change.
 | `reconcile.ts` | keyed reconcile | (no dedicated file) |
 | `bindings.ts` | bindValue/Checked/Group | (no dedicated file) |
 | `experiment.ts` | A/B/n | `experiment.test.ts` |
+| `store.ts` | `createStore` — whole-state reactive store + optional SSR persistence (`persist`/`storageKey`) | `store.test.ts` |
+| `path-store.ts` | `createPathStore` — fine-grained `at(path)` reactivity, auto-captured `derived()`, causal `why()`/`explain()`, structural-sharing `undo`/`redo`; re-exports the shared persistence helpers | `path-store.test.ts` |
+| `store-persistence.ts` | shared SSR continuity — cookie name, per-request key registry (ALS token bucket), pre-paint payload builder, adapter hook install | `store-persistence.test.ts` |
 | `suspense.ts` | **no exports** (compiler-phase feature) | — |
 | `hmr-client.ts` | dev HMR IIFE (not public API) | — |
 | `index-client.ts` | client barrel | — |

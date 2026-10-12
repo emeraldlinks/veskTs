@@ -38,6 +38,41 @@ async function resolveCompilerApi<T = Record<string, unknown>>(name: string): Pr
 }
 
 /**
+ * Build gate against two page files claiming one URL.
+ *
+ * SSR routes are keyed by URL pattern (fullPath) — last write wins in the
+ * path->file map — while the client router walks the manifest tree first-match
+ * wins, so a group page and a root page both claiming `/` ship a document for
+ * one of them and hydrate the other. Both respond 200; the only symptom is a
+ * page whose claims land on the layout's elements. Refuse the build instead.
+ */
+function findRouteConflicts(
+  routeTree: RouteNode[],
+  appDir: string,
+): Array<{ fullPath: string; files: string[] }> {
+  const projectRoot = resolve(appDir, '..');
+  const byPath = new Map<string, string[]>();
+  const walk = (nodes: RouteNode[]): void => {
+    for (const node of nodes) {
+      if (node.page) {
+        const pageFile = join(node.sourceDir, 'page.vsk');
+        const files = byPath.get(node.fullPath) ?? [];
+        files.push(relative(projectRoot, pageFile));
+        byPath.set(node.fullPath, files);
+      }
+      if (node.children && node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(routeTree);
+
+  const conflicts: Array<{ fullPath: string; files: string[] }> = [];
+  for (const [fullPath, files] of byPath) {
+    if (files.length > 1) conflicts.push({ fullPath, files });
+  }
+  return conflicts;
+}
+
+/**
  * Plugin activation record as consumed by the build gate. At runtime these come
  * from the plugin-manager module (`@vesk/adapter/src/plugins`): either
  * `getPluginRecords` (full `PluginRecord[]` — only `name` + `active` are used
@@ -257,6 +292,17 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   if (routeTree.length === 0) {
     console.error('vesk build: no routes found in', appDir);
     return;
+  }
+
+  const routeConflicts = findRouteConflicts(routeTree, appDir);
+  if (routeConflicts.length > 0) {
+    for (const conflict of routeConflicts) {
+      console.error(`vesk build: conflicting routes for ${conflict.fullPath}: ${conflict.files.join(', ')}`);
+    }
+    const first = routeConflicts[0];
+    throw new Error(
+      `conflicting routes: ${first.fullPath} is claimed by both ${first.files.join(' and ')}`,
+    );
   }
 
   const projectRoot = resolve(appDir, '..');

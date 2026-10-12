@@ -1,5 +1,6 @@
-import { track, batch as batchPrimitive } from './track.js';
+import { track, flush_sync } from './ripple-runtime.js';
 import type { StoreMiddleware } from '@vesk/types';
+import { readPersistedStorage, writePersistedStorage, clearPersistedStorage } from './store-persistence.js';
 
 /**
  * @typedef Subscriber
@@ -48,13 +49,13 @@ export function createStore<T extends object>(
 ) {
   const { persist = false, storageKey, devtools = false } = options;
 
-  // Check if running in browser for SSR safety
-  const canUseStorage = typeof window !== "undefined" && persist && storageKey;
-
-  // Load persisted state if enabled
+  // Load persisted state if enabled — on the server this reads through the
+  // adapter-installed hook (request cookie) and registers the key for the
+  // pre-paint script; on the client it prefers the pre-painted
+  // `window.__VESK_STORE_INIT__` value, then localStorage. Fallback: seed.
   let value: T = { ...initial };
-  if (canUseStorage) {
-    const stored = localStorage.getItem(storageKey!);
+  if (persist && storageKey) {
+    const stored = readPersistedStorage(storageKey);
     if (stored) {
       try {
         value = JSON.parse(stored);
@@ -116,11 +117,12 @@ export function createStore<T extends object>(
     }
   }
 
-  /** Persist current state to localStorage if enabled */
+  /** Persist current state if enabled — localStorage plus a same-site cookie
+   *  mirror so the next SSR render serves the user's actual value. */
   function persistToStorage() {
-    if (canUseStorage) {
+    if (persist && storageKey) {
       try {
-        localStorage.setItem(storageKey!, JSON.stringify(stateCell.get()));
+        writePersistedStorage(storageKey, JSON.stringify(stateCell.get()));
       } catch (err) {
         console.log("error saving to localStorage: ", err);
       }
@@ -190,12 +192,8 @@ export function createStore<T extends object>(
   /** @function clear — Clears both state and its localStorage record */
   function clear() {
     stateCell.set({ ...initial });
-    if (canUseStorage) {
-      try {
-        localStorage.removeItem(storageKey!);
-      } catch (err) {
-        console.warn("Failed to clear persisted store:", err);
-      }
+    if (persist && storageKey) {
+      clearPersistedStorage(storageKey);
     }
     notifyDirty("clear");
   }
@@ -204,7 +202,7 @@ export function createStore<T extends object>(
   function batch<R>(fn: () => R): R {
     batchDepth++;
     try {
-      return batchPrimitive(fn);
+      return flush_sync(fn) as R;
     } finally {
       batchDepth--;
       if (batchDepth === 0 && dirty) {
@@ -224,8 +222,24 @@ export function createStore<T extends object>(
    * store.subscribe(s => console.log(s)); // full state
    * store.subscribe(s => console.log(s.theme), s => s.theme); // only theme
    */
-  function subscribe(fn: Subscriber<T>, selector?: (state: T) => any) {
-    const wrapper = selector ? (state: T) => fn(selector(state)) : fn;
+  function subscribe(
+    fn: Subscriber<T>,
+    selector?: (state: T) => any,
+    equals?: (a: any, b: any) => boolean
+  ) {
+    const eq = equals ?? Object.is;
+    let hasPrev = false;
+    let prev: unknown;
+    const wrapper = selector
+      ? (state: T) => {
+          const selected = selector(state);
+          if (!hasPrev || !eq(selected, prev)) {
+            hasPrev = true;
+            prev = selected;
+            fn(selected);
+          }
+        }
+      : fn;
     subs.add(wrapper);
     wrapper(stateCell.get()); // initial call
     return () => subs.delete(wrapper);
@@ -288,7 +302,11 @@ export function createStore<T extends object>(
   ) {
     return {
       subscribe(cb: (v: K) => void) {
-        return subscribe(state => cb(selector(state)));
+        return subscribe(
+          (v: unknown) => cb(v as K),
+          selector,
+          equals as ((a: unknown, b: unknown) => boolean) | undefined
+        );
       },
     };
   }
@@ -316,21 +334,27 @@ export function createStore<T extends object>(
 }
 
 // -------------------- Example Stores --------------------
+//
+// Commented out on purpose: a top-level `createStore(...)` is a side effect,
+// so shipping ready-made example stores here would force `store.ts` into every
+// client runtime bundle — the tree-shaker cannot drop a module whose top level
+// runs anything. `createStore` is imported on demand and stays tree-shaken.
+// Build your own with `createStore({ ... })`.
 
-/**
- * This provides a basic store for your app like theme, user etc.
- * It's an example which you can delete;
- */
-export const appStore = createStore(
-  {
-    user: { name: "Joe", location: "unknown", preferences: [] },
-    count: 0,
-    theme: "dark",
-  },
-  { persist: true, storageKey: "appStore" }
-);
+// /**
+//  * This provides a basic store for your app like theme, user etc.
+//  * It's an example which you can delete;
+//  */
+// export const appStore = createStore(
+//   {
+//     user: { name: "Joe", location: "unknown", preferences: [] },
+//     count: 0,
+//     theme: "dark",
+//   },
+//   { persist: true, storageKey: "appStore" }
+// );
 
-export const routeStore = createStore(
-  { path: "/" },
-  { persist: true, storageKey: "routeStore" }
-);
+// export const routeStore = createStore(
+//   { path: "/" },
+//   { persist: true, storageKey: "routeStore" }
+// );

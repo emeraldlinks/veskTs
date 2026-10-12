@@ -13,7 +13,7 @@ await esbuild.build({
   outfile: resolve(__dirname, 'dist/cli.js'),
   format: 'esm',
   sourcemap: false,
-  external: ['typescript', 'ws', 'esbuild', 'sharp', 'zimmerframe', 'esrap'],
+  external: ['typescript', 'ws', 'esbuild', 'sharp', 'zimmerframe', 'esrap', 'puppeteer', 'puppeteer-core'],
   logOverride: { 'direct-eval': 'silent' },
   plugins: [{
     name: 'ts-prefer',

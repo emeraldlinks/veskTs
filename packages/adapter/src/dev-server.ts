@@ -614,6 +614,18 @@ await doBuild().catch(() => {});
       return;
     }
 
+    // Persisted-store pre-paint payload — same token-stash/consume contract as
+    // /ssr-data.js above so the dev SPA fallback never serves HTML as JS.
+    if (url.pathname === '/store-init.js') {
+      const token = url.searchParams.get('t') || '';
+      const store = (globalThis as Record<string, unknown>).__vsk_store_init_payload_store as Record<string, string> | undefined;
+      const payload = store?.[token];
+      if (payload) delete store[token];
+      res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
+      res.end(payload ?? '// no store init');
+      return;
+    }
+
     if (url.pathname.startsWith('/_vesk/static/')) {
       const relPath = url.pathname.slice('/_vesk/static/'.length);
       const staticPath = resolveWithin(resolve(devDir, 'static'), relPath);

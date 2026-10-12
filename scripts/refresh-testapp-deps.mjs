@@ -15,14 +15,14 @@
  */
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..');
 const appArg = process.argv[2];
 const appDirName = appArg || 'test-app';
-const appDir = join(root, appDirName);
+const appDir = appArg && isAbsolute(appArg) ? appArg : join(root, appDirName);
 const tarballsDir = join(appDir, 'tarballs');
 
 // name -> directory under packages/ (built from every package.json in packages/)

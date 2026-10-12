@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { compileClient } from '@vesk/compiler/src/client-codegen';
 import { buildHmrEvalSnippet } from './client-bundle';
 import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
-import { resolveErrorFile } from '@vesk/adapter/src/ssr-function';
+import { resolveErrorFile, persistedStoreSsrCode } from '@vesk/adapter/src/ssr-function';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
 import { parseCompilerError, buildCodeframe, type Codeframe } from '@vesk/adapter/src/error-codeframe';
@@ -397,6 +397,7 @@ function regenerateSsrFunction(
       // serialized by `renderFullPage` under another and the page would ship
       // with no ssr-data script.
       '  return withSsrStore(async () => {',
+      '  resetPersistedStoreKeys();',
       '  let page;',
       '  let caughtError = null;',
       '  try {',
@@ -416,13 +417,14 @@ function regenerateSsrFunction(
       "    if (_inner.head) _head = _inner.head + _head;",
       '  }',
       "  const html = await renderFullPage(_layoutSrcList[0], _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ', pageHead: _head, sourcePath: _layoutPathList[0] });',
-      "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
+      "  return new Response(__injectStoreInit(html), { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
     ].join('\n');
   } else {
     renderCode = [
       '  return withSsrStore(async () => {',
       '  let stream;',
+      "  const __streamToken = globalThis.__vsk_ssr_token || '';",
       '  try {',
       '    stream = renderPageStream(_src, _comp, { params }, __componentRegistry, { hydrate: true, cached: _srcCompiled' + bakedOptions + clientScriptOption + dataScriptOption + ", sourcePath: _srcPath });",
       '  } catch (err) {',
@@ -431,13 +433,26 @@ function regenerateSsrFunction(
       "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
       "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "    const html = await renderFullPage(_errorSrc, _errorComp, { params, statusCode: 500, error: message, stack, url: url.href }, __componentRegistry, { hydrate: true, cached: _errorCompiled" + bakedOptions + clientScriptOption + dataScriptOption + ', sourcePath: _errorPath });',
-      "    return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: 500 });",
+      "    return new Response(__injectStoreInit(html), { headers: { 'Content-Type': 'text/html' }, status: 500 });",
       '  }',
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',
+      "      let __tail = null;",
+      '      resetPersistedStoreKeys(__streamToken);',
       '      for await (const chunk of stream) {',
-      '        controller.enqueue(enc.encode(chunk));',
+      '        if (__tail !== null) controller.enqueue(enc.encode(__tail));',
+      '        __tail = chunk;',
+      '      }',
+      '      if (__tail !== null) {',
+      '        const __tag = __storeInitTag(__streamToken);',
+      "        if (__tag !== '') {",
+      "          const __bi = __tail.lastIndexOf('</body>');",
+      "          __tail = __bi === -1 ? __tail + __tag : __tail.slice(0, __bi) + __tag + __tail.slice(__bi);",
+      '        }',
+      '        controller.enqueue(enc.encode(__tail));',
+      '      } else {',
+      '        resetPersistedStoreKeys(__streamToken);',
       '      }',
       '      controller.close();',
       '    },',
@@ -460,9 +475,11 @@ function regenerateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, storeDataScriptGlobal, withSsrStore } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, compileFile, setVskHydrate, storeDataScriptGlobal, withSsrStore, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
     '', registryCode, src, '',
     errorBodyFnCode,
+    '',
+    persistedStoreSsrCode(),
     '',
     'export async function handle(request) {',
     '  const url = new URL(request.url);',

@@ -78,6 +78,56 @@ function buildParamExtraction(node: RouteNode, urlParts: string[]): string[] {
   return parts;
 }
 
+/** Shared persisted-store SSR helper block emitted into every generated SSR
+ *  function (prod via ssr-function.ts, dev via hmr.ts — keep the two callers
+ *  in sync by calling this). Emit it AFTER the function declarations so the
+ *  module-level `installPersistedStoreServerHooks` call runs on import. */
+export function persistedStoreSsrCode(): string {
+  return [
+    '// ── Persisted-store SSR continuity (createStore / createPathStore persist) ──',
+    '// Reads a persisted store\'s cookie value through the adapter request context.',
+    '// Client writes mirror URL-encoded; decode on the way back (best effort).',
+    'function __persistRead(key) {',
+    '  const cookieName = persistedStoreCookieName(key);',
+    '  const req = globalThis.__vesk_request;',
+    '  if (!req) return null;',
+    '  const c = req.cookies || {};',
+    '  const v = typeof c.get === \'function\' ? c.get(cookieName) : c[cookieName];',
+    '  if (v == null) return null;',
+    '  try { return decodeURIComponent(String(v)); } catch { return String(v); }',
+    '}',
+    '',
+    '// Drain this request\'s registered persisted keys into a served pre-paint',
+    '// script (/store-init.js?t=...) then forget them. `token` selects the',
+    '// render\'s bucket for callers outside the ALS scope (the no-layout stream',
+    '// path captures its token at the renderPageStream call site); the layout',
+    '// path runs this inside the scope and relies on the ambient token.',
+    'function __storeInitTag(token) {',
+    '  const keys = getPersistedStoreKeys(token);',
+    '  if (keys.length === 0) { resetPersistedStoreKeys(token); return \'\'; }',
+    '  const values = {};',
+    '  for (let __i = 0; __i < keys.length; __i++) values[keys[__i]] = __persistRead(keys[__i]);',
+    '  resetPersistedStoreKeys(token);',
+    '  const payload = buildStorePrePaintPayload(values);',
+    '  const url = storeInitScriptGlobal(payload);',
+    '  return url ? storeInitScriptTag(url) : \'\';',
+    '}',
+    '',
+    '// Inject the blocking store-init <script src> into a full HTML string',
+    '// (before </head>; append if the document has no head).',
+    'function __injectStoreInit(html) {',
+    '  const tag = __storeInitTag();',
+    '  if (tag === \'\') return html;',
+    '  const idx = html.lastIndexOf(\'</head>\');',
+    '  if (idx === -1) return html + tag;',
+    '  return html.slice(0, idx) + tag + html.slice(idx);',
+    '}',
+    '',
+    'installPersistedStoreServerHooks({ read: __persistRead });',
+    '',
+  ].join('\n');
+}
+
 export function generateSsrFunction(
   routeNode: RouteNode,
   appDir: string,
@@ -184,6 +234,7 @@ export function generateSsrFunction(
       '',
       'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
+      '  resetPersistedStoreKeys();',
       '  let page;',
       '  let caughtError = null;',
       "  const __expose = process.env.NODE_ENV !== 'production';",
@@ -204,7 +255,7 @@ export function generateSsrFunction(
       '    if (_inner.head) _head = _inner.head + _head;',
       '  }',
       "  const html = await renderFullPage('', _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ", pageHead: _head });",
-      "  return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
+      "  return new Response(__injectStoreInit(html), { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
       '  });',
       '}',
       '',
@@ -223,25 +274,48 @@ export function generateSsrFunction(
       'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
       '  let stream;',
+      // The streamed no-layout page emits its <head> before the component body
+      // renders, so its persisted stores don't exist yet when the head is
+      // flushed — the pre-paint tag therefore goes into the final chunk, right
+      // before </body> (still a blocking, pre-paint script). Capture the render
+      // token now (renderPageStream adopts this exact ambient store) so the
+      // registry drain in the consumer's start() can hit the right bucket even
+      // though it runs outside the ALS scope.
+      "  const __streamToken = globalThis.__vsk_ssr_token || '';",
       '  try {',
       "    stream = renderPageStream('', _comp, { params }, __componentRegistry, { hydrate: true, cached: _compiled" + bakedOptions + clientScriptOption + dataScriptOption + ' });',
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    const html = await __renderErrorFullPage(params, requestUrl, err);',
-      "    return new Response(html, { headers: { 'Content-Type': 'text/html' }, status: 500 });",
+      "    return new Response(__injectStoreInit(html), { headers: { 'Content-Type': 'text/html' }, status: 500 });",
       '  }',
       '  return new Response(new ReadableStream({',
       '    async start(controller) {',
       '      const enc = new TextEncoder();',
+      "      let __tail = null;",
+      '      resetPersistedStoreKeys(__streamToken);',
       '      try {',
       '        for await (const chunk of stream) {',
-      '          controller.enqueue(enc.encode(chunk));',
+      '          if (__tail !== null) controller.enqueue(enc.encode(__tail));',
+      '          __tail = chunk;',
+      '        }',
+      '        if (__tail !== null) {',
+      '          const __tag = __storeInitTag(__streamToken);',
+      '          if (__tag !== \'\') {',
+      '            const __bi = __tail.lastIndexOf(\'</body>\');',
+      '            __tail = __bi === -1 ? __tail + __tag : __tail.slice(0, __bi) + __tag + __tail.slice(__bi);',
+      '          }',
+      '          controller.enqueue(enc.encode(__tail));',
+      '        } else {',
+      '          // Empty stream (no chunks) — nothing to attach the tag to; just',
+      '          // clear the registry so a later render can\'t inherit these keys.',
+      '          resetPersistedStoreKeys(__streamToken);',
       '        }',
       '      } catch (err) {',
       '        if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '        try {',
       '          const html = await __renderErrorFullPage(params, requestUrl, err);',
-      '          controller.enqueue(enc.encode(html));',
+      '          controller.enqueue(enc.encode(__injectStoreInit(html)));',
       '        } catch {}',
       '      }',
       '      controller.close();',
@@ -252,6 +326,13 @@ export function generateSsrFunction(
       '',
     ].join('\n');
   }
+
+  // Persisted-store SSR continuity (createStore / createPathStore persist).
+  // The adapter-installed read hook pulls each store's cookie value through the
+  // request context; the tag the generated pages emit points at an origin-served
+  // /store-init.js?t=<token> file (CSP-safe, never inlined — see
+  // buildStorePrePaintPayload) so the client can pre-paint the user's value.
+  const persistCode = persistedStoreSsrCode();
 
   let dataCode: string;
   const exposeErr = "process.env.NODE_ENV !== 'production'";
@@ -270,8 +351,11 @@ export function generateSsrFunction(
     // removes the property definition and the process silently reverts to a
     // process-global token — the cross-request data-slot race, for good. The
     // token dies with the withSsrStore scope wrapped around this block instead.
-    '      delete globalThis.__vsk_ssr_data;',
-    '    }',
+'      delete globalThis.__vsk_ssr_data;',
+      // SPA data-nav only runs renderPage, so the persisted-store registration
+      // bucket would otherwise keep this request's keys forever.
+      '      resetPersistedStoreKeys();',
+      '    }',
   ];
   // The data-nav branch never runs renderFullPage/renderPageStream, so it needs
   // its own request scope — otherwise its renderPage mints a token that is
@@ -466,7 +550,7 @@ export function generateSsrFunction(
   ].join('\n');
 
   const funcCode = [
-    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,
@@ -474,6 +558,8 @@ export function generateSsrFunction(
     '',
     paramsCode,
     htmlFnCode,
+    '',
+    persistCode,
     '',
     'export async function handle(request) {',
     '  const url = new URL(request.url);',

@@ -333,6 +333,19 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       return;
     }
 
+    // Persisted-store pre-paint payload (buildStorePrePaintPayload), stashed by
+    // storeInitScriptGlobal under its own token store so consuming one never
+    // eats the page's /ssr-data.js handoff. Served once, consumed-and-deleted.
+    if (url.pathname === '/store-init.js') {
+      const token = url.searchParams.get('t') || '';
+      const store = (globalThis as Record<string, unknown>).__vsk_store_init_payload_store as Record<string, string> | undefined;
+      const payload = store?.[token];
+      if (payload) delete store[token];
+      res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
+      res.end(payload ?? '// no store init');
+      return;
+    }
+
     // Stable alias for the client runtime: the file on disk is content-hashed in
     // production, so the name is resolved from the manifest rather than assumed.
     if (url.pathname === '/_vesk/runtime.js') {

@@ -178,6 +178,20 @@ ${serverStoreLine}
     });
   }
 
+  // Persisted-store pre-paint payload (buildStorePrePaintPayload) — same
+  // token-stash/consume contract as /ssr-data.js, own store so neither handoff
+  // can eat the other.
+  if (pathname === '/store-init.js') {
+    const initToken = url.searchParams.get('t') || '';
+    const initStore = (globalThis.__vsk_store_init_payload_store || {});
+    const initPayload = initStore[initToken];
+    if (initPayload !== undefined) delete initStore[initToken];
+    return new Response(initPayload ?? '// no store init', {
+      status: 200,
+      headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' },
+    });
+  }
+
 ${eventsStartLine}
   let mwCtx = { params: {}, url, locals: ${localsSeed}, cookies: {}, request, resolveUrl(u) { return new URL(u, request.url).href; }, set() {}, get() { return undefined; } };
   if (${hasMwLiteral}) {
