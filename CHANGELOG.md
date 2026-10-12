@@ -2,6 +2,23 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.60 — 2026-10-12
+
+_No breaking changes._
+
+### Features
+
+- **runtime:** SSR-persisted stores + path-store, fix cell imprint & derived recompute
+
+### Fixes
+
+- **parser:** handle JSX quotes in for clauses
+- **ssr/orphan-root:** prevent effects from running during server rendering
+
+### Other
+
+- added tests files
+
 ## 0.2.59 — 2026-10-10
 
 _No breaking changes._
