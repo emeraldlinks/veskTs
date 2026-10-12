@@ -5,7 +5,7 @@ import { tsPlugin } from './acorn-ts-plugin/index.js';
 import { VeskParserPlugin } from '@vesk/compiler/src/vesk-plugin';
 import { blankComments, containsForOfIn } from '@vesk/compiler/src/scan';
 import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
-import { findSpecifierExports, hasTopLevelValueDeclaration } from '@vesk/compiler/src/tokens';
+import { findSpecifierExports, hasTopLevelValueDeclaration, collectStringDelimiters, tokenizeCode } from '@vesk/compiler/src/tokens';
 
 export interface ParseOptions {
   filename?: string;
@@ -61,8 +61,21 @@ function offsetToLineCol(source: string, offset: number): { line: number; column
  * Scans the source and blanks `; key <expr>` / `; index <ident>` clauses
  * found in `for (...)` headers, returning the rewritten code (same length
  * as the input, so every source offset is preserved) plus annotations.
+ *
+ * `delimiters` — the real string/template delimiters from
+ * `collectStringDelimiters` — is optional. Without it the scan assumes every
+ * `"`, `'` and `` ` `` opens a literal, which is wrong for JSX: an apostrophe
+ * in text (`<th>Joe Christopher's Standing</th>`) or in an attribute value
+ * opens a "string" that runs to the next quote anywhere in the file, so every
+ * `for` loop in between is invisible and its `; key …` clause reaches acorn
+ * un-blanked as `Unexpected token` at the header. Callers that can afford the
+ * tokenization pass it in; when it is unavailable the scan falls back to the
+ * plain lexical skip so mid-edit source never crashes it.
  */
-export function preprocessForClauses(source: string): { code: string; annotations: VeskAnnotation[] } {
+export function preprocessForClauses(
+  source: string,
+  delimiters?: Set<number> | null,
+): { code: string; annotations: VeskAnnotation[] } {
   const annotations: VeskAnnotation[] = [];
   const chars: string[] = source.split('');
 
@@ -74,6 +87,13 @@ export function preprocessForClauses(source: string): { code: string; annotation
 
     // Skip strings and comments (nested backtick templates keep depth).
     if (isString(ch)) {
+      // A quote the tokenizer says is not a delimiter is literal JSX text (or
+      // a quote inside a literal); step over the single character instead of
+      // swallowing the rest of the file.
+      if (delimiters && !delimiters.has(i)) {
+        i++;
+        continue;
+      }
       const quote = ch;
       let j = i + 1;
       let tplDepth = 0;
@@ -458,15 +478,21 @@ export function parseGeneratedJs(source: string): Program | null {
 
 export function parse(source: string, options: ParseOptions = {}): Program {
   const ParserClass = createBaseParser();
-  const { code, annotations } = preprocessForClauses(blankGenericArrowTypeParams(blankComments(source)));
+  // Tokenize once for both delimiter detection and specifier-export filtering
+  // to avoid duplicate lexing/parsing overhead.
+  const sourceTokens = tokenizeCode(source);
+  const delimiters = sourceTokens === null
+    ? null
+    : collectStringDelimiters(source, sourceTokens);
+  const { code, annotations } = preprocessForClauses(blankGenericArrowTypeParams(blankComments(source)), delimiters);
   // Acorn validates that every `export { X }` names a real top-level binding.
   // A `.vsk` component is a registry entry, not a binding, so acorn rejects
   // `export { MyComponent }`. Remove only those specifier lists — one whose
   // local IS a real declaration keeps native module semantics — and carry the
   // pairs on the AST; the IR generator turns them into registry aliases.
   const vskSource = !options.filename || String(options.filename).endsWith('.vsk');
-  const specifierExports = vskSource
-    ? findSpecifierExports(code).filter((e) => !hasTopLevelValueDeclaration(code, e.local))
+  const specifierExports = vskSource && sourceTokens !== null
+    ? findSpecifierExports(code, sourceTokens).filter((e) => !hasTopLevelValueDeclaration(code, e.local, sourceTokens))
     : [];
   let parseable = code;
   if (specifierExports.length > 0) {

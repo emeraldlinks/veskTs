@@ -31,3 +31,4 @@ export type { VeskMetadata, MetadataTitle, OpenGraphMetadata } from '@vesk/runti
 
 export { setIn, updateIn, getIn } from '@vesk/runtime/src/nested-update';
 export type { Path } from '@vesk/runtime/src/nested-update';
+export { createStore } from './store.js';

@@ -60,35 +60,77 @@ export function tokenizeCode(code: string): CodeToken[] | null {
   });
 }
 
+/** Token labels whose source text is a quoted literal (string or template). */
+const QUOTED_LABELS = new Set(['string', 'template', '`', 'backQuote']);
+
+/**
+ * Returns the set of offsets at which a `"`, `'` or `` ` `` in `code` really
+ * opens a quoted literal, or `null` when the code cannot be tokenized.
+ *
+ * A character-level scanner cannot tell an apostrophe in JSX text
+ * (`<th>Joe Christopher's Standing</th>`) or inside an attribute value
+ * (`class="Bob's"`) from the opening quote of a JavaScript string, and the
+ * mistake is unbounded: the scanner skips to the next quote it can find — or to
+ * end of file — and everything in between is invisible to it. That is how the
+ * `; key …` clause of a `for` loop could go un-blanked and surface as
+ * `Unexpected token` at a header hundreds of lines away from the real cause.
+ *
+ * The tokenizer has no such ambiguity, so this hands the decision to it. A
+ * quote is a delimiter when a quoted-literal token starts there (ordinary JS
+ * strings and template backticks) or when no token covers it at all — which is
+ * how a JSX attribute value arrives, since acorn's JSX reader consumes the
+ * attribute's opening quote before tokenizing its content.
+ *
+ * Callers must fall back to their own lexical skip when this returns `null`;
+ * tokenizing fails on input that is mid-edit or otherwise unparsable, and the
+ * character scanners have to keep working there.
+ */
+export function collectStringDelimiters(code: string, tokens?: CodeToken[] | null): Set<number> | null {
+  const t = tokens == null ? tokenizeCode(code) : tokens;
+  if (t === null) return null;
+  const starts = new Set<number>();
+  // `t` is ordered by offset, so one pointer answers "is this offset
+  // inside a token?" for the whole source without materialising a bitmap.
+  let ti = 0;
+  for (let i = 0; i < code.length; i++) {
+    const c = code.charCodeAt(i);
+    if (c !== 34 && c !== 39 && c !== 96) continue;
+    while (ti < t.length && t[ti].end <= i) ti++;
+    const covered = ti < t.length && t[ti].start <= i;
+    if (!covered || QUOTED_LABELS.has(t[ti].label)) starts.add(i);
+  }
+  return starts;
+}
+
 /**
  * Returns the set of identifiers in `code` that are called — an identifier
  * token immediately followed by `(` or by a `<...>` generic clause and then
  * `(`. Member accesses (`obj.fn(`, `obj?.fn(`) are excluded so methods are
  * not mistaken for imported runtime functions.
  */
-export function collectCalledIdentifiers(code: string): Set<string> {
-  const tokens = tokenizeCode(code);
-  if (tokens !== null) {
+export function collectCalledIdentifiers(code: string, tokens?: CodeToken[] | null): Set<string> {
+  const t = tokens == null ? tokenizeCode(code) : tokens;
+  if (t !== null) {
     const result = new Set<string>();
-    for (let i = 0; i < tokens.length; i++) {
-      const t = tokens[i];
-      if (t.label !== 'name') continue;
-      const prev = i > 0 ? tokens[i - 1] : null;
+    for (let i = 0; i < t.length; i++) {
+      const tok = t[i];
+      if (tok.label !== 'name') continue;
+      const prev = i > 0 ? t[i - 1] : null;
       if (prev && (prev.label === '.' || prev.label === '?.')) {
         // Member calls (`useFetch.text(`) surface the receiver so an
         // auto-importable function used as a receiver is still imported.
-        const obj = i >= 2 ? tokens[i - 2] : null;
-        const next = tokens[i + 1];
+        const obj = i >= 2 ? t[i - 2] : null;
+        const next = t[i + 1];
         if (obj && obj.label === 'name' && next) {
           const nextCh = code[next.start];
           if (nextCh === '(' || nextCh === '<') result.add(obj.value);
         }
         continue;
       }
-      const next = tokens[i + 1];
+      const next = t[i + 1];
       if (!next) continue;
       const nextCh = code[next.start];
-      if (nextCh === '(' || nextCh === '<') result.add(t.value);
+      if (nextCh === '(' || nextCh === '<') result.add(tok.value);
     }
     return result;
   }
@@ -335,19 +377,19 @@ function manualExtractImportNames(importText: string): string[] {
  * with no binding — apart from an ordinary JS/TS declaration, whose
  * `export { name }` must keep native module semantics.
  */
-export function hasTopLevelValueDeclaration(code: string, name: string): boolean {
-  const tokens = tokenizeCode(code);
-  if (tokens === null) return false;
+export function hasTopLevelValueDeclaration(code: string, name: string, tokens?: CodeToken[] | null): boolean {
+  const t = tokens == null ? tokenizeCode(code) : tokens;
+  if (t === null) return false;
   const declWords = ['const', 'let', 'var', 'function', 'class'];
-  for (let i = 1; i < tokens.length; i++) {
-    if (tokens[i].label !== 'name' || tokens[i].value !== name) continue;
-    const prev = tokens[i - 1];
+  for (let i = 1; i < t.length; i++) {
+    if (t[i].label !== 'name' || t[i].value !== name) continue;
+    const prev = t[i - 1];
     // Declaration keywords carry their own token label (`const`, `var`,
     // `function`, `class`); `let` arrives as a plain name. Match on value.
     if (!prev || !declWords.includes(prev.value)) continue;
     // `export const X` / `export function X` are preceded by `export`.
     if (i >= 2) {
-      const pp = tokens[i - 2];
+      const pp = t[i - 2];
       if (pp && pp.label === 'name' && pp.value === 'export') continue;
     }
     return true;
@@ -374,37 +416,37 @@ export interface VskSpecifierExport {
  * `export const A = 1`) and re-exports (`export … from '…'`) are left alone:
  * those parse fine and are handled in the IR generator.
  */
-export function findSpecifierExports(code: string): VskSpecifierExport[] {
-  const tokens = tokenizeCode(code);
-  if (tokens === null) return [];
+export function findSpecifierExports(code: string, tokens?: CodeToken[] | null): VskSpecifierExport[] {
+  const t = tokens == null ? tokenizeCode(code) : tokens;
+  if (t === null) return [];
   const out: VskSpecifierExport[] = [];
-  for (let i = 0; i < tokens.length; i++) {
-    if (tokens[i].label !== 'export') continue;
+  for (let i = 0; i < t.length; i++) {
+    if (t[i].label !== 'export') continue;
     // A specifier list starts with `{`. `export default`, `export const` and
     // `export *` take another route and are left for the IR generator.
-    if (!tokens[i + 1] || tokens[i + 1].label !== '{') continue;
+    if (!t[i + 1] || t[i + 1].label !== '{') continue;
     // Find this statement's `}` and note any module source, which makes it a
     // re-export (`export { A } from './x.vsk'`) rather than a specifier list.
     let k = i + 2;
     let depth = 1;
-    for (; k < tokens.length; k++) {
-      const lbl = tokens[k].label;
+    for (; k < t.length; k++) {
+      const lbl = t[k].label;
       if (lbl === 'string') { continue; }
       if (lbl === '{') depth++;
       else if (lbl === '}') { depth--; if (depth === 0) break; }
     }
     // A re-export puts `from '…'` AFTER the closing brace, so check past it.
     let isReexport = false;
-    for (let j = k + 1; j < tokens.length; j++) {
-      const lbl = tokens[j].label;
+    for (let j = k + 1; j < t.length; j++) {
+      const lbl = t[j].label;
       if (lbl === 'string') { isReexport = true; break; }
       if (lbl === ';' || lbl === 'export' || lbl === 'import' || lbl === '}') break;
     }
     if (depth !== 0 || isReexport) continue;
-    const pairs = readSpecifierPairs(code, tokens[i + 1].end, tokens[k].end);
+    const pairs = readSpecifierPairs(code, t[i + 1].end, t[k].end);
     if (pairs === null) continue;
-    const stmtEnd = tokens[k].end;
-    for (const [local, exported] of pairs) out.push({ local, exported, start: tokens[i].start, end: stmtEnd });
+    const stmtEnd = t[k].end;
+    for (const [local, exported] of pairs) out.push({ local, exported, start: t[i].start, end: stmtEnd });
     i = k;
   }
   return out;

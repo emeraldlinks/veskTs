@@ -816,4 +816,67 @@ export const pages: { slug: string; title: string; description: string; group: s
       },
     ],
   },
+];    ],
+  },
+  {
+    kind: "h2",
+    text: "Store",
+  },
+  {
+    kind: "p",
+    text:
+      "Vesk includes a reactive store implementation inspired by libraries like Zustand, built on top of Vesk's fine-grained reactivity system. The store provides a centralized state management solution with optional persistence, middleware, and derived stores.",
+  },
+  {
+    kind: "h3",
+    text: "Creating a Store",
+  },
+  {
+    kind: "p",
+    text:
+      "Stores are created with the `createStore` function from `@vesk/runtime`.",
+  },
+  {
+    kind: "pre",
+    text:
+      "import { createStore } from '@vesk/runtime';\n\nconst store = createStore({ count: 0, theme: 'dark' }, {\n  persist: true,\n  storageKey: 'my-store'\n});",
+  },
+  {
+    kind: "h3",
+    text: "Store API",
+  },
+  {
+    kind: "p",
+    text:
+      "The store returns an object with the following methods:",
+  },
+  {
+    kind: "pre",
+    text:
+      "// State access\nstore.get() // => { count: 0, theme: 'dark' }\n\n// State updates\nstore.update({ count: 1 })\nstore.set({ count: 5, theme: 'light' })\nstore.update(prev => ({ count: prev.count + 1 }))\n\n// Batch operations (prevents multiple subscriber calls)\nstore.batch(() => {\n  store.update({ a: 1 })\n  store.update({ b: 2 })\n  store.set({ c: 3 })\n})\n\n// Reset to initial state\nstore.reset()\n\n// Rehydrate with new initial state (keeps store identity)\nstore.rehydrate({ user: { id: 1, name: 'Ada' } })\n\n// Clear state and persistence\nstore.clear()\n\n// Subscribe to changes\nconst unsub = store.subscribe(state => console.log(state))\n\n// Watch specific values\nconst unwatch = store.watch(\n  s => s.count,\n  (n, o) => console.log(`count: ${o} → ${n}`),\n  (a, b) => a === b // shallow equality\n)\n\n// Middleware\nconst unuse = store.use((state, action) => console.log(`[${action}]`, state))\n\n// Derived stores\nconst themeStore = store.derive(s => s.theme)\nthemeStore.subscribe(v => console.log('theme:', v))\n\n// Debugging\nconsole.log(store.toJSON()) // deep clone of state",
+  },
+  {
+    kind: "h3",
+    text: "Server Safety",
+  },
+  {
+    kind: "p",
+    text:
+      "The store is SSR-safe. When running on the server (where `window` is undefined), persistence and devtools features are automatically disabled, but all other functionality works identically.",
+  },
+  {
+    kind: "h3",
+    text: "Example Stores",
+  },
+  {
+    kind: "p",
+    text:
+      "The runtime includes example stores that you can use or remove:",
+  },
+  {
+    kind: "pre",
+    text:
+// Assuming these are exported from the runtime
+"import { appStore, routeStore } from '@vesk/runtime'\n\n// appStore contains { user, count, theme } with persistence\n// routeStore contains { path } with persistence",
+  },
 ];

@@ -73,6 +73,7 @@ export interface ApiRouteNode {
  * ```
  */
 export interface VeskLocals extends Record<string, unknown> {}
+export type StoreMiddleware<S> = (state: S, action?: string, payload?: any) => void;
 
 /**
  * A typed key/value store for request-scoped values. Keys and values are

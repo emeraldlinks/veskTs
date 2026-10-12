@@ -1309,6 +1309,29 @@ describe('For-of key/index clauses and #empty blocks', () => {
 // ============================================================
 // Results
 // ============================================================
+it('parses for-of with ; key clause inside tbody of table (statement mode) without error', () => {
+	const source = `component Test() {
+		const perf = { classBRequirements: [{ metric: 'M1', required: 'R1', current: 'C1', delta: 'D1', isSatisfied: true }] };
+		<div class="overflow-x-auto">
+			<table>
+				<tbody>
+					for (const row of perf.classBRequirements; key row.metric) {
+						<tr>{row.metric}</tr>
+					}
+				</tbody>
+			</table>
+		</div>
+	}`;
+	let ok = true;
+	let err;
+	try {
+		parse(source, { filename: 'Test.vsk' });
+	} catch (e) {
+		ok = false;
+		err = e;
+	}
+	expect(ok).toBe(true);
+});
 console.log(`\n${'='.repeat(50)}`);
 // ── Standalone tokenizing must understand JSX ────────────────────────────────
 // `tokenizeCode` drives the tokenizer without the parser, so the plugin cannot
@@ -1337,14 +1360,14 @@ describe('tokenizeCode with JSX in a component body', () => {
 
 	it('finds a same-file specifier export in a file with component bodies', () => {
 		const src = withBody('\tconst a = 1\n\t<button>x</button>') + 'export { App }\n';
-		const found = findSpecifierExports(src);
+		const found = findSpecifierExports(src, null);
 		expect(found.length).toBe(1);
 		expect(found[0].local).toBe('App');
 	});
 
 	it('keeps `export { A }` for a local that really is a top-level binding', () => {
 		const src = 'const A = 1\nexport { A }\n';
-		expect(hasTopLevelValueDeclaration(src, 'A')).toBe(true);
+		expect(hasTopLevelValueDeclaration(src, 'A', null)).toBe(true);
 	});
 
 	it('parseGeneratedJs reports the same node offsets as the .vsk parser', () => {

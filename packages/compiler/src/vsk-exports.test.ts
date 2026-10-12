@@ -175,15 +175,15 @@ describe('parse: specifier exports are extracted, not rejected', () => {
 
 describe('hasTopLevelValueDeclaration', () => {
   it('detects const/let/var/function/class declarations', () => {
-    expect(hasTopLevelValueDeclaration('const A = 1', 'A')).toBe(true);
-    expect(hasTopLevelValueDeclaration('let A = 1', 'A')).toBe(true);
-    expect(hasTopLevelValueDeclaration('var A = 1', 'A')).toBe(true);
-    expect(hasTopLevelValueDeclaration('function A() {}', 'A')).toBe(true);
-    expect(hasTopLevelValueDeclaration('class A {}', 'A')).toBe(true);
+    expect(hasTopLevelValueDeclaration('const A = 1', 'A', null)).toBe(true);
+    expect(hasTopLevelValueDeclaration('let A = 1', 'A', null)).toBe(true);
+    expect(hasTopLevelValueDeclaration('var A = 1', 'A', null)).toBe(true);
+    expect(hasTopLevelValueDeclaration('function A() {}', 'A', null)).toBe(true);
+    expect(hasTopLevelValueDeclaration('class A {}', 'A', null)).toBe(true);
   });
 
   it('reports a component declaration as NOT a value declaration', () => {
-    expect(hasTopLevelValueDeclaration('component A { <p>a</p> }', 'A')).toBe(false);
+    expect(hasTopLevelValueDeclaration('component A { <p>a</p> }', 'A', null)).toBe(false);
   });
 });
 
@@ -370,20 +370,20 @@ describe('a .vsk namespace import resolves component tags', () => {
 describe('findSpecifierExports', () => {
   it('finds a specifier list with a span', () => {
     const code = 'component A {}\nexport { A }';
-    const found = findSpecifierExports(code);
+    const found = findSpecifierExports(code, null);
     expect(found).toHaveLength(1);
     expect(found[0].local).toBe('A');
     expect(code.slice(found[0].start, found[0].end)).toBe('export { A }');
   });
 
   it('ignores `export * from` and `export default`', () => {
-    expect(findSpecifierExports("export * from './a.vsk'")).toHaveLength(0);
-    expect(findSpecifierExports('export default component A {}')).toHaveLength(0);
-    expect(findSpecifierExports('export const X = 1')).toHaveLength(0);
+    expect(findSpecifierExports("export * from './a.vsk'", null)).toHaveLength(0);
+    expect(findSpecifierExports('export default component A {}', null)).toHaveLength(0);
+    expect(findSpecifierExports('export const X = 1', null)).toHaveLength(0);
   });
 
   it('ignores a re-export with a brace list', () => {
-    expect(findSpecifierExports("export { A } from './a.vsk'")).toHaveLength(0);
+    expect(findSpecifierExports("export { A } from './a.vsk'", null)).toHaveLength(0);
   });
 });
 
