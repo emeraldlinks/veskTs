@@ -431,6 +431,70 @@ export function transformTrackedInit(init: string, tracked: Map<string, TrackedI
   return transformTracked({ raw: init, ast: expr as unknown as ESTreeNode } as Expression, tracked);
 }
 
+/**
+ * Names a body-level `RuntimeStatement` binds (`const list = …`, `let x = …`).
+ * Only top-level `Identifier` declarators count — destructuring patterns are
+ * rare here and a false negative only means we hoist, which is the previous
+ * behaviour.
+ */
+function runtimeDeclaredNames(node: IRNode): string[] {
+  if (!(node instanceof RuntimeStatement)) return [];
+  const stmt = node.ast as { type?: string; declarations?: Array<{ id?: { type?: string; name?: string } }> } | null;
+  if (!stmt || stmt.type !== 'VariableDeclaration' || !stmt.declarations) return [];
+  const out: string[] = [];
+  for (const d of stmt.declarations) {
+    if (d.id && d.id.type === 'Identifier' && typeof d.id.name === 'string') out.push(d.id.name);
+  }
+  return out;
+}
+
+/**
+ * Whether a `TrackDecl` initializer reads any of `names`. Parsed with the vsk
+ * parser (TS generics and `.vsk` syntax included) and walked AST-only — no
+ * regex over source. An unparsable init reports `false`, which keeps the
+ * previous hoist behaviour rather than silently changing emission order.
+ */
+function initReadsAnyOf(init: string, names: Set<string>): boolean {
+  if (!init || names.size === 0) return false;
+  let expr: Record<string, unknown> | null = null;
+  try {
+    const prog = parse(`(${init})`) as unknown as {
+      body?: Array<{ type: string; expression?: Record<string, unknown> }>;
+    };
+    expr = prog.body?.[0]?.type === 'ExpressionStatement' ? (prog.body[0].expression ?? null) : null;
+  } catch {
+    return false;
+  }
+  if (!expr) return false;
+  let found = false;
+  const walk = (n: unknown): void => {
+    if (found || !n || typeof n !== 'object') return;
+    if (Array.isArray(n)) {
+      for (const c of n) walk(c);
+      return;
+    }
+    const t = (n as { type?: string }).type;
+    if (typeof t !== 'string') return;
+    if (t === 'Identifier') {
+      if (names.has((n as { name: string }).name)) found = true;
+      return;
+    }
+    if (t === 'MemberExpression') {
+      const m = n as { computed?: boolean; object?: unknown; property?: unknown };
+      walk(m.object);
+      // A non-computed property is a field name, not a reference.
+      if (m.computed) walk(m.property);
+      return;
+    }
+    for (const key of Object.keys(n)) {
+      if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') continue;
+      walk((n as Record<string, unknown>)[key]);
+    }
+  };
+  walk(expr);
+  return found;
+}
+
 const NON_BUBBLING_EVENTS = new Set([
   'focus', 'blur',
   'mouseenter', 'mouseleave',
@@ -2371,9 +2435,27 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
   const paramInit = buildParamInit(comp.paramNames, comp.propsAlias);
   if (paramInit) ctx.push(indent(paramInit));
 
-  // Hoist TrackDecls to top to avoid TDZ when Head/effects reference them before declaration
+  // Hoist TrackDecls to top to avoid TDZ when Head/effects reference them before
+  // declaration — BUT a TrackDecl whose initializer reads a binding declared by
+  // an EARLIER body statement must stay in place. Hoisting it turned
+  // `const list = …; const &[sel] = track(list[0])` into
+  // `const sel = track(list[0]); const list = …`, so the client threw
+  // `ReferenceError: Cannot access 'list' before initialization` and the route
+  // rendered the error page after hydration. Source order already satisfies the
+  // Head/effect case, because both are emitted after the statements they read.
+  const deferredTrackDecls = new Set<TrackDecl>();
+  {
+    const declaredSoFar = new Set<string>();
+    for (const node of comp.body) {
+      if (node instanceof TrackDecl) {
+        if (initReadsAnyOf(node.init, declaredSoFar)) deferredTrackDecls.add(node);
+        continue;
+      }
+      for (const name of runtimeDeclaredNames(node)) declaredSoFar.add(name);
+    }
+  }
   for (const node of comp.body) {
-    if (node instanceof TrackDecl) {
+    if (node instanceof TrackDecl && !deferredTrackDecls.has(node)) {
       emitNode(ctx, node, tracked, null);
     }
   }
@@ -2427,7 +2509,13 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
     }
   }
   for (const node of comp.body) {
-    if (node instanceof TrackDecl) continue;
+    // A TrackDecl that could not be hoisted (its init reads an earlier body
+    // binding) is emitted here, in source order, so the binding it reads is
+    // already initialised.
+    if (node instanceof TrackDecl) {
+      if (deferredTrackDecls.has(node)) emitNode(ctx, node, tracked, null);
+      continue;
+    }
     const v = emitNode(ctx, node, tracked, null, undefined, '__components', topPendingSkip, topBudget || undefined);
     if (v) {
       if (ctx.hydrate) {

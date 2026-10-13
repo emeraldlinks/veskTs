@@ -2106,6 +2106,87 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	});
 });
 
+describe('Client Codegen — TrackDecl declaration order', () => {
+
+	// TrackDecls are hoisted so a <Head> or effect can read them early, but a
+	// track whose initializer reads a binding declared by an EARLIER statement
+	// must stay put. Hoisting it produced
+	// `ReferenceError: Cannot access 'list' before initialization` after
+	// hydration — the route SSR'd fine and then rendered the error page.
+	// Reported from a real app (/admin/my-classroom, /portal/profile).
+	it('[normal] a track decl that reads an earlier const is emitted in source order (statement mode)', () => {
+		const code = compileClient(`
+			component P(props: { items: string[] }) {
+				const list = props.items.filter(Boolean);
+				const &[sel] = track(list[0] ?? '');
+				<div>{sel}</div>
+			}
+		`, null, { forceClient: true });
+		const listAt = code.search(/const list\s*=/);
+		const trackAt = code.search(/track\(list\[0\]/);
+		expect(listAt).toBeGreaterThan(-1);
+		expect(trackAt).toBeGreaterThan(-1);
+		expect(listAt).toBeLessThan(trackAt);
+	});
+
+	it('[normal] a track decl that reads an earlier const is emitted in source order (expression mode)', () => {
+		const code = compileClient(`
+			component P(props: { items: string[] }) {
+				const list = props.items.filter(Boolean);
+				const &[sel] = track(list[0] ?? '');
+				return <div>{sel}</div>;
+			}
+		`, null, { forceClient: true });
+		const listAt = code.search(/const list\s*=/);
+		const trackAt = code.search(/track\(list\[0\]/);
+		expect(listAt).toBeGreaterThan(-1);
+		expect(trackAt).toBeGreaterThan(-1);
+		expect(listAt).toBeLessThan(trackAt);
+	});
+
+	it('[normal] a derived reading an earlier const is emitted in source order', () => {
+		const code = compileClient(`
+			component P(props: { rows: { id: string }[] }) {
+				const visible = props.rows.filter(Boolean);
+				const &[pick] = derived(() => visible[0]?.id ?? '');
+				<div>{pick}</div>
+			}
+		`, null, { forceClient: true });
+		const visAt = code.search(/const visible\s*=/);
+		const derAt = code.search(/derived\(\(\) => visible\[0\]/);
+		expect(visAt).toBeGreaterThan(-1);
+		expect(derAt).toBeGreaterThan(-1);
+		expect(visAt).toBeLessThan(derAt);
+	});
+
+	it('[normal] an INDEPENDENT track decl is still hoisted above a later effect', () => {
+		// The hoist exists for this case, and must not be regressed away.
+		const code = compileClient(`
+			component P() {
+				const &[n] = track(0);
+				effect(() => { console.log(n); });
+				<div>{n}</div>
+			}
+		`, null, { forceClient: true });
+		const trackAt = code.search(/track\(0\)/);
+		const effectAt = code.search(/effect\(/);
+		expect(trackAt).toBeGreaterThan(-1);
+		expect(effectAt).toBeGreaterThan(-1);
+		expect(trackAt).toBeLessThan(effectAt);
+	});
+
+	it('[normal] a non-computed field name is not treated as an earlier-binding reference', () => {
+		// `data.rows` reads `data`, not a binding called `rows`.
+		const code = compileClient(`
+			component P(props: { data: { rows: string[] } }) {
+				const &[sel] = track(props.data.rows[0] ?? '');
+				<div>{sel}</div>
+			}
+		`, null, { forceClient: true });
+		expect(code).toContain('track(props.data.rows[0]');
+	});
+});
+
 describe('Client Codegen — Async Components', () => {
 
 	it('[normal] async component body is an async function', () => {

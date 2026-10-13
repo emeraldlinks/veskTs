@@ -7,6 +7,14 @@ Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 
 **Current phase:** pure-TS pipeline (haul parked)
 
+**This session (client codegen: TrackDecl hoist caused a TDZ on the client — found driving the Cofounder Academy port):**
+
+The client emitted every `TrackDecl` at the top of the component body to keep `<Head>`/effects from reading a cell before its declaration. That hoist broke the opposite case: a `track()` whose initializer reads a binding declared by an *earlier* statement was moved above it. Source order is already safe for Head/effects (both are emitted after the statements they read), so the hoist only ever created risk.
+
+- [x] **BUG (client codegen): `ReferenceError: Cannot access 'x' before initialization` after hydration.** `const list = …; const &[sel] = track(list[0])` compiled to `const sel = track(list[0]); const list = …`, so the client threw and the router swapped in the 500 page — the route SSR'd correctly (200, full HTML) and only failed once the bundle ran. Hit `/admin/my-classroom` (`visible`) and `/portal/profile` (`student`); neither was fixed by the reactivity work that preceded it, and `profile` was never edited, which is what identified it as pre-existing rather than a regression. A TrackDecl is now deferred in place when its init reads a binding declared by an earlier body statement; independent ones still hoist. Detection is AST-only (`runtimeDeclaredNames` + `initReadsAnyOf`, parsed with the vsk parser), and a non-computed `MemberExpression` property is not treated as a reference.
+- [x] Tests: `client-codegen.test.ts` +5 (statement mode, expression mode, `derived` variant, a guard that an *independent* track still hoists above a later effect, and a `props.data.rows` field-name case). 396→399. Suites green: client 399, server 201, integration 128, statement-mode 33, expression-mode 26, track-codegen 26, abuse-reactivity 12. `npm run typecheck` clean.
+- [x] Verified in a real browser (puppeteer-core over 31 routes): **31/31 clean** after hydration — no error page, no failed requests.
+
 **This session (sibling-index-loop codegen + stale-const diagnostic accuracy — found driving the Cofounder Academy port):**
 
 Two more compiler bugs surfaced once the app built far enough to SSR every route: one hard `SyntaxError` that 500'd a page, and a diagnostic that flagged correct code. Both fixed with regression tests; the app now builds and serves 31/31 routes.
