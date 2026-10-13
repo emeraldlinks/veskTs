@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.62 — 2026-10-13
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler:** don't hoist a TrackDecl above the binding its init reads
+
 ## 0.2.61 — 2026-10-13
 
 _No breaking changes._
