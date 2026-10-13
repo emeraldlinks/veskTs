@@ -56,6 +56,8 @@ async function main() {
   function stageAdapter() {
     mkdirSync(adapterDir(), { recursive: true });
     cpSync(resolve(__dirname, '..', 'dist', 'platform-handler.js'), join(adapterDir(), 'platform-handler.js'));
+    // platform-handler imports the branded fallback pages; stage the sibling too.
+    cpSync(resolve(__dirname, '..', 'dist', 'default-pages.js'), join(adapterDir(), 'default-pages.js'));
   }
   function stageCompiler() {
     mkdirSync(compilerDist(), { recursive: true });

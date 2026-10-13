@@ -10,6 +10,7 @@ import { executeError } from '@vesk/adapter/src/events';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { loadVeskConfig } from '@vesk/adapter/src/load-config';
+import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import type { SecurityConfig } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -561,7 +562,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
               }
               if (err.name === 'NotFoundError') {
                 res.writeHead(404, { 'Content-Type': 'text/html' });
-                res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
+                res.end(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname, headExtra: bakedHeadExtra }));
                 return;
               }
               console.error('vesk ssr error:', err.message);
@@ -592,7 +593,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                 } catch {}
               }
               res.writeHead(500, { 'Content-Type': 'text/html' });
-              res.end(errorHtml || '<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>');
+              res.end(errorHtml || renderDefaultErrorPage({ message: process.env.NODE_ENV !== 'production' ? err.message : undefined, url: url.pathname, headExtra: bakedHeadExtra }));
               return;
             }
           }
@@ -601,7 +602,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     }
 
     res.writeHead(404, { 'Content-Type': 'text/html' });
-    res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
+    res.end(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname, headExtra: bakedHeadExtra }));
   });
 
   try {

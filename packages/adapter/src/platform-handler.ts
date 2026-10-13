@@ -2,6 +2,11 @@ import { existsSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { RouteNode, ApiRouteNode } from '@vesk/adapter/src/types';
+// Relative (not `@vesk/adapter/src/...`) so the compiled module keeps working
+// when the dist is copied into a registry-style node_modules layout — see
+// platform-handler.test.ts. No other runtime import in this file, so the pack
+// stays standalone.
+import { renderDefaultNotFoundPage } from './default-pages';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -87,6 +92,8 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
 
   const isrCache = 'const __isrCache = new Map();';
 
+  const defaultNotFoundLine = `const __defaultNotFoundHtml = ${JSON.stringify(renderDefaultNotFoundPage())};`;
+
   const serverStoreLine = hasEvents ? 'const __serverStore = globalThis.__vesk_server_ctx || {};' : '';
   const eventsStartLine = hasEvents ? '  await __eventsStart({ server: null });' : '';
   const eventsRequestLine = hasEvents ? '  await __eventsRequest(mwCtx);' : '';
@@ -104,6 +111,7 @@ ${mwImport}
 ${eventsImport}
 ${prerenderedList}
 ${isrCache}
+${defaultNotFoundLine}
 const __routes = [${routeEntries.join(',\n')}];
 
 async function __invokeRoute(route, request) {
@@ -117,7 +125,7 @@ async function __invokeRoute(route, request) {
       });
     }
     if (e && typeof e === 'object' && e.name === 'NotFoundError') {
-      return new Response('<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>', {
+      return new Response(__defaultNotFoundHtml, {
         status: 404,
         headers: { 'Content-Type': 'text/html' },
       });
@@ -244,7 +252,7 @@ ${eventsRequestLine}
     return response;
   }
 
-  return new Response('<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>', {
+  return new Response(__defaultNotFoundHtml, {
     status: 404,
     headers: { 'Content-Type': 'text/html' },
   });

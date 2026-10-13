@@ -417,7 +417,7 @@ async function renderNotFound(
 	}
 	if (container.replaceChildren) container.replaceChildren();
 	else container.innerHTML = '';
-	container.innerHTML = '<h1>404 — Not Found</h1>';
+	container.innerHTML = defaultErrorHtml(404, 'Not Found');
 	router._currentMatch = match;
 }
 
@@ -434,6 +434,22 @@ function defaultOfflineHtml(url: string): string {
 
 function escapeOfflineUrl(url: string): string {
 	return String(url).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+/**
+ * The last-resort fallback the client shows when a route has no
+ * `not-found.vsk` / `error.vsk` (or rendering one failed). Mirrors the shape of
+ * the server-side built-in pages in `@vesk/adapter/src/default-pages` (big
+ * status code, hairline divider, message) but deliberately uses
+ * `color:inherit` / `currentColor` so it adopts whatever theme the app has set
+ * on `<body>` rather than imposing the Vesk palette.
+ */
+function defaultErrorHtml(status: number, message: string): string {
+	return '<div data-vesk-default-error="' + status + '" style="display:flex;align-items:center;justify-content:center;min-height:50vh;padding:32px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:inherit">' +
+		'<div style="display:flex;align-items:center">' +
+		'<span style="font-size:24px;font-weight:500;line-height:49px;padding-right:23px;margin-right:20px;border-right:1px solid currentColor;opacity:.85">' + status + '</span>' +
+		'<span style="font-size:14px;line-height:49px;opacity:.7">' + message + '</span>' +
+		'</div></div>';
 }
 
 /**
@@ -796,7 +812,7 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 		} else {
 			container.innerHTML = '';
 		}
-		container.innerHTML = '<h1>404 — Not Found</h1>';
+		container.innerHTML = defaultErrorHtml(404, 'Not Found');
 		return;
 	}
 
@@ -1029,7 +1045,7 @@ async function renderErrorPage(
 	if (!errorFn) {
 		if (container.replaceChildren) container.replaceChildren();
 		else container.innerHTML = '';
-		container.innerHTML = '<h1>500 — Internal Server Error</h1>';
+		container.innerHTML = defaultErrorHtml(500, 'Internal Server Error');
 		return;
 	}
 	const layoutNodes = chain.filter(n => n.layout);
@@ -1099,7 +1115,7 @@ async function hydrateInitial(
 			});
 			return;
 		}
-		container.innerHTML = '<h1>404 — Not Found</h1>';
+		container.innerHTML = defaultErrorHtml(404, 'Not Found');
 		return;
 	}
 
@@ -1865,7 +1881,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 						}
 					})();
 				} else {
-					container.innerHTML = '<h1>404 — Not Found</h1>';
+					container.innerHTML = defaultErrorHtml(404, 'Not Found');
 				}
 				return;
 			}

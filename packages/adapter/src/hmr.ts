@@ -8,6 +8,7 @@ import { buildHmrEvalSnippet } from './client-bundle';
 import { resolveComponentName, randomToken } from '@vesk/compiler/src/server-codegen';
 import { resolveErrorFile, persistedStoreSsrCode } from '@vesk/adapter/src/ssr-function';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
+import { renderDefaultErrorFragment } from '@vesk/adapter/src/default-pages';
 import { isAllowedWsUpgrade } from '@vesk/adapter/src/paths';
 import { parseCompilerError, buildCodeframe, type Codeframe } from '@vesk/adapter/src/error-codeframe';
 import { suggestFor } from '@vesk/adapter/src/error-tips';
@@ -469,7 +470,7 @@ function regenerateSsrFunction(
     '    const result = await renderPage(_errorSrc, _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled, sourcePath: _errorPath });',
     '    return result.body;',
     '  } catch {',
-    "    return '<h1>500 \\u2014 Internal Server Error</h1>';",
+    `    return ${JSON.stringify(renderDefaultErrorFragment())};`,
     '  }',
     '}',
   ].join('\n');

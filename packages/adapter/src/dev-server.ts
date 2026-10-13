@@ -12,6 +12,7 @@ import * as hmrApi from './hmr';
 import type { HmrErrorPayload } from './hmr';
 import { createDevApiRouter } from './dev-api';
 import { resolveRuntimeErrorPayload, renderDevErrorPage } from './ssr-error';
+import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import { buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import type { RouteNode, DevServerOptions, Manifest, VeskPlugin } from '@vesk/adapter/src/types';
@@ -430,7 +431,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
       });
       return injectDevScripts(renderDevErrorPage(payload, { status: 500, url: pathname }));
     } catch {
-      return '<!DOCTYPE html><html><body><h1>500</h1><pre>Internal Server Error</pre></body></html>';
+      return injectDevScripts(renderDefaultErrorPage({ message: e instanceof Error ? e.message : undefined, url: pathname }));
     }
   }
 
@@ -802,7 +803,7 @@ let finalBody = body;
     }
 
     res.writeHead(404, { 'Content-Type': 'text/html' });
-    res.end('<!DOCTYPE html><html><body><h1>404</h1><p>Not Found</p></body></html>');
+    res.end(injectDevScripts(renderDefaultNotFoundPage({ url: url.pathname })));
   });
 
   const hmr = createHmrServer(server, appDir, devDir, componentMap);

@@ -209,9 +209,11 @@ try {
   {
     const rich = (devSrc.match(/renderSsrErrorPage\(e, url\.pathname\)/g) || []).length;
     assert(rich === 2, `both legacy SSR 500 catches use renderSsrErrorPage (got ${rich})`);
-    // The only bare-500 HTML left is the renderSsrErrorPage fallback itself.
-    const bare = (devSrc.match(/<h1>500<\/h1><pre>Internal Server Error<\/pre>/g) || []).length;
-    assert(bare === 1, `no bare-500 HTML outside the renderSsrErrorPage fallback (got ${bare})`);
+    // The last-resort 500 fallback now renders the branded built-in page, never bare HTML.
+    assert(!devSrc.includes('<h1>500</h1>'), 'no bare-500 HTML left in dev-server.ts');
+    const fallback = (devSrc.match(/renderDefaultErrorPage\(/g) || []).length;
+    assert(fallback === 1, `renderSsrErrorPage fallback renders the branded 500 page (got ${fallback})`);
+    assert(devSrc.includes('@vesk/adapter/src/default-pages'), 'dev-server.ts imports the branded page builder');
     assert(devSrc.includes("from './ssr-error'"), 'dev-server.ts imports resolve/render from ./ssr-error');
   }
 } finally {

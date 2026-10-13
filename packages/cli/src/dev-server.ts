@@ -33,6 +33,7 @@ import { createBrowserTools } from '@vesk/agentic/src/tools/browser';
 import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin, VeskEventHandlers, ServerEventContext, CompileFileResult } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
+import { renderDefaultNotFoundPage } from '@vesk/adapter/src/default-pages';
 import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
 import { buildErrorPayload } from '@vesk/adapter/src/hmr';
 import { resolveClientErrorReport, resolveRuntimeErrorPayload, renderDevErrorPage, formatErrorLocation } from '@vesk/adapter/src/ssr-error';
@@ -1663,7 +1664,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
       logRequest(404);
       res.writeHead(404, { 'Content-Type': 'text/html' });
-      res.end(notFoundHtml || `<!DOCTYPE html><html><body><h1>404</h1><p>${url.pathname}</p></body></html>`);
+      res.end(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname }));
       return;
     }
 
@@ -2008,7 +2009,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
         }
         logRequest(404);
         res.writeHead(404, { 'Content-Type': 'text/html' });
-        res.end(notFoundHtml || '<!DOCTYPE html><html><body><h1>404 — Not Found</h1></body></html>');
+        res.end(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname }));
       } else {
         // SSR runtime failure — report it exactly like an HMR compile error:
         // resolve the throw to its `.vsk` file/line + codeframe + tips, replay

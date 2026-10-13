@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { resolveComponentName, precompileFile } from '@vesk/compiler/src/server-codegen';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
+import { renderDefaultErrorFragment } from '@vesk/adapter/src/default-pages';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
 // Finds the nearest error.vsk walking up from the route's own directory to the
@@ -228,7 +229,7 @@ export function generateSsrFunction(
       '    const result = await renderPage(\'\', _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled });',
       '    return result.body;',
       '  } catch {',
-      '    return \'<h1>500 \\u2014 Internal Server Error</h1>\';',
+      `    return ${JSON.stringify(renderDefaultErrorFragment())};`,
       '  }',
       '}',
       '',
