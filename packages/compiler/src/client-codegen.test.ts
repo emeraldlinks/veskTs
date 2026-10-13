@@ -3080,6 +3080,93 @@ describe('generated code is valid ESM', () => {
 		}
 	}
 
+	// `continue`/`break` used to be emitted verbatim inside the per-item render
+	// closure a map/for loop lowers to. The closure has no enclosing loop, so
+	// the statements were syntactically invalid (`Unsyntactic continue` /
+	// `Unsyntactic break`), the whole chunk failed to parse, and the page lost
+	// ALL hydration. Guard-clause `continue` now collapses into an opaque region
+	// and `break` travels through a per-iteration flag, so every shape must
+	// still emit valid ESM in both modes.
+	const loopControl = {
+		'guard continue in a keyed for-of with JSX': `
+		component App(props: { items: number[] }) {
+			const &[sel] = track(1)
+			for (const it of props.items; index i; key it) {
+				if (it === sel) continue
+				<li>{it}</li>
+			}
+		}`,
+		'guard continue in a no-JSX for-of': `
+		component App(props: { items: { score: number | null }[] }) {
+			const counts = { A: 0, B: 0 }
+			for (const it of props.items) {
+				if (it.score === null) continue
+				if (it.score >= 60) counts.A += 1
+				else counts.B += 1
+			}
+			<div>{counts.A}</div>
+		}`,
+		'guard break in a keyed for-of': `
+		component App(props: { items: number[] }) {
+			for (const it of props.items; index i; key it) {
+				if (it === 3) break
+				<li>{it}</li>
+			}
+		}`,
+		'guard continue in a while loop': `
+		component App(props: { items: number[] }) {
+			let i = 0
+			while (i < props.items.length) {
+				const it = props.items[i]
+				i = i + 1
+				if (it === 2) continue
+				<li>{it}</li>
+			}
+		}`,
+		'block-bodied map callback': `
+		component App(props: { items: number[] }) {
+			<ul>{props.items.map((it) => {
+				const d = it * 2
+				return <li>{d}</li>
+			})}</ul>
+		}`,
+	};
+	for (const [label, source] of Object.entries(loopControl)) {
+		for (const mode of ['normal', 'hydrate']) {
+			it(`[${mode}] ${label} parses`, () => {
+				const code = compileClient(source, null, { forceClient: true, hydrate: mode === 'hydrate' });
+				try {
+					parse(code, { ecmaVersion: 'latest', sourceType: 'module' });
+				} catch (e) {
+					throw new Error(`emitted code is not valid ESM: ${e.message}`);
+				}
+			});
+		}
+	}
+
+	// A guard-clause early return splits the body: the rest — including any
+	// `let &[x] = track()` decls and the assignments to them — lands in the
+	// alternate branch of an opaque region, not at the top level. Collecting
+	// tracked names only from the top level left those cells emitted as plain
+	// `const x = track(...)` with raw `x = …` assignments surviving, which the
+	// bundler rejected (`Cannot assign to "x" because it is a constant`).
+	for (const mode of ['normal', 'hydrate']) {
+		it(`[${mode}] track decls after a guard return are get/set-wrapped`, () => {
+			const code = compileClient(`
+			component App(props: { x: number }) {
+				if (!props.x) return <div>empty</div>
+				let &[tab] = track('a')
+				const setIt = () => { tab = 'x' }
+				<button onClick={() => (tab = 'y')}>{tab}</button>
+			}`, null, { forceClient: true, hydrate: mode === 'hydrate' });
+			parse(code, { ecmaVersion: 'latest', sourceType: 'module' });
+			expect(code).toContain('set(tab,');
+			expect(code).toContain('get(tab)');
+			expect(code).not.toContain('(tab = ');
+			expect(code).not.toContain('{ tab = ');
+		});
+	}
+
 	// A several-root render owns as many SSR slots as it has roots: claiming
 	// one and splicing the rest in front of it left the unclaimed SSR siblings
 	// behind, duplicating every root past the first on hydration.

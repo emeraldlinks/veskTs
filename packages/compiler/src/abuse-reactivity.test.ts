@@ -179,6 +179,66 @@ it('does NOT warn for a helper FUNCTION that reads a cell', () => {
   assert(compileCapturing(src).length === 0, 'a function helper is not a stale snapshot');
 });
 
+it('does NOT warn when a const reads a FIELD NAME that matches a tracked binding', () => {
+  // `const klass = base.find(c => c.id === learner.classId)` reads the loop
+  // item's `classId` FIELD, not the tracked `classId` binding. Collecting
+  // non-computed property names as references flagged this correct
+  // per-iteration code as a stale snapshot.
+  const src = `component P {
+  const &[classId] = track('');
+  for (const learner of rows) {
+    const klass = base.find((c) => c.id === learner.classId);
+    <td>{klass?.code}</td>
+  }
+}`;
+  assert(compileCapturing(src).length === 0, 'a member property name is not a tracked reference');
+});
+
+it('does NOT warn for a const bound to derived()', () => {
+  // `const filtered = derived(() => rows.filter(r => r.q === query))` is the
+  // documented fix this warning recommends, and it is live by construction.
+  // The identifier walk reaches `query` inside the closure, so the factory call
+  // has to be excluded explicitly or the advice is flagged as a violation of
+  // itself. Reported from a real conversion (AuditLogPage).
+  const src = `component P {
+  const &[query] = track('');
+  const filtered = derived(() => rows.filter((r) => r.q === query));
+  <ul>
+    for (const row of filtered.get(); key row.id) {
+      <li>{row.label}</li>
+    }
+  </ul>
+}`;
+  assert(compileCapturing(src).length === 0, 'a derived() binding is live and must not warn');
+});
+
+it('does NOT warn for a const bound to derived() (expression mode)', () => {
+  const src = `component P {
+  const &[query] = track('');
+  const filtered = derived(() => rows.filter((r) => r.q === query));
+  return <ul>
+    for (const row of filtered.get(); key row.id) {
+      <li>{row.label}</li>
+    }
+  </ul>;
+}`;
+  assert(compileCapturing(src).length === 0, 'a derived() binding is live and must not warn');
+});
+
+it('STILL warns when the same expression reads the tracked BINDING, not a field', () => {
+  // The guard on the false positive above: `classId` used as a bare reference is
+  // a real tracked read and must keep reporting.
+  const src = `component P {
+  const &[classId] = track('');
+  const label = rows.filter((r) => r.classId === classId);
+  <div>{label.length}</div>
+}`;
+  assert(
+    compileCapturing(src).some((w) => /label/.test(w)),
+    'a bare tracked reference must still warn',
+  );
+});
+
 it('does NOT warn when a cell is only read by an EVENT HANDLER', () => {
   // `onClick={handler}` where handler reads a cell is correct — the read happens
   // when the handler runs. Flagging this produced pure noise (three warnings in

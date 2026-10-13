@@ -3,6 +3,7 @@ import {
   Expression, StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion,
   MapRegion, WhileLoop, SwitchBlock, TryCatch, ForLoop,
   TrackDecl, RuntimeStatement, ComponentRef, ComponentCall,
+  BreakSignal,
   ServerBlock, ClientBlock, HeadBlock, SlotNode, PropSlot, PropSlotRender,
 } from '@vesk/compiler/src/ir';
 import { isStaticIR, collectTrackedNames, transformTracked, transformTrackedInit, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
@@ -130,6 +131,9 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
     }
     return semicolonizeStatement(transformTracked(node as any, tracked || new Map()));
   }
+  // SSR regions are emitted inline inside a real loop, so a break signal is a
+  // native `break;` — it exits the loop the item body was emitted into.
+  if (node instanceof BreakSignal) return `break;`;
   if (node instanceof SlotNode) {
     // Markerless mode drops the slot boundary comments: SSR output is plain
     // HTML and slot claims scope structurally (createLayoutSlot subject to the
@@ -353,14 +357,15 @@ function mapRegionToJS(node: MapRegion, isAsync = false, tracked?: Map<string, T
 
   const loopArr = arrVar || arr;
   if (node.indexVariable) {
-    lines.push('let __i = 0;');
+    const counter = `__i${nextVskId()}`;
+    lines.push(`let ${counter} = 0;`);
     lines.push(`for (const ${item} of ${loopArr}) {`);
-    lines.push(indent(`const ${node.indexVariable} = __i;`));
+    lines.push(indent(`const ${node.indexVariable} = ${counter};`));
     for (const n of bodyForItem) {
       const code = irNodeToJS(n, null, isAsync, tracked);
       if (code) lines.push(indent(code));
     }
-    lines.push(indent('__i++;'));
+    lines.push(indent(`${counter}++;`));
     lines.push(`}`);
   } else {
     lines.push(`for (const ${item} of ${loopArr}) {`);

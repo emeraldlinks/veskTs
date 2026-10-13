@@ -18,6 +18,7 @@ import {
   ServerBlock,
   ClientBlock,
   HeadBlock,
+  BreakSignal,
   Expression,
   SlotNode,
   PropSlot,
@@ -1372,6 +1373,12 @@ function processJSXCallbackBody(source: string, body: any): IRNode[] {
     for (const c of body.children) nodes.push(...processJSXChildren(source, [c]));
     return nodes;
   }
+  // A block-bodied callback — `.map((x) => { const y = …; return <jsx/>; })` —
+  // is a statement-mode body: local declarations become runtime statements and
+  // the terminal `return <jsx>` renders the item. Previously the block was
+  // printed verbatim as an expression (`const y = …; return <li>`) and esbuild
+  // rejected it with `Unexpected keyword 'const'`.
+  if (body.type === 'BlockStatement') return processStatementModeBody(source, body.body);
   if (body.type === 'ParenthesizedExpression') return exprToIR(source, body.expression);
   return exprToIR(source, body);
 }
@@ -1583,6 +1590,49 @@ function getReturnStatement(node: any): any {
   return null;
 }
 
+/**
+ * True when `node`'s subtree contains a `continue`/`break` that targets the
+ * loop `node` belongs to. Descent stops at nested loops (their control
+ * statements bind to them, not to the enclosing loop) and at function
+ * boundaries.
+ */
+function containsLoopControl(node: any): boolean {
+  if (!node) return false;
+  if (node.type === 'ContinueStatement' || node.type === 'BreakStatement') return true;
+  if (
+    node.type === 'FunctionDeclaration' || node.type === 'FunctionExpression' ||
+    node.type === 'ArrowFunctionExpression'
+  ) return false;
+  if (
+    node.type === 'ForStatement' || node.type === 'ForInStatement' ||
+    node.type === 'ForOfStatement' || node.type === 'WhileStatement' ||
+    node.type === 'DoWhileStatement'
+  ) return false;
+  if (node.type === 'BlockStatement') return node.body.some(containsLoopControl);
+  if (node.type === 'IfStatement') return containsLoopControl(node.consequent) || containsLoopControl(node.alternate);
+  if (node.type === 'SwitchStatement') return node.cases.some((c: any) => (c.consequent || []).some(containsLoopControl));
+  if (node.type === 'TryStatement') {
+    return containsLoopControl(node.block) || containsLoopControl(node.handler) || containsLoopControl(node.finalizer);
+  }
+  if (node.type === 'CatchClause') return containsLoopControl(node.body);
+  if (node.type === 'LabeledStatement') return containsLoopControl(node.body);
+  return false;
+}
+
+/**
+ * Recognizes an `if (c) continue;` / `if (c) break;` guard (no `else`) and
+ * returns the control node plus any statements that precede it inside the
+ * branch block (`if (c) { foo(); continue; }`).
+ */
+function getLoopControlGuard(consequent: any, kind: 'continue' | 'break'): { pre: any[]; node: any } | null {
+  const stmts = consequent.type === 'BlockStatement' ? consequent.body : [consequent];
+  if (stmts.length === 0) return null;
+  const want = kind === 'continue' ? 'ContinueStatement' : 'BreakStatement';
+  const last = stmts[stmts.length - 1];
+  if (!last || last.type !== want) return null;
+  return { pre: stmts.slice(0, -1), node: last };
+}
+
 function isStatementMode(bodyStmts: any[]): boolean {
   if (bodyStmts.some((s) => s.type === 'JSXElement' || s.type === 'JSXExpressionContainer' || s.type === 'JSXFragment')) return true;
   for (const stmt of bodyStmts) {
@@ -1624,6 +1674,15 @@ function processIfStatement(source: string, stmt: any): IRNode[] {
 }
 
 function processForStatement(source: string, stmt: any, alternate: IRNode[] = []): IRNode[] {
+  // A loop with no JSX is pure computation: its value is the side effects it
+  // performs on surrounding bindings. Leaving it as a reactive DOM region would
+  // emit anchors and per-item render closures for no output — and a
+  // `continue`/`break` inside it lands inside those closures as invalid JS
+  // (`Unsyntactic continue`). Emit the loop verbatim instead so its control
+  // flow runs in its original scope.
+  if (stmt.body && !hasJSXInSubtree(stmt.body) && containsLoopControl(stmt.body)) {
+    return [new RuntimeStatement(getSource(source, stmt), stmt, source)];
+  }
   if (stmt.type === 'ForOfStatement') {
     const left = stmt.left;
     let itemVar = 'item';
@@ -1658,6 +1717,9 @@ function processForStatement(source: string, stmt: any, alternate: IRNode[] = []
 }
 
 function processWhileStatement(source: string, stmt: any): IRNode[] {
+  if (stmt.body && !hasJSXInSubtree(stmt.body) && containsLoopControl(stmt.body)) {
+    return [new RuntimeStatement(getSource(source, stmt), stmt, source)];
+  }
   const condition = toExpression(source, stmt.test);
   const bodyTemplate = processBlockBody(source, stmt.body);
   const isDoWhile = stmt.type === 'DoWhileStatement';
@@ -1733,6 +1795,24 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
         nodes.push(new OpaqueDynamicRegion(toExpression(source, stmt.test), consequent, alternate));
         break;
       }
+      // `if (c) continue;` / `if (c) break;` — a loop-body guard. The loop body
+      // is re-emitted as a per-item closure (map) or inline loop, so the control
+      // statement cannot cross the branch closure. Rewrite the remainder of the
+      // iteration into the guard's ELSE branch: `if (c) { pre } else { rest }`.
+      // `continue` renders nothing in the consequent; `break` also sets the
+      // region's break flag (a BreakSignal) so later iterations stop.
+      if (!stmt.alternate) {
+        const guardContinue = getLoopControlGuard(stmt.consequent, 'continue');
+        const guardBreak = guardContinue ? null : getLoopControlGuard(stmt.consequent, 'break');
+        const guard = guardContinue || guardBreak;
+        if (guard) {
+          const consequent = guard.pre.length ? processStatementModeBody(source, guard.pre, filename) : [];
+          if (guardBreak) consequent.push(new BreakSignal());
+          const alternate = processStatementModeBody(source, bodyStmts.slice(i + 1), filename);
+          nodes.push(new OpaqueDynamicRegion(toExpression(source, stmt.test), consequent, alternate));
+          break;
+        }
+      }
       nodes.push(...processIfStatement(source, stmt));
     } else if (stmt.type === 'ForOfStatement') {
       let alternate: IRNode[] = [];
@@ -1770,6 +1850,15 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
     } else if (stmt.type === 'ClassDeclaration') {
       const { line, column } = offsetToLineCol(source, (stmt as unknown as { start: number }).start ?? 0);
       throw VeskError.classDecl({ file: filename || '', line, column, code: codeFrame(source, line, column) });
+    } else if (stmt.type === 'ContinueStatement') {
+      // An unconditional `continue` at the top level of a loop body: everything
+      // after it is dead code. Drop the remainder of the body.
+      break;
+    } else if (stmt.type === 'BreakStatement') {
+      // An unconditional `break` at the top level of a loop body: stop the loop
+      // and drop the remainder.
+      nodes.push(new BreakSignal());
+      break;
     } else {
       const raw = getSource(source, stmt);
       if (raw) nodes.push(new RuntimeStatement(raw, stmt, source));
@@ -1938,6 +2027,12 @@ function warnStaleConstBindings(comp: ComponentIR, file: string): void {
       // binding is evaluated, so the tracked read happens there. Reporting it
       // pushed authors to inline helpers that were already correct.
       if (d.init.type === 'ArrowFunctionExpression' || d.init.type === 'FunctionExpression') continue;
+      // `const x = derived(() => trackedValue)` is the DOCUMENTED fix this very
+      // warning recommends, and it is live by construction. The recursion below
+      // would still reach the tracked read inside the closure and flag it, so
+      // a reactive factory call is excluded for the same reason a bare function
+      // initializer is.
+      if (isReactiveFactoryCall(d.init)) continue;
       // A bare identifier initializer is an ALIAS, not a read: `const copy =
       // selCell` re-binds the cell and stays live. Only a read snapshots.
       if (d.init.type === 'Identifier' && reactive.has(d.init.name)) continue;
@@ -1989,6 +2084,19 @@ function warnStaleConstBindings(comp: ComponentIR, file: string): void {
 }
 
 /** Every identifier name appearing anywhere in an expression (AST walk). */
+function isReactiveFactoryCall(node: any): boolean {
+  if (!node || node.type !== 'CallExpression') return false;
+  const callee = node.callee;
+  if (!callee) return false;
+  // `derived(...)` is auto-imported, so the callee is a bare identifier; also
+  // accept a namespace/dotted call (`$state.derived(...)`) defensively.
+  if (callee.type === 'Identifier') return callee.name === 'derived';
+  if (callee.type === 'MemberExpression' && !callee.computed) {
+    return callee.property?.type === 'Identifier' && callee.property.name === 'derived';
+  }
+  return false;
+}
+
 function collectIdentifiers(node: any, into: Set<string>): void {
   if (!node || typeof node !== 'object') return;
   if (Array.isArray(node)) {
@@ -1996,6 +2104,20 @@ function collectIdentifiers(node: any, into: Set<string>): void {
     return;
   }
   if (typeof node.type !== 'string') return;
+  // A NON-computed member property (`learner.classId`) and a non-computed
+  // object/class key (`{ classId: 1 }`) are names, not references. Collecting
+  // them made `const klass = base.find(c => c.id === learner.classId)` look
+  // like it read the tracked `classId` binding, when it only reads the loop
+  // item's field — a false positive on correct per-iteration code.
+  if (node.type === 'MemberExpression' && !node.computed) {
+    collectIdentifiers(node.object, into);
+    if (node.property?.type === 'MemberExpression') collectIdentifiers(node.property, into);
+    return;
+  }
+  if ((node.type === 'Property' || node.type === 'PropertyDefinition' || node.type === 'MethodDefinition') && !node.computed) {
+    collectIdentifiers(node.value, into);
+    return;
+  }
   if (node.type === 'Identifier' && typeof node.name === 'string') into.add(node.name);
   for (const key of Object.keys(node)) {
     if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') continue;

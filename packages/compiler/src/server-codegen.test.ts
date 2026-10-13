@@ -108,6 +108,72 @@ describe('Static HTML Rendering', () => {
 });
 
 // ============================================================
+// Loop control flow (continue / break) in SSR
+// ============================================================
+describe('SSR loop control flow', () => {
+	it('guard continue skips the matching item in a JSX for-of', () => {
+		const html = render(`
+			component App(props: { items: number[] }) {
+				<ul>
+					for (const it of props.items) {
+						if (it === 2) continue
+						<li>{it}</li>
+					}
+				</ul>
+			}
+		`, 'App', { items: [1, 2, 3] });
+		expect(html).toBe('<ul><li>1</li><li>3</li></ul>');
+	});
+	it('guard break stops the loop in a JSX for-of', () => {
+		const html = render(`
+			component App(props: { items: number[] }) {
+				<ul>
+					for (const it of props.items) {
+						if (it === 3) break
+						<li>{it}</li>
+					}
+				</ul>
+			}
+		`, 'App', { items: [1, 2, 3, 4] });
+		expect(html).toBe('<ul><li>1</li><li>2</li></ul>');
+	});
+	it('guard continue in a no-JSX computation loop accumulates correctly', () => {
+		const html = render(`
+			component App(props: { items: (number | null)[] }) {
+				let total = 0
+				for (const it of props.items) {
+					if (it === null) continue
+					total = total + it
+				}
+				<div>{total}</div>
+			}
+		`, 'App', { items: [1, null, 2, null, 3] });
+		expect(html).toBe('<div>6</div>');
+	});
+	it('track decls after a guard return still render their current value', () => {
+		const html = render(`
+			component App(props: { items: string[] }) {
+				if (!props.items.length) return <p>empty</p>
+				let &[first] = track(props.items[0])
+				first = props.items[props.items.length - 1]
+				<div>{first}</div>
+			}
+		`, 'App', { items: ['a', 'b', 'c'] });
+		expect(html).toBe('<div>c</div>');
+	});
+	it('guard return falls through to the empty branch', () => {
+		const html = render(`
+			component App(props: { items: string[] }) {
+				if (!props.items.length) return <p>empty</p>
+				let &[first] = track(props.items[0])
+				<div>{first}</div>
+			}
+		`, 'App', { items: [] });
+		expect(html).toBe('<p>empty</p>');
+	});
+});
+
+// ============================================================
 // Dynamic Expression Rendering
 // ============================================================
 describe('Dynamic Expression Rendering', () => {
@@ -491,6 +557,44 @@ describe('Statement Mode Server Rendering', () => {
 			}
 		`, 'App', { items: ['A', 'B'] });
 		expect(html).toBe('<div>0:A</div><div>1:B</div>');
+	});
+	it('renders sibling indexed for-of loops without __i redeclaration (statement mode)', () => {
+		const html = render(`
+			component App(props: { tiers: string[], progs: { id: string, label: string }[] }) {
+				<div>
+					<select>
+						for (const t of props.tiers; index tIdx; key t) {
+							<option value={t}>{t}</option>
+						}
+					</select>
+					<select>
+						for (const p of props.progs; index pIdx; key p.id) {
+							<option value={p.id}>{p.label}</option>
+						}
+					</select>
+				</div>
+			}
+		`, 'App', { tiers: ['a', 'b'], progs: [{ id: 'x', label: 'X' }] });
+		expect(html).toBe('<div><select><option value="a">a</option><option value="b">b</option></select><select><option value="x">X</option></select></div>');
+	});
+	it('renders sibling indexed for-of loops without __i redeclaration (expression mode)', () => {
+		const html = render(`
+			component App(props: { tiers: string[], progs: { id: string, label: string }[] }) {
+				return <div>
+					<select>
+						for (const t of props.tiers; index tIdx; key t) {
+							<option value={t}>{t}</option>
+						}
+					</select>
+					<select>
+						for (const p of props.progs; index pIdx; key p.id) {
+							<option value={p.id}>{p.label}</option>
+						}
+					</select>
+				</div>;
+			}
+		`, 'App', { tiers: ['a', 'b'], progs: [{ id: 'x', label: 'X' }] });
+		expect(html).toBe('<div><select><option value="a">a</option><option value="b">b</option></select><select><option value="x">X</option></select></div>');
 	});
 	it('renders text-mode for-of with #empty state', () => {
 		const html = render(`

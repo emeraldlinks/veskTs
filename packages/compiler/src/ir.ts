@@ -328,6 +328,22 @@ export class RuntimeStatement {
   }
 }
 
+/**
+ * A `break` targeting the enclosing reactive loop region.
+ *
+ * A statement-mode loop body is emitted as a per-item render closure (map) or
+ * an inline real loop (for/while). A `break` inside a nested `if` region is
+ * emitted inside a branch closure and cannot `break` the outer loop. The IR
+ * generator rewrites `if (c) break; rest` into `if (c) { <BreakSignal> } else
+ * { rest }`; codegen lowers this node to "set the region's break flag and stop
+ * emitting the current item" (map) or "set the flag; the loop checks it at the
+ * top of each pass" (inline loops). The server emits a native `break;` since
+ * its regions are inline.
+ */
+export class BreakSignal {
+  constructor() {}
+}
+
 export class ForLoop {
   init: string;
   condition: Expression;
@@ -377,6 +393,7 @@ export type IRNode =
   | ForLoop
   | TrackDecl
   | RuntimeStatement
+  | BreakSignal
   | ComponentRef
   | ComponentCall
   | ServerBlock

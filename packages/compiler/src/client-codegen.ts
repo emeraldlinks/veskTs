@@ -15,6 +15,7 @@ import {
   ForLoop,
   TrackDecl,
   RuntimeStatement,
+  BreakSignal,
   ComponentRef,
   ComponentCall,
   ServerBlock,
@@ -330,14 +331,47 @@ import type { Node as ESTreeNode } from 'estree';
 
 export function collectTrackedNames(body: IRNode[]): Map<string, TrackedInfo> {
   const names = new Map<string, TrackedInfo>();
+  collectTrackedNamesInto(body, names);
+  return names;
+}
+
+/**
+ * A `track()` declaration is not always a direct child of the component body.
+ * A guard-clause early return (`if (!props.x) return <empty/>;`) lowers to an
+ * opaque region whose alternate branch carries the rest of the body — so the
+ * track decls (and every assignment that must become `set(cell, …)`) live
+ * inside `OpaqueDynamicRegion.alternateNodes`, not at the top level. Other
+ * constructs (loops, switch cases, `{#server}` blocks, slot children) nest
+ * bodies too. Miss one and the cell is emitted but never `get`/`set`-wrapped,
+ * which both breaks reactivity and leaves `x = …` assigning to a `const`.
+ */
+function collectTrackedNamesInto(body: IRNode[], names: Map<string, TrackedInfo>): void {
   for (const node of body) {
     if (node instanceof TrackDecl) {
       const cellName = node.rawName || node.name;
       names.set(node.name, { cellName, kind: 'virtual' });
       if (node.rawName) names.set(node.rawName, { cellName, kind: 'cell' });
+    } else if (node instanceof StaticNode || node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) {
+      collectTrackedNamesInto(node.children, names);
+    } else if (node instanceof ComponentCall) {
+      collectTrackedNamesInto(node.children, names);
+    } else if (node instanceof PropSlot) {
+      collectTrackedNamesInto(node.body, names);
+    } else if (node instanceof MapRegion) {
+      collectTrackedNamesInto(node.bodyTemplate, names);
+      collectTrackedNamesInto(node.alternateNodes, names);
+    } else if (node instanceof OpaqueDynamicRegion) {
+      collectTrackedNamesInto(node.consequentNodes, names);
+      collectTrackedNamesInto(node.alternateNodes, names);
+    } else if (node instanceof WhileLoop || node instanceof ForLoop) {
+      collectTrackedNamesInto(node.bodyTemplate, names);
+    } else if (node instanceof TryCatch) {
+      collectTrackedNamesInto(node.bodyTemplate, names);
+      collectTrackedNamesInto(node.catchBody, names);
+    } else if (node instanceof SwitchBlock) {
+      for (const c of node.cases) collectTrackedNamesInto(c.body, names);
     }
   }
-  return names;
 }
 
 /**
@@ -465,6 +499,9 @@ hydrate = false;
   walker = '__hydrate';
   asyncComps = new Set<string>();
   isAsyncScope = false;
+  // While emitting a loop body, names the boolean flag a `break` sets (see
+  // BreakSignal). Null outside a break-capable loop body.
+  breakFlag: string | null = null;
 
   constructor(alloc?: NameAlloc) {
     this.alloc = alloc ?? { c: 0 };
@@ -542,6 +579,10 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
   }
   if (node instanceof RuntimeStatement) {
     ctx.push(semicolonizeStatement(transformTracked(node as any, tracked)));
+    return null;
+  }
+  if (node instanceof BreakSignal) {
+    if (ctx.breakFlag) ctx.push(`${ctx.breakFlag} = true;`);
     return null;
   }
   if (node instanceof SlotNode) {
@@ -1700,12 +1741,18 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
   emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const renderLoop = ctx.n();
+  const hasBreak = bodyHasBreak(node.bodyTemplate);
+  const breakVar = hasBreak ? ctx.n() : null;
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
   if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   if (!hyd) ctx.push(indent(`const __b = document.createDocumentFragment();`));
   if (hyd) ctx.push(indent(`const __cl = [];`));
+  if (breakVar) ctx.push(indent(`let ${breakVar} = false;`));
+  const savedBreakFlag = ctx.breakFlag;
+  ctx.breakFlag = breakVar;
   if (node.isDoWhile) {
     ctx.push(indent(`do {`));
+    if (breakVar) ctx.push(indent(indent(`if (${breakVar}) break;`)));
     for (const n of node.bodyTemplate) {
       const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
@@ -1716,6 +1763,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
     ctx.push(indent(`} while (${condExpr});`));
   } else {
     ctx.push(indent(`while (${condExpr}) {`));
+    if (breakVar) ctx.push(indent(indent(`if (${breakVar}) break;`)));
     for (const n of node.bodyTemplate) {
       const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
@@ -1725,6 +1773,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
     }
     ctx.push(indent(`}`));
   }
+  ctx.breakFlag = savedBreakFlag;
   if (!hyd) ctx.push(indent(`__p.insertBefore(__b, ${endAnchor});`));
   if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
   ctx.push(`};`);
@@ -1771,13 +1820,19 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
   emitHydrateFenceAnchoring(ctx, anchor, endAnchor, parent === '$root', budget || undefined);
 
   const renderLoop = ctx.n();
+  const forHasBreak = bodyHasBreak(node.bodyTemplate);
+  const forBreakVar = forHasBreak ? ctx.n() : null;
   ctx.push(`const ${renderLoop} = ${ctx.isAsyncScope ? 'async () => {' : '() => {'}`);
   if (!hyd) ctx.push(indent(`const __p = ${anchor}.parentNode;`));
   if (!hyd) ctx.push(indent(`const __b = document.createDocumentFragment();`));
   if (hyd) ctx.push(indent(`const __cl = [];`));
+  if (forBreakVar) ctx.push(indent(`let ${forBreakVar} = false;`));
+  const savedForBreakFlag = ctx.breakFlag;
+  ctx.breakFlag = forBreakVar;
   if (node.kind === 'for-in') {
     const srcExpr = transformTracked(node.condition as any, tracked);
     ctx.push(indent(`for (${node.init} of (Array.isArray(${srcExpr}) ? ${srcExpr} : (${srcExpr} == null ? [] : Object.keys(${srcExpr})))) {`));
+    if (forBreakVar) ctx.push(indent(indent(`if (${forBreakVar}) break;`)));
     for (const n of node.bodyTemplate) {
       const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
@@ -1802,6 +1857,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     if (updatePart.endsWith(';')) updatePart = updatePart.slice(0, -1).trim();
     const head = initPart ? `${initPart}; ${condExpr}` : `; ${condExpr}`;
     ctx.push(indent(`for (${head}; ${updatePart}) {`));
+    if (forBreakVar) ctx.push(indent(indent(`if (${forBreakVar}) break;`)));
     for (const n of node.bodyTemplate) {
       const v = emitNode(ctx, n, tracked, effectsVar, hyd ? parentVar : '__b', '__components', 0, budget || undefined);
       if (v) {
@@ -1811,6 +1867,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     }
     ctx.push(indent(`}`));
   }
+  ctx.breakFlag = savedForBreakFlag;
   if (!hyd) ctx.push(indent(`__p.insertBefore(__b, ${endAnchor});`));
   if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
   ctx.push(`};`);
@@ -1993,6 +2050,33 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
   return null;
 }
 
+/**
+ * True when a loop body contains a BreakSignal (or `continue`/`break`) that
+ * targets the loop itself. Descent stops at nested loops, whose breaks bind to
+ * themselves and are handled by their own emitter.
+ */
+function bodyHasBreak(nodes: IRNode[]): boolean {
+  for (const n of nodes) {
+    if (n instanceof BreakSignal) return true;
+    if (n instanceof OpaqueDynamicRegion) {
+      if (bodyHasBreak([...n.consequentNodes, ...n.alternateNodes])) return true;
+    } else if (n instanceof SwitchBlock) {
+      for (const c of n.cases) if (bodyHasBreak(c.body)) return true;
+    } else if (n instanceof TryCatch) {
+      if (bodyHasBreak([...n.bodyTemplate, ...n.catchBody])) return true;
+    } else if (n instanceof StaticNode) {
+      if (bodyHasBreak(n.children)) return true;
+    } else if (n instanceof ComponentCall) {
+      if (bodyHasBreak(n.children)) return true;
+    } else if (n instanceof ServerBlock || n instanceof ClientBlock || n instanceof HeadBlock) {
+      if (bodyHasBreak(n.children)) return true;
+    } else if (n instanceof PropSlot) {
+      if (bodyHasBreak(n.body)) return true;
+    }
+  }
+  return false;
+}
+
 function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, effTarget: string | null, parentVar?: string, skipK = 0, regionBudget?: string): string | null {
   const arrExpr = transformTracked(node.expression as any, tracked);
   const itemVar = node.itemVariable;
@@ -2043,9 +2127,13 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
   ctx.push(`const ${endAnchor} = document.createComment('map-end');`);
 
   const renderItem = ctx.n();
+  const hasBreak = bodyHasBreak(node.bodyTemplate);
+  const breakVar = hasBreak ? ctx.n() : null;
+  if (breakVar) ctx.push(`let ${breakVar} = false;`);
   const indexParam = node.indexVariable ? ', __i' : '';
   ctx.push(`const ${renderItem} = ${ctx.isAsyncScope ? 'async ' : ''}(${itemVar}${indexParam}, __e, __r${hyd ? ', __cl' : ''}${hydKeyed ? ', __root' : ''}) => {`);
   ctx.push(indent(`__r = __r || ${endAnchor};`));
+  if (breakVar) ctx.push(indent(`if (${breakVar}) return;`));
   if (node.indexVariable) ctx.push(indent(`const ${node.indexVariable} = __i;`));
   if (hyd) {
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
@@ -2059,6 +2147,8 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     ctx.push(indent(`const __it = document.createDocumentFragment();`));
   }
   if (hydKeyed) ctx.rootClaim = true;
+  const savedMapBreak = ctx.breakFlag;
+  ctx.breakFlag = breakVar;
   for (const n of node.bodyTemplate) {
     const v = emitNode(ctx, n, tracked, '__e', hyd ? undefined : '__it', '__components', 0, budget || undefined);
     if (v) {
@@ -2074,6 +2164,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
       }
     }
   }
+  ctx.breakFlag = savedMapBreak;
   if (hydKeyed) ctx.rootClaim = false;
   if (!hyd) ctx.push(indent(`if (__it.childNodes.length > 0) __p.insertBefore(__it, __r);`));
   ctx.push(`};`);
@@ -2124,15 +2215,16 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     const keyFnSrc = `(${itemVar}${node.indexVariable ? `, ${node.indexVariable}` : ''}) => ${keyExpr}`;
     const reconciler = ctx.n();
     const initList = ctx.n();
+    const breakReset = breakVar ? `${breakVar} = false; ` : '';
     ctx.push(`let ${reconciler} = () => {};`);
     if (hydKeyed) {
       // claim-by-key hydration: `reconcileHydrated` attaches the region anchors
       // inside `parent` (pre-attach, `anchor.parentNode` is null) and peeks all
       // keys before claim-by-key consumes the walker, so server-rendered items
       // are adopted and wired in place instead of being rebuilt.
-      ctx.push(`const ${initList} = () => { ${reconciler} = reconcileHydrated(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e, __root) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'}, null, __root), __hydrate, ${parent}, ${skipK}); };`);
+      ctx.push(`const ${initList} = () => { ${breakReset}${reconciler} = reconcileHydrated(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e, __root) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'}, null, __root), __hydrate, ${parent}, ${skipK}); };`);
     } else {
-      ctx.push(`const ${initList} = () => { ${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'})); };`);
+      ctx.push(`const ${initList} = () => { ${breakReset}${reconciler} = reconcile(${anchor}, ${endAnchor}, ${arrExpr}, ${keyFnSrc}, (${itemVar}, __i, __e) => ${renderItem}(${itemVar}${indexParam ? ', __i, __e' : ', __e'})); };`);
     }
 
     if (emptyRenderName) {
@@ -2144,7 +2236,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     const __new = ${hasItems}();
     if (__first) { __first = false; __new; return; }
     if (__new !== ${isEmptyVar}) {
-      if (__new) ${reconciler}(${arrExpr});
+      if (__new) {${breakVar ? ` ${breakVar} = false;` : ''} ${reconciler}(${arrExpr}); }
       return;
     }
     ${isEmptyVar} = !__new;
@@ -2158,22 +2250,25 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
       if (!reactiveSource) return null;
       pushEffect(`let __first = true;`, `effect(() => {
     const __nv = ${arrExpr};
-    if (__first) { __first = false; __nv; ${reconciler}(${arrExpr}); return; }
-    ${reconciler}(${arrExpr});
+    if (__first) { __first = false; __nv; ${breakReset}${reconciler}(${arrExpr}); return; }
+    ${breakVar ? `if (${breakVar}) ${breakVar} = false;` : ''}${reconciler}(${arrExpr});
   })`);
     }
   } else {
     const renderAllItems = (ind: string, collect: string | null): string => {
       const lines: string[] = [];
+      if (breakVar) lines.push(`${ind}${breakVar} = false;`);
       if (node.indexVariable) {
         lines.push(`${ind}let __i = 0;`);
         lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
         lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, __i, ${effectsVar}${collect ? `, null, ${collect}` : ''});`);
         lines.push(`${ind}\t__i++;`);
+        if (breakVar) lines.push(`${ind}\tif (${breakVar}) break;`);
         lines.push(`${ind}}`);
       } else {
         lines.push(`${ind}for (const ${itemVar} of ${arrExpr}) {`);
         lines.push(`${ind}\t${aw}${renderItem}(${itemVar}, ${effectsVar}${collect ? `, null, ${collect}` : ''});`);
+        if (breakVar) lines.push(`${ind}\tif (${breakVar}) break;`);
         lines.push(`${ind}}`);
       }
       return lines.join('\n');
