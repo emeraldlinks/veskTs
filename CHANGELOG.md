@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.61 — 2026-10-13
+
+_No breaking changes._
+
+### Features
+
+- **adapter,runtime:** styled built-in 404/error pages
+
+### Fixes
+
+- **compiler:** sibling indexed loops, loop control, guard-scoped track() + diagnostics
+
 ## 0.2.60 — 2026-10-12
 
 _No breaking changes._
