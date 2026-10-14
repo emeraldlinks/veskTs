@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.63 — 2026-10-14
+
+_No breaking changes._
+
+### Performance
+
+- **dev:** parallelize chunk builds, defer route chunk bodies, memoize parse()
+
+### Other
+
+- parse() memoization (measured neutral, regressed the HMR hot path)
+
 ## 0.2.62 — 2026-10-13
 
 _No breaking changes._
