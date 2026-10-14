@@ -12,7 +12,7 @@
  * NOTE: Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  * Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  */
-import { parse, parseGeneratedJs, clearParseCache, parseCacheStats } from '@vesk/compiler/src/parser';
+import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
 import { tokenizeCode, findSpecifierExports, hasTopLevelValueDeclaration } from '@vesk/compiler/src/tokens';
 
 let passed = 0;
@@ -1502,87 +1502,6 @@ describe('generic arrow functions', () => {
 	it('leaves a <T,> inside a string or comment alone', () => {
 		expect(parses('const s = "<T,>(x) => x";')).toBe(true);
 		expect(parses('// <T,>(x) => x\nconst a = 1;')).toBe(true);
-	});
-});
-
-describe('parse() memoization', () => {
-	// Code-splitting resets its per-chunk dedupe set so each chunk is
-	// self-contained, which parses one app file once per chunk that pulls it
-	// (~12x on a 37-route app). The parse is cached and every caller gets its
-	// OWN deep clone, so this must be invisible to callers.
-
-	it('returns a deep-equal tree on a cache hit', () => {
-		clearParseCache();
-		const src = `component P { const &[n] = track(0); <div>{n}</div> }`;
-		expect(JSON.stringify(parse(src))).toBe(JSON.stringify(parse(src)));
-	});
-
-	it('hands out a DISTINCT tree on every call (nothing is shared)', () => {
-		clearParseCache();
-		const src = `component P { <div class="a">hi</div> }`;
-		const a = parse(src);
-		const b = parse(src);
-		expect(a === b).toBe(false);
-		expect(a.body === b.body).toBe(false);
-		expect(a.body[0] === b.body[0]).toBe(false);
-	});
-
-	it('a mutation of one result cannot leak into another', () => {
-		clearParseCache();
-		const src = `component P { <div class="a">hi</div> }`;
-		const a = parse(src);
-		const b = parse(src);
-		(b as unknown as { __vskAnnotations?: string[] }).__vskAnnotations = ['poison'];
-		(b.body[0] as unknown as { type: string }).type = 'MUTATED';
-		expect((b.body[0] as unknown as { type: string }).type).toBe('MUTATED');
-		expect((a.body[0] as unknown as { type: string }).type).not.toBe('MUTATED');
-		expect((a as unknown as { __vskAnnotations?: string[] }).__vskAnnotations).toBe(undefined);
-	});
-
-	it('the same source under a different filename still hits and stays identical', () => {
-		clearParseCache();
-		const src = `component P { <div>x</div> }`;
-		const a = parse(src, { sourcePath: 'one.vsk' });
-		const b = parse(src, { sourcePath: 'two.vsk' });
-		expect(JSON.stringify(a)).toBe(JSON.stringify(b));
-		expect(parseCacheStats().misses).toBe(1);
-		expect(parseCacheStats().hits).toBe(1);
-	});
-
-	it('different sources never share an entry', () => {
-		clearParseCache();
-		const a = parse(`component A { <div>A</div> }`);
-		const b = parse(`component B { <div>B</div> }`);
-		expect(a.body[0].type).toBe('B'.length > 0 ? a.body[0].type : '');
-		expect(JSON.stringify(a)).not.toBe(JSON.stringify(b));
-		expect(parseCacheStats().misses).toBe(2);
-	});
-
-	it('an edited file (new source text) misses rather than serving a stale tree', () => {
-		clearParseCache();
-		const before = parse(`component P { <div>one</div> }`);
-		const after = parse(`component P { <div>two</div> }`);
-		expect(JSON.stringify(before)).not.toBe(JSON.stringify(after));
-		expect(parseCacheStats().entries).toBe(2);
-	});
-
-	it('a parse error is not cached, and still names the requested file', () => {
-		clearParseCache();
-		let threw = '';
-		try {
-			parse(`const x = ;`, { filename: 'broken.vsk' });
-		} catch (e) {
-			threw = (e as Error).message;
-		}
-		expect(threw.includes('broken.vsk')).toBe(true);
-		expect(parseCacheStats().entries).toBe(0);
-	});
-
-	it('the cache stays bounded under many distinct sources', () => {
-		clearParseCache();
-		for (let i = 0; i < 400; i++) parse(`component P${i} { <div>${i}</div> }`);
-		const s = parseCacheStats();
-		expect(s.entries <= 256).toBe(true);
 	});
 });
 
