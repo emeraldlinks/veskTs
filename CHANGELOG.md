@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.64 — 2026-10-14
+
+_No breaking changes._
+
+### Performance
+
+- **dev:** persist the client bundle so restarts skip unchanged work
+
 ## 0.2.63 — 2026-10-14
 
 _No breaking changes._
