@@ -1,4 +1,5 @@
-import { readFileSync, watch, statSync, existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { readFileSync, watch, statSync, existsSync, mkdirSync, readdirSync, writeFileSync, renameSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve, extname, join, dirname } from 'node:path';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -864,6 +865,70 @@ export async function startDevServer(port: number, projectDir: string, config: R
   let clientGeneration = 0;
 
   /**
+   * Persistent client-bundle cache.
+   *
+   * `vesk dev` spends ~99% of startup in generateClientBundle, and none of it
+   * depends on anything but the sources on disk. Restarting without editing
+   * anything therefore redoes identical work, which is what made a restart cost
+   * minutes on a large app. The cache stores the EMITTED bundle under a key
+   * derived from every source's path+mtime+size plus the build flags, so a
+   * restart with unchanged sources restores instead of rebuilding.
+   *
+   * Deliberately one file with one key rather than per-file entries: the entry
+   * bundle and the chunk set have to agree with each other (chunk URLs are baked
+   * into the entry's route tree), so they must be restored as one unit. Any
+   * source change moves the key and the whole entry is rebuilt.
+   */
+  const devCacheDir = () => join(projectDir, 'node_modules', '.vesk', 'dev-cache');
+
+  function devCacheKey(): string {
+    const parts: string[] = [`flags:${!!config.routeDataCache}`];
+    const walk = (dir: string): void => {
+      let entries: string[] = [];
+      try { entries = readdirSync(dir); } catch { return; }
+      for (const name of entries.sort()) {
+        if (name === 'node_modules' || name.startsWith('.')) continue;
+        const p = join(dir, name);
+        let st;
+        try { st = statSync(p); } catch { continue; }
+        if (st.isDirectory()) { walk(p); continue; }
+        if (!/\.(vsk|ts|tsx|js|jsx|vue|svelte)$/.test(name)) continue;
+        parts.push(`${p}:${st.mtimeMs}:${st.size}`);
+      }
+    };
+    walk(appDirPath);
+    // A different compiler produces different output for identical sources.
+    try { parts.push(`compiler:${readFileSync(join(process.cwd(), 'node_modules', '@vesk', 'compiler', 'package.json'), 'utf8')}`); } catch { /* best effort */ }
+    return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 32);
+  }
+
+  function readDevBundleCache(): { main: string; chunks: ChunkEntry[] } | null {
+    try {
+      const file = join(devCacheDir(), 'client-bundle.json');
+      const parsed = JSON.parse(readFileSync(file, 'utf8')) as { key?: string; main?: string; chunks?: ChunkEntry[] };
+      if (parsed.key !== devCacheKey() || typeof parsed.main !== 'string' || !Array.isArray(parsed.chunks)) return null;
+      return { main: parsed.main, chunks: parsed.chunks };
+    } catch {
+      return null;
+    }
+  }
+
+  function writeDevBundleCache(main: string, chunks: ChunkEntry[]): void {
+    try {
+      const dir = devCacheDir();
+      mkdirSync(dir, { recursive: true });
+      const file = join(dir, 'client-bundle.json');
+      // Write-then-rename so a crash mid-write cannot leave a half-written
+      // cache that the next start would restore as if it were valid.
+      const tmp = join(dir, `client-bundle.${process.pid}.tmp`);
+      writeFileSync(tmp, JSON.stringify({ key: devCacheKey(), main, chunks }), 'utf8');
+      renameSync(tmp, file);
+    } catch {
+      /* cache is an optimization; a failure must never break the dev server */
+    }
+  }
+
+  /**
    * Build this route's chunk body on demand.
    *
    * Startup defers route bodies (see ClientBundleOptions.skipRouteChunks); the
@@ -920,6 +985,21 @@ function routeFullPathForChunk(chunkName: string): string | null {
 
   async function buildClientBundle() {
     try {
+      // A restart with unchanged sources must not redo ~250s of identical work.
+      const cached = readDevBundleCache();
+      if (cached) {
+        clientBundle = cached.main;
+        devBundleBytes = Buffer.byteLength(cached.main, 'utf8');
+        storeChunks(cached.chunks);
+        // Restored chunk bodies count as built, so a first visit to any route
+        // does not trigger an on-demand rebuild of something we already have.
+        for (const c of cached.chunks) {
+          const fullPath = c.name === SHARED_CHUNK_NAME ? null : routeFullPathForChunk(c.name);
+          if (fullPath) routeChunksBuilt.add(fullPath);
+        }
+        LOG.info?.(`client bundle restored from cache (${cached.chunks.length} chunks)`);
+        return;
+      }
       const { main, chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
         importRuntime: true,
         hmr: true,
@@ -935,6 +1015,10 @@ function routeFullPathForChunk(chunkName: string): string | null {
       clientBundle = main;
       devBundleBytes = Buffer.byteLength(main, 'utf8');
       storeChunks(chunks);
+      // Only a startup build (which produced every chunk) is cacheable; an
+      // on-demand build produces a partial set that would restore as if it
+      // were the whole thing.
+      writeDevBundleCache(main, chunks);
     } catch (e) {
       LOG.err(`client build error:`, (e as Error).message);
       throw e;
