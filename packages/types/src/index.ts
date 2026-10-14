@@ -471,6 +471,30 @@ export interface ClientBundleOptions {
   codeSplit?: boolean;
   hmr?: boolean;
   importRuntime?: boolean;
+  /**
+   * Dev only: build the entry bundle and the shared chunk, but DEFER each
+   * per-route chunk BODY. Route chunks are the bulk of dev startup (one
+   * self-contained compile + esbuild pass per route) while a dev session visits
+   * a handful of them, so eager building made startup scale with app size
+   * rather than with what is being looked at.
+   *
+   * The chunk URL is still assigned to every route up front, which is what
+   * makes this safe: the route tree is baked into the ENTRY bundle
+   * (`const __routeTree = …`) and the client router fetches `node.chunk`
+   * before any server round-trip, so a route whose chunk had no URL would
+   * never be fetched and the page would hydrate with no components. Dev chunk
+   * URLs are not content-hashed, so they are a pure function of the route and
+   * can be known before the body exists. The dev server builds the body on
+   * first request. Must stay off for production builds.
+   */
+  skipRouteChunks?: boolean;
+  /**
+   * Build chunk bodies ONLY for these route `fullPath`s (plus the shared
+   * chunk). `only` is a FILE-level filter — it keeps recompiles cheap but still
+   * walks every route and emits every chunk, so it cannot make a cold build
+   * lazy. This is the ROUTE-level filter the on-demand build needs.
+   */
+  onlyRoutes?: string[];
   routeDataCache?: number;
   /**
    * Incremental compile cache for dev rebuilds. Pass the same object across

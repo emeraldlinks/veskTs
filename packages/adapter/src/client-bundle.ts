@@ -13,6 +13,41 @@ import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-im
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { resolveImportPath, findTsconfigPath } from '@vesk/compiler/src/module-imports';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts, ClientBundleChunkSpec, ClientBundleFileEntry } from '@vesk/adapter/src/types';
+import { availableParallelism } from 'node:os';
+
+/**
+ * Run `fn` over `items` with at most `limit` in flight, preserving input
+ * order in the result array. The first rejection propagates once the in-flight
+ * work settles, so a `--strict` chunk failure still fails the build rather than
+ * being swallowed by a sibling's success.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const out: R[] = new Array(items.length);
+  let next = 0;
+  let firstError: unknown = null;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      if (firstError !== null) return;
+      try {
+        out[i] = await fn(items[i], i);
+      } catch (e) {
+        if (firstError === null) firstError = e;
+        return;
+      }
+    }
+  };
+  const workers: Promise<void>[] = [];
+  for (let i = 0; i < Math.min(limit, items.length); i++) workers.push(worker());
+  await Promise.all(workers);
+  if (firstError !== null) throw firstError;
+  return out;
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -682,6 +717,22 @@ export function removeCompiledNodes(code: string, isTarget: (node: CompiledNode)
   return code;
 }
 
+/** Name of the cross-route shared chunk. Route chunks import from it. */
+export const SHARED_CHUNK_NAME = 'shared.js';
+
+/**
+ * The chunk file stem for a route: its directory under `app/`, with dynamic
+ * segment brackets neutralised. Exported so the dev server can map an incoming
+ * chunk request back to its route (see routeFullPathForChunk) without
+ * duplicating the naming rule.
+ */
+export function buildChunkName(appDir: string, node: RouteNode): string {
+  const dir = relative(appDir, node.sourceDir || '');
+  const parts = dir.split(sep).filter(Boolean);
+  const slug = parts.length > 0 ? parts.join('-') : 'index';
+  return slug.replace(/[\[\]]/g, '_');
+}
+
 export async function generateClientBundle(
   routeTree: RouteNode[],
   appDir: string,
@@ -696,6 +747,7 @@ export async function generateClientBundle(
   const runtimeImportNames = new Set<string>();
   const cache = options?.cache;
   const only = options?.only && options.only.length > 0 ? new Set(options.only) : null;
+  const onlyRoutes = options?.onlyRoutes && options.onlyRoutes.length > 0 ? new Set(options.onlyRoutes) : null;
   const returnEdited = !!options?.returnEditedSources && !!only;
   const editedSources = returnEdited ? new Map<string, string>() : undefined;
   const editedNames = returnEdited ? new Map<string, string | null>() : undefined;
@@ -889,13 +941,6 @@ export async function generateClientBundle(
     }
   }
 
-  function buildChunkName(node: RouteNode): string {
-    const dir = relative(appDir, node.sourceDir || '');
-    const parts = dir.split(sep).filter(Boolean);
-    const slug = parts.length > 0 ? parts.join('-') : 'index';
-    return slug.replace(/[\[\]]/g, '_');
-  }
-
   const codeSplit = !!(options?.codeSplit);
   const transformPlugins = options?.plugins || [];
 
@@ -919,7 +964,8 @@ export async function generateClientBundle(
   }
 
   if (codeSplit) {
-    const chunkEntries: Array<{ name: string; code: string; node: RouteNode; imports: boolean; importsTable: ChunkImports }> = [];
+    type ChunkSource = { name: string; code: string; node: RouteNode; imports: boolean; importsTable: ChunkImports };
+    const chunkEntries: ChunkSource[] = [];
 
     function walkSplit(nodes: RouteNode[], _chain: RouteNode[]): void {
       for (const node of nodes) {
@@ -962,7 +1008,11 @@ export async function generateClientBundle(
           compileFile(loadingPath, node.loading, chunkCode, chunkImports);
         }
         if (chunkCode.length > 0) {
-          const chunkName = `page-${buildChunkName(node)}.js`;
+          const chunkName = `page-${buildChunkName(appDir, node)}.js`;
+          // Route-level filter for on-demand dev builds. `only` is FILE-level:
+          // it keeps a recompile cheap but still walks every route, so it
+          // cannot make a COLD build lazy.
+          if (!onlyRoutes || onlyRoutes.has(node.fullPath)) {
           // Prepend this chunk's deduped imports (one statement per source, no
           // duplicate bindings) so the classic script exposes the bare
           // identifiers its file bodies reference, and esbuild can parse and
@@ -971,6 +1021,7 @@ export async function generateClientBundle(
           const head = chunkImports.render();
           const code = (head ? head + '\n\n' : '') + chunkCode.join('\n\n');
           chunkEntries.push({ name: chunkName, code, node, importsTable: chunkImports, imports: chunkHasImports(head.length, !chunkImports.ok) });
+          }
         }
         walkSplit(node.children || [], [..._chain, node]);
       }
@@ -988,7 +1039,7 @@ export async function generateClientBundle(
       if (!sharedImports.ok) console.error('[vesk] chunk import merge aborted for shared.js:', sharedImports.reason);
       const head = sharedImports.render();
       const code = (head ? head + '\n\n' : '') + sharedCode.join('\n\n');
-      chunkEntries.push({ name: 'shared.js', code, node: null as unknown as RouteNode, importsTable: sharedImports, imports: chunkHasImports(head.length, !sharedImports.ok) });
+      chunkEntries.push({ name: SHARED_CHUNK_NAME, code, node: null as unknown as RouteNode, importsTable: sharedImports, imports: chunkHasImports(head.length, !sharedImports.ok) });
     }
 
     const chunkIIFE = (body: string): string =>
@@ -1130,8 +1181,14 @@ export async function generateClientBundle(
           }
         : null;
 
-    for (const entry of chunkEntries) {
-      if (!entry.code.trim()) continue;
+    // Each chunk is bundled through its own esbuild pass. Those passes are
+    // independent, so they run CONCURRENTLY: one esbuild round-trip per chunk
+    // was the single largest slice of `vesk dev` startup (37 chunks on a
+    // 37-route app, strictly serial, with every core but one idle). Results are
+    // written back in the original order so chunk load order — which the
+    // preload/annotation passes below depend on — is unchanged.
+    const buildChunkEntry = async (entry: ChunkSource): Promise<ChunkEntry | null> => {
+      if (!entry.code.trim()) return null;
       let finalCode: string;
       if (entry.imports) {
         // Bundle the chunk through esbuild so every remaining import (npm
@@ -1208,12 +1265,29 @@ export async function generateClientBundle(
         // via the __components / __hydrators registries, matching the mono path).
         finalCode = chunkIIFE(demoteExports(entry.code));
       }
-      chunks.push({ name: entry.name, code: finalCode });
+      return { name: entry.name, code: finalCode };
+    };
+
+    // Dev may defer route chunk BODIES (see ClientBundleOptions.skipRouteChunks).
+    // The shared chunk is still built — route chunks import from it — and
+    // `main` is assembled separately below, so the entry bundle is unaffected.
+    // Chunk URLs are published for every route regardless; see annotate().
+    const effectiveChunkEntries = options?.skipRouteChunks
+      ? chunkEntries.filter((e) => e.name === SHARED_CHUNK_NAME)
+      : chunkEntries;
+
+    // Concurrency is capped below the core count: esbuild's own service is
+    // already multi-process, so oversubscribing every chunk at once trades
+    // throughput for memory on the constrained machines this runs on.
+    const CHUNK_CONCURRENCY = Math.max(1, Math.min(6, (availableParallelism?.() ?? 4) - 1));
+    const built = await mapWithConcurrency(effectiveChunkEntries, CHUNK_CONCURRENCY, buildChunkEntry);
+    for (const c of built) {
+      if (c !== null) chunks.push(c);
     }
 
     function annotate(nodes: RouteNode[]): void {
       for (const node of nodes) {
-        const chunkName = `page-${buildChunkName(node)}.js`;
+        const chunkName = `page-${buildChunkName(appDir, node)}.js`;
         // Production chunk names are content-hashed, and the ROUTER asks for
         // chunks by the URL baked here — so the hash has to be applied to this
         // reference, not just to the file on disk. Getting it wrong is silent
@@ -1224,6 +1298,16 @@ export async function generateClientBundle(
         if (emitted) {
           const fileName = options?.hmr ? chunkName : hashedName(chunkName, emitted.code);
           node.chunk = `/_vesk/static/${fileName}`;
+        } else if (options?.skipRouteChunks) {
+          // The body is deferred, but the URL must still be published now.
+          // The route tree — chunk URLs included — is baked into the ENTRY
+          // bundle and the client router fetches `node.chunk` with no server
+          // round-trip in between, so leaving it undefined means the chunk is
+          // never requested and the page hydrates with nothing registered.
+          // Dev chunk URLs are unhashed, so they depend only on the route and
+          // are identical whether or not the body has been built — which also
+          // keeps the entry bundle's cache key stable across lazy builds.
+          node.chunk = `/_vesk/static/${chunkName}`;
         }
         annotate(node.children || []);
       }

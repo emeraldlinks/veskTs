@@ -13,7 +13,7 @@ import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@v
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { collectEventsFile, loadEvents, runEventHandlers } from '@vesk/compiler/src/events';
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
-import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet } from '@vesk/adapter/src/client-bundle';
+import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet, buildChunkName, SHARED_CHUNK_NAME } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, isAllowedWsUpgrade, installMdReadHook } from '@vesk/adapter/src/paths';
 import { createDevApiRouter } from '@vesk/adapter/src/dev-api';
 import type { DevPanelResponse, DiagnosticFinding } from '@vesk/adapter/src/dev-api';
@@ -852,6 +852,72 @@ export async function startDevServer(port: number, projectDir: string, config: R
     clientChunks = next;
   }
 
+  /** Routes whose chunk body has been built this session. */
+  const routeChunksBuilt = new Set<string>();
+  /**
+   * Bumped whenever an edit invalidates built chunks. An in-flight on-demand
+   * build that started before the bump finishes against the PRE-edit file
+   * cache; without this it would write stale code into the map after
+   * `routeChunksBuilt.clear()` had already run, and nothing would invalidate it
+   * again — a silently stale bundle that still hydrates.
+   */
+  let clientGeneration = 0;
+
+  /**
+   * Build this route's chunk body on demand.
+   *
+   * Startup defers route bodies (see ClientBundleOptions.skipRouteChunks); the
+   * URLs are published up front, so the client already asks for this chunk and
+   * a missing body would be a 404 that the SPA fallback answers with text/html
+   * — the browser refuses the script and the page never hydrates. This runs
+   * before the HTML is rendered so the body exists by the time it is requested.
+   */
+  async function ensureRouteChunk(fullPath: string): Promise<void> {
+    if (routeChunksBuilt.has(fullPath)) return;
+    // Mark first, so a concurrent request for the same route cannot start a
+    // second build, and so a build that throws is retried on the next request
+    // rather than wedging the route for the rest of the session.
+    routeChunksBuilt.add(fullPath);
+    const generation = clientGeneration;
+    const { chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
+      importRuntime: true,
+      hmr: true,
+      codeSplit: true,
+      cache: bundleCache,
+      onlyRoutes: [fullPath],
+      ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
+    });
+    // An edit landed while this build was in flight: its output is built from
+    // the pre-edit cache, so it must not be published. Drop the mark too, so
+    // the next request rebuilds against the new source.
+    if (generation !== clientGeneration) {
+      routeChunksBuilt.delete(fullPath);
+      return;
+    }
+    // MERGE: a route-level build returns only the bodies it built, and
+    // replacing would drop every body built for an earlier route.
+    const next = new Map(clientChunks);
+    for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
+    clientChunks = next;
+  }
+
+  /** Reverse lookup: the route whose chunk has this file name, if any. */
+function routeFullPathForChunk(chunkName: string): string | null {
+    let found: string | null = null;
+    const walk = (nodes: RouteNode[]): void => {
+      for (const node of nodes) {
+        if (found) return;
+        if (`page-${buildChunkName(appDirPath, node)}.js` === chunkName) {
+          found = node.fullPath;
+          return;
+        }
+        walk(node.children || []);
+      }
+    };
+    walk(routeTree);
+    return found;
+  }
+
   async function buildClientBundle() {
     try {
       const { main, chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
@@ -859,6 +925,11 @@ export async function startDevServer(port: number, projectDir: string, config: R
         hmr: true,
         codeSplit: true,
         cache: bundleCache,
+        // Startup cost otherwise scales with app size: one self-contained
+        // compile + esbuild pass per route. A dev session visits a handful of
+        // routes, so each route's chunk is built on first request instead
+        // (see ensureRouteChunk).
+        skipRouteChunks: true,
         ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
       clientBundle = main;
@@ -888,6 +959,18 @@ export async function startDevServer(port: number, projectDir: string, config: R
         returnEditedSources: true,
         ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
+      // An edit can invalidate chunks for routes OTHER than the edited one (a
+      // shared component is inlined into every chunk that imports it), and
+      // `chunks` here only carries routes rebuilt from invalidated files. With
+      // route chunks built on demand, a chunk kept in the map is one that was
+      // NOT rebuilt — serving it would hand the browser a stale bundle and
+      // fail hydration silently. Drop every per-route chunk and let each route
+      // rebuild on its next request; the file cache is warm, so that is cheap.
+      // The shared chunk has no route dependencies and survives.
+      const keepShared = (name: string) => name === SHARED_CHUNK_NAME;
+      clientChunks = new Map([...clientChunks].filter(([url]) => keepShared(url.slice(url.lastIndexOf('/') + 1))));
+      routeChunksBuilt.clear();
+      clientGeneration++;
       storeChunks(chunks);
       return { err: null, editedSource: editedSources?.get(fullPath) ?? null, actualName: editedNames?.get(fullPath) ?? null };
     } catch (e) {
@@ -1466,7 +1549,24 @@ export async function startDevServer(port: number, projectDir: string, config: R
       return;
     }
     if (url.pathname.startsWith('/_vesk/static/') && url.pathname.endsWith('.js')) {
-      const code = clientChunks.get(url.pathname);
+      let code = clientChunks.get(url.pathname);
+      if (code === undefined) {
+        // The client router preloads route chunks EAGERLY at boot, not just for
+        // the route being visited, so a deferred body can be requested before
+        // any page render has asked for it. Building on the request itself
+        // closes that gap: 404 here would be logged by the browser as
+        // "Failed to load chunk" and the route would never hydrate.
+        const name = url.pathname.slice(url.pathname.lastIndexOf('/') + 1);
+        const fullPath = routeFullPathForChunk(name);
+        if (fullPath) {
+          try {
+            await ensureRouteChunk(fullPath);
+          } catch (e) {
+            LOG.err(`client chunk build failed for ${name}:`, (e as Error).message);
+          }
+          code = clientChunks.get(url.pathname);
+        }
+      }
       if (code !== undefined) {
         res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
         res.end(code);
@@ -1685,6 +1785,21 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
     const matched = match;
     const forData = req.headers['x-vesk-data'] === '1';
+
+    // Route chunks are built on demand (see ensureRouteChunk). This must run
+    // before the page HTML is produced, because the rendered HTML carries the
+    // chunk URL the browser will ask for next. Only for real page navigations —
+    // a data request (`x-vesk-data`) returns JSON, not a document.
+    if (!forData && matched && Array.isArray(matched.nodes)) {
+      const leaf = matched.nodes.find((n) => n.page);
+      if (leaf && typeof leaf.fullPath === 'string') {
+        try {
+          await ensureRouteChunk(leaf.fullPath);
+        } catch (e) {
+          LOG.err(`client chunk build failed for ${leaf.fullPath}:`, (e as Error).message);
+        }
+      }
+    }
 
     async function renderSSR() {
       // Per-request SSR handoff isolation. renderPage (used for the
