@@ -70,7 +70,13 @@ export function generateManifest(
       if (last && r.isCatchAll && s.startsWith(':')) return '*' + s.slice(1);
       return s;
     });
-    const name = parts.map(s => s.slice(1) || 'param').join('_') || 'index';
+    // Strip the `:name` / `*name` prefix from DYNAMIC AND CATCH-ALL segments
+    // only. A blanket `slice(1)` also decapitates static segments, which made
+    // `/api/posts` point at `server/api/osts.js` while the file on disk is
+    // `posts.js` — so every static API route 404'd in a production build.
+    const name = parts
+      .map(s => (s.startsWith(':') || s.startsWith('*')) ? s.slice(1) || 'param' : s)
+      .join('_') || 'index';
     apiEntries.push({
       path: parts.length ? `/api/${parts.join('/')}` : '/api',
       type: 'api',

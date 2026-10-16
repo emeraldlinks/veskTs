@@ -22,6 +22,9 @@ function expect(actual: unknown) {
 		toBeNull() {
 			if (actual !== null) throw new Error(`Expected null, got ${JSON.stringify(actual)}`);
 		},
+		toBeTruthy() {
+			if (!actual) throw new Error(`Expected truthy, got ${JSON.stringify(actual)}`);
+		},
 		toEqual(expected: unknown) {
 			const a = JSON.stringify(actual), b = JSON.stringify(expected);
 			if (a !== b) throw new Error(`Expected ${b}, got ${a}`);
@@ -55,6 +58,12 @@ function apiPaths(nodes: ApiNode[]): string[] {
 	return generateManifest([], [], nodes as never, [], false).routes
 		.filter(r => r.type === 'api')
 		.map(r => r.path);
+}
+
+function apiFunctions(nodes: ApiNode[]): Array<[string, string]> {
+	return generateManifest([], [], nodes as never, [], false).routes
+		.filter(r => r.type === 'api')
+		.map(r => [r.path, r.function]);
 }
 
 /** Reference implementation of the consumer-side matcher (prod-server). */
@@ -132,6 +141,31 @@ it('dynamic sorts ahead of catch-all at the same position', () => {
 
 it('still requires an exact segment count for dynamic routes', () => {
 	expect(resolve([api('/users/:id', { dynamic: true })], '/api/users/a/b')).toBeNull();
+});
+
+// The emitted `function` must match the filename api-function.ts actually
+// writes. These drifted apart once: the manifest stripped the leading
+// character off EVERY segment (`posts` -> `osts`) while the writer did not,
+// so `/api/posts` pointed at `server/api/osts.js` and every static API route
+// 404'd in a production build while dev kept working.
+it('maps a static route to its own filename', () => {
+	expect(apiFunctions([api('/posts')])).toEqual([['/api/posts', 'server/api/posts.js']]);
+});
+
+it('maps a dynamic route to its name without the prefix', () => {
+	expect(apiFunctions([api('/echo/:msg', { dynamic: true })]))
+		.toEqual([['/api/echo/:msg', 'server/api/echo_msg.js']]);
+});
+
+it('maps a catch-all route to its name without the prefix', () => {
+	expect(apiFunctions([api('/files/:rest', { catchAll: true })]))
+		.toEqual([['/api/files/*rest', 'server/api/files_rest.js']]);
+});
+
+it('never decapitates a static segment, whatever its length', () => {
+	for (const seg of ['a', 'ab', 'abc', 'bench', 'protected', 'posts']) {
+		expect(apiFunctions([api('/' + seg)])).toEqual([['/api/' + seg, `server/api/${seg}.js`]]);
+	}
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
