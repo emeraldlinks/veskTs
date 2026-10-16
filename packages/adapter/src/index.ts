@@ -16,6 +16,7 @@ import { compileMiddleware, compileMiddlewareCode } from '@vesk/adapter/src/midd
 import { compileEvents } from '@vesk/adapter/src/events';
 import { generateClientBundle } from '@vesk/adapter/src/client-bundle';
 import { generateManifest } from '@vesk/adapter/src/manifest';
+import { isSocketlessTarget, tcpDriverViolations, edgeDriverBuildError } from '@vesk/adapter/src/server-only';
 import { copyStaticAssets } from '@vesk/adapter/src/static';
 import type {
   RouteNode, ApiRouteNode, BuildOptions, BuildResult, AncestorLayout,
@@ -242,6 +243,15 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   if (pluginHeadExtra) console.error('vesk build: baked plugin head → config.json + SSR functions');
 
   console.error(`vesk build: output → ${outDir}`);
+
+  // Socketless-target gate, before anything is compiled or bundled. An edge
+  // runtime has no TCP socket, so a build that imports a socket driver produces
+  // a function that fails on its first query — in production, from a log. Fail
+  // here instead, naming the file, the line and the driver.
+  if (isSocketlessTarget(options?.platform, options?.target)) {
+    const driverHits = tcpDriverViolations(appDir);
+    if (driverHits.length > 0) throw edgeDriverBuildError(driverHits);
+  }
 
   const dirs = [
     resolve(outDir, 'server', 'functions'),

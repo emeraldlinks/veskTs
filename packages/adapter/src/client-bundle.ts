@@ -12,6 +12,7 @@ import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { resolveImportPath, findTsconfigPath } from '@vesk/compiler/src/module-imports';
+import { serverOnlyPlugin } from '@vesk/adapter/src/server-only-plugin';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts, ClientBundleChunkSpec, ClientBundleFileEntry } from '@vesk/adapter/src/types';
 import { availableParallelism } from 'node:os';
 
@@ -285,6 +286,37 @@ export function nativeLibraryImportStubs(code: string): string {
     );
   });
   return lines.join('\n') + '\n\n';
+}
+
+/**
+ * Report, and under `--strict` fail on, a server-only package that reached a
+ * client chunk.
+ *
+ * Not an error by default: importing `../db.ts` from a page is the normal way
+ * to write a server-rendered page, and the import is harmless as long as the
+ * binding is only touched during SSR — which is the whole reason the bundler
+ * substitutes a throwing stub instead of breaking the module. `--strict` is the
+ * gate for authors who want the build to refuse it outright, the same bargain
+ * `--strict` already makes for unresolvable chunk imports.
+ */
+function reportServerOnlyImports(
+  chunkName: string,
+  hits: Array<{ specifier: string; binding: string; importer: string }>,
+  strict: boolean | undefined,
+): void {
+  const detail = [...new Set(hits.map(h => `"${h.binding}" from "${h.specifier}"`))].join(', ');
+  if (strict) {
+    throw new Error(
+      `[vesk] ${chunkName} imports a server-only package in client code: ${detail}. ` +
+      'Move that work into an API route (app/api/**/route.ts) or a server action. ' +
+      'Pass without --strict to allow it (the binding is replaced by a throwing stub).',
+    );
+  }
+  console.error(
+    `[vesk] ${chunkName}: removed server-only import from client code (${detail}). ` +
+    'It is replaced by a stub that throws if the component calls it at runtime — ' +
+    'server-only work belongs in an API route or a server action.',
+  );
 }
 
 /**
@@ -1020,7 +1052,7 @@ export async function generateClientBundle(
           if (!chunkImports.ok) console.error('[vesk] chunk import merge aborted for', chunkName + ':', chunkImports.reason);
           const head = chunkImports.render();
           const code = (head ? head + '\n\n' : '') + chunkCode.join('\n\n');
-          chunkEntries.push({ name: chunkName, code, node, importsTable: chunkImports, imports: chunkHasImports(head.length, !chunkImports.ok) });
+          chunkEntries.push({ name: chunkName, code, node, importsTable: chunkImports, imports: chunkHasImports(head.length, !chunkImports.ok), });
           }
         }
         walkSplit(node.children || [], [..._chain, node]);
@@ -1039,7 +1071,7 @@ export async function generateClientBundle(
       if (!sharedImports.ok) console.error('[vesk] chunk import merge aborted for shared.js:', sharedImports.reason);
       const head = sharedImports.render();
       const code = (head ? head + '\n\n' : '') + sharedCode.join('\n\n');
-      chunkEntries.push({ name: SHARED_CHUNK_NAME, code, node: null as unknown as RouteNode, importsTable: sharedImports, imports: chunkHasImports(head.length, !sharedImports.ok) });
+      chunkEntries.push({ name: SHARED_CHUNK_NAME, code, node: null as unknown as RouteNode, importsTable: sharedImports, imports: chunkHasImports(head.length, !sharedImports.ok), });
     }
 
     const chunkIIFE = (body: string): string =>
@@ -1202,6 +1234,19 @@ export async function generateClientBundle(
         const tmpFile = join(tmpBase, 'entry.js');
         const toBundle = `const __components = globalThis.__components || (globalThis.__components = {});\nconst __hydrators = globalThis.__hydrators || (globalThis.__hydrators = {});\n${entry.code}\n`;
         writeFileSync(tmpFile, toBundle);
+        // Keeps a database driver out of a browser bundle. The interception has
+        // to be here, inside the bundler, because that is the only place the
+        // transitive import `db.ts → slintorm → pg` is ever visible: by now the
+        // chunk's own import list is merged, and the offender is almost never
+        // in it.
+        const serverOnlyHits: Array<{ specifier: string; binding: string; importer: string }> = [];
+        const driverHits: Array<{ specifier: string; importer: string }> = [];
+        const eagerHits: Array<{ specifier: string; bindings: string[]; importer: string }> = [];
+        const serverOnlyGuard = serverOnlyPlugin({
+          onStub: hit => serverOnlyHits.push(hit),
+          onDriver: hit => driverHits.push(hit),
+          onEager: hit => eagerHits.push(hit),
+        });
         try {
           // Pass the app tsconfig so esbuild resolves tsconfig `paths` aliases
           // (`@/x`, `@app/x`) inside transitively bundled modules too.
@@ -1227,7 +1272,7 @@ export async function generateClientBundle(
             // shared-modules.js serves every route chunk. (esbuild's `alias`
             // option only accepts bare package names, so this is a resolver
             // rather than a map.)
-            ...(sharedRedirectPlugin ? { plugins: [sharedRedirectPlugin] } : {}),
+            ...(sharedRedirectPlugin ? { plugins: [sharedRedirectPlugin, serverOnlyGuard] } : { plugins: [serverOnlyGuard] }),
             ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
           });
           finalCode = result.outputFiles[0].text;
@@ -1256,6 +1301,39 @@ export async function generateClientBundle(
           finalCode = chunkIIFE(nativeLibraryImportStubs(entry.code) + stripped);
         } finally {
           try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+        }
+        // Checked OUTSIDE the try above, deliberately. A TCP driver cannot be
+        // stubbed into a browser bundle — a page that looked fine and failed on
+        // its first query would be worse than a build error — and the catch
+        // block degrades every failure into "strip the imports and carry on",
+        // which is exactly the wrong outcome for this one.
+        if (eagerHits.length > 0) {
+          // A stub would throw while the chunk is still evaluating, so the page
+          // would die before a component existed. That is the worst place to
+          // learn about it: refuse the build instead.
+          const detail = eagerHits
+            .map(h => `${h.importer} uses ${h.bindings.map(b => `"${b}"`).join(', ')} from "${h.specifier}" at module scope`)
+            .join('; ');
+          console.error('[vesk] server-only package used at module scope in client code', entry.name + ':', detail);
+          throw new Error(
+            `[vesk] ${entry.name}: ${detail}.\n` +
+            'A module-scope statement runs the moment the browser evaluates the chunk, so a ' +
+            'server-only package cannot be substituted there. Move that work into an API route ' +
+            '(app/api/**/route.ts) or a server action — if the binding is only used from inside ' +
+            'a function, this build already handles it.',
+          );
+        }
+        if (driverHits.length > 0) {
+          const detail = [...new Set(driverHits.map(h => `${h.specifier} (from ${h.importer})`))].join(', ');
+          console.error('[vesk] chunk bundle contains a TCP-only driver', entry.name + ':', detail);
+          throw new Error(
+            `[vesk] ${entry.name} pulls a TCP-only driver into the browser bundle: ${detail}. ` +
+            "A browser cannot open a socket. Import the package's edge/browser-safe entry if it " +
+            'ships one, or keep database access in an API route (app/api/**/route.ts) or a server action.',
+          );
+        }
+        if (serverOnlyHits.length > 0) {
+          reportServerOnlyImports(entry.name, serverOnlyHits, options?.strict);
         }
       } else {
         // No-import chunk: wrap the compiled source in the registry IIFE. The
