@@ -2,7 +2,7 @@
   "name": "@vesk/runtime",
   "version": "0.2.65",
   "type": "module",
-  "description": "Vesk runtime — reactivity, blocks, DOM operations, hydration",
+  "description": "Vesk runtime \u2014 reactivity, blocks, DOM operations, hydration",
   "main": "./dist/index-client.js",
   "types": "./dist/index-client.d.ts",
   "exports": {
@@ -25,6 +25,14 @@
     "./store": {
       "types": "./dist/store.d.ts",
       "default": "./dist/store.js"
+    },
+    "./request": {
+      "types": "./dist/request.d.ts",
+      "default": "./dist/request.js"
+    },
+    "./security": {
+      "types": "./dist/security-overrides.d.ts",
+      "default": "./dist/security-overrides.js"
     },
     "./path-store": {
       "types": "./dist/path-store.d.ts",

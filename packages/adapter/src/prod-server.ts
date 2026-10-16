@@ -324,6 +324,53 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       return origWriteHead(statusCode, headers as Record<string, string | number>);
     }) as typeof res.writeHead;
 
+    // Per-request security overrides (`request.setCsp()`, `.setSecurityHeader()`,
+    // `.setRateLimit()`, `.setCsrf()`) accumulate in the runtime's
+    // AsyncLocalStorage bag. The server cannot import the runtime directly (it
+    // is injected into generated code as a string), so it reads the bridge it
+    // registers on globalThis. Without this every one of those setters was a
+    // silent no-op.
+    const securityBridge = (globalThis as Record<string, unknown>).__vesk_security as {
+      run?: <T>(fn: () => T) => T;
+      get?: () => Record<string, unknown> | null;
+    } | undefined;
+    // Rate limiting is enforced BEFORE the handler runs, so a per-request
+    // limit set inside the handler cannot apply to this same request. It is
+    // surfaced here for the next request on the connection-independent bag;
+    // the global limit configured in vesk.config is what gates this one.
+    // Wrap a handler call so overrides it records land in a fresh bag that is
+    // still readable when the response is written. Falls back to a pass-through
+    // when the runtime has not registered its bridge.
+    const securityRun = securityBridge?.run;
+    const withSecurityScope = securityRun
+      ? (fn: () => Promise<Response>): Promise<Response> => securityRun!(fn)
+      : (fn: () => Promise<Response>): Promise<Response> => fn();
+    const applyOverrideHeaders = (headers: Record<string, string | number>): Record<string, string | number> => {
+      const overrides = securityBridge?.get?.();
+      if (!overrides) return headers;
+      const next: Record<string, string | number> = { ...headers };
+      if (typeof overrides.contentSecurityPolicy === 'string') {
+        next['Content-Security-Policy'] = overrides.contentSecurityPolicy;
+      }
+      const custom = overrides.customHeaders as Record<string, string | false> | undefined;
+      if (custom) {
+        for (const [name, value] of Object.entries(custom)) {
+          if (value === false) delete next[name];
+          else next[name] = value;
+        }
+      }
+      return next;
+    };
+    const origWriteHead2 = res.writeHead.bind(res);
+    let overridesApplied = false;
+    res.writeHead = ((statusCode: number, headers?: Record<string, string | number>) => {
+      if (!overridesApplied) {
+        overridesApplied = true;
+        headers = applyOverrideHeaders((headers || {}) as Record<string, string | number>);
+      }
+      return origWriteHead2(statusCode, headers as Record<string, string | number>);
+    }) as typeof res.writeHead;
+
     const publicDir = resolve(staticDir, 'public');
     const rootFile = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
     if (rootFile && existsSync(rootFile) && statSync(rootFile).isFile()) {
@@ -469,7 +516,8 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       }
       try {
         const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-        const response = await mod.handleAction(webRequest, actionId);
+        const handleAction = mod.handleAction!.bind(mod);
+        const response = await withSecurityScope(() => handleAction(webRequest, actionId));
         await deliverResponse(res, response);      } catch (e) {
         const status = errorStatus(e, 500);
         const message = status === 500 && process.env.NODE_ENV === 'production'
@@ -490,7 +538,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
             if (mod) {
               try {
                 const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-                const response = await mod.handle(webRequest);
+                const response = await withSecurityScope(() => mod.handle(webRequest));
                 await deliverResponse(res, response);
                 return;
               } catch (e) {
@@ -533,7 +581,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
               if (route.revalidate && route.revalidate > 0) {
                 const { pageIsr } = await import('@vesk/runtime/src/index-server') as unknown as { pageIsr: (path: string, fn: () => Promise<{ html: string; headers: Record<string, string> }>, opts: { revalidate: number; tags: string[] }) => Promise<{ html: string; headers: Record<string, string> } | null> };
                 cachedResult = await pageIsr(url.pathname, async () => {
-                  const response = await mod.handle(webRequest);
+                  const response = await withSecurityScope(() => mod.handle(webRequest));
                   return { html: await response.text(), headers: Object.fromEntries(response.headers) };
                 }, { revalidate: route.revalidate, tags: route.tags || [] });
               }
@@ -544,7 +592,7 @@ export async function startProdServer(outDir: string, options?: { port?: number;
                 return;
               }
 
-              const response = await mod.handle(webRequest);
+              const response = await withSecurityScope(() => mod.handle(webRequest));
               const headers: Record<string, string | number> = Object.fromEntries(response.headers);
               if (!headers['content-type'] && !headers['Content-Type']) headers['Content-Type'] = 'text/html';
 

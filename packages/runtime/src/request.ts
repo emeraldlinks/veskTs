@@ -1,4 +1,5 @@
 import type { VeskLocals } from '@vesk/types';
+import { setSecurityOverride, getSecurityOverrides } from './security-overrides.js';
 
 interface RequestContext {
 	_request?: Request;
@@ -614,23 +615,29 @@ export class VeskRequest extends ServerRequest {
 
 	setCsp(policy: string | false): void {
 		this._security.contentSecurityPolicy = policy;
+		setSecurityOverride('contentSecurityPolicy', policy);
 	}
 
 	setRateLimit(options: { windowMs?: number; max?: number } | false): void {
 		this._security.rateLimit = options;
+		setSecurityOverride('rateLimit', options);
 	}
 
 	setCsrf(enable: boolean): void {
 		this._security.csrf = enable;
+		setSecurityOverride('csrf', enable);
 	}
 
 	setSecurityHeader(name: string, value: string | false): void {
 		if (!this._security.customHeaders) this._security.customHeaders = {};
 		(this._security.customHeaders as Record<string, string | false>)[name] = value;
+		const existing = (this._security.customHeaders as Record<string, string | false>);
+		setSecurityOverride('customHeaders', { ...existing });
 	}
 
 	setTrustProxy(enable: boolean | string): void {
 		this._security.trustProxy = enable;
+		setSecurityOverride('trustProxy', enable);
 	}
 
 	getSecurityOverrides(): Record<string, unknown> {
@@ -804,7 +811,9 @@ export const VeskResponse = new Proxy(_VeskResponse, {
 
 export function applyRequestSecurity(request: VeskRequest, response: VeskResponseInstance): void {
 	if (!request || !response) return;
-	const overrides = request.getSecurityOverrides?.() || {};
+	// Prefer the per-request channel the servers read from; fall back to the
+	// request's own bag so direct callers keep working.
+	const overrides = getSecurityOverrides() || request.getSecurityOverrides?.() || {};
 	if (overrides.contentSecurityPolicy !== undefined) {
 		response.setCsp(overrides.contentSecurityPolicy as string | false);
 	}
