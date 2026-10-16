@@ -24,3 +24,12 @@ export type { VeskMetadata, MetadataTitle, OpenGraphMetadata } from '@vesk/runti
 
 export { setIn, updateIn, getIn } from '@vesk/runtime/src/nested-update';
 export type { Path } from '@vesk/runtime/src/nested-update';
+
+// Stores. `loadRuntimeImports` (SSR) resolves `@vesk/runtime` names out of
+// THIS barrel, so a `.vsk` page that imported createStore got `undefined` and
+// rendered `Cannot read properties of undefined (reading 'get')`. The client
+// barrel exports the same names — keep the two in sync.
+export { createStore } from '@vesk/runtime/src/store';
+export { createPathStore } from '@vesk/runtime/src/path-store';
+export type { StoreMiddleware } from '@vesk/types';
+export type { PathStore, PathStoreOptions, PathHandle, PathStoreChange } from '@vesk/runtime/src/path-store';

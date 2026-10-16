@@ -434,6 +434,29 @@ function flattenSources(tree: RouteNode[]): Map<string, string> {
   return map;
 }
 
+/**
+ * Sibling precedence: groups/root > static > dynamic > catch-all. A literal
+ * segment must win over a `[param]` that would otherwise swallow it, so
+ * `/users/me` resolves to the static `me` page and not to `/users/:id`. Child
+ * order comes from a `localeCompare` of directory names, which puts `[id]`
+ * ahead of `me`, so precedence has to be stated here rather than left to the
+ * filesystem. Ties keep their original order.
+ */
+function segmentRank(node: RouteNode): number {
+  if (node.isGroup || node.fullPath === '/') return 0;
+  if (node.isCatchAll) return 3;
+  if (node.isDynamic) return 2;
+  return 1;
+}
+
+function bySegmentPrecedence(nodes: RouteNode[]): RouteNode[] {
+  if (nodes.length < 2) return nodes;
+  return nodes
+    .map((node, index) => ({ node, index, rank: segmentRank(node) }))
+    .sort((a, b) => (a.rank - b.rank) || (a.index - b.index))
+    .map(entry => entry.node);
+}
+
 export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | null {
   const parts = pathname.split('/').filter(Boolean);
   const chain: RouteNode[] = [];
@@ -452,7 +475,7 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
   }
 
   function matchNodes(nodes: RouteNode[], partIndex: number): boolean {
-    for (const node of nodes) {
+    for (const node of bySegmentPrecedence(nodes)) {
       if (node.isGroup) {
         // The group goes into the chain BEFORE its matched child, so the chain
         // reads root -> group -> page, exactly like the client's

@@ -31,3 +31,21 @@ export type { VeskMetadata, MetadataTitle, OpenGraphMetadata } from '@vesk/runti
 
 export { setIn, updateIn, getIn } from '@vesk/runtime/src/nested-update';
 export type { Path } from '@vesk/runtime/src/nested-update';
+
+// createStore/createPathStore used to be reachable ONLY through the
+// `@vesk/runtime/store` and `@vesk/runtime/path-store` subpaths. The client
+// tree-shake decides what it can emit from `runtimeExportNames()`, which reads
+// the export names of index-client.js alone, so any page using a store made
+// `createStore` look "not exported" — which sent the build down the legacy
+// concatenation fallback, where hydrate.js and router.js both declare a
+// top-level `hydrateInitial` and the whole page failed to evaluate
+// (`Identifier 'hydrateInitial' has already been declared`).
+//
+// Both modules are client-safe: store-persistence guards every `window`/
+// `document`/`localStorage` access behind a `typeof` check, so re-exporting
+// them here keeps the tree-shaken runtime the default path instead of a
+// guaranteed-broken fallback.
+export { createStore } from '@vesk/runtime/src/store';
+export { createPathStore } from '@vesk/runtime/src/path-store';
+export type { StoreMiddleware } from '@vesk/types';
+export type { PathStore, PathStoreOptions, PathHandle, PathStoreChange } from '@vesk/runtime/src/path-store';

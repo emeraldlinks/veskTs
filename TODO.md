@@ -5,6 +5,26 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (routing/matcher + store bugs found by code inspection, not docs):**
+
+Five defects, all reproduced before fixing. Full suite green; the store/hydration
+one verified end-to-end in Chromium (`tests/hydration-test.mjs` 493/493, new test 25).
+
+- [x] **`createStore` forced the full-runtime fallback and killed hydration on every page.** `runtimeExportNames()` (`adapter/src/client-bundle.ts`) reads only `dist/index-client.js`, and `createStore` was reachable only through the `@vesk/runtime/store` subpath — so `missing = ['createStore']` sent every store-using page down the legacy `buildRuntimeCode` concat, where `dist/hydrate.js:1402` and `dist/router.js:1009` each declare a top-level `hydrateInitial` → `Identifier 'hydrateInitial' has already been declared`. SSR HTML looked perfect; zero markers were claimed and every `on*` handler was dead. Note: extending `runtimeExportNames` alone would NOT have worked — the tree-shake entry always re-exports from `index-client.js`, so esbuild would fail to resolve the name anyway. Fixed by exporting `createStore`/`createPathStore` from BOTH barrels (`runtime/src/index-client.ts`, `index-server.ts`). `tree-shake.test.ts` +6, `test-app/app/store-api/` + hydration test 25.
+- [x] **Stores were unreachable during SSR.** Two independent failures: `extractRuntimeNames()` (`compiler/src/server-utils.ts`) only matched the bare `@vesk/runtime`, never `@vesk/runtime/*` subpaths — while the client collector (`extractRuntimeImportNames`) always did — and `loadRuntimeImports()` resolves names out of the **server** barrel, which lacked them. Any `.vsk` page touching a store rendered `Cannot read properties of undefined (reading 'get')`. Both fixed.
+- [x] **`createStore` silently corrupted array state.** `let value = { ...initial }` turned `createStore([1,2,3])` into `{"0":1,"1":2,"2":3}` — at construction, before any mutation, and again on `reset()`/`clear()`/`rehydrate()`. `T extends object` admits arrays, so the invariant was false. Fixed with a kind-aware `cloneState()` (arrays `slice()`), and `update()` now `Object.assign`s onto the clone so an array store merges by index instead of degrading to an object. `store.test.ts` 23 → 33.
+- [x] **API matcher let a dynamic child swallow its parent's collection URL.** `matchApiUrl` (`compiler/src/api-routes.ts`) matched any node with a handler once the URL was exhausted, without requiring the node's own segment to be consumed: `app/api/users/route.ts` + `app/api/users/[id]/route.ts` made `/api/users` resolve to `/api/users/:id` with **no params**. Also fixed sibling precedence (static > dynamic > catch-all) — `/api/users/me` was being taken by `[id]` purely because of `readdir` order. `api-routes.test.ts` 16 → 31.
+- [x] **Same two matcher bugs in the page router.** `matchUrl` already had the fullPath guard so it never swallowed a collection URL, but it shared the sibling-precedence defect: `/users/me` resolved to `/users/:id`. Fixed with the same rank sort. `router.test.ts` 30 → 34.
+- [x] **Prod/dev API-route parity.** Manifest entries were emitted in directory-scan order and every consumer (`prod-server`, adapter `dev-server`, `platform-handler`) takes the FIRST exact-length match, so a static API route was unreachable in a production build while dev answered correctly. `generateManifest` now orders API entries by per-segment specificity — one fix covering all three consumers.
+
+**Known, deliberately NOT changed:**
+
+- `buildRuntimeCode` (the concat fallback) still cannot produce a loadable module — that duplicate `hydrateInitial` is inherent to concatenating whole runtime files, and an IIFE-per-module wrap would break every cross-module reference. It is now unreachable for every real export, but any future subpath-only export would hit it. Making it an esbuild full-bundle instead is the real fix; `packages/adapter/AGENTS.md` and `tree-shake.test.ts` both pin the concat as the fallback, so that is a deliberate contract change, not a drive-by.
+- `loadRuntimeImports` resolves `@vesk/runtime` names **by local binding name**, so `import { createStore as makeStore }` yields `undefined` server-side. Client and SSR disagree on aliases.
+- The manifest flattens `[...rest]` and `[id]` to the same `:name` shape, so catch-all API routes cannot match multiple segments in prod.
+
+**Pre-existing flake, not from this work:** `module-imports.test.ts` "warm barrel re-load is cached" asserts 500 loads finish in <1000 ms; it fails intermittently on this machine (1009–1053 ms). Verified failing on a clean tree with these changes stashed.
+
 **Current phase:** pure-TS pipeline (haul parked)
 
 **This session (dev startup cost — profiled, not guessed):**

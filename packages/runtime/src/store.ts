@@ -33,10 +33,23 @@ interface StoreOptions {
 type Middleware<T> = StoreMiddleware<T>;
 
 /**
+ * Clone store state by kind. A plain object spread turns an array into a plain
+ * object (`{ ...[1, 2, 3] }` is `{"0":1,"1":2,"2":3}`), so a store seeded with
+ * an array handed back a corrupted, non-array value from `get()` — before any
+ * mutation, and again on every `reset()`/`clear()`/`rehydrate()`. Arrays are
+ * copied with `slice()` so they stay arrays.
+ */
+function cloneState<T>(value: T): T {
+  return (Array.isArray(value)
+    ? (value as unknown[]).slice()
+    : { ...value }) as T;
+}
+
+/**
  * @function createStore
  * Creates a reactive store with optional persistence and tools like watch & middleware.
  *
- * @param initial The initial state object
+ * @param initial The initial state object (or array)
  * @param options Optional store options
  * @returns Store API with get, set, update, delete, subscribe, derive, watch, use, clear, batch, reset, rehydrate, toJSON
  *
@@ -53,7 +66,7 @@ export function createStore<T extends object>(
   // adapter-installed hook (request cookie) and registers the key for the
   // pre-paint script; on the client it prefers the pre-painted
   // `window.__VESK_STORE_INIT__` value, then localStorage. Fallback: seed.
-  let value: T = { ...initial };
+  let value: T = cloneState(initial);
   if (persist && storageKey) {
     const stored = readPersistedStorage(storageKey);
     if (stored) {
@@ -74,7 +87,7 @@ export function createStore<T extends object>(
   }[] = [];
   const middlewares: Middleware<T>[] = [];
 
-  let prevValue = { ...value };
+  let prevValue = cloneState(value);
 
   // Batching state
   let batchDepth = 0;
@@ -105,7 +118,7 @@ export function createStore<T extends object>(
       }
     }
     // Update prevValue
-    prevValue = { ...current };
+    prevValue = cloneState(current);
   }
 
   /** Called by mutators to signal that a change occurred */
@@ -157,7 +170,10 @@ export function createStore<T extends object>(
     const current = stateCell.get();
     const patch =
       typeof partialOrFn === "function" ? partialOrFn(current) : partialOrFn;
-    const next = { ...current, ...patch };
+    // `Object.assign` onto the clone rather than an object spread: for an
+    // array store the merge stays an array and patches land on indexes,
+    // instead of degrading into `{"0": …}`.
+    const next = Object.assign(cloneState(current), patch) as T;
     stateCell.set(next);
     persistToStorage();
     notifyDirty(action, patch);
@@ -167,7 +183,7 @@ export function createStore<T extends object>(
   function deleteKeys(keys: (keyof T) | (keyof T)[], action = "delete") {
     const current = stateCell.get();
     const kArray = Array.isArray(keys) ? keys : [keys];
-    const next = { ...current };
+    const next = cloneState(current);
     kArray.forEach(k => {
       delete (next as any)[k];
     });
@@ -178,20 +194,20 @@ export function createStore<T extends object>(
 
   /** @function reset — Resets state to the original initial value (does not affect persistence) */
   function reset() {
-    stateCell.set({ ...initial });
+    stateCell.set(cloneState(initial));
     notifyDirty("reset");
   }
 
   /** @function rehydrate — Merges new initial state and updates store (keeps same identity) */
   function rehydrate(newInitial: Partial<T>) {
     Object.assign(initial, newInitial);
-    stateCell.set({ ...initial });
+    stateCell.set(cloneState(initial));
     notifyDirty("rehydrate");
   }
 
   /** @function clear — Clears both state and its localStorage record */
   function clear() {
-    stateCell.set({ ...initial });
+    stateCell.set(cloneState(initial));
     if (persist && storageKey) {
       clearPersistedStorage(storageKey);
     }

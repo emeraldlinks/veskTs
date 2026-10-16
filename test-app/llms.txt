@@ -25,6 +25,7 @@
 | `/md-html` | `app/md-html/page.vsk` | page (raw-HTML allowlist demo) |
 | `/store` | `app/store/page.vsk` | page |
 | `/store/:item` | `app/store/[item]/page.vsk` | page (dynamic) |
+| `/store-api` | `app/store-api/page.vsk` | page (client-runtime store tree-shake + array-seed regression bed) |
 | `/empty` | `app/empty/page.vsk` | page |
 | `/actions` | `app/actions/page.vsk` | page |
 | `/comp-test` | `app/comp-test/page.vsk` | page |

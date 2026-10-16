@@ -93,6 +93,29 @@ function scanApiDir(rootDir: string, dir: string, parentPath: string): ApiRouteN
   return nodes;
 }
 
+/**
+ * Sibling precedence: root > static > dynamic > catch-all. A literal segment
+ * must win over a `[param]` that would otherwise swallow it, so `/users/me`
+ * resolves to the static `me` route and not to `/users/:id`. Children arrive
+ * in `readdirSync` order (alphabetical, which puts `[id]` before `me`), so the
+ * precedence has to be stated here instead of being left to the filesystem.
+ * Ties keep their original order.
+ */
+function specificityRank(node: ApiRouteNode): number {
+  if (node.fullPath === '/') return 0;
+  if (node.isCatchAll) return 3;
+  if (node.isDynamic) return 2;
+  return 1;
+}
+
+function bySpecificity(nodes: ApiRouteNode[]): ApiRouteNode[] {
+  if (nodes.length < 2) return nodes;
+  return nodes
+    .map((node, index) => ({ node, index, rank: specificityRank(node) }))
+    .sort((a, b) => (a.rank - b.rank) || (a.index - b.index))
+    .map(entry => entry.node);
+}
+
 export function matchApiUrl(tree: ApiRouteNode[], pathname: string): { node: ApiRouteNode; params: Record<string, string> } | null {
   let normalized = pathname.split('?')[0].split('#')[0];
   // strip a leading /api segment (exact or followed by /) without regex
@@ -104,32 +127,49 @@ export function matchApiUrl(tree: ApiRouteNode[], pathname: string): { node: Api
   const parts = normalized.split('/').filter(Boolean);
   const params: Record<string, string> = {};
 
+  /** Undo params captured by a branch that matched nothing downstream. */
+  function restoreParams(snapshot: Record<string, string>): void {
+    for (const key of Object.keys(params)) {
+      if (!(key in snapshot)) delete params[key];
+    }
+    for (const key of Object.keys(snapshot)) params[key] = snapshot[key];
+  }
+
   function matchNodes(nodes: ApiRouteNode[], partIndex: number): ApiRouteNode | null {
-    for (const node of nodes) {
+    for (const node of bySpecificity(nodes)) {
+      // The root node owns no segment of its own, so it is transparent: the
+      // same position is matched against its children.
       if (node.fullPath === '/') {
         if (partIndex >= parts.length && node.filePath) return node;
         return matchNodes(node.children, partIndex);
       }
 
-      if (partIndex >= parts.length) {
-        if (node.filePath) return node;
-        continue;
-      }
-
-      const part = parts[partIndex];
+      const part = partIndex < parts.length ? parts[partIndex] : undefined;
 
       if (node.isCatchAll) {
+        // `[...rest]` absorbs every remaining segment, including none at all.
+        // It only counts as a match when it has a handler to run.
+        if (!node.filePath) continue;
         const paramName = node.path.startsWith(':') ? node.path.slice(1) : node.path;
         params[paramName] = parts.slice(partIndex).map(decodeURIComponent).join('/');
         return node;
       }
 
+      // Every other node owns exactly one segment, which has to be consumed by
+      // the URL. Once the URL is exhausted the node's own segment never
+      // matched, so it cannot be the handler — keep looking. Matching here
+      // anyway is what let `/api/users` resolve to `/api/users/:id`, handing a
+      // directory's collection URL to its dynamic child with no params at all.
+      if (part === undefined) continue;
+
       if (node.isDynamic) {
         const paramName = node.path.startsWith(':') ? node.path.slice(1) : node.path;
         params[paramName] = decodeURIComponent(part);
         if (node.children.length > 0) {
+          const snapshot = { ...params };
           const result = matchNodes(node.children, partIndex + 1);
           if (result) return result;
+          restoreParams(snapshot);
         }
         if (node.filePath) return node;
         delete params[paramName];
@@ -137,9 +177,16 @@ export function matchApiUrl(tree: ApiRouteNode[], pathname: string): { node: Api
       }
 
       if (node.path === part) {
+        // The URL ends here, so this node is the match: return its own handler
+        // instead of descending. Descending first let a `[param]` child swallow
+        // a directory's collection URL even though that directory had a
+        // `route.ts` of its own.
+        if (partIndex + 1 >= parts.length && node.filePath) return node;
         if (node.children.length > 0) {
+          const snapshot = { ...params };
           const result = matchNodes(node.children, partIndex + 1);
           if (result) return result;
+          restoreParams(snapshot);
         }
         if (node.filePath) return node;
         continue;

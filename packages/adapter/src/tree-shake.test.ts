@@ -62,6 +62,29 @@ async function main() {
     await assert(new RegExp(`export \\{[^}]*\\b${n}\\b[^}]*\\};`).test(allRt), `full set explicitly exports ${n}`);
   }
 
+  console.log('\n=== Store subpath exports are tree-shakable ===');
+  // Regression: createStore/createPathStore lived only behind the
+  // @vesk/runtime/store and /path-store subpaths. runtimeExportNames() reads
+  // index-client.js alone, so a page using a store reported
+  // `runtime names not exported — createStore` and fell back to the legacy
+  // concat, where hydrate.js and router.js each declare a top-level
+  // `hydrateInitial` — a page-wide SyntaxError that killed all hydration.
+  for (const n of ['createStore', 'createPathStore']) {
+    await assert(all.has(n), `${n} is in the available name set`);
+  }
+  const storeRt = await buildTreeShakenRuntime(runtimeDir, ['createStore', 'track']);
+  await assert(storeRt.includes('__veskRuntime'), 'store bundle uses the closed IIFE, not the concat fallback');
+  await assert(!storeRt.includes('// --- ripple-constants.js ---'), 'store bundle has no legacy concat markers');
+  await assert(new RegExp('export \\{[^}]*\\bcreateStore\\b[^}]*\\};').test(storeRt), 'store bundle explicitly exports createStore');
+  const dupHydrate = (storeRt.match(/^(export )?(async )?function hydrateInitial/gm) || []).length;
+  await assert(dupHydrate <= 1, `no duplicate top-level hydrateInitial declaration (got ${dupHydrate})`);
+  const storeDir = mkdtempSync(join(tmpdir(), 'vesk-rt-store-'));
+  const storeOut = join(storeDir, 'rt.mjs');
+  writeFileSync(storeOut, storeRt);
+  const storeMod = await import(pathToFileURL(storeOut).href + '?v=' + Date.now());
+  rmSync(storeDir, { recursive: true });
+  await assert(typeof (storeMod as Record<string, unknown>).createStore === 'function', 'createStore resolves via ESM import');
+
   console.log('\n=== Fallback ===');
   const fallback = await buildTreeShakenRuntime(runtimeDir, ['track', 'notARealExport']);
   await assert(fallback.includes('// --- ripple-constants.js ---'), 'missing name falls back to legacy concatenated runtime');

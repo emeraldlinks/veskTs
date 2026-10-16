@@ -209,10 +209,216 @@ describe('matchApiUrl', () => {
 			'users/route.ts': '',
 		});
 		const tree = scanApiRoutes(d);
-    const match = matchApiUrl(tree, '/api/products');
-    expect(match).not.toBeNull();
-    cleanup();
-  });
+		const match = matchApiUrl(tree, '/api/products');
+		expect(match).not.toBeNull();
+		cleanup();
+	});
+
+	// ── A dynamic child must not swallow its parent's collection URL ──
+
+	it('collection route is not swallowed by a dynamic child', () => {
+		const d = createTestDir({
+			'users/route.ts': '',
+			'users/[id]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users');
+		expect(match.params).toEqual({});
+		cleanup();
+	});
+
+	it('dynamic child still matches its own segment', () => {
+		const d = createTestDir({
+			'users/route.ts': '',
+			'users/[id]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users/42');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/:id');
+		expect(match.params.id).toBe('42');
+		cleanup();
+	});
+
+	it('collection route with a static sibling is not swallowed either', () => {
+		const d = createTestDir({
+			'users/route.ts': '',
+			'users/me/route.ts': '',
+			'users/[id]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users');
+		cleanup();
+	});
+
+	it('a deeper dynamic grandchild cannot match an exhausted URL', () => {
+		const d = createTestDir({
+			'users/[id]/posts/route.ts': '',
+			'users/[id]/posts/[pid]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		// /api/users/42/posts — the [pid] leaf has no segment left to consume
+		const match = matchApiUrl(tree, '/api/users/42/posts');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/:id/posts');
+		expect(match.params).toEqual({ id: '42' });
+		cleanup();
+	});
+
+	it('nested collection route under a dynamic parent is not swallowed', () => {
+		const d = createTestDir({
+			'users/[id]/posts/route.ts': '',
+			'users/[id]/posts/[pid]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users/42/posts/9');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/:id/posts/:pid');
+		expect(match.params).toEqual({ id: '42', pid: '9' });
+		cleanup();
+	});
+
+	it('falls back to the dynamic handler when its children do not match', () => {
+		const d = createTestDir({
+			'users/[id]/route.ts': '',
+			'users/[id]/posts/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		// `posts` must not steal the request from `[id]`'s own handler
+		const match = matchApiUrl(tree, '/api/users/42');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/:id');
+		expect(match.params).toEqual({ id: '42' });
+		cleanup();
+	});
+
+	it('does not leak params from a failed branch into the fallback match', () => {
+		const d = createTestDir({
+			'items/[id]/route.ts': '',
+			'items/[id]/nested/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		// `nested` claims `deep`, then fails (no `deep` segment left to give it)
+		// — the fallback must not keep `nested`'s param behind.
+		const match = matchApiUrl(tree, '/api/items/7/nested');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/items/:id/nested');
+		expect(match.params).toEqual({ id: '7' });
+		cleanup();
+	});
+
+	// ── Static beats dynamic regardless of directory order ──
+
+	it('static sibling wins over a dynamic sibling', () => {
+		const d = createTestDir({
+			// '[id]' sorts before 'me' in readdir order — precedence must not
+			// depend on that.
+			'users/[id]/route.ts': '',
+			'users/me/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users/me');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/me');
+		expect(match.params).toEqual({});
+		cleanup();
+	});
+
+	it('static sibling wins over a dynamic sibling with a deeper dynamic child', () => {
+		const d = createTestDir({
+			'users/[id]/posts/route.ts': '',
+			'users/me/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users/me');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/me');
+		cleanup();
+	});
+
+	it('dynamic sibling still matches a non-static segment', () => {
+		const d = createTestDir({
+			'users/[id]/route.ts': '',
+			'users/me/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/users/42');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/users/:id');
+		expect(match.params.id).toBe('42');
+		cleanup();
+	});
+
+	// ── Catch-all ──
+
+	it('catch-all collects a nested multi-segment tail', () => {
+		const d = createTestDir({
+			'files/[...rest]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/files/a/b/c.png');
+		expect(match).not.toBeNull();
+		expect(match.params.rest).toBe('a/b/c.png');
+		cleanup();
+	});
+
+	it('catch-all yields an empty tail rather than an undefined param', () => {
+		const d = createTestDir({
+			'files/[...rest]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/files');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/files/:rest');
+		expect(match.params.rest).toBe('');
+		cleanup();
+	});
+
+	it('catch-all does not match when its parent consumed the whole URL', () => {
+		const d = createTestDir({
+			'files/route.ts': '',
+			'files/[...rest]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		// `files/route.ts` is the match — the catch-all has nothing left to eat
+		const match = matchApiUrl(tree, '/api/files');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/files');
+		expect(match.params).toEqual({});
+		cleanup();
+	});
+
+	it('catch-all is preferred over a dynamic sibling with no handler', () => {
+		const d = createTestDir({
+			// `[id]` is a pure segment (no route.ts of its own), so it cannot
+			// answer `/a/b` on its own and the catch-all takes the whole tail.
+			'[id]/nested/route.ts': '',
+			'[...rest]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/a/b');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/:rest');
+		expect(match.params.rest).toBe('a/b');
+		cleanup();
+	});
+
+	it('dynamic sibling with a handler is tried before a catch-all', () => {
+		const d = createTestDir({
+			'[id]/route.ts': '',
+			'[...rest]/route.ts': '',
+		});
+		const tree = scanApiRoutes(d);
+		const match = matchApiUrl(tree, '/api/7');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/:id');
+		expect(match.params).toEqual({ id: '7' });
+		cleanup();
+	});
 });
 
 // ── buildWebRequest body cap ─────────────────────────────────────

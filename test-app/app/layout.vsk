@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
 	{ label: 'Broken', href: '/broken' },
 	{ label: 'StandaloneDep', href: '/standalonedep' },
 	{ label: 'Portal', href: '/portal' },
+	{ label: 'StoreApi', href: '/store-api' },
 ]
 
 component Layout(props: LayoutProps) {

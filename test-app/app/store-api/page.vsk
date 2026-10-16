@@ -1,0 +1,50 @@
+import { createStore } from '@vesk/runtime/store'
+import { track } from '@vesk/runtime'
+
+// Regression fixture for two linked bugs.
+//
+// 1. Client runtime tree-shake. `createStore` was reachable only through the
+//    `@vesk/runtime/store` subpath, while the runtime availability check reads
+//    index-client.js alone. Any page using a store reported
+//    `runtime names not exported — createStore` and fell back to the legacy
+//    concatenation, where hydrate.js and router.js each declare a top-level
+//    `hydrateInitial`. The server still sent complete HTML, but the client
+//    threw `Identifier 'hydrateInitial' has already been declared`, so no
+//    hydration marker was claimed and every on* handler was dead.
+// 2. SSR scope. The subpath import was skipped entirely server-side, so the
+//    store was undefined at render (`Cannot read properties of undefined`).
+const counter = createStore<{ count: number }>({ count: 0 })
+
+// Array seeding: `let value = { ...initial }` turned this into
+// `{"0":"alpha","1":"beta"}`, so `.join`/`.map`/`.find` threw on first render.
+const tags = createStore<string[]>(['alpha', 'beta'])
+
+component StoreApiIsland() {
+	const &[count] = track(0)
+
+	<div class="store-api-box">
+		<p class="store-api-count">Store count: {count}</p>
+		<p class="store-api-tags">Tags: {tags.get().join(', ')}</p>
+		<button
+			class="store-api-bump"
+			onClick={() => {
+				// Reaching into the store from a LIVE handler: if createStore
+				// were missing from the runtime bundle this throws and the DOM
+				// never updates.
+				counter.update({ count: counter.get().count + 1 })
+				count = counter.get().count
+			}}
+		>bump</button>
+	</div>
+}
+
+export default component StoreApiPage {
+	<Head>
+		<title>Store API</title>
+	</Head>
+
+	<h1 class="text-3xl font-bold mb-4">Store API</h1>
+	<p class="store-api-ssr">SSR store count: {counter.get().count}</p>
+	<p class="store-api-tags-ssr">SSR tags: {tags.get().join(', ')}</p>
+	<StoreApiIsland />
+}

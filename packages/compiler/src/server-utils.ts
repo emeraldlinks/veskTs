@@ -1029,7 +1029,13 @@ export function extractRuntimeNames(importStrs: string[]): string[] {
       for (const stmt of ast.body as any[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
         const src = stmt.source?.value;
-        if (typeof src !== 'string' || (src !== '@vesk/runtime' && src !== '@vesk/reactivity')) continue;
+        // Subpaths (`@vesk/runtime/store`) are real imports too. They were
+        // skipped here, so nothing a `.vsk` file pulled from a subpath ever
+        // reached the SSR scope — while the CLIENT collector
+        // (`extractRuntimeImportNames` in client-bundle.ts) has always accepted
+        // them. That mismatch is why a store-importing page rendered on the
+        // server with `createStore` undefined.
+        if (typeof src !== 'string' || !(src === '@vesk/runtime' || src === '@vesk/reactivity' || src.startsWith('@vesk/runtime/'))) continue;
         for (const spec of stmt.specifiers || []) {
           if (spec.importKind === 'type') continue;
           if (spec.type === 'ImportSpecifier') {
@@ -1043,7 +1049,7 @@ export function extractRuntimeNames(importStrs: string[]): string[] {
       continue;
     }
     const target = importModuleTarget(imp);
-    if (target === '@vesk/runtime' || target === '@vesk/reactivity') {
+    if (target && (target === '@vesk/runtime' || target === '@vesk/reactivity' || target.startsWith('@vesk/runtime/'))) {
       for (const name of extractImportNames(imp)) names.push(name);
     }
   }

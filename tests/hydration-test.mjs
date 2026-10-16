@@ -2176,6 +2176,65 @@ async function main() {
     }
   }
 
+  // ── 25: a page that imports createStore must still hydrate ──────────────
+  // Regression: createStore was reachable only through the
+  // @vesk/runtime/store subpath, so the client-runtime availability check
+  // (which reads index-client.js alone) reported it as missing and the build
+  // fell back to the legacy concatenation — where hydrate.js and router.js
+  // each declare a top-level `hydrateInitial`. The server sent complete HTML,
+  // but the client threw `Identifier 'hydrateInitial' has already been
+  // declared`: zero markers claimed and every on* handler dead.
+  {
+    console.log('  25: store page — runtime bundle exports createStore, page hydrates');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const resp = await goto(page, BASE + '/store-api', { waitUntil: 'networkidle0', timeout: 30000 });
+    assert(resp && resp.status() === 200, `25 /store-api is HTTP 200 (got ${resp?.status()})`);
+    assert((resp?.headers()['content-type'] || '').includes('text/html'), '25 /store-api serves HTML');
+
+    const served = resp ? await resp.text() : '';
+    assert(served.includes('Store API'), '25 SSR renders the heading');
+    // SSR already ran the array store through .join() — before the fix this
+    // was `{"0":"alpha","1":"beta"}` and threw.
+    assert(served.includes('SSR tags: alpha, beta'), '25 SSR joins the array-valued store correctly');
+
+    // The whole point: the client bundle evaluated without a duplicate
+    // `hydrateInitial`, so hydration actually ran.
+    await page.waitForFunction(
+      () => document.querySelector('.store-api-box') !== null,
+      { timeout: 20000 },
+    ).catch(() => {});
+    const markers = await page.evaluate(() => {
+      const html = document.documentElement.innerHTML;
+      return (html.match(/<!--vsk/g) || []).length;
+    });
+    assert(markers === 0, `25 hydration markers all claimed (got ${markers})`);
+
+    // A live on* handler that reads and writes the store. If createStore were
+    // missing from the runtime the handler would throw and this would not move.
+    const before = await page.evaluate(() => document.querySelector('.store-api-count')?.textContent?.trim());
+    assert(before === 'Store count: 0', `25 store-backed counter starts at 0 (got "${before}")`);
+    await clickEl(page, '.store-api-bump');
+    await page.waitForFunction(
+      () => document.querySelector('.store-api-count')?.textContent?.trim() === 'Store count: 1',
+      { timeout: 15000 },
+    ).catch(() => {});
+    const after = await page.evaluate(() => document.querySelector('.store-api-count')?.textContent?.trim());
+    assert(after === 'Store count: 1', `25 onClick handler ran and updated via the store (got "${after}")`);
+
+    const tagsText = await page.evaluate(() => document.querySelector('.store-api-tags')?.textContent?.trim());
+    assert(tagsText === 'Tags: alpha, beta', `25 array store renders as an array on the client (got "${tagsText}")`);
+
+    assert(
+      !errors.some(e => e.includes('hydrateInitial')),
+      `25 no duplicate-hydrateInitial SyntaxError (got: ${errors.join(', ')})`,
+    );
+    assert(errors.length === 0, `25 zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${passed + failed + skipped} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

@@ -44,6 +44,9 @@ function expect(value: unknown) {
 		toBeFalsy() {
 			if (value) throw new Error(`Expected falsy, got ${JSON.stringify(value)}`);
 		},
+		toBeArray() {
+			if (!Array.isArray(value)) throw new Error(`Expected an array, got ${JSON.stringify(value)}`);
+		},
 		toEqual(expected: unknown) {
 			const a = JSON.stringify(value);
 			const b = JSON.stringify(expected);
@@ -343,6 +346,88 @@ describe('createStore — SSR persistence', () => {
 		resetPersistedStoreKeys();
 		createStore({ count: 0 });
 		expect(getPersistedStoreKeys()).toEqual([]);
+	});
+});
+
+describe('createStore — array state', () => {
+	// `{ ...state }` turns an array into `{"0": …}`, so an array store came back
+	// corrupted from get() before any mutation happened at all.
+
+	it('get() returns an array, not an object with numeric keys', () => {
+		const store = createStore<number[]>([1, 2, 3]);
+		expect(Array.isArray(store.get())).toBeTruthy();
+		expect(store.get()).toEqual([1, 2, 3]);
+	});
+
+	it('an empty array seed stays an empty array', () => {
+		const store = createStore<number[]>([]);
+		expect(store.get()).toBeArray();
+		expect(store.get()).toEqual([]);
+	});
+
+	it('set() keeps the value an array', () => {
+		const store = createStore<number[]>([1]);
+		store.set([1, 2, 3]);
+		expect(store.get()).toBeArray();
+		expect(store.get()).toEqual([1, 2, 3]);
+	});
+
+	it('array length and indexes survive a read', () => {
+		const store = createStore<{ id: number }[]>([{ id: 1 }, { id: 2 }]);
+		expect(store.get().length).toBe(2);
+		expect(store.get()[1].id).toBe(2);
+	});
+
+	it('reset() and clear() restore an array, not an object', () => {
+		const store = createStore<number[]>([1, 2, 3]);
+		store.set([9]);
+		store.reset();
+		expect(store.get()).toBeArray();
+		expect(store.get()).toEqual([1, 2, 3]);
+		store.set([8]);
+		store.clear();
+		expect(store.get()).toBeArray();
+		expect(store.get()).toEqual([1, 2, 3]);
+	});
+
+	it('rehydrate() keeps the state an array', () => {
+		const store = createStore<number[]>([1]);
+		store.rehydrate([4, 5] as unknown as Partial<number[]>);
+		expect(store.get()).toBeArray();
+		expect(store.get()).toEqual([4, 5]);
+	});
+
+	it('subscribers receive an array after a change', () => {
+		const store = createStore<number[]>([1]);
+		const seen: unknown[] = [];
+		store.subscribe((s) => seen.push(s));
+		store.set([1, 2]);
+		flush_sync(() => {});
+		const last = seen[seen.length - 1];
+		expect(Array.isArray(last)).toBeTruthy();
+		expect(last).toEqual([1, 2]);
+	});
+
+	it('update() merges onto an array without degrading to an object', () => {
+		const store = createStore<number[]>([1, 2, 3]);
+		store.update({ 0: 9 } as unknown as Partial<number[]>);
+		expect(store.get()).toBeArray();
+		expect(store.get()).toEqual([9, 2, 3]);
+	});
+
+	it('update() with a callback still returns an array', () => {
+		const store = createStore<number[]>([1, 2]);
+		store.update(prev => ({ length: prev.length + 1 } as Partial<number[]>));
+		expect(store.get()).toBeArray();
+		expect(store.get().length).toBe(3);
+	});
+
+	it('object stores are unaffected by the array handling', () => {
+		const store = createStore<{ a: number; b: number }>({ a: 1, b: 2 });
+		expect(store.get()).toEqual({ a: 1, b: 2 });
+		store.update({ a: 5 });
+		expect(store.get()).toEqual({ a: 5, b: 2 });
+		expect(Array.isArray(store.get())).toBeFalsy();
 	});
 });
 

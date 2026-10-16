@@ -1,5 +1,34 @@
 import type { RouteNode, ApiRouteNode, Manifest, ManifestRouteEntry, ManifestPrerenderedEntry, ManifestActionEntry, SsgRouteResult } from '@vesk/adapter/src/types';
 
+/**
+ * Specificity key for a route pattern, compared segment by segment: a literal
+ * segment outranks a dynamic one, so `/users/me` is tried before
+ * `/users/:id`.
+ *
+ * Every consumer of the manifest — prod-server, adapter dev-server, platform
+ * handler — scans `routes` in order and takes the FIRST match, so the order
+ * written here IS the routing precedence. Entries came out in directory-scan
+ * order, which puts `[id]` ahead of `me`, leaving a static API route
+ * permanently unreachable in a production build while the dev tree matcher
+ * (which sorts siblings) answered correctly.
+ */
+function specificityKey(path: string): string[] {
+  return path
+    .split('/')
+    .filter(Boolean)
+    .map(seg => (seg.startsWith(':') ? '1' + seg : '0' + seg));
+}
+
+function compareSpecificity(a: string, b: string): number {
+  const ka = specificityKey(a);
+  const kb = specificityKey(b);
+  const len = Math.min(ka.length, kb.length);
+  for (let i = 0; i < len; i++) {
+    if (ka[i] !== kb[i]) return ka[i] < kb[i] ? -1 : 1;
+  }
+  return kb.length - ka.length;
+}
+
 export function generateManifest(
   routes: RouteNode[],
   ssrRoutes: RouteNode[],
@@ -8,7 +37,7 @@ export function generateManifest(
   middlewareEnabled: boolean,
   actionMap?: Record<string, string>,
   headExtra?: string,
-  eventsEnabled = false,
+  eventsEnabled = false
 ): Manifest {
   const routeEntries: ManifestRouteEntry[] = [];
 
@@ -25,15 +54,18 @@ export function generateManifest(
     routeEntries.push(entry);
   }
 
+  const apiEntries: ManifestRouteEntry[] = [];
   for (const r of apiRoutes) {
     const urlParts = r.fullPath.split('/').filter(Boolean);
     const name = urlParts.map(s => s.startsWith(':') ? s.slice(1) || 'param' : s).join('_') || 'index';
-    routeEntries.push({
+    apiEntries.push({
       path: `/api${r.fullPath}`,
       type: 'api',
       function: `server/api/${name}.js`,
     });
   }
+  apiEntries.sort((a, b) => compareSpecificity(a.path, b.path));
+  routeEntries.push(...apiEntries);
 
   const ssgEntries: ManifestPrerenderedEntry[] = [];
   for (const r of staticRoutes) {

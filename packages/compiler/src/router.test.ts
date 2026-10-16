@@ -538,6 +538,73 @@ test('a group that does not match leaves no trace in the chain', () => {
 	} finally { cleanup(tmp); }
 });
 
+// ── Sibling precedence: static beats dynamic ─────────────────────────────
+// Regression: child order comes from a localeCompare of directory names,
+// which puts `[id]` ahead of `me`, so a literal segment was shadowed by a
+// dynamic sibling and its page became unreachable.
+
+console.log('matchUrl precedence\n');
+
+function leafFullPath(match) {
+	return match ? match.nodes[match.nodes.length - 1].fullPath : null;
+}
+
+test('static sibling wins over a dynamic sibling', () => {
+	const tmp = createFixture({
+		'users/page.vsk': 'export default component P { <div>x</div> }',
+		'users/[id]/page.vsk': 'export default component P { <div>x</div> }',
+		'users/me/page.vsk': 'export default component P { <div>x</div> }',
+	});
+	try {
+		const tree = scanRoutes(tmp);
+		expect(leafFullPath(matchUrl(tree, '/users/me'))).toBe('/users/me');
+		expect(matchUrl(tree, '/users/me').params).toEqual({});
+		// the dynamic sibling still answers for anything else
+		const dyn = matchUrl(tree, '/users/42');
+		expect(leafFullPath(dyn)).toBe('/users/:id');
+		expect(dyn.params.id).toBe('42');
+		// and the collection page is untouched
+		expect(leafFullPath(matchUrl(tree, '/users'))).toBe('/users');
+	} finally { cleanup(tmp); }
+});
+
+test('static sibling wins even when the dynamic sibling has children', () => {
+	const tmp = createFixture({
+		'users/[id]/posts/page.vsk': 'export default component P { <div>x</div> }',
+		'users/me/page.vsk': 'export default component P { <div>x</div> }',
+	});
+	try {
+		const tree = scanRoutes(tmp);
+		expect(leafFullPath(matchUrl(tree, '/users/me'))).toBe('/users/me');
+	} finally { cleanup(tmp); }
+});
+
+test('catch-all loses to a dynamic sibling with its own page', () => {
+	const tmp = createFixture({
+		'[id]/page.vsk': 'export default component P { <div>x</div> }',
+		'[...rest]/page.vsk': 'export default component P { <div>x</div> }',
+	});
+	try {
+		const tree = scanRoutes(tmp);
+		expect(leafFullPath(matchUrl(tree, '/docs'))).toBe('/:id');
+	} finally { cleanup(tmp); }
+});
+
+test('precedence does not reorder the emitted chain for deeper matches', () => {
+	const tmp = createFixture({
+		'users/page.vsk': 'export default component P { <div>x</div> }',
+		'users/[id]/page.vsk': 'export default component P { <div>x</div> }',
+		'users/[id]/posts/page.vsk': 'export default component P { <div>x</div> }',
+		'users/[id]/posts/[pid]/page.vsk': 'export default component P { <div>x</div> }',
+	});
+	try {
+		const tree = scanRoutes(tmp);
+		expect(leafFullPath(matchUrl(tree, '/users/42/posts/9'))).toBe('/users/:id/posts/:pid');
+		expect(matchUrl(tree, '/users/42/posts/9').params).toEqual({ id: '42', pid: '9' });
+		expect(leafFullPath(matchUrl(tree, '/users/42/posts'))).toBe('/users/:id/posts');
+	} finally { cleanup(tmp); }
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);
 console.log('All router tests passed!');
