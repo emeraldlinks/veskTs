@@ -1,5 +1,5 @@
 import { readFileSync, existsSync, statSync } from 'node:fs';
-import { resolve, extname, dirname, basename } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
@@ -11,7 +11,9 @@ import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { loadVeskConfig } from '@vesk/adapter/src/load-config';
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
-import type { SecurityConfig } from '@vesk/adapter/src/types';
+import { installResponsePipeline } from '@vesk/adapter/src/response-pipeline';
+import { mimeFor } from '@vesk/adapter/src/platform-output';
+import type { SecurityConfig, CompressionConfig, ProdServerOptions } from '@vesk/adapter/src/types';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -26,15 +28,65 @@ async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAU
   return Buffer.concat(chunks);
 }
 
+/** Open-ended content types. Buffering one would hold the response until the
+ *  stream closed — which, for a never-ending event stream, is never. */
+const STREAMING_TYPES = new Set(['text/event-stream', 'application/x-ndjson']);
+
+/** Above this, a "buffered" body is streamed instead rather than held whole. */
+const DELIVER_BUFFER_LIMIT = 1024 * 1024;
+
 /**
- * Writes a handler Response to the socket, piping a streaming body
- * chunk-by-chunk (SSE / text streams) instead of buffering everything.
+ * Writes a handler Response to the socket.
+ *
+ * A finite body is delivered as ONE `end(buffer)`, not chunk-by-chunk, and that
+ * is load-bearing: the response pipeline can only tag a body and revalidate it
+ * against `If-None-Match` — and only apply content-encoding — once it can see
+ * the whole body. Streaming a 2 KB JSON body would silently opt every API
+ * response out of both. A response that turns out to exceed the buffer limit,
+ * or that declares an open-ended content type, falls back to streaming so the
+ * memory and time-to-first-byte cost of a genuinely large body is unchanged.
  */
 async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
-  res.writeHead(response.status, Object.fromEntries(response.headers));
+  const headers = Object.fromEntries(response.headers);
   const body = response.body;
-  if (body && typeof body.getReader === 'function') {
-    const reader = body.getReader();
+  if (!body || typeof body.getReader !== 'function') {
+    res.writeHead(response.status, headers);
+    res.end(await response.text());
+    return;
+  }
+  const contentType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+  const reader = body.getReader();
+  if (STREAMING_TYPES.has(contentType)) {
+    res.writeHead(response.status, headers);
+    pumpRemaining(res, reader);
+    return;
+  }
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let overflow = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      chunks.push(Buffer.from(value));
+      size += value.byteLength;
+      if (size > DELIVER_BUFFER_LIMIT) { overflow = true; break; }
+    }
+  } catch {
+    /* stream aborted by the client */
+  }
+  res.writeHead(response.status, headers);
+  if (overflow) {
+    for (const chunk of chunks) res.write(chunk);
+    pumpRemaining(res, reader);
+    return;
+  }
+  res.end(Buffer.concat(chunks));
+}
+
+/** Drain an already-started reader onto the socket, then end it. */
+function pumpRemaining(res: ServerResponse, reader: ReadableStreamDefaultReader<Uint8Array>): void {
+  void (async () => {
     try {
       for (;;) {
         const { done, value } = await reader.read();
@@ -45,9 +97,7 @@ async function deliverResponse(res: ServerResponse, response: Response): Promise
       /* stream aborted by the client */
     }
     res.end();
-    return;
-  }
-  res.end(await response.text());
+  })();
 }
 
 export function bodyTooLarge(maxBytes: number): Error & { status: number } {
@@ -115,14 +165,6 @@ function makeWebRequest(nodeReq: IncomingMessage, url: string, maxBodyBytes: num
   return webRequest;
 }
 
-const MIME: Record<string, string> = {
-  '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon', '.html': 'text/html', '.json': 'application/json',
-  '.webmanifest': 'application/manifest+json',
-  '.woff': 'font/woff', '.woff2': 'font/woff2', '.wasm': 'application/wasm',
-};
-
 interface BuildConfigRoute {
   path: string;
   type: 'ssr' | 'api';
@@ -152,7 +194,7 @@ interface MatchPathResult {
   [key: string]: string;
 }
 
-export async function startProdServer(outDir: string, options?: { port?: number; host?: string; maxBodyBytes?: number }): Promise<Server> {
+export async function startProdServer(outDir: string, options?: ProdServerOptions & { compression?: CompressionConfig | false; healthCheck?: boolean }): Promise<Server> {
   const port = options?.port || 3000;
   const host = options?.host || '127.0.0.1';
   const maxBodyBytes = options?.maxBodyBytes || DEFAULT_MAX_BODY_BYTES;
@@ -178,17 +220,28 @@ export async function startProdServer(outDir: string, options?: { port?: number;
   const projectDir = resolve(outDir, '..');
   let securityConfig: SecurityConfig = {};
   let mdConfig: Record<string, unknown> | undefined;
+  let compressionConfig: CompressionConfig = {};
+  let healthCheckEnabled = true;
   try {
     const config = await loadVeskConfig(projectDir);
     if (config) {
       securityConfig = { security: config.security as SecurityConfig['security'] };
       mdConfig = config.md as Record<string, unknown> | undefined;
+      // `compression: false` disables encoding entirely; an object tunes it.
+      compressionConfig = config.compression === false ? { enabled: false } : (config.compression || {});
+      healthCheckEnabled = config.healthCheck !== false;
     }
   } catch (e) {
     // Fail closed: keep the secure defaults above and warn loudly — a broken
     // config must never silently disable the app's chosen security policy.
     console.error('vesk start: failed to load vesk.config — falling back to secure defaults:', e instanceof Error ? e.message : e);
   }
+  // Explicit server options win over vesk.config (the CLI passes nothing here,
+  // so this is the programmatic path — how tests and embedders configure it).
+  if (options?.compression !== undefined) {
+    compressionConfig = options.compression === false ? { enabled: false } : options.compression;
+  }
+  if (options?.healthCheck !== undefined) healthCheckEnabled = options.healthCheck !== false;
   if (mdConfig) {
     try {
       const { configureMd } = await import('@vesk/runtime/src/md') as { configureMd: (p?: unknown) => void };
@@ -303,6 +356,24 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       : getClientProtocol({ headers: req.headers } as Record<string, unknown>, !!securityConfig?.trustProxy);
     (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
 
+    // Liveness probe. Deliberately the FIRST thing in the handler, ahead of the
+    // rate limiter, middleware and the pipeline below:
+    //  - a probe that can be answered 429 is indistinguishable from a dead
+    //    server to an orchestrator, which then restarts a healthy pod;
+    //  - it must not be rewritten or authed by user middleware;
+    //  - it must never be encoded or tagged — a load balancer revalidating a
+    //    cached "ok" is testing its own cache, not this process.
+    if (healthCheckEnabled && (url.pathname === '/healthz' || url.pathname === '/_vesk/healthz')) {
+      const probe = JSON.stringify({ status: 'ok', uptime: Math.floor(process.uptime()) });
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Content-Length': String(Buffer.byteLength(probe)),
+        'Cache-Control': 'no-store',
+      });
+      res.end(probe);
+      return;
+    }
+
     if (rateLimiter) {
       const clientIp = getClientIpFromReq(req);
       if (!rateLimiter.check(clientIp)) {
@@ -371,11 +442,23 @@ export async function startProdServer(outDir: string, options?: { port?: number;
       return origWriteHead2(statusCode, headers as Record<string, string | number>);
     }) as typeof res.writeHead;
 
+    // Installed LAST so it wraps the two header decorators above: its captured
+    // `writeHead` is their wrapper, so security headers and per-request
+    // overrides are still merged in — once, at flush time. One install covers
+    // every response the handler produces (static files, SSR HTML, API JSON,
+    // middleware short-circuits), so no call site can be missed.
+    installResponsePipeline(res, req, {
+      compress: compressionConfig.enabled !== false,
+      compressThreshold: compressionConfig.threshold,
+      brotliQuality: compressionConfig.brotliQuality,
+      gzipLevel: compressionConfig.gzipLevel,
+      etag: compressionConfig.etag !== false,
+    });
+
     const publicDir = resolve(staticDir, 'public');
     const rootFile = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
     if (rootFile && existsSync(rootFile) && statSync(rootFile).isFile()) {
-      const ext = extname(rootFile);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      res.writeHead(200, { 'Content-Type': mimeFor(rootFile) });
       res.end(readFileSync(rootFile));
       return;
     }
@@ -429,9 +512,8 @@ export async function startProdServer(outDir: string, options?: { port?: number;
         res.writeHead(403); res.end('Forbidden'); return;
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-        const ext = extname(staticPath);
         res.writeHead(200, {
-          'Content-Type': MIME[ext] || 'application/octet-stream',
+          'Content-Type': mimeFor(staticPath),
           // A content-hashed name can never change meaning, so it is immutable
           // for a year; anything unhashed must be revalidated or a deploy would
           // serve stale JS forever.
@@ -690,8 +772,19 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 3000).unref();
   }
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  // Named handlers so they can be detached on close. Without this every
+  // start/stop cycle leaks two process listeners, which is a hard crash
+  // (MaxListenersExceededWarning → throw) once a host restarts the server more
+  // than five times — the shape every test harness and hot-restarting dev
+  // wrapper uses.
+  const onSigint = () => shutdown('SIGINT');
+  const onSigterm = () => shutdown('SIGTERM');
+  process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigterm);
+  server.once('close', () => {
+    process.off('SIGINT', onSigint);
+    process.off('SIGTERM', onSigterm);
+  });
 
   server.listen(port, host, () => {
     console.error(`vesk production server at http://localhost:${port} (listening on ${host})`);

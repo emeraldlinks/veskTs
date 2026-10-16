@@ -327,8 +327,31 @@ export type MdHtmlMode = 'escape' | 'allow' | 'allowlist';
 export interface MdConfig {
   /** Raw-HTML policy for Markdown rendering. Default 'escape'. */
   html?: MdHtmlMode;
-  /** Tag allowlist for `html: 'allowlist'`. Lowercased during validation. */
+  /** Tag allowlist when `html: 'allowlist'`. Lowercased during validation. */
   allowTags?: string[];
+}
+
+/**
+ * Transport-level response handling for `vesk start`.
+ *
+ * Both halves are on by default and are the reason a production build behaves
+ * like a production HTTP server rather than a file reader: JS/HTML/JSON go out
+ * encoded (brotli when the client offers it, otherwise gzip), and every
+ * buffered GET carries an `ETag` so a repeat visit is a `304` with no body.
+ * Responses are revalidated on the *unencoded* bytes and `Vary:
+ * Accept-Encoding` is always sent, so a cache keyed by encoding still hits.
+ */
+export interface CompressionConfig {
+  /** Negotiate br/gzip. Default true. Set false to serve every body as-is. */
+  enabled?: boolean;
+  /** Smallest body worth encoding, in bytes. Default 1024. */
+  threshold?: number;
+  /** brotli quality 0-11. Default 5; 11 costs seconds per megabyte. */
+  brotliQuality?: number;
+  /** gzip level 1-9. Default 6. */
+  gzipLevel?: number;
+  /** Emit `ETag` and answer `If-None-Match` with `304`. Default true. */
+  etag?: boolean;
 }
 
 export interface VeskConfig {
@@ -344,6 +367,13 @@ export interface VeskConfig {
   routeDataCache?: number;
   /** Markdown (`<Md>`) rendering options. */
   md?: MdConfig;
+  /** Transport-level response handling for `vesk start` (brotli/gzip + ETag/304). */
+  compression?: CompressionConfig | false;
+  /**
+   * Serve a liveness probe at `/healthz` (`200 {"status":"ok"}`).
+   * Default true. Set `false` to leave the endpoint off the public surface.
+   */
+  healthCheck?: boolean;
   /** Control which console.* output is streamed to the devtool log tab.
    *  - `false` disables all console streaming.
    *  - `true` streams all levels (default in dev).

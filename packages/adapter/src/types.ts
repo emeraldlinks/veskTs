@@ -52,6 +52,7 @@ export type {
   MdConfig,
   MdHtmlMode,
   MarkdownOptions,
+  CompressionConfig,
   MdHtmlWarning,
   VeskLeafComponent,
   VeskPrimitiveComponent,
