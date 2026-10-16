@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.66 — 2026-10-16
+
+_No breaking changes._
+
+### Fixes
+
+- **runtime,adapter:** make VeskRequest security overrides actually apply
+
 ## 0.2.65 — 2026-10-16
 
 _No breaking changes._
