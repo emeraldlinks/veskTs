@@ -112,24 +112,46 @@ async function processImage(srcPath: string, outDir: string, baseName: string): 
   const image = sharpFn ? sharpFn(srcPath) : null;
 
   if (!image) {
+    // Copy-only fallback. The emitted file MUST keep the source extension:
+    // `<Image>`'s srcset is `${base}-${w}w${ext}`, so writing `hero-640w` with
+    // no extension left every copy-only URL 404ing.
     const original = readFileSync(srcPath);
+    const ext = extname(srcPath);
+    const written: string[] = [];
     for (const w of OUTPUT_WIDTHS) {
-      const outputPath = resolve(outDir, `${baseName}-${w}w`);
+      const outputPath = resolve(outDir, `${baseName}-${w}w${ext}`);
       mkdirSync(dirname(outputPath), { recursive: true });
       writeFileSync(outputPath, original);
+      written.push(outputPath);
     }
-    return [];
+    return written;
   }
 
   const meta = await image.metadata();
   const originalWidth = meta.width || 1920;
   const generated: string[] = [];
 
+  // `<Image>` emits a srcset entry for EVERY configured width, whatever the
+  // source's real size — it has no way to know what was generated. Skipping
+  // widths above the source's width therefore left real URLs 404ing (a 400px
+  // photo produced none of the 640w+ entries the browser would pick).
+  //
+  // So emit every configured width, and for any width at or above the
+  // source's own, emit the ORIGINAL bytes rather than enlarging: the URL
+  // resolves, and the browser gets a smaller image than it asked for instead
+  // of a 404.
   for (const w of OUTPUT_WIDTHS) {
-    if (w > originalWidth) continue;
-    const resized = image.clone().resize({ width: w, withoutEnlargement: true });
     const base = `${baseName}-${w}w`;
 
+    if (w >= originalWidth) {
+      const copyPath = resolve(outDir, `${base}${extname(srcPath)}`);
+      mkdirSync(dirname(copyPath), { recursive: true });
+      writeFileSync(copyPath, readFileSync(srcPath));
+      generated.push(copyPath);
+      continue;
+    }
+
+    const resized = image.clone().resize({ width: w, withoutEnlargement: true });
     const jpgPath = resolve(outDir, `${base}${extname(srcPath)}`);
     mkdirSync(dirname(jpgPath), { recursive: true });
     await resized.toFile(jpgPath);
@@ -145,7 +167,7 @@ async function processImage(srcPath: string, outDir: string, baseName: string): 
   return generated;
 }
 
-function collectImageRefs(appDir: string): ImageRef[] {
+export function collectImageRefs(appDir: string): ImageRef[] {
   const refs: ImageRef[] = [];
 
   function walk(dir: string): void {
@@ -157,9 +179,13 @@ function collectImageRefs(appDir: string): ImageRef[] {
       if (st.isDirectory()) {
         if (entry.startsWith('.')) continue;
         walk(full);
-      } else if (entry === 'page.vsk') {
+      } else if (entry.endsWith('.vsk')) {
+        // Scan EVERY .vsk file, not just page.vsk. An `<Image>` living in a
+        // shared component or a layout is just as real a reference, and
+        // restricting the walk to page.vsk meant those images were never
+        // processed — their srcsets 404'd with no build-time complaint.
         const src = readFileSync(full, 'utf-8');
-        const imgRegex = /<Image\s+src=["']([^"']+)["']/g;
+        const imgRegex = /<Image\s[^>]*src=["']([^"']+)["']/g;
         let m: RegExpExecArray | null;
         while ((m = imgRegex.exec(src)) !== null) {
           refs.push({ source: full, src: m[1] });
@@ -173,8 +199,15 @@ function collectImageRefs(appDir: string): ImageRef[] {
 }
 
 export async function optimizeImages(appDir: string, outDir: string): Promise<ImageResult[]> {
-  const imageOutDir = resolve(outDir, 'static', 'images');
-  mkdirSync(imageOutDir, { recursive: true });
+  // Variants must land where the emitted URLs actually resolve.
+  //
+  // `<Image src="/hero.png" />` renders `srcset="/hero-640w.png 640w, …"` —
+  // site-root-relative, with no directory prefix. The prod server serves the
+  // site root from `<outDir>/static/public`, so that is exactly where each
+  // variant belongs. They used to be written to `<outDir>/static/images`,
+  // which nothing serves: every `<Image>` srcset URL 404'd in a real build
+  // while the build itself reported success.
+  mkdirSync(resolve(outDir, 'static', 'public'), { recursive: true });
 
   const refs = collectImageRefs(appDir);
   if (refs.length === 0) {
@@ -216,6 +249,11 @@ export async function optimizeImages(appDir: string, outDir: string): Promise<Im
     }
 
     const baseName = ref.src.replace(/^\//, '').replace(extname(ref.src), '');
+    // `baseName` already carries the source's subdirectory (`/photos/hero.png`
+    // → `photos/hero`), and processImage mkdir's the parent of each output —
+    // so the destination stays the site root and the nesting is not doubled.
+    const imageOutDir = resolve(outDir, 'static', 'public');
+    mkdirSync(imageOutDir, { recursive: true });
     const files = await processImage(srcPath, imageOutDir, baseName);
     results.push({ src: ref.src, baseName, files, widths: OUTPUT_WIDTHS });
     console.error(`vesk images: ${ref.src} → ${files.length} variants`);

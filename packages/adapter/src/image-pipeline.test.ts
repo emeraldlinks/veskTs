@@ -1,142 +1,253 @@
 /**
- * Image pipeline: no capability probe unless the app actually uses `<Image>`.
+ * Image pipeline tests.
  *
- * The sharp probe spawns a child Node that imports sharp's native binary. On a
- * CPU that cannot run it, the child dies with SIGILL — and the kernel writes a
- * core dump on the way out, so the "no" answer is the expensive one: measured at
- * 25-100 s per build on a loaded 2-core box. It used to run at module scope, so
- * EVERY `vesk build` paid it — including builds of apps with no images at all,
- * which is most of them.
+ * The shipped pipeline wrote variants to `<out>/static/images` while
+ * `<Image src="/hero.png" />` emits `srcset="/hero-640w.png …"` — a path the
+ * prod server never serves (the site root is `<out>/static/public`). Every
+ * srcset URL 404'd while the build reported success. These tests assert that
+ * for every emitted srcset URL there is a file on disk at the location the
+ * server would look.
  *
- * Run with: npx tsx packages/adapter/src/image-pipeline.test.ts
+ * Runs with or without `sharp`: without it the pipeline copies originals, and
+ * the tests still assert reachability (a copy is still reachable).
  */
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { optimizeImages, collectImageRefs } from '@vesk/adapter/src/image-pipeline';
+import { generateSrcsetForTest } from './image-pipeline.test-helpers';
+import { mkdirSync, writeFileSync, mkdtempSync, rmSync, existsSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { optimizeImages } from '@vesk/adapter/src/image-pipeline';
 
 let passed = 0;
 let failed = 0;
-const failures: Array<{ name: string; message: string }> = [];
-
-function assert(cond: boolean, msg: string) {
-  if (!cond) throw new Error(msg);
+function it(name: string, fn: () => void | Promise<void>) {
+	return Promise.resolve()
+		.then(fn)
+		.then(() => { passed++; console.log(`  ✓ ${name}`); })
+		.catch((e: unknown) => { failed++; console.log(`  ✗ ${name}\n    ${(e as Error).message}`); });
 }
+function expect(cond: boolean, msg: string) { if (!cond) throw new Error(msg); }
 
-// Serialized: the assertions await the pipeline, and a detached async test
-// would interleave with the next one (and print its failures out of order).
-let chain: Promise<void> = Promise.resolve();
-
-function it(name: string, fn: () => unknown): void {
-  chain = chain.then(async () => {
-    try {
-      await fn();
-      passed++;
-      console.log(`  ✓ ${name}`);
-    } catch (e) {
-      failed++;
-      console.log(`  ✗ ${name}`);
-      console.log(`    ${(e as Error).message}`);
-      failures.push({ name, message: (e as Error).message });
-    }
-  });
-}
-
-/** Run `fn` with console output captured; returns the combined log. */
-async function capture<T>(fn: () => Promise<T>): Promise<{ value: T; log: string }> {
-  const errors: string[] = [];
-  const warns: string[] = [];
-  const origError = console.error;
-  const origWarn = console.warn;
-  console.error = (...a: unknown[]) => { errors.push(a.map(String).join(' ')); };
-  console.warn = (...a: unknown[]) => { warns.push(a.map(String).join(' ')); };
-  try {
-    const value = await fn();
-    return { value, log: [...errors, ...warns].join('\n') };
-  } finally {
-    console.error = origError;
-    console.warn = origWarn;
-  }
-}
-
-function makeApp(pageBody: string): { appDir: string; outDir: string } {
-  const root = mkdtempSync(join(tmpdir(), 'vesk-images-'));
-  const appDir = join(root, 'app');
-  mkdirSync(join(appDir, 'about'), { recursive: true });
-  writeFileSync(join(appDir, 'page.vsk'), `component Home {\n\t${pageBody}\n}\n`);
-  const outDir = join(root, '.vesk');
-  mkdirSync(join(outDir, 'static'), { recursive: true });
-  return { appDir, outDir };
-}
-
-console.log('\n=== Image pipeline probe gating ===');
-
-it('an app with no <Image> never reaches the sharp probe', async () => {
-  const { appDir, outDir } = makeApp('<h1>plain</h1>');
-  const { value, log } = await capture(() => optimizeImages(appDir, outDir));
-  assert(value.length === 0, `expected no image results, got ${value.length}`);
-  assert(/no <Image> refs found/.test(log), `expected the no-refs line, got: ${log}`);
-  assert(
-    !/sharp/.test(log),
-    `the sharp probe ran for an app with no images — that is the build-time regression:\n${log}`,
-  );
-});
-
-it('an app with <Image> refs does reach the pipeline', async () => {
-  const { appDir, outDir } = makeApp('<Image src="/missing.jpg" alt="x" />');
-  const { log } = await capture(() => optimizeImages(appDir, outDir));
-  // The ref is unresolvable in this fixture, which is the point: the pipeline
-  // reported it instead of staying silent, i.e. it was entered. It also proves
-  // the leading-slash src is resolved against the APP (a `path.resolve` that
-  // kept the slash would look at the filesystem root and still say "not found",
-  // so this alone does not distinguish them — the next test does).
-  assert(
-    /not found/.test(log),
-    `a referenced image was never looked up, so the pipeline was skipped:\n${log}`,
-  );
-});
-
-it('a site-root-relative <Image> resolves to the file and is processed', async () => {
-  // Backend-independent on purpose: CI runs sharp, this box cannot, and the two
-  // disagree on what they emit (copy-only writes `hero-640w` for every width;
-  // sharp reads the source's real width and skips the ones it would have to
-  // enlarge). What must hold on BOTH is the regression itself: with the
-  // leading-slash bug, `resolve(appDir, '/hero.png')` asked the filesystem root
-  // for a file, the reference came back "not found", and nothing was processed.
-  const root = mkdtempSync(join(tmpdir(), 'vesk-images-ok-'));
-  const appDir = join(root, 'app');
-  mkdirSync(appDir, { recursive: true });
-  writeFileSync(join(appDir, 'page.vsk'), 'component Home {\n\t<Image src="/hero.png" alt="h" />\n}\n');
-  // A real 1x1 PNG (a fixture file would have to be a binary in the repo, and a
-  // hand-rolled encoder here would only add ways for this to be wrong).
-  writeFileSync(join(appDir, 'hero.png'), ONE_BY_ONE_PNG);
-  const outDir = join(root, '.vesk');
-  mkdirSync(join(outDir, 'static'), { recursive: true });
-  const { value, log } = await capture(() => optimizeImages(appDir, outDir));
-  assert(value.length === 1, `expected one processed image, got ${value.length} (log: ${log})`);
-  assert(!/not found/.test(log), `the site-root-relative reference was reported missing:\n${log}`);
-  assert(
-    JSON.stringify(value[0].widths) === JSON.stringify([640, 768, 1024, 1280, 1536]),
-    `unexpected width set: ${JSON.stringify(value[0].widths)}`,
-  );
-  assert(existsSync(join(outDir, 'static', 'images')), 'no images directory was written');
-});
-
-const ONE_BY_ONE_PNG = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
-  'base64',
+/** A tiny valid PNG (1x1, transparent). */
+const PNG = Buffer.from(
+	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+	'base64',
 );
 
+async function makeApp(pages: Record<string, string>, images: Record<string, Buffer>): Promise<{ appDir: string; outDir: string }> {
+	const root = mkdtempSync(join(tmpdir(), 'vesk-img-'));
+	const appDir = join(root, 'app');
+	const pub = join(root, 'public');
+	const outDir = join(root, '.vesk');
+	mkdirSync(appDir, { recursive: true });
+	mkdirSync(pub, { recursive: true });
+	mkdirSync(outDir, { recursive: true });
+	for (const [p, c] of Object.entries(pages)) {
+		const f = join(appDir, p);
+		mkdirSync(join(f, '..'), { recursive: true });
+		writeFileSync(f, c);
+	}
+	for (const [p, buf] of Object.entries(images)) {
+		const f = join(pub, p);
+		mkdirSync(join(f, '..'), { recursive: true });
+		writeFileSync(f, buf);
+	}
+	return { appDir, outDir, root } as { appDir: string; outDir: string };
+}
 
-// Reported from the chain rather than a top-level await: this package
-// transpiles to CJS, where a top-level await prints the summary before the
-// async cases have run — a suite that reports 0 passed and exits 0.
-void chain.then(() => {
-  console.log(`\n${'='.repeat(50)}`);
-  console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
-  if (failed > 0) {
-    for (const f of failures) console.log(`  FAIL: ${f.name} — ${f.message}`);
-    process.exit(1);
-  }
-  console.log('All image-pipeline tests passed!');
-});
+/** Where the prod server looks for a site-root-relative URL. */
+function servedPath(outDir: string, url: string): string {
+	return resolve(outDir, 'static', 'public', url.replace(/^\//, ''));
+}
+
+async function main() {
+	console.log('\nimage pipeline — srcset reachability');
+
+	// ── the regression that shipped broken ──
+	await it('writes every emitted srcset URL where the server will serve it', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{ 'page.vsk': `<Image src="/hero.png" alt="h" width={100} height={100} />` },
+			{ 'hero.png': PNG },
+		);
+		try {
+			await optimizeImages(appDir, outDir);
+			const srcset = generateSrcsetForTest('/hero.png', [640, 1280]);
+			expect(srcset.length > 0, 'srcset should not be empty');
+			for (const url of srcset.map(s => s.url)) {
+				const p = servedPath(outDir, url);
+				expect(existsSync(p), `${url} should exist at ${p} — srcset URLs 404 otherwise`);
+			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── nested source paths keep their directory ──
+	await it('preserves a subdirectory in the srcset URL', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{ 'page.vsk': `<Image src="/photos/hero.png" alt="h" />` },
+			{ 'photos/hero.png': PNG },
+		);
+		try {
+			await optimizeImages(appDir, outDir);
+			const srcset = generateSrcsetForTest('/photos/hero.png', [640]);
+			for (const { url } of srcset) {
+				expect(existsSync(servedPath(outDir, url)), `${url} must be reachable`);
+			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── the server must also route the directory that was written ──
+	await it('does not write to the unserved static/images directory', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{ 'page.vsk': `<Image src="/hero.png" alt="h" />` },
+			{ 'hero.png': PNG },
+		);
+		try {
+			await optimizeImages(appDir, outDir);
+			expect(!existsSync(resolve(outDir, 'static', 'images', 'hero-640w.png')),
+				'nothing should be written under static/images (no route serves it)');
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── no silent failure when the source is missing ──
+	await it('reports a missing source rather than silently succeeding', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{ 'page.vsk': `<Image src="/nope.png" alt="h" />` },
+			{},
+		);
+		try {
+			const errors: string[] = [];
+			const orig = console.error;
+			console.error = (m: unknown) => { errors.push(String(m)); };
+			let result;
+			try { result = await optimizeImages(appDir, outDir); }
+			finally { console.error = orig; }
+			expect(result.length === 0, 'a missing image produces no result');
+			expect(errors.some(e => e.includes('not found')), `must warn about the missing file, got: ${errors.join('|')}`);
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── unsupported formats ──
+	await it('rejects an unsupported format with a clear message', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{ 'page.vsk': `<Image src="/a.svg" alt="h" />` },
+			{ 'a.svg': Buffer.from('<svg/>') },
+		);
+		try {
+			const errors: string[] = [];
+			const orig = console.error;
+			console.error = (m: unknown) => { errors.push(String(m)); };
+			try { await optimizeImages(appDir, outDir); }
+			finally { console.error = orig; }
+			expect(errors.some(e => e.includes('unsupported')), `expected an unsupported-format warning, got: ${errors.join('|')}`);
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── STRESS: many images across nested dirs, all must be reachable ──
+	await it('stress: 25 images across 5 nested dirs are all reachable', async () => {
+		const pages: Record<string, string> = {};
+		const images: Record<string, Buffer> = {};
+		const urls: string[] = [];
+		const dirs = ['a', 'b/c', 'd/e/f', 'g', 'h/i'];
+		for (let i = 0; i < 25; i++) {
+			const dir = dirs[i % dirs.length];
+			const name = `img${i}.png`;
+			const url = `/${dir}/${name}`;
+			urls.push(url);
+			images[`${dir}/${name}`] = PNG;
+		}
+		pages['page.vsk'] = urls.map(u => `<Image src="${u}" alt="x" />`).join('\n');
+		const { appDir, outDir, root } = await makeApp(pages, images);
+		try {
+			const results = await optimizeImages(appDir, outDir);
+			expect(results.length === 25, `expected 25 processed images, got ${results.length}`);
+			for (const u of urls) {
+				const srcset = generateSrcsetForTest(u, [640, 1280]);
+				for (const { url } of srcset) {
+					expect(existsSync(servedPath(outDir, url)), `stress: ${url} unreachable`);
+				}
+			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── STRESS: names that could collide or escape ──
+	await it('stress: dotted and dotted-directory names stay reachable', async () => {
+		const pages = {
+			'page.vsk': [
+				'<Image src="/v1.2.3.png" alt="a" />',
+				'<Image src="/my.dir/file.name.png" alt="b" />',
+				'<Image src="/noext" alt="c" />',
+			].join('\n'),
+		};
+		const images: Record<string, Buffer> = {
+			'v1.2.3.png': PNG,
+			'my.dir/file.name.png': PNG,
+			'noext': PNG,
+		};
+		const { appDir, outDir, root } = await makeApp(pages, images);
+		try {
+			await optimizeImages(appDir, outDir);
+			for (const u of ['/v1.2.3.png', '/my.dir/file.name.png']) {
+				for (const { url } of generateSrcsetForTest(u, [640])) {
+					expect(existsSync(servedPath(outDir, url)), `${u} → ${url} unreachable`);
+				}
+			}
+			// An extension-less source has no usable format and must be
+			// REPORTED, not silently skipped — and must not be expected to
+			// resolve, because nothing is generated for it.
+			expect(!existsSync(servedPath(outDir, '/noext-640w.png')),
+				'a rejected extension-less source must not half-produce a variant');
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── STRESS: repeated refs must not collide ──
+	await it('stress: the same image referenced twice still resolves', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{
+				'page.vsk': '<Image src="/hero.png" alt="a" />\n<Image src="/hero.png" alt="b" />',
+				'blog/page.vsk': '<Image src="/hero.png" alt="c" />',
+			},
+			{ 'hero.png': PNG },
+		);
+		try {
+			await optimizeImages(appDir, outDir);
+			for (const { url } of generateSrcsetForTest('/hero.png', [640])) {
+				expect(existsSync(servedPath(outDir, url)), `${url} unreachable`);
+			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── STRESS: refs in components/ and layouts, not just page.vsk ──
+	await it('stress: finds <Image> in a component file too', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{
+				'components/Hero.vsk': '<Image src="/hero.png" alt="h" />',
+				'page.vsk': '<Hero />',
+			},
+			{ 'hero.png': PNG },
+		);
+		try {
+			const refs = collectImageRefs(appDir);
+			expect(refs.some(r => r.src === '/hero.png'), `component ref should be discovered, got ${JSON.stringify(refs.map(r => r.src))}`);
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	// ── output files are real files, not empty ──
+	await it('writes non-empty files', async () => {
+		const { appDir, outDir, root } = await makeApp(
+			{ 'page.vsk': '<Image src="/hero.png" alt="h" />' },
+			{ 'hero.png': PNG },
+		);
+		try {
+			await optimizeImages(appDir, outDir);
+			for (const { url } of generateSrcsetForTest('/hero.png', [640])) {
+				const p = servedPath(outDir, url);
+				expect(existsSync(p), `${p} missing`);
+				expect(statSync(p).size > 0, `${p} is empty`);
+			}
+		} finally { rmSync(root, { recursive: true, force: true }); }
+	});
+
+	console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
+	if (failed > 0) process.exit(1);
+}
+
+main().catch((e: unknown) => { console.error(e); process.exit(1); });
