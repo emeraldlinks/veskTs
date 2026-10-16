@@ -1,0 +1,36 @@
+{
+  "name": "@vesk/plugin-multipart",
+  "version": "0.2.65",
+  "type": "module",
+  "description": "Streaming multipart/form-data uploads for Vesk — real File values, per-field size/type limits, no full-body buffering",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./parser": {
+      "types": "./dist/parser.d.ts",
+      "default": "./dist/parser.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "prepublishOnly": "npm run build",
+    "test": "tsx src/parser.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@vesk/types": "^0.2.65"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.0"
+  },
+  "license": "MIT",
+  "author": "opencode",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/emeraldlinks/veskTs.git"
+  }
+}
