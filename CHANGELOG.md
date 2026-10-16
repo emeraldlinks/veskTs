@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.67 — 2026-10-16
+
+_No breaking changes._
+
+### Features
+
+- **plugin-multipart:** streaming multipart/form-data with real File values
+
+### Fixes
+
+- **adapter:** make every <Image> srcset URL actually resolve
+
 ## 0.2.66 — 2026-10-16
 
 _No breaking changes._
