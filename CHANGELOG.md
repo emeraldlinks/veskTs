@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.68 — 2026-10-16
+
+_No breaking changes._
+
+### Features
+
+- **adapter:** brotli/gzip, ETag/304 and /healthz in production
+
 ## 0.2.67 — 2026-10-16
 
 _No breaking changes._
