@@ -8,7 +8,7 @@
  * unused runtime modules are dropped, the bundle imports cleanly as ESM, and a
  * missing name falls back to the legacy concatenated runtime.
  */
-import { buildTreeShakenRuntime, runtimeExportNames, extractRuntimeImportNames } from '@vesk/adapter/src/client-bundle';
+import { buildTreeShakenRuntime, runtimeExportNames, extractRuntimeImportNames, buildRuntimeCode } from '@vesk/adapter/src/client-bundle';
 import { resolve, dirname } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { writeFileSync, rmSync, mkdtempSync } from 'fs';
@@ -87,8 +87,19 @@ async function main() {
 
   console.log('\n=== Fallback ===');
   const fallback = await buildTreeShakenRuntime(runtimeDir, ['track', 'notARealExport']);
-  await assert(fallback.includes('// --- ripple-constants.js ---'), 'missing name falls back to legacy concatenated runtime');
-  await assert(!fallback.includes('__veskRuntime'), 'fallback is the old concat, not the IIFE');
+  // The fallback must stay a loadable closed IIFE. The legacy concat stripped
+  // `export ` from whole runtime files into one module scope, where
+  // hydrate.js and router.js both declare a top-level `hydrateInitial`, so
+  // every page died on `Identifier 'hydrateInitial' has already been
+  // declared`. A safety net that always fails is worse than no net.
+  await assert(fallback.includes('__veskRuntime'), 'fallback is a closed IIFE, not the legacy concat');
+  await assert(!fallback.includes('// --- ripple-constants.js ---'), 'fallback has no legacy concat markers');
+  const fbHydrate = (fallback.match(/^(export )?(async )?function hydrateInitial/gm) || []).length;
+  await assert(fbHydrate <= 1, `fallback has no duplicate top-level hydrateInitial (got ${fbHydrate})`);
+  await assert(new RegExp('export \\{[^}]*\\btrack\\b[^}]*\\};').test(fallback), 'fallback still exports the names that do exist');
+  // The legacy concat is retained as a last resort when esbuild itself fails.
+  const legacy = buildRuntimeCode(runtimeDir);
+  await assert(legacy.includes('// --- ripple-constants.js ---'), 'buildRuntimeCode concat is still available as the last resort');
 
   console.log('\n=== Import-name collection ignores template-literal doc samples ===');
   const compiledHero = [

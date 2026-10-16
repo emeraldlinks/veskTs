@@ -959,13 +959,19 @@ function matchPath(pattern: string, pathname: string): boolean {
 
   let pi = 0, pp = 0;
   while (pi < pathParts.length && pp < patternParts.length) {
-    if (patternParts[pp].startsWith(':')) {
+    const seg = patternParts[pp];
+    // `*name` is a catch-all and absorbs the rest of the path.
+    if (seg.startsWith('*')) { pi = pathParts.length; pp++; }
+    else if (seg.startsWith(':')) {
       pi++; pp++;
-    } else if (patternParts[pp] === pathParts[pi]) {
+    } else if (seg === pathParts[pi]) {
       pi++; pp++;
     } else {
       return false;
     }
   }
+  // A trailing catch-all still matches an empty tail; the loop above exits as
+  // soon as the URL is exhausted, so without this it was never reached.
+  if (pp === patternParts.length - 1 && patternParts[pp].startsWith('*')) pp++;
   return pp === patternParts.length && pi === pathParts.length;
 }

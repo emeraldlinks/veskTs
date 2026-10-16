@@ -4,7 +4,7 @@ import {
 	securityHeaders, corsHeaders, corsPreflight,
 	createRateLimiter, getClientIp, getClientProtocol, applyTrustProxy,
 	redactLog, setRedactLogging, securityComment,
-	prettifyHtml, extractTopLevelNames, extractRuntimeNames, evalTopLevelCode,
+	prettifyHtml, extractTopLevelNames, extractRuntimeNames, extractRuntimeBindingPairs, loadRuntimeImports, evalTopLevelCode,
 	safeJsonForScript, quoteAttr, randomToken, assertSameOrigin, DEFAULT_MAX_BODY_BYTES,
 } from '@vesk/compiler/src/server-utils';
 
@@ -860,6 +860,75 @@ describe('createRateLimiter trustProxy', () => {
 		expect(rl.middleware(a)).toBe(true);
 		expect(rl.middleware(a)).toBe(false);
 		expect(rl.middleware(b)).toBe(true); // separate bucket
+	});
+});
+
+describe('runtime import bindings', () => {
+	// The SSR scope is built by binding each import's LOCAL name. Keying by
+	// local name alone meant every aliased import resolved to `undefined` on
+	// the server while working fine on the client.
+	it('reports imported and local names separately for an aliased import', () => {
+		const pairs = extractRuntimeBindingPairs([
+			"import { createStore as makeStore } from '@vesk/runtime/store';",
+		]);
+		expect(pairs).toEqual([{ imported: 'createStore', local: 'makeStore' }]);
+	});
+
+	it('reports identical names for a plain import', () => {
+		const pairs = extractRuntimeBindingPairs([
+			"import { createStore, track } from '@vesk/runtime';",
+		]);
+		expect(pairs).toEqual([
+			{ imported: 'createStore', local: 'createStore' },
+			{ imported: 'track', local: 'track' },
+		]);
+	});
+
+	it('extractRuntimeNames still reports local names', () => {
+		expect(extractRuntimeNames(["import { createStore as makeStore } from '@vesk/runtime';"]))
+			.toEqual(['makeStore']);
+	});
+
+	it('binds the local name to the value the runtime exports', () => {
+		const scope = loadRuntimeImports(["import { track as t } from '@vesk/runtime';"]);
+		expect(typeof scope.t).toBe('function');
+		expect(scope.makeStore).toBeUndefined();
+	});
+
+	it('resolves an aliased subpath import', () => {
+		const scope = loadRuntimeImports([
+			"import { createStore as makeStore } from '@vesk/runtime/store';",
+		]);
+		expect(typeof scope.makeStore).toBe('function');
+		// and it really is the store factory
+		const s = (scope.makeStore as (v: unknown) => { get: () => unknown })({ a: 1 });
+		expect(s.get()).toEqual({ a: 1 });
+	});
+
+	it('resolves an array-valued aliased store as an array', () => {
+		const scope = loadRuntimeImports([
+			"import { createStore as makeStore } from '@vesk/runtime/store';",
+		]);
+		const s = (scope.makeStore as (v: unknown) => { get: () => unknown })([1, 2, 3]);
+		expect(Array.isArray(s.get())).toBe(true);
+		expect(s.get()).toEqual([1, 2, 3]);
+	});
+
+	it('ignores type-only imports', () => {
+		// `import type { X }` marks the statement, not the specifiers — a
+		// specifier-level check alone leaked a live binding for X.
+		const scope = loadRuntimeImports([
+			"import type { createStore } from '@vesk/runtime/store';",
+		]);
+		expect('createStore' in scope).toBe(false);
+		expect(scope.createStore).toBeUndefined();
+	});
+
+	it('still binds the unaliased names the runtime always provides', () => {
+		const scope = loadRuntimeImports([]);
+		expect(typeof scope.track).toBe('function');
+		expect(typeof scope.get).toBe('function');
+		expect(typeof scope.set).toBe('function');
 	});
 });
 

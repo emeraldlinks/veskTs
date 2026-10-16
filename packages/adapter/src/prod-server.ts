@@ -261,15 +261,28 @@ export async function startProdServer(outDir: string, options?: { port?: number;
     let pi = 0, pp = 0;
     const params: MatchPathResult = {};
     while (pi < pathParts.length && pp < patternParts.length) {
-      if (patternParts[pp].startsWith(':')) {
-        const name = patternParts[pp].slice(1);
+      const seg = patternParts[pp];
+      if (seg.startsWith('*')) {
+        // Catch-all: absorbs every remaining segment (possibly none).
+        params[seg.slice(1)] = pathParts.slice(pi).join('/');
+        pi = pathParts.length;
+        pp++;
+      } else if (seg.startsWith(':')) {
+        const name = seg.slice(1);
         params[name] = pathParts[pi];
         pi++; pp++;
-      } else if (patternParts[pp] === pathParts[pi]) {
+      } else if (seg === pathParts[pi]) {
         pi++; pp++;
       } else {
         return null;
       }
+    }
+    // A trailing catch-all still matches with an empty tail (`/api/files` ->
+    // `/api/files/*rest` with rest=''). The loop above exits as soon as the
+    // URL is exhausted, so without this the catch-all was never reached.
+    if (pp === patternParts.length - 1 && patternParts[pp].startsWith('*')) {
+      params[patternParts[pp].slice(1)] = pathParts.slice(pi).join('/');
+      pp++;
     }
     if (pp === patternParts.length && pi === pathParts.length) return params;
     return null;

@@ -144,16 +144,21 @@ function __matchPath(pattern, pathname) {
   let pi = 0, pp = 0;
   const params = {};
   while (pi < pathParts.length && pp < patternParts.length) {
-    if (patternParts[pp].startsWith(':')) {
-      const name = patternParts[pp].slice(1);
-      params[name] = pathParts[pi];
+    const seg = patternParts[pp];
+    // A "*name" segment is a catch-all and absorbs the rest of the path.
+    if (seg.startsWith('*')) { params[seg.slice(1)] = pathParts.slice(pi).join('/'); pi = pathParts.length; pp++; }
+    else if (seg.startsWith(':')) {
+      params[seg.slice(1)] = pathParts[pi];
       pi++; pp++;
-    } else if (patternParts[pp] === pathParts[pi]) {
+    } else if (seg === pathParts[pi]) {
       pi++; pp++;
     } else {
       return null;
     }
   }
+  // A trailing catch-all still matches an empty tail; the loop above exits as
+  // soon as the URL is exhausted, so without this it was never reached.
+  if (pp === patternParts.length - 1 && patternParts[pp].startsWith('*')) { params[patternParts[pp].slice(1)] = pathParts.slice(pi).join('/'); pp++; }
   if (pp === patternParts.length && pi === pathParts.length) return params;
   return null;
 }

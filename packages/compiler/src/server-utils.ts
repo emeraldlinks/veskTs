@@ -1021,13 +1021,32 @@ function tryParseTopLevel(code: string): any | null {
   }
 }
 
-export function extractRuntimeNames(importStrs: string[]): string[] {
-  const names: string[] = [];
+/**
+ * Every value binding a file pulls from the runtime, as `{ imported, local }`
+ * pairs.
+ *
+ * `local` is what the compiled body references; `imported` is what the runtime
+ * module actually exports. They differ whenever the import is aliased
+ * (`import { createStore as makeStore }`), and conflating the two is why an
+ * aliased runtime import silently became `undefined` during SSR: the binding
+ * was looked up on the runtime module by its LOCAL name.
+ *
+ * Default/namespace imports have no exported name of their own, so they are
+ * reported with `imported: '*'` for the caller to handle.
+ */
+export function extractRuntimeBindingPairs(importStrs: string[]): Array<{ imported: string; local: string }> {
+  const pairs: Array<{ imported: string; local: string }> = [];
+  const isRuntimeTarget = (src: string): boolean =>
+    src === '@vesk/runtime' || src === '@vesk/reactivity' || src.startsWith('@vesk/runtime/');
   for (const imp of importStrs) {
     const ast = tryParseImport(imp);
     if (ast) {
       for (const stmt of ast.body as any[]) {
         if (stmt.type !== 'ImportDeclaration') continue;
+        // `import type { X } from '...'` marks the STATEMENT, not its
+        // specifiers, so filtering on `spec.importKind` alone let every
+        // type-only import leak a live runtime binding.
+        if (stmt.importKind === 'type') continue;
         const src = stmt.source?.value;
         // Subpaths (`@vesk/runtime/store`) are real imports too. They were
         // skipped here, so nothing a `.vsk` file pulled from a subpath ever
@@ -1035,25 +1054,30 @@ export function extractRuntimeNames(importStrs: string[]): string[] {
         // (`extractRuntimeImportNames` in client-bundle.ts) has always accepted
         // them. That mismatch is why a store-importing page rendered on the
         // server with `createStore` undefined.
-        if (typeof src !== 'string' || !(src === '@vesk/runtime' || src === '@vesk/reactivity' || src.startsWith('@vesk/runtime/'))) continue;
+        if (typeof src !== 'string' || !isRuntimeTarget(src)) continue;
         for (const spec of stmt.specifiers || []) {
           if (spec.importKind === 'type') continue;
           if (spec.type === 'ImportSpecifier') {
-            const name = spec.local?.name || spec.imported?.name;
-            if (name) names.push(name);
+            const local = spec.local?.name;
+            const imported = spec.imported?.name;
+            if (local) pairs.push({ imported: imported || local, local });
           } else if (spec.type === 'ImportDefaultSpecifier' || spec.type === 'ImportNamespaceSpecifier') {
-            if (spec.local?.name) names.push(spec.local.name);
+            if (spec.local?.name) pairs.push({ imported: '*', local: spec.local.name });
           }
         }
       }
       continue;
     }
     const target = importModuleTarget(imp);
-    if (target && (target === '@vesk/runtime' || target === '@vesk/reactivity' || target.startsWith('@vesk/runtime/'))) {
-      for (const name of extractImportNames(imp)) names.push(name);
+    if (target && isRuntimeTarget(target)) {
+      for (const name of extractImportNames(imp)) pairs.push({ imported: name, local: name });
     }
   }
-  return names;
+  return pairs;
+}
+
+export function extractRuntimeNames(importStrs: string[]): string[] {
+  return extractRuntimeBindingPairs(importStrs).map(p => p.local);
 }
 
 function tryParseImport(code: string): any | null {
@@ -1125,7 +1149,7 @@ export function setRuntimeModule(mod: Record<string, unknown>): void {
 }
 
 export function loadRuntimeImports(importStrs: string[]): Record<string, unknown> {
-  const names = extractRuntimeNames(importStrs);
+  const pairs = extractRuntimeBindingPairs(importStrs);
   const mod: Record<string, unknown> = __cachedRuntimeModule || __defaultRuntimeModule as unknown as Record<string, unknown>;
   if (mod) {
     const result: Record<string, unknown> = {};
@@ -1134,8 +1158,15 @@ export function loadRuntimeImports(importStrs: string[]): Record<string, unknown
     for (const name of ['get', 'set', 'track']) {
       if (name in mod) result[name] = mod[name];
     }
-    for (const name of names) {
-      if (name in mod) result[name] = mod[name];
+    for (const { imported, local } of pairs) {
+      // Bind the LOCAL name to the value the runtime exports under the
+      // IMPORTED name. Keying by local name alone silently produced
+      // `undefined` for every aliased import.
+      if (imported === '*') {
+        result[local] = mod;
+      } else if (imported in mod) {
+        result[local] = mod[imported];
+      }
     }
     return result;
   }

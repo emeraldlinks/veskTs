@@ -16,7 +16,9 @@ function specificityKey(path: string): string[] {
   return path
     .split('/')
     .filter(Boolean)
-    .map(seg => (seg.startsWith(':') ? '1' + seg : '0' + seg));
+    // `:x` is one segment, `*x` is the rest of the path — so `*` sorts below
+    // `:` and both below a literal.
+    .map(seg => (seg.startsWith('*') ? '2' + seg : seg.startsWith(':') ? '1' + seg : '0' + seg));
 }
 
 function compareSpecificity(a: string, b: string): number {
@@ -57,9 +59,20 @@ export function generateManifest(
   const apiEntries: ManifestRouteEntry[] = [];
   for (const r of apiRoutes) {
     const urlParts = r.fullPath.split('/').filter(Boolean);
-    const name = urlParts.map(s => s.startsWith(':') ? s.slice(1) || 'param' : s).join('_') || 'index';
+    // A catch-all segment is emitted as `*name`, not `:name`. They were both
+    // written as `:name`, which made `[...rest]` and `[id]` indistinguishable
+    // in the manifest — and since every consumer treats `:` as exactly ONE
+    // segment, a catch-all API route could never match more than one segment
+    // in a production build (`/api/files/a/b/c` never reached `[...rest]`,
+    // while the dev tree matcher handled it correctly).
+    const parts = urlParts.map((s, i) => {
+      const last = i === urlParts.length - 1;
+      if (last && r.isCatchAll && s.startsWith(':')) return '*' + s.slice(1);
+      return s;
+    });
+    const name = parts.map(s => s.slice(1) || 'param').join('_') || 'index';
     apiEntries.push({
-      path: `/api${r.fullPath}`,
+      path: parts.length ? `/api/${parts.join('/')}` : '/api',
       type: 'api',
       function: `server/api/${name}.js`,
     });

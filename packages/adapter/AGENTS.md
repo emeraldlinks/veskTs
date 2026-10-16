@@ -25,17 +25,22 @@
   followed by explicit `export { ... };`. Top-level `const` bindings are NOT
   ESM exports — without that explicit export statement browsers resolve zero
   names. Do not replace it with naive concatenation as the default path; the
-  legacy `buildRuntimeCode` concatenation exists only as a **fallback** and it
-  leaks module scope. Preserve the IIFE + explicit re-export contract.
+  legacy `buildRuntimeCode` concatenation is now only reached when esbuild
+  itself fails, and it leaks module scope (see the next rule). Preserve the
+  IIFE + explicit re-export contract.
 
-- **The legacy concat fallback strips export lines.** If you touch
+- **The legacy concat fallback is LAST RESORT only.** If you touch
   `buildRuntimeCode` (the fallback), remember it strips:
   - `import ... from './x'` / `@vesk/runtime/src/...` lines,
   - `export { ... } from '...'` lines,
   - leading `export ` keywords,
   and re-emits a single `export { <names> };` from `index-client.js` re-export
-  names. Don't rely on it being semantically complete; it exists so a missing
-  runtime name never totally breaks a build.
+  names. It is reached ONLY when esbuild itself fails. When a used name is
+  missing from `index-client.js`, the fallback is now an esbuild bundle of
+  every name that DOES exist (closed IIFE), NOT the concat — the concat drops
+  whole runtime files into one module scope where `hydrate.js` and `router.js`
+  both declare a top-level `hydrateInitial`, so it kills every page at
+  evaluation. Don't reintroduce the concat as the missing-name path.
 
 - **When you add a runtime import a page/component can use**, wire it through
   BOTH paths: the base list in `buildMainBundle` and `collectRuntimeImports`

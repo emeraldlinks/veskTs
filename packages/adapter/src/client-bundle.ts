@@ -1515,10 +1515,37 @@ async function buildTreeShakenRuntimeNow(runtimeDir: string, usedNames: string[]
   const missing = unique.filter((n) => !available.has(n));
   if (missing.length > 0) {
     console.error(`vesk: runtime names not exported — ${missing.join(', ')}; falling back to full runtime`);
+    // Fall back to a FULL esbuild bundle of every name that DOES exist, not
+    // to the legacy concatenation. The concat strips `export ` from whole
+    // runtime files and drops them into ONE module scope, where
+    // hydrate.js and router.js both declare a top-level `hydrateInitial`
+    // (`Identifier 'hydrateInitial' has already been declared`) — a
+    // page-wide SyntaxError. So the "safety net" guaranteed total failure
+    // for every page, which is the opposite of its job. The bundle keeps
+    // the runtime in a closed IIFE, so the unknown names are simply absent
+    // (a clear ReferenceError at the one call site) instead of every page
+    // dying at evaluation.
+    const full = await bundleRuntimeNames(runtimeDir, [...available]);
+    if (full) return full;
+    // esbuild itself failed — last resort is the old concat.
     return buildRuntimeCode(runtimeDir);
   }
+  return (await bundleRuntimeNames(runtimeDir, unique, true)) ?? buildRuntimeCode(runtimeDir);
+}
+
+/**
+ * Bundles the named runtime exports into one closed IIFE plus an explicit
+ * re-export tail. Returns null when esbuild fails, so callers can fall back.
+ */
+async function bundleRuntimeNames(
+  runtimeDir: string,
+  names: string[],
+  strict = false,
+): Promise<string | null> {
+  if (names.length === 0) return null;
   const entry = runtimeTreeShakeEntry();
   const indexClient = esbuildPath(join(runtimeDir, 'index-client.js'));
+  const unique = [...new Set(names)];
   try {
     try { mkdirSync(dirname(entry), { recursive: true }); } catch { /* exists */ }
     try { rmSync(entry); } catch { /* not present yet */ }
@@ -1545,8 +1572,8 @@ async function buildTreeShakenRuntimeNow(runtimeDir: string, usedNames: string[]
     const bundle = result.outputFiles[0].text;
     return `${bundle}\nconst { ${unique.join(', ')} } = __veskRuntime;\nexport { ${unique.join(', ')} };\n`;
   } catch (e) {
-    console.error('vesk: runtime tree-shake failed, falling back to full runtime:', (e as Error).message);
-    return buildRuntimeCode(runtimeDir);
+    if (strict) console.error('vesk: runtime tree-shake failed, falling back to full runtime:', (e as Error).message);
+    return null;
   } finally {
     try { unlinkSync(entry); } catch { /* ignore */ }
   }
