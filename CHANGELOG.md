@@ -2,6 +2,22 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.65 — 2026-10-16
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** stop decapitating static API route function names
+- **compiler,adapter:** alias-safe SSR imports, safe fallback, catch-all in prod
+- **compiler,runtime,adapter:** store tree-shake/hydration, array seed, route matchers
+
+### Chores
+
+- add poc-ssr-fetch.ts (untracked since 2026-10-14)
+- **perf:** adopt client budget for the store fix (+15.7 KB runtime)
+- **test-app:** repin @vesk/* deps to freshly built CI tarballs
+
 ## 0.2.64 — 2026-10-14
 
 _No breaking changes._
