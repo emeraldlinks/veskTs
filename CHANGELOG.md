@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.70 — 2026-10-17
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** make nested error.vsk / not-found.vsk actually resolve in prod
+
 ## 0.2.69 — 2026-10-17
 
 _No breaking changes._
