@@ -17,6 +17,10 @@ import { makeWebRequest, bodyTooLarge } from '@vesk/adapter/src/web-request';
 import { mimeFor } from '@vesk/adapter/src/platform-output';
 import type { SecurityConfig, CompressionConfig, ProdServerOptions } from '@vesk/adapter/src/types';
 
+// Re-exported so a host embedding the prod server gets the transport types it
+// may need to type its own options without reaching into @vesk/types directly.
+export type { CompressionConfig, ProdServerOptions };
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAULT_MAX_BODY_BYTES): Promise<Buffer> {
@@ -136,7 +140,7 @@ interface MatchPathResult {
   [key: string]: string;
 }
 
-export async function startProdServer(outDir: string, options?: ProdServerOptions & { compression?: CompressionConfig | false; healthCheck?: boolean }): Promise<Server> {
+export async function startProdServer(outDir: string, options?: ProdServerOptions): Promise<Server> {
   const port = options?.port || 3000;
   const host = options?.host || '127.0.0.1';
   const maxBodyBytes = options?.maxBodyBytes || DEFAULT_MAX_BODY_BYTES;

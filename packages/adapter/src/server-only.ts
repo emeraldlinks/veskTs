@@ -25,6 +25,32 @@
  *   opt-out: the alternative is discovering it in a deployment log.
  *
  * AST-only throughout. No text scanning — see the module rules.
+ *
+ * ## Shape
+ *
+ * ```ts
+ * // classification
+ * classifySpecifier(spec): 'server-only-package' | 'tcp-driver' | null
+ * isServerOnlySpecifier(spec): boolean
+ * isTcpDriverSpecifier(spec): boolean
+ *
+ * // enforcement
+ * serverOnlyStubs(notes: Array<{ specifier, binding }>): string        // from a recorded list
+ * serverOnlyImportStubs(code, classify?): string                      // scanned from source
+ * scanServerOnlyImports(files: Array<{ path, code }>): ServerOnlyViolation[]
+ * tcpDriverViolations(appDir): ServerOnlyViolation[]                  // whole app tree
+ * edgeDriverBuildError(violations): Error                             // the socketless message
+ *
+ * // target
+ * isSocketlessTarget(platform, target): boolean
+ * collectAppSources(dir, out?): string[]
+ * ```
+ *
+ * Adding to the table: extend `SERVER_ONLY_EXACT` / `TCP_DRIVERS`, and — if the
+ * package is legitimately usable on the client through a subpath — leave that
+ * subpath unmatched, as `slintorm/edge` is. See
+ * `packages/adapter/AGENTS.md` for the three outcomes the plugin must
+ * distinguish.
  */
 
 import { parse } from '@vesk/compiler/src/parser';

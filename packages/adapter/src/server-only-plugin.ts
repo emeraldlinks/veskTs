@@ -19,6 +19,25 @@
  * TCP drivers are NOT stubbed. A browser bundle cannot contain one under any
  * circumstances, so a stub would ship a page that looks fine and fails at the
  * first query; they are reported and left for esbuild to reject.
+ *
+ * ## Shape
+ *
+ * ```ts
+ * serverOnlyPlugin({
+ *   onStub?:  (hit: { specifier, binding, importer }) => void,   // stubbed
+ *   onDriver?:(hit: { specifier, importer }) => void,           // refused
+ *   onEager?: (hit: { specifier, bindings: string[], importer }) => void, // module-scope: build error
+ * })
+ *
+ * // helpers, exported for testing
+ * importedNamesFor(code, specifier): string[]      // what the importer asks for
+ * referencedAtTopLevel(code, name): boolean       // module-scope use?
+ * stubFactorySource(specifier): string             // the shared throwing proxy
+ * ```
+ *
+ * `onEager` returning null (rather than a stub) is deliberate: the browser would
+ * evaluate that statement while loading the chunk, so there is no call site to
+ * throw at.
  */
 import { readFileSync } from 'node:fs';
 import { parse } from '@vesk/compiler/src/parser';

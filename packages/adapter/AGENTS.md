@@ -67,6 +67,32 @@
   same semantics (rewriteUrl, Response short-circuit, `next` guard). Changing
   one without the other breaks SSR vs. root behavior.
 
+- **There is exactly ONE request shim.** `web-request.ts`. Do not re-add a
+  `makeWebRequest` to `prod-server.ts` or `dev-server.ts` — they carried
+  identical copies, which is how the same `body: null` defect sat in both and
+  why `dev-server` never set `cookies`/`query` at all. Anything a route can
+  reach (`body`, `text`, `json`, `formData`, `cookies`, `query`) is built here;
+  a streaming parser that reads `request.body` is a supported caller, not a
+  leak. Reading is single-pass: bytes seen by the stream are cached so a handler
+  may read `request.body` and then `request.text()`.
+
+- **Server-only enforcement has three outcomes, and the middle one is the point.**
+  In `server-only-plugin.ts`: a **function-scope** use of a server-only package
+  is stubbed (build warns; `--strict` refuses); a **module-scope** use is a
+  BUILD ERROR, because a browser evaluates it while loading the chunk, before any
+  component exists; a **TCP driver** is never stubbed and fails the build. Both
+  hard errors must be raised OUTSIDE `buildChunkEntry`'s catch — that catch
+  degrades every failure into "strip the imports and carry on", which is exactly
+  the wrong outcome. Extending the table means extending
+  `isSocketlessTarget`'s platform set to match `shellFor`'s
+  `nodeBuiltins: false` cases.
+
+- **Never write a response without going through `installResponsePipeline`.**
+  It is installed once per request by `prod-server`; a new `createServer`
+  handler that skips it silently loses compression, `Vary`, ETag and 304 for
+  everything it serves. If you add a second response-producing path, wrap `res`
+  the same way rather than bypassing it.
+
 - **`emitPlatformOutput` returns `null` for `'node'`** — callers treat `null`
   as "no platform emit". Adding a platform means updating FOUR places: the
   `Platform` union (`platform.ts`), `VALID` + a `detectPlatform` env branch,
@@ -116,7 +142,7 @@ suite.
 |------|------|
 | `index.ts` | `build()` orchestration order, flag wiring, plugins, CSS/Tailwind, sitemap/robots, platform handoff. |
 | `runtime-bundle.ts` | Server runtime bundle (`server/runtime.js`) + its export surface. |
-| `ssr-function.ts` / `hmr.ts:regenerateSsrFunction` | SSR function source generation (must match!). |
+| `ssr-function.ts` / `hmr.ts:regenerateSsrFunction` | SSR function source generation (must match!). Also owns `resolveErrorFile` / `resolveNotFoundFile` (build-time, keyed on a route's directory) and `resolveBoundaryFileForUrl` (request-time, keyed on a URL). |
 | `api-function.ts` | API function generation. |
 | `client-bundle.ts` | Client bundle, code-split chunks, tree-shaken runtime (IIFE + exports), legacy fallback. |
 | `middleware.ts` | Both middleware chain compilers. |
@@ -126,7 +152,11 @@ suite.
 | `seo-audit.ts` | `SEO_CHECKS` + `runSeoAudit`. |
 | `hmr.ts` | HMR WebSocket server + rebuild/message routing. |
 | `dev-server.ts` | Dev http server, `doBuild`, static/runtime/action/API/SSR serving, HMR wiring. |
-| `prod-server.ts` | Prod http server, config parse, security, rate limit, ISR, action/API/SSR serving. |
+| `prod-server.ts` | Prod http server, config parse, security, rate limit, ISR, action/API/SSR serving, boundary walk. |
+| `web-request.ts` | **The** `Request` handed to API routes / actions. ONE copy, shared by dev + prod. Owns `request.body` (a lazy stream), the cached whole-body readers, cookies, query, and `bodyTooLarge`. |
+| `response-pipeline.ts` | Transport: brotli/gzip negotiation, `Vary`, ETag + `If-None-Match` → 304, and incremental compression of streamed bodies. Wraps `res` once. |
+| `server-only.ts` | What may not cross the server/client line (package table), the app-tree scanner, and the socketless-target gate. |
+| `server-only-plugin.ts` | esbuild plugin that replaces a resolved server-only package with throwing stubs. See the three-outcome rule below. |
 | `platform.ts` | `Platform` type + detection. |
 | `platform-output.ts` | MIME, dir copy, static layout, `mimeFor`. |
 | `platform-handler.ts` | Universal `handleRequest` source + esbuild bundling. |
@@ -159,4 +189,14 @@ suite.
 - Don't edit `dist/` by hand — edit `src/` and rebuild.
 - Don't assume `optimizeImages` runs once: the current `index.ts` invokes it
   twice; keep the change consistent (or fix both call sites intentionally).
+- Don't add a string-keyed property to the `Request` a route receives. Internal
+  state rides on private `Symbol`s (see `AUTO_PARSED` in
+  `@vesk/plugin-multipart`) — a `__vesk_*` name is a public name the framework
+  has to reserve forever, with no type for it.
+- Don't serve a different MIME type than `platform-output.ts`'s table. Both
+  servers used to answer from their own; `prod-server` had a shorter one, so
+  `.txt`/`.webp`/`.xml` shipped as `application/octet-stream` under
+  `vesk start` while the platform handlers were correct — and
+  `application/octet-stream` is not compressible, so the gap silently disabled
+  encoding too. Use `mimeFor`.
 

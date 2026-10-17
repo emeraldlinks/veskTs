@@ -19,6 +19,28 @@
  * `text()`/`json()`/`formData()` serve from that cache if the stream has already
  * been taken. A handler that reads `request.body` and then calls
  * `request.text()` gets the body once, not a hang.
+ *
+ * ## Shape
+ *
+ * ```ts
+ * makeWebRequest(nodeReq, url, maxBodyBytes?): ExtendedRequest
+ *
+ * interface ExtendedRequest extends Request {
+ *   body: ReadableStream<Uint8Array> | null;   // lazy; null for GET/HEAD
+ *   text(): Promise<string>;
+ *   json(): Promise<unknown>;
+ *   formData(): Promise<FormData>;
+ *   clone(): ExtendedRequest;                  // same object — one socket, one read
+ *   cookies: Record<string, string>;
+ *   query: Record<string, string>;
+ * }
+ *
+ * bodyTooLarge(maxBytes): Error & { status: 413 }   // re-exported by prod-server
+ * ```
+ *
+ * One instance per request. Do not attach string-keyed properties to it — that is
+ * a public name the framework has to reserve forever, with no type for it. Use a
+ * private `Symbol` (see `AUTO_PARSED` in `@vesk/plugin-multipart`).
  */
 import type { IncomingMessage } from 'node:http';
 import { Buffer } from 'node:buffer';

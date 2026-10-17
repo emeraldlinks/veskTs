@@ -431,6 +431,18 @@ export interface ProdServerOptions {
   host?: string;
   /** Request body size cap in bytes. Default 1 MiB. */
   maxBodyBytes?: number;
+  /**
+   * Transport-level encoding + conditional GET. Defaults to `vesk.config`'s
+   * `compression`, or on when neither is set. Pass `false` to serve every body
+   * as-is.
+   */
+  compression?: CompressionConfig | false;
+  /**
+   * Serve `GET /healthz`. Defaults to `vesk.config`'s `healthCheck`, or on when
+   * neither is set. The probe is answered ahead of the rate limiter, middleware
+   * and encoding.
+   */
+  healthCheck?: boolean;
 }
 
 export interface SsrFunctionOptions {

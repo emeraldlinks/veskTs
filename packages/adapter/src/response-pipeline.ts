@@ -29,6 +29,29 @@
  * Deliberately not here: range requests, `Last-Modified`/`If-Modified-Since`
  * (the ETag covers the same revalidation need and cannot disagree with itself),
  * and compression of already-encoded bodies.
+ *
+ * ## Shape
+ *
+ * ```ts
+ * installResponsePipeline(res, req, {
+ *   compress?: boolean;        // default true
+ *   compressThreshold?: number;// default 1024
+ *   etag?: boolean;            // default true
+ *   brotliQuality?: number;    // 0-11, default 5
+ *   gzipLevel?: number;        // 1-9, default 6
+ * })
+ *
+ * // pure helpers, exported for testing and for any other transport
+ * negotiateEncoding(acceptEncoding): 'br' | 'gzip' | null
+ * isCompressibleType(contentType): boolean
+ * etagFor(body: Buffer): '"..."'
+ * ifNoneMatchSatisfied(ifNoneMatch, etag): boolean
+ * ```
+ *
+ * Install it ONCE per request, before any header is written. It is idempotent
+ * per `res` in the sense that matters — a second install would defer again —
+ * but a handler that bypasses it loses compression, `Vary`, ETag and 304 for
+ * everything it serves, silently.
  */
 import { createHash } from 'node:crypto';
 import {
