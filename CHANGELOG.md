@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.69 — 2026-10-17
+
+_No breaking changes._
+
+### Features
+
+- **adapter:** keep a database driver out of the browser bundle
+
 ## 0.2.68 — 2026-10-16
 
 _No breaking changes._
