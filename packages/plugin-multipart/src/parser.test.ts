@@ -4,6 +4,7 @@ import {
 	parseMultipart,
 	parseMultipartRequest,
 	boundaryFromContentType,
+	multipartResult,
 	toRecord,
 	MultipartError,
 } from './parser.js';
@@ -259,5 +260,99 @@ describe('toRecord', () => {
 			`--${B}--${CRLF}`;
 		const rec = toRecord(await parseMultipart(bodyOf(body), B));
 		assert.deepEqual(rec.tag, ['a', 'b']);
+	});
+});
+
+describe('an already-parsed body is reused, never re-read', () => {
+	function requestWith(body: string): Request {
+		const bytes = new TextEncoder().encode(body);
+		return new Request('http://x/', {
+			method: 'POST',
+			headers: { 'content-type': `multipart/form-data; boundary=${B}` },
+			body: bytes as unknown as BodyInit,
+			// @ts-expect-error — duplex is required by Node for a stream body but
+			// not present in the DOM lib this file type-checks against.
+			duplex: 'half',
+		});
+	}
+
+	const body =
+		`--${B}${CRLF}Content-Disposition: form-data; name="f"; filename="n.txt"${CRLF}` +
+		`Content-Type: text/plain${CRLF}${CRLF}n${CRLF}--${B}--${CRLF}`;
+
+	it('multipartResult is null before anything parsed', () => {
+		assert.equal(multipartResult(requestWith(body)), null);
+	});
+
+	it('multipartResult exposes the parse without throwing', async () => {
+		const req = requestWith(body);
+		await parseMultipartRequest(req);
+		const parsed = multipartResult(req);
+		assert.ok(parsed);
+		assert.equal(parsed.files.length, 1);
+		assert.equal(parsed.files[0].filename, 'n.txt');
+	});
+
+	it('a second parse returns the same result instead of NO_BODY', async () => {
+		// The whole reason autoParse is safe: a request body is single-pass, so
+		// a handler that parses after the plugin already did used to fail.
+		const req = requestWith(body);
+		const first = await parseMultipartRequest(req);
+		const second = await parseMultipartRequest(req);
+		assert.equal(second, first);
+	});
+
+	it('the stored parse adds no visible string property to the request', async () => {
+		const req = requestWith(body);
+		await parseMultipartRequest(req);
+		// A string key would show up here, and would be a public name the
+		// framework has to keep reserved. The symbol is intentional and does not.
+		assert.deepEqual(
+			Object.keys(req).filter((k) => k.toLowerCase().includes('multipart')),
+			[],
+		);
+		assert.equal(JSON.stringify(req).includes('multipart'), false, 'invisible to JSON');
+		assert.equal(
+			({ ...req } as Record<string, unknown>).multipart,
+			undefined,
+			'invisible to the spread',
+		);
+	});
+
+	it("the caller's own limits are still applied to a reused parse", async () => {
+		const req = requestWith(body);
+		await parseMultipartRequest(req);          // parsed with permissive limits
+		await assert.rejects(
+			() => parseMultipartRequest(req, { allowedMimeTypes: ['image/png'] }),
+			(e: unknown) => e instanceof MultipartError && e.status === 415,
+		);
+	});
+
+	it('a stricter per-file limit is applied to a reused parse', async () => {
+		const req = requestWith(body);
+		await parseMultipartRequest(req);
+		await assert.rejects(
+			() => parseMultipartRequest(req, { maxFileSize: 0 }),
+			(e: unknown) => e instanceof MultipartError && e.status === 413,
+		);
+	});
+
+	it('limits looser than the ones it was parsed with do not reject it', async () => {
+		// Re-checking is one-way: a stricter caller is refused, a looser one
+		// still gets the parse. Anything else would make a plugin's configured
+		// limits impossible to loosen at a call site.
+		const req = requestWith(body);
+		await parseMultipartRequest(req, { maxFileSize: 1 });
+		const relaxed = await parseMultipartRequest(req, { maxFileSize: 1024 });
+		assert.equal(relaxed.files.length, 1);
+	});
+
+	it('a rejected parse stores nothing, so a later call can still try', async () => {
+		const req = requestWith(body);
+		await assert.rejects(
+			() => parseMultipartRequest(req, { maxFileSize: 0 }),
+			(e: unknown) => e instanceof MultipartError && e.status === 413,
+		);
+		assert.equal(multipartResult(req), null, 'nothing stored on a rejection');
 	});
 });

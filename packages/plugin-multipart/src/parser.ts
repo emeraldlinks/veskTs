@@ -444,16 +444,104 @@ export function boundaryFromContentType(contentType: string | null | undefined):
 }
 
 /** Convenience: parse straight from a `Request` using its content-type. */
+/**
+ * Where an auto-parsed upload is parked on the request.
+ *
+ * A Symbol, not a property name. A string key is either a public name the
+ * framework has to keep reserved forever — `request.__vesk_multipart` printed an
+ * internal convention on the very object the handler holds, with no type for it
+ * and no way to reach it without a cast — or a collision waiting to happen with
+ * user code. A symbol is invisible to `Object.keys`, cannot collide, and puts no
+ * name in the public surface. Reach it with `multipartResult()`.
+ */
+const AUTO_PARSED: unique symbol = Symbol('vesk.multipart');
+
+type WithAutoParsed = { [AUTO_PARSED]?: ParsedMultipart };
+
+/**
+ * The upload a `multipart({ autoParse: true })` plugin already parsed for this
+ * request, or null if none did.
+ *
+ * You rarely need this: `parseUploadOrError` / `parseMultipartRequest` reuse
+ * the auto-parsed body on their own. It exists for a handler that wants the
+ * result without being able to fail — an error page, say.
+ */
+export function multipartResult(request: Request): ParsedMultipart | null {
+	return (request as unknown as WithAutoParsed)[AUTO_PARSED] ?? null;
+}
+
+/** @internal — used by the plugin's `onRequest` hook. */
+export function attachMultipartResult(request: Request, parsed: ParsedMultipart): void {
+	(request as unknown as WithAutoParsed)[AUTO_PARSED] = parsed;
+}
+
+/**
+ * Apply `options` to an already-parsed upload.
+ *
+ * Only correct after the fact — the whole point of `parseMultipart` is that it
+ * stops a hostile body mid-stream — but the only alternative when a plugin has
+ * already read the body is to serve the result with the caller's limits silently
+ * ignored, which is worse.
+ */
+export function recheckLimits(parsed: ParsedMultipart, options: MultipartOptions = {}): ParsedMultipart {
+	const maxFileSize = options.maxFileSize ?? DEFAULTS.maxFileSize;
+	const maxTotalSize = options.maxTotalSize ?? DEFAULTS.maxTotalSize;
+	const maxFiles = options.maxFiles ?? DEFAULTS.maxFiles;
+	const maxFields = options.maxFields ?? DEFAULTS.maxFields;
+
+	if (parsed.totalSize > maxTotalSize) {
+		throw new MultipartError(`Upload exceeds maxTotalSize (${maxTotalSize} bytes)`, 'UPLOAD_TOO_LARGE', 413);
+	}
+
+	let fileCount = 0;
+	let fieldCount = 0;
+	for (const part of parsed.parts) {
+		if (part.size > maxFileSize) {
+			throw new MultipartError(
+				part.isFile
+					? `File "${part.filename}" exceeds maxFileSize (${maxFileSize} bytes)`
+					: `Field "${part.name}" exceeds maxFileSize (${maxFileSize} bytes)`,
+				'FILE_TOO_LARGE',
+				413,
+			);
+		}
+		if (!part.isFile) {
+			fieldCount++;
+			if (fieldCount > maxFields) throw new MultipartError(`Too many form fields (max ${maxFields})`, 'TOO_MANY_FIELDS', 400);
+			continue;
+		}
+		fileCount++;
+		if (fileCount > maxFiles) throw new MultipartError(`Too many files (max ${maxFiles})`, 'TOO_MANY_FILES', 413);
+		if (options.allowedMimeTypes && part.contentType && !mimeAllowed(part.contentType, options.allowedMimeTypes)) {
+			throw new MultipartError(`File type not allowed: ${part.contentType}`, 'FILE_TYPE_NOT_ALLOWED', 415);
+		}
+		if (options.allowedExtensions?.length && part.filename) {
+			const dot = part.filename.lastIndexOf('.');
+			const ext = dot === -1 ? '' : lower(part.filename.slice(dot));
+			const ok = options.allowedExtensions.some((e) => lower(e) === ext || lower(e) === `.${ext.slice(1)}`);
+			if (!ok) throw new MultipartError(`File extension not allowed: ${ext || '(none)'}`, 'FILE_TYPE_NOT_ALLOWED', 415);
+		}
+	}
+	return parsed;
+}
+
 export async function parseMultipartRequest(
 	request: Request,
 	options: MultipartOptions = {},
 ): Promise<ParsedMultipart> {
+	// A request body is single-pass. If a plugin already parsed it, reading it a
+	// second time can only fail — so reuse the stored parse and re-apply this
+	// call's limits to it.
+	const existing = multipartResult(request);
+	if (existing) return recheckLimits(existing, options);
 	if (!request.body) throw new MultipartError('Request has no body', 'NO_BODY', 400);
 	const boundary = boundaryFromContentType(request.headers.get('content-type'));
 	if (!boundary) {
 		throw new MultipartError('Not a multipart request (missing boundary)', 'NOT_MULTIPART', 415);
 	}
-	return parseMultipart(request.body as ReadableStream<Uint8Array>, boundary, options);
+	const parsed = await parseMultipart(request.body as ReadableStream<Uint8Array>, boundary, options);
+	attachMultipartResult(request, parsed);
+	return parsed;
 }
 
 /**

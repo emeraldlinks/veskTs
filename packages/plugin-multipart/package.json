@@ -2,9 +2,13 @@
   "name": "@vesk/plugin-multipart",
   "version": "0.2.70",
   "type": "module",
-  "description": "Streaming multipart/form-data uploads for Vesk — real File values, per-field size/type limits, no full-body buffering",
+  "description": "Streaming multipart/form-data uploads for Vesk — real File values, per-file/per-field limits enforced as bytes arrive",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

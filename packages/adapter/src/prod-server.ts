@@ -13,6 +13,7 @@ import { loadVeskConfig } from '@vesk/adapter/src/load-config';
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import { installResponsePipeline } from '@vesk/adapter/src/response-pipeline';
 import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
+import { makeWebRequest, bodyTooLarge } from '@vesk/adapter/src/web-request';
 import { mimeFor } from '@vesk/adapter/src/platform-output';
 import type { SecurityConfig, CompressionConfig, ProdServerOptions } from '@vesk/adapter/src/types';
 
@@ -101,69 +102,9 @@ function pumpRemaining(res: ServerResponse, reader: ReadableStreamDefaultReader<
   })();
 }
 
-export function bodyTooLarge(maxBytes: number): Error & { status: number } {
-  const err = new Error(`Request body exceeds limit (${maxBytes} bytes)`) as Error & { status: number };
-  err.status = 413;
-  return err;
-}
-
 function errorStatus(e: unknown, fallback: number): number {
   const s = (e as { status?: unknown } | null)?.status ?? (e as { statusCode?: unknown } | null)?.statusCode;
   return typeof s === 'number' && s >= 400 && s < 600 ? s : fallback;
-}
-
-interface ExtendedRequest extends Request {
-  json(): Promise<unknown>;
-  text(): Promise<string>;
-  formData(): Promise<FormData>;
-  clone(): ExtendedRequest;
-  cookies: Record<string, string>;
-  query: Record<string, string>;
-}
-
-function makeWebRequest(nodeReq: IncomingMessage, url: string, maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES): ExtendedRequest {
-  const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
-  const method = nodeReq.method || 'GET';
-  let _bodyBuffer: Buffer | null = null;
-  async function getBody(): Promise<Buffer> {
-    if (_bodyBuffer) return _bodyBuffer;
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for await (const chunk of nodeReq) {
-      total += chunk.byteLength;
-      if (total > maxBodyBytes) throw bodyTooLarge(maxBodyBytes);
-      chunks.push(Buffer.from(chunk));
-    }
-    _bodyBuffer = Buffer.concat(chunks);
-    return _bodyBuffer;
-  }
-  const webRequest = new Request(parsedUrl, { method, headers: nodeReq.headers as Record<string, string>, body: null }) as ExtendedRequest;
-  webRequest.json = async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } };
-  webRequest.text = async () => (await getBody()).toString('utf-8');
-  webRequest.formData = async () => {
-    const body = await getBody();
-    const ct = String(nodeReq.headers['content-type'] || '');
-    if (ct.includes('multipart/form-data')) {
-      const temp = new Request('http://localhost', { method: 'POST', headers: nodeReq.headers as Record<string, string>, body: body as unknown as BodyInit });
-      return temp.formData();
-    }
-    const fd = new FormData();
-    if (ct.includes('x-www-form-urlencoded')) {
-      for (const [k, v] of new URLSearchParams(body.toString()).entries()) fd.append(k, v);
-    }
-    return fd;
-  };
-  webRequest.clone = () => webRequest;
-  const cookies: Record<string, string> = {};
-  for (const [k, v] of String(nodeReq.headers.cookie || '').split(';').map(s => s.trim()).filter(Boolean)) {
-    const eq = k.indexOf('=');
-    if (eq > -1) cookies[k.slice(0, eq)] = decodeURIComponent(k.slice(eq + 1));
-  }
-  webRequest.cookies = cookies;
-  const query: Record<string, string> = {};
-  for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
-  webRequest.query = query;
-  return webRequest;
 }
 
 interface BuildConfigRoute {
@@ -295,16 +236,35 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
   }
 
   const functionCache = new Map<string, SsrFunctionModule>();
+  /** Import failures, kept so the same broken module is not re-imported per request. */
+  const functionFailures = new Map<string, unknown>();
+
+  /**
+   * Load a generated function module.
+   *
+   * Returns null both for "no such file" and for "the file exists but could not
+   * be imported", and the caller cannot tell them apart — which turned a route
+   * with a bad import into a **404 with no diagnostic anywhere**. A missing
+   * export or an unresolvable dependency is a build bug, and the only evidence
+   * was an empty 404. `functionFailure` records what happened so the request
+   * path can answer 500 and log it, which is what a broken route is.
+   */
+  function functionFailure(funcPath: string): unknown {
+    return functionFailures.get(funcPath);
+  }
 
   async function loadFunction(funcPath: string): Promise<SsrFunctionModule | null> {
     if (functionCache.has(funcPath)) return functionCache.get(funcPath)!;
+    if (functionFailures.has(funcPath)) return null;
     const fullPath = resolve(outDir, funcPath);
     if (!existsSync(fullPath)) return null;
     try {
       const mod = await import(`${fullPath}?t=${Date.now()}`) as SsrFunctionModule;
       functionCache.set(funcPath, mod);
       return mod;
-    } catch {
+    } catch (e) {
+      console.error(`vesk start: failed to load ${funcPath}:`, e instanceof Error ? e.message : e);
+      functionFailures.set(funcPath, e);
       return null;
     }
   }
@@ -618,18 +578,26 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
           const params = matchPath(route.path, url.pathname);
           if (params) {
             const mod = await loadFunction(route.function);
-            if (mod) {
-              try {
-                const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-                const response = await withSecurityScope(() => mod.handle(webRequest));
-                await deliverResponse(res, response);
-                return;
-              } catch (e) {
-                const status = errorStatus(e, 500);
-                res.writeHead(status, { 'Content-Type': 'application/json' });
-                res.end(JSON.stringify({ error: status === 500 ? 'Internal Server Error' : e instanceof Error ? e.message : String(e) }));
+            if (!mod) {
+              // The route matched, so a 404 would be a lie: the handler is
+              // there and could not be loaded.
+              if (functionFailure(route.function)) {
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ error: 'Internal Server Error' }));
                 return;
               }
+              continue;
+            }
+            try {
+              const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
+              const response = await withSecurityScope(() => mod.handle(webRequest));
+              await deliverResponse(res, response);
+              return;
+            } catch (e) {
+              const status = errorStatus(e, 500);
+              res.writeHead(status, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: status === 500 ? 'Internal Server Error' : e instanceof Error ? e.message : String(e) }));
+              return;
             }
           }
         }

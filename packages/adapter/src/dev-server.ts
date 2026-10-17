@@ -15,6 +15,7 @@ import { resolveRuntimeErrorPayload, renderDevErrorPage } from './ssr-error';
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import { buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
+import { makeWebRequest, bodyTooLarge } from '@vesk/adapter/src/web-request';
 import type { RouteNode, DevServerOptions, Manifest, VeskPlugin } from '@vesk/adapter/src/types';
 import { getPluginRecords } from './plugins';
 // @vesk/agentic — optional AI plugin; gated by active state if installed
@@ -59,13 +60,6 @@ const devHmrState: () => DevHmrState =
     ? (hmrApi as unknown as { getHmrState: () => DevHmrState }).getHmrState
     : defaultDevHmrState;
 
-interface ExtendedRequest extends Request {
-  json(): Promise<unknown>;
-  text(): Promise<string>;
-  formData(): Promise<FormData>;
-  clone(): ExtendedRequest;
-}
-
 /**
  * Writes a handler Response to the socket, piping a streaming body
  * chunk-by-chunk (SSE / text streams) instead of buffering everything.
@@ -88,12 +82,6 @@ async function deliverResponse(res: ServerResponse, response: Response): Promise
     return;
   }
   res.end(await response.text());
-}
-
-export function bodyTooLarge(maxBytes: number): Error & { status: number } {
-  const err = new Error(`Request body exceeds limit (${maxBytes} bytes)`) as Error & { status: number };
-  err.status = 413;
-  return err;
 }
 
 function errorStatus(e: unknown, fallback: number): number {
@@ -213,42 +201,6 @@ export function injectDevScripts(html: string): string {
   if (!html.includes('</body>')) return html;
   const scripts = '\t<script type="module" src="/_vesk/hmr.js"></script>\n' + devBootstrapScript() + '\n';
   return html.replace('</body>', scripts + '</body>');
-}
-
-function makeWebRequest(nodeReq: IncomingMessage, url: string, maxBodyBytes: number = DEFAULT_MAX_BODY_BYTES): ExtendedRequest {
-  const parsedUrl = new URL(url, `http://${nodeReq.headers.host || 'localhost'}`);
-  const method = nodeReq.method || 'GET';
-  let _bodyBuffer: Buffer | null = null;
-  async function getBody(): Promise<Buffer> {
-    if (_bodyBuffer) return _bodyBuffer;
-    const chunks: Buffer[] = [];
-    let total = 0;
-    for await (const chunk of nodeReq) {
-      total += chunk.byteLength;
-      if (total > maxBodyBytes) throw bodyTooLarge(maxBodyBytes);
-      chunks.push(Buffer.from(chunk));
-    }
-    _bodyBuffer = Buffer.concat(chunks);
-    return _bodyBuffer;
-  }
-  const webRequest = new Request(parsedUrl, { method, headers: nodeReq.headers as Record<string, string>, body: null }) as ExtendedRequest;
-  webRequest.json = async () => { try { return JSON.parse((await getBody()).toString()); } catch { return null; } };
-  webRequest.text = async () => (await getBody()).toString('utf-8');
-  webRequest.formData = async () => {
-    const body = await getBody();
-    const ct = String(nodeReq.headers['content-type'] || '');
-    if (ct.includes('multipart/form-data')) {
-      const temp = new Request('http://localhost', { method: 'POST', headers: nodeReq.headers as Record<string, string>, body: body as unknown as BodyInit });
-      return temp.formData();
-    }
-    const fd = new FormData();
-    if (ct.includes('x-www-form-urlencoded')) {
-      for (const [k, v] of new URLSearchParams(body.toString()).entries()) fd.append(k, v);
-    }
-    return fd;
-  };
-  webRequest.clone = () => webRequest;
-  return webRequest;
 }
 
 const MIME: Record<string, string> = {

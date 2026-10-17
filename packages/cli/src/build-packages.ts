@@ -35,6 +35,10 @@ const PACKAGES: Record<string, PackageBuild> = {
   // servers on fresh checkouts (CI).
   'plugin-pwa': { name: '@vesk/plugin-pwa', entry: 'index' },
   'plugin-tailwind': { name: '@vesk/plugin-tailwind', entry: 'index' },
+  // The multipart plugin ships as a real published package: an app route imports
+  // it by name, so its dist must exist for the API-function bundler to resolve it
+  // on a fresh checkout (CI).
+  'plugin-multipart': { name: '@vesk/plugin-multipart', entry: 'index' },
   // testing last — it depends on the compiler.
   testing: { name: '@vesk/testing', entry: 'index' },
 };

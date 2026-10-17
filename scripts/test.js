@@ -16,6 +16,7 @@ const testDirs = [
   resolve(root, 'packages/plugin-pwa/src'),
   resolve(root, 'packages/testing/src'),
   resolve(root, 'packages/plugin-tailwind/src'),
+  resolve(root, 'packages/plugin-multipart/src'),
   resolve(root, 'packages/lucide-vesk/src'),
 ]
 
@@ -35,18 +36,22 @@ function runTestFile(filePath, env) {
   return output
 }
 
-// Test files report in three shapes, and the harness has to read all of them
+// Test files report in four shapes, and the harness has to read all of them
 // or it silently drops a file's assertions from the totals:
 //   `Results: 12 passed, 0 failed, 12 total`
 //   `module-imports: 41 passed, 0 failed`
 //   `59 passing, 0 failing`
+//   node:test's summary — `ℹ pass 26` / `ℹ fail 0` (spec reporter), or
+//   `# pass 26` / `# fail 0` (tap reporter). Anchored to line start so a
+//   suite that merely mentions "pass 3" in prose cannot be miscounted.
 // A file that prints no counts at all (some suites print per-case PASS lines)
 // still counts as passing when it exits 0 — execSync throws otherwise — so
 // this returns null and the caller reports the file without a count.
 function parseCounts(output) {
   const m =
     output.match(/Results:\s*(\d+)\s*pass(?:ed|ing),\s*(\d+)\s*fail(?:ed|ing)/) ||
-    output.match(/(\d+)\s*pass(?:ed|ing),\s*(\d+)\s*fail(?:ed|ing)/)
+    output.match(/(\d+)\s*pass(?:ed|ing),\s*(\d+)\s*fail(?:ed|ing)/) ||
+    output.match(/^(?:[^\S\n]*[#\u2139][^\S\n]*)pass (\d+)[\s\S]*?^(?:[^\S\n]*[#\u2139][^\S\n]*)fail (\d+)/m)
   if (!m) return null
   return { passed: parseInt(m[1], 10), failed: parseInt(m[2], 10) }
 }

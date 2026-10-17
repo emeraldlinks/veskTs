@@ -11,17 +11,29 @@
  * Usage — in a route or API handler:
  *
  * ```ts
- * import { parseUpload } from '@vesk/plugin-multipart';
+ * import { parseUploadOrError } from '@vesk/plugin-multipart';
  *
- * export async function POST(req: VeskRequest) {
- *   const upload = await parseUpload(req, {
+ * export async function POST(request) {
+ *   const upload = await parseUploadOrError(request, {
  *     maxFileSize: 8 * 1024 * 1024,
  *     allowedMimeTypes: ['image/png', 'image/jpeg'],
  *   });
- *   const avatar = upload.files[0]?.value as File;
- *   return ServerResponse.json({ ok: true, name: avatar?.name });
+ *   if (upload instanceof Response) return upload; // already a 413/415/400
+ *   const avatar = upload.files[0]?.value;
+ *   if (avatar instanceof File) console.log(avatar.name, avatar.size);
+ *   return Response.json({ ok: true });
  * }
  * ```
+ *
+ * There is deliberately no bare `parseUpload`: a rejection is a protocol-level
+ * outcome (413 / 415 / 400) and every call site has to answer with it, so the
+ * function that can return a ready `Response` is the one to reach for. Use
+ * `parseMultipartRequest` when you want the throw, to handle it yourself.
+ *
+ * `request.body` must be a real stream. `vesk dev` and `vesk start` both provide
+ * one (see `packages/adapter/src/web-request.ts`); a handler that reaches for
+ * `request.formData()` instead is buffered whole under the core 1 MiB body cap
+ * and has no per-file, per-type or count limits to enforce.
  *
  * Rejections throw `MultipartError`, whose `status` is 413 (too large / too
  * many), 415 (disallowed type) or 400 (malformed). Nothing is buffered beyond
@@ -37,6 +49,8 @@ import {
 	parseMultipartRequest,
 	boundaryFromContentType,
 	toRecord,
+	multipartResult,
+	attachMultipartResult,
 	MultipartError,
 	type MultipartPart,
 	type MultipartOptions,
@@ -48,6 +62,7 @@ export {
 	parseMultipartRequest,
 	boundaryFromContentType,
 	toRecord,
+	multipartResult,
 	MultipartError,
 };
 export type { MultipartPart, MultipartOptions, ParsedMultipart };
@@ -58,18 +73,22 @@ export interface MultipartPluginOptions extends MultipartOptions {
 	/** Skip parsing requests below this content-length (default 1). */
 	minBytes?: number;
 	/**
-	 * Parse every multipart request before it reaches the handler. The parsed
-	 * result is attached to the request as `__vesk_multipart`, so a handler can
-	 * reach it without re-reading the stream.
+	 * Parse every multipart request before it reaches the handler, so a
+	 * configured limit is enforced before any of your code runs.
 	 *
-	 * Off by default: a handler that never calls `parseUpload` pays nothing.
+	 * Off by default: a handler that never parses an upload pays nothing.
+	 *
+	 * You rarely read the result yourself — `parseUploadOrError` and
+	 * `parseMultipartRequest` reuse a body that has already been parsed, since a
+	 * request body cannot be read twice. Reach for `multipartResult(request)`
+	 * only where you cannot fail, such as an error page.
 	 */
 	autoParse?: boolean;
 }
 
 /**
- * `parseUpload` that returns the JSON error `Response` itself on rejection —
- * the ergonomic form for a route handler:
+ * `parseMultipartRequest` that returns the JSON error `Response` itself on
+ * rejection — the ergonomic form for a route handler.
  *
  * ```ts
  * const upload = await parseUploadOrError(req, { maxFileSize: 8 * MiB });
@@ -106,7 +125,7 @@ export function multipart(options: MultipartPluginOptions = {}): VeskPlugin {
 			if (!boundaryFromContentType(request.headers.get('content-type'))) return;
 			try {
 				const parsed = await parseMultipartRequest(request, parseOptions);
-				(request as unknown as Record<string, unknown>).__vesk_multipart = parsed;
+				attachMultipartResult(request, parsed);
 			} catch (e) {
 				if (e instanceof MultipartError) {
 					(ctx as unknown as { response?: Response }).response = new Response(

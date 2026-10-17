@@ -5,6 +5,81 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (multipart uploads: docs, E2E — and the plugin was inoperable):**
+
+Writing the E2E turned up three defects that made `@vesk/plugin-multipart`
+non-functional. None was in the parser; all three were in the plumbing around
+it, which is why 26 parser tests could be green.
+
+- [x] **BUG (server): every streaming body reader saw NO body.** Both servers
+  built their `Request` with `body: null` and supplied only whole-body readers
+  (`text()` / `json()` / `formData()`). Anything reading `request.body` — which
+  is every streaming parser — got `NO_BODY` on every request, so an upload
+  handler 400'd unconditionally. Extracted into `packages/adapter/src/web-request.ts`
+  (the two servers each carried an identical copy, which is how the same defect
+  sat in both) with a real, **lazily created** stream: eager listeners would
+  start draining every bodiless GET. One socket, two readers still works —
+  everything the stream sees is cached, so a handler may read `request.body` and
+  then `request.text()` without hanging.
+- [x] **BUG (server): `request.cookies` has always been `{}`.** The parse loop
+  was `for (const [k, v] of cookieString.split(';'))`. `split` yields STRINGS,
+  and a string is iterable, so `k` was bound to the first CHARACTER of each
+  pair, `indexOf('=')` was always -1, and nothing was ever stored. The
+  `[k, v]` form IS right for `searchParams.entries()` directly below it, which
+  is exactly why the bug survived next to working code. Every production
+  request that read `request.cookies` saw an empty jar. Dev-server never set
+  `cookies` or `query` at all, so dev and prod disagreed on both.
+- [x] **BUG (server): a route whose module fails to import answered 404, with
+  no diagnostic.** `loadFunction` returned null for both "no such file" and
+  "the file exists but threw", and the API loop could not tell them apart — so a
+  missing export produced an empty 404 page. This is how the missing-export bug
+  below stayed invisible. A matched route whose module will not load is now a
+  500, and the import error is logged once and cached.
+- [x] **The plugin's own module docstring documented `parseUpload`, which has
+  never existed.** The package exports `parseUploadOrError` and
+  `parseMultipartRequest`; there is no bare `parseUpload`. The docstring now
+  shows the real call and says why the error-returning form is the one to reach
+  for.
+- [x] **Corrected a false claim in the plugin's rationale.** `Object.fromEntries(
+  fd.entries())` does **not** collapse a `File` to a string on this runtime —
+  verified, and asserted as a test. What collapses an upload is `{...fd}` (a
+  FormData has no own enumerable properties, so the spread is `{}`). The real
+  justification is the LIMITS: core buffers the whole body under one global cap
+  with no per-file, per-type or count limit, and the E2E pins the difference by
+  sending the same 900 KB to both paths and getting 200 and 413.
+- [x] **The plugin was invisible to the build and to CI.** It is a declared
+  workspace, but it was in neither `build-packages.ts`'s package list (so no
+  `dist/` ever existed, and a route importing it could not resolve) nor
+  `scripts/test.js`'s `testDirs` (so its 26 tests never ran). Both wired up, and
+  `parseCounts` learned node:test's `ℹ pass N` / `# pass N` summaries so its
+  assertions count toward the total instead of being reported without a number.
+- [x] **`request.__vesk_multipart` was a bad public shape and is gone.** The
+  auto-parsed upload was stashed on a double-underscore property of the object
+  the handler holds — an internal convention printed on a public object, with no
+  type for it and no way to reach it without a cast, and a name the framework
+  would have to keep reserved forever. It is now a private `Symbol`, read
+  through `multipartResult(request)`: invisible to `Object.keys`, to JSON and to
+  the spread, and uncollidable. The `autoParse` option also stops being a trap —
+  a request body is single-pass, so a handler that parsed after the plugin had
+  already parsed used to fail with `NO_BODY`. `parseMultipartRequest` now reuses
+  a stored parse and re-checks the caller's own limits against it (stricter is
+  refused, looser passes), so the documented call is unchanged and the double
+  read simply cannot happen.
+- [x] Tests: `multipart-upload.test.ts` (15) is a real `build()` served through
+  `startProdServer`, with the plugin resolved from the app's own `node_modules`
+  by name — the path a published install takes, so a broken `exports` map fails
+  here. `web-request.test.ts` (14) covers what a socket cannot: that the cap
+  stops the upload **early** (observable only where the bytes pulled off the
+  incoming message are counted), and that reading the stream then calling
+  `text()` does not hang.
+- **Two fixture bugs found while writing the tests, recorded because both looked
+  like product bugs.** A test helper that wrapped `destroy` and set
+  `destroyed = true` itself made the real method a no-op, so the stream's async
+  iterator waited forever — a hang that is indistinguishable from one in the
+  code under test. And a promise that never settles takes its ref'd handles with
+  it, so Node exited 0 with **no summary at all**: a silently truncated suite.
+  `web-request.test.ts` now watchdog-times every test for that reason.
+
 **This session (nested error/not-found boundaries + a static-vs-dynamic SSR
 precedence bug the boundary work exposed):**
 
