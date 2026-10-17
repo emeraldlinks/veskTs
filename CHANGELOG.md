@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.72 — 2026-10-17
+
+_No breaking changes._
+
+### Docs
+
+- **adapter:** document the new transport/request-shim/server-only shapes
+
 ## 0.2.71 — 2026-10-17
 
 _No breaking changes._
