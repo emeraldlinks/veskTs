@@ -6,6 +6,7 @@
  * ORDER and the segment syntax written here are load-bearing routing behaviour.
  */
 import { generateManifest } from '@vesk/adapter/src/manifest';
+import type { RouteNode } from '@vesk/adapter/src/types';
 
 let passed = 0;
 let failed = 0;
@@ -166,6 +167,63 @@ it('never decapitates a static segment, whatever its length', () => {
 	for (const seg of ['a', 'ab', 'abc', 'bench', 'protected', 'posts']) {
 		expect(apiFunctions([api('/' + seg)])).toEqual([['/api/' + seg, `server/api/${seg}.js`]]);
 	}
+});
+
+console.log('\ngenerateManifest — SSR route precedence');
+
+function ssrRoute(fullPath: string, opts: { dynamic?: boolean; catchAll?: boolean } = {}): RouteNode {
+	const seg = fullPath.split('/').filter(Boolean).pop() || '';
+	const isDynamic = opts.dynamic === true || opts.catchAll === true;
+	return {
+		path: fullPath, fullPath,
+		isGroup: false, isDynamic, isCatchAll: opts.catchAll === true,
+		page: 'P', layout: null, loading: null, error: null, notFound: null,
+		offline: null, network: null, hasMiddleware: false, children: [],
+		sourceDir: '', segmentCount: seg.startsWith(':') ? 1 : 1,
+	};
+}
+
+function ssrPaths(nodes: RouteNode[]): string[] {
+	// The SSR table is the SECOND argument (`routes` is the tree the manifest is
+	// derived from; `ssrRoutes` is the flattened list actually emitted).
+	return generateManifest([], nodes, [], [], false).routes
+		.filter(r => r.type === 'ssr')
+		.map(r => r.path);
+}
+
+function resolveSsr(nodes: RouteNode[], pathname: string): string | null {
+	for (const p of ssrPaths(nodes)) {
+		if (matchPath(p, pathname)) return p;
+	}
+	return null;
+}
+
+// Every consumer takes the FIRST exact-length match, so the emitted ORDER is the
+// precedence. This was already fixed for API entries; SSR entries came out in
+// directory-scan order, so `app/docs/[slug]` scanned before `app/docs/boom` made
+// the static page unreachable in production.
+it('a static SSR route outranks a dynamic sibling', () => {
+	expect(resolveSsr([ssrRoute('/docs/:slug', { dynamic: true }), ssrRoute('/docs/boom')], '/docs/boom')).toBe('/docs/boom');
+});
+
+it('the order does not depend on which sibling the scan reached first', () => {
+	expect(ssrPaths([ssrRoute('/docs/:slug', { dynamic: true }), ssrRoute('/docs/boom')]))
+		.toEqual(['/docs/boom', '/docs/:slug']);
+	expect(ssrPaths([ssrRoute('/docs/boom'), ssrRoute('/docs/:slug', { dynamic: true })]))
+		.toEqual(['/docs/boom', '/docs/:slug']);
+});
+
+it('a catch-all SSR route sorts below a dynamic sibling', () => {
+	expect(ssrPaths([ssrRoute('/files/*rest', { catchAll: true }), ssrRoute('/files/:id', { dynamic: true })]))
+		.toEqual(['/files/:id', '/files/*rest']);
+});
+
+it('deeper specificity wins within the same prefix', () => {
+	expect(ssrPaths([ssrRoute('/a/:x/c'), ssrRoute('/a/b/c')])).toEqual(['/a/b/c', '/a/:x/c']);
+});
+
+it('routes of different lengths both survive the sort', () => {
+	expect(ssrPaths([ssrRoute('/'), ssrRoute('/docs'), ssrRoute('/docs/:slug', { dynamic: true })]).length).toBe(3);
 });
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

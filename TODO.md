@@ -5,6 +5,143 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (nested error/not-found boundaries + a static-vs-dynamic SSR
+precedence bug the boundary work exposed):**
+
+- [x] **A nested `not-found.vsk` did nothing on the server, while the client
+  router honoured it.** `ssr-function.ts` re-threw every `NotFoundError` out of
+  the function and `prod-server.ts` answered with a hard read of
+  `app/not-found.vsk`. So `app/docs/not-found.vsk` answered `/docs/*` on SPA
+  navigation (the router's `findNotFoundComponent` walks the matched chain
+  deepest-first) and did nothing on a hard load — same URL, two different pages
+  depending on how you arrived. There was no `resolveNotFoundFile` at all;
+  `resolveErrorFile` had existed all along, which is why nested `error.vsk`
+  already worked inside the SSR function and this was easy to misread as "both
+  are broken". The generated function now compiles the nearest `not-found.vsk`
+  and renders it inside the layout stack with **status 404**, and re-throws only
+  when no boundary exists on the route's path so the server still answers.
+- [x] **The server's own last-resort boundary was root-only.**
+  `resolveBoundaryFileForUrl` now walks the URL's directories, so
+  `app/shop/error.vsk` answers a failure under `/shop/*` instead of
+  `app/error.vsk`. This is the seam a *layout* failure lands on — the generated
+  function's try/catch wraps only the page render — so before this a throwing
+  layout anywhere in the app answered with the root boundary. Both prod-server
+  boundary reads now share one helper, one cache and one prop shape; the
+  not-found render also gained the client script URL/integrity it was missing,
+  so a 404 no longer ships a page with no client bundle attached.
+- [x] **BUG (manifest): a static SSR route was shadowed by a dynamic sibling.**
+  `generateManifest` ordered API entries by per-segment specificity (an earlier
+  fix) but emitted SSR entries in directory-scan order, and every consumer takes
+  the FIRST exact-length match. `app/docs/[slug]` scanned before
+  `app/docs/boom` meant `/docs/boom` was served by the dynamic route — in this
+  work's own fixture it silently returned 404 instead of the page. SSR entries
+  now get the same `compareSpecificity` sort. `manifest.test.ts` 11 → 16.
+- [x] The layout wrap in the generated SSR function is now a shared
+  `__wrapLayouts` helper instead of inlined at the error site. Three call sites
+  that each re-implement the loop is three chances to forget the head merge.
+- [x] Tests: `nested-boundaries.test.ts` (11) is a real `build()` served through
+  `startProdServer`, asserting on the CONTENT that identifies which boundary
+  answered — a rule about which file is picked cannot be demonstrated by string
+  assertions. `ssr-function.test.ts` 30 → 42 pins the per-route selection and
+  the 404 status. Suites green: ssr-function 42, manifest 16, ssr-error 60,
+  dev-server 51, default-pages 41, response-pipeline 54, server-only 44,
+  platform-handler 9, client-bundle 6, code-split 16. `npm run typecheck` clean.
+- **Correction to the handoff I inherited, recorded because it changed the plan:**
+  nested `error.vsk` was NOT broken in production. `resolveErrorFile` has always
+  done the deepest-match walk inside the generated SSR function. Only the
+  server-side last resort was root-only, and only `not-found.vsk` had no server
+  resolution whatsoever.
+- **Known gap, not addressed here:** the streamed page path (a route with no
+  layout anywhere) commits its HTTP status before the body renders, so a
+  mid-stream `NotFoundError` cannot become a 404 from inside the function. The
+  boundary CONTENT is still the nearest one (the server answers, since the error
+  escapes), but the status is 200 for that one shape. Asserted in the e2e as it
+  behaves today rather than papered over.
+- **Known gap, not addressed here:** `resolveBoundaryFile` requires an ABSOLUTE
+  `sourceDir`, which is what `scanDirectory` produces. A relative path silently
+  resolves to no boundary. The pre-existing `resolveErrorFile` had the same
+  contract; `ssr-function.test.ts` now passes absolute paths so the boundary
+  assertions mean something, but a guard would be better than a convention.
+
+**This session (production HTTP: compression, conditional GET, health probe):**
+
+- [x] **`vesk start` served every byte uncompressed and unvalidated, with no
+  liveness endpoint.** New `packages/adapter/src/response-pipeline.ts` wraps
+  `res` once, so the ~15 places in `prod-server.ts` that write headers cannot
+  miss it. brotli preferred / gzip fallback with q-values and `*` honoured,
+  `Vary: Accept-Encoding` whenever the representation varies, never applied when
+  it would enlarge the body. ETag on buffered GETs → 304 carrying only the
+  validator and caching directives; `no-store` responses are excluded, which is
+  load-bearing for the single-use `/ssr-data.js` and `/store-init.js`.
+- [x] **API responses were never compressed or tagged.** `deliverResponse` took
+  the streaming branch for *every* Response — a Response built from a string
+  still has a `body` ReadableStream — so each 2 KB JSON body went out one
+  `res.write()` at a time and opted itself out of both new features. Finite
+  bodies now go out as one `end(buffer)`; `text/event-stream`,
+  `application/x-ndjson` and anything past a 1 MiB buffer limit still stream.
+- [x] **Streams are encoded incrementally** through a zlib Transform rather than
+  buffered, so streamed SSR HTML and SSE keep their time-to-first-byte AND get
+  compressed. They carry no ETag — there is no whole body to hash. A buffered
+  decode would defeat the streaming, which is the only reason to stream.
+- [x] `/healthz` (and `/_vesk/healthz`) answers before the rate limiter,
+  middleware and the pipeline: a probe that can be answered 429, rewritten or
+  authed is indistinguishable from a dead process to an orchestrator, which then
+  restarts a healthy pod. Config: `compression: CompressionConfig | false` and
+  `healthCheck?: boolean` on `VeskConfig`, both default on.
+- [x] **Two incidental defects found while wiring it.** `prod-server.ts` carried
+  a second, shorter MIME table than `platform-output.ts`, so `.txt`, `.xml`,
+  `.gif`, `.webp`, `.avif`, `.htm`, `.ttf` and `.map` fell through to
+  `application/octet-stream` under `vesk start` while platform handlers served
+  them correctly — and octet-stream is not compressible, so the gap silently
+  disabled encoding for those types. Now uses the canonical `mimeFor`. And
+  `startProdServer` leaked two process listeners per start; ten restarts tripped
+  MaxListenersExceededWarning, which throws.
+- [x] `response-pipeline.test.ts`, 54, against a real socket with raw
+  `node:http` — `fetch` transparently decompresses and normalises
+  Content-Length, which hides both the encoding decision and the declared length.
+
+**This session (a database driver could reach the browser bundle):**
+
+- [x] **A page reaching for a DB driver produced a browser chunk containing a
+  Node socket driver.** The chain is `page.vsk → app/db.ts → slintorm → pg`, and
+  `pg` pulls `node:net`, so esbuild died with `Could not resolve "node:net"`
+  — naming neither the package the author imported nor the page that pulled it
+  in. Without `--strict` the build then "succeeded" by stripping the imports and
+  leaving every name they bound dangling. Interception has to be inside the
+  bundler: by then the chunk's own imports are merged and the offender is almost
+  never one of them. `server-only-plugin.ts` hooks esbuild's resolver.
+- [x] **Three outcomes, and the distinction is the point.** Function-scope use —
+  the browser never reaches the binding — is stubbed (build warns, `--strict`
+  refuses). Module-scope use (`export const orm = createORM({})`) is a **build
+  error**, because a browser evaluates that while loading the chunk, before a
+  component exists, and no stub can help; decidable from source alone via
+  `referencedAtTopLevel`. A TCP driver is never stubbed — reported and left for
+  esbuild to reject, since a page that looks fine and dies on its first query is
+  worse than a build failure. Both hard errors are raised OUTSIDE the chunk
+  builder's catch, which degrades every failure into "strip and carry on".
+- [x] `slintorm` is marked server-only but `slintorm/edge`, `/browser`,
+  `/postgrest` and `/proxy` deliberately are NOT — they resolve to a bundle with
+  no Node built-ins anywhere in its graph, and marking them would make the edge
+  path unusable. Socketless targets (`--target edge`, cloudflare, deno, coxmos —
+  the shells with `nodeBuiltins: false`) additionally get a pre-compile gate with
+  no opt-out; vercel/netlify/aws run Node functions and are not gated.
+- [x] **The re-export case is scanned too.** `export { Client } from 'pg'` is how
+  a barrel forwards a driver and it is the shape most likely to slip past a scan
+  that only looks at imports.
+- [x] `server-only.test.ts`, 44, including the thing that had never been proven:
+  a bare `slintorm` specifier resolves from an API route, from a page, and all
+  the way down to the driver at request time — while `slintorm/edge` resolves to
+  a different entry and stays client-safe. Marking a package server-only is only
+  safe if the server side can still reach it. The fixture mirrors the real
+  exports map and has a `pg` that pulls `node:net`.
+- **Found while testing, recorded rather than assumed:** a page whose ORM use is
+  confined to `load()` never reaches the browser bundle at all — the client
+  codegen strips `load` and the import goes with it. The ordinary SSR-data shape
+  was already safe; this work is about the cases where it is not.
+- **Known gap:** the monolithic (`--skip-split`) client path emits a raw
+  `import { orm } from './db.ts'` for ANY non-.vsk module, server-only or not.
+  Pre-existing, unrelated to this change, and not covered by the tests here.
+
 **This session (routing/matcher + store bugs found by code inspection, not docs):**
 
 Five defects, all reproduced before fixing. Full suite green; the store/hydration

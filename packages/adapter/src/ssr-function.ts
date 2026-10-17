@@ -5,13 +5,46 @@ import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { renderDefaultErrorFragment } from '@vesk/adapter/src/default-pages';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
-// Finds the nearest error.vsk walking up from the route's own directory to the
-// app root, mirroring the router's findErrorComponent chain semantics.
-export function resolveErrorFile(sourceDir: string, appDir: string): string | null {
+/**
+ * The nearest `<file>` walking up from a route's own directory to the app root.
+ *
+ * This is the server-side twin of the client router's `findErrorComponent` /
+ * `findNotFoundComponent`, which walk the matched chain deepest-first. Same rule,
+ * same reason: an `error.vsk` (or `not-found.vsk`) inside `app/admin/` is the
+ * boundary for `/admin/*` and nothing else — the root file is the fallback, not
+ * the implementation.
+ */
+export function resolveBoundaryFile(sourceDir: string, appDir: string, file: string): string | null {
   const rel = relative(appDir, sourceDir).split('/').filter(Boolean);
   for (let depth = rel.length; depth >= 0; depth--) {
     const dir = depth === 0 ? appDir : join(appDir, ...rel.slice(0, depth));
-    const p = join(dir, 'error.vsk');
+    const p = join(dir, file);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+export function resolveErrorFile(sourceDir: string, appDir: string): string | null {
+  return resolveBoundaryFile(sourceDir, appDir, 'error.vsk');
+}
+
+export function resolveNotFoundFile(sourceDir: string, appDir: string): string | null {
+  return resolveBoundaryFile(sourceDir, appDir, 'not-found.vsk');
+}
+
+/**
+ * The nearest `<file>` for a REQUESTED URL, used by the server when no SSR
+ * function ran (an unmatched path) or when one gave up.
+ *
+ * The walk is over URL segments, so a dynamic segment cannot be mapped back to a
+ * directory — `/users/42/edit` stops at `/users`. Static paths, which is what a
+ * `not-found.vsk` is written for, resolve exactly.
+ */
+export function resolveBoundaryFileForUrl(pathname: string, appDir: string, file: string): string | null {
+  const segments = pathname.split('/').filter(Boolean);
+  for (let depth = segments.length; depth >= 0; depth--) {
+    const dir = join(appDir, ...segments.slice(0, depth));
+    const p = join(dir, file);
     if (existsSync(p)) return p;
   }
   return null;
@@ -183,17 +216,30 @@ export function generateSsrFunction(
     ? `const _errorComp = ${JSON.stringify(errorComp)};\nconst _errorCompiled = ${hydrateInvoke(precompilePlan(errorPath))};\n`
     : 'const _errorComp = null;\nconst _errorCompiled = null;\n';
 
+  // Not-found used to have no server-side resolution at all: a NotFoundError was
+  // re-thrown out of the function and the prod server answered with the ROOT
+  // not-found.vsk. A nested `app/admin/not-found.vsk` therefore did nothing on a
+  // hard load, while the client router — which walks the matched chain
+  // deepest-first — honoured it on SPA navigation. Same URL, two different
+  // pages depending on how you arrived.
+  const notFoundPath = resolveNotFoundFile(routeNode.sourceDir, appDir);
+  const notFoundSrc = notFoundPath ? readFileSync(notFoundPath, 'utf-8') : null;
+  const notFoundComp = notFoundPath ? (extractCompName(notFoundSrc as string) || 'NotFound') : null;
+  const notFoundVars = notFoundPath
+    ? `const _notFoundComp = ${JSON.stringify(notFoundComp)};\nconst _notFoundCompiled = ${hydrateInvoke(precompilePlan(notFoundPath))};\n`
+    : 'const _notFoundComp = null;\nconst _notFoundCompiled = null;\n';
+
   let src = '';
   if (layoutDecls.length > 0) {
     src = `const _pageComp = ${JSON.stringify(pageComp)};\n`;
     src += `const _pageCompiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })();\n`;
     src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
     src += `const _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n];\n`;
-    src += errorVars;
+    src += errorVars + notFoundVars;
   } else {
     src = `const _comp = ${JSON.stringify(pageComp)};\n`;
     src += `const _compiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })();\n`;
-    src += errorVars;
+    src += errorVars + notFoundVars;
   }
 
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
@@ -220,7 +266,7 @@ export function generateSsrFunction(
     registryCode = 'const __componentRegistry = new Map();\n';
   }
 
-  let htmlFnCode: string;
+let htmlFnCode: string;
   if (layoutDecls.length > 0) {
     htmlFnCode = [
       'async function __renderErrorBody(props) {',
@@ -233,30 +279,66 @@ export function generateSsrFunction(
       '  }',
       '}',
       '',
+      // Returns null rather than throwing when there is no boundary, so the
+      // caller can re-throw the original NotFoundError and let the server answer
+      // — a page with no not-found.vsk anywhere must still get a 404.
+      'async function __renderNotFoundBody(props) {',
+      '  if (!_notFoundComp) return null;',
+      '  try {',
+      '    const result = await renderPage(\'\', _notFoundComp, props, __componentRegistry, { hydrate: true, cached: _notFoundCompiled });',
+      '    return result.body;',
+      '  } catch {',
+      '    return null;',
+      '  }',
+      '}',
+      '',
+      // The layout wrap, shared by the page / error / not-found paths. Extracted
+      // because three call sites that each re-implemented it is three chances to
+      // forget the head merge.
+      'async function __wrapLayouts(params, body, head) {',
+      '  let _b = body;',
+      '  let _h = head || "";',
+      '  for (let _i = _layoutCompList.length - 1; _i > 0; _i--) {',
+      "    const _inner = await renderPage('', _layoutCompList[_i], { params, children: _b }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i] });",
+      '    _b = _inner.body;',
+      '    if (_inner.head) _h = _inner.head + _h;',
+      '  }',
+      "  return renderFullPage('', _layoutCompList[0], { params, children: _b }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ", pageHead: _h });",
+      '}',
+      '',
       'async function __renderHtml(params, requestUrl) {',
       '  return withSsrStore(async () => {',
       '  resetPersistedStoreKeys();',
       '  let page;',
       '  let caughtError = null;',
+      '  let notFound = false;',
       "  const __expose = process.env.NODE_ENV !== 'production';",
       '  try {',
       '    page = await renderPage(\'\', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled });',
       '  } catch (err) {',
-      '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
-      '    caughtError = err;',
-      "    const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
-      "    const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
-      "    page = { body: await __renderErrorBody({ params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' }), head: '' };",
+      "    if (err && err.name === 'Redirect') throw err;",
+      "    if (err && err.name === 'NotFoundError') {",
+      // The boundary is chosen per-route at build time (resolveNotFoundFile walks
+      // this route's own directory up to the app root), so a nested
+      // app/admin/not-found.vsk answers /admin/* and the root one answers the
+      // rest — matching the client router's deepest-first chain walk.
+      '      const nfBody = await __renderNotFoundBody({ params, url: requestUrl || \'\' });',
+      '      if (nfBody !== null) {',
+      '        notFound = true;',
+      '        page = { body: nfBody, head: \'\' };',
+      '      } else {',
+      '        throw err;',
+      '      }',
+      '    } else {',
+      '      caughtError = err;',
+      "      const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
+      "      const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
+      "      page = { body: await __renderErrorBody({ params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' }), head: '' };",
+      '    }',
       '  }',
-      '  let _body = (caughtError ? \'<!--vesk-ssr-error:\' + (caughtError && typeof caughtError === \'object\' && \'message\' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : \'Internal Server Error\') : \'\') + \'-->\' : \'\') + page.body;',
-      '  let _head = page.head || \'\';',
-      '  for (let _i = _layoutCompList.length - 1; _i > 0; _i--) {',
-      "    const _inner = await renderPage('', _layoutCompList[_i], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i] });",
-      '    _body = _inner.body;',
-      '    if (_inner.head) _head = _inner.head + _head;',
-      '  }',
-      "  const html = await renderFullPage('', _layoutCompList[0], { params, children: _body }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ", pageHead: _head });",
-      "  return new Response(__injectStoreInit(html), { headers: { 'Content-Type': 'text/html' }, status: caughtError ? 500 : 200 });",
+      "  let _body = (caughtError ? '<!--vesk-ssr-error:' + (caughtError && typeof caughtError === 'object' && 'message' in caughtError ? encodeURIComponent(__expose ? String(caughtError.message) : 'Internal Server Error') : '') + '-->' : '') + page.body;",
+      '  const html = await __wrapLayouts(params, _body, page.head || \'\');',
+      "  return new Response(__injectStoreInit(html), { headers: { 'Content-Type': 'text/html' }, status: notFound ? 404 : (caughtError ? 500 : 200) });",
       '  });',
       '}',
       '',

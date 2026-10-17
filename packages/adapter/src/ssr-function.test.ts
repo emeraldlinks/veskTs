@@ -36,9 +36,19 @@ write('docs/page.vsk', `component DocsPage() { return <div>Docs Index</div>; }`)
 write('docs/[slug]/page.vsk', `component DocPage() { return <article>Doc Body</article>; }`);
 write('store/layout.vsk', `export const standalone = true;\ncomponent StoreLayout(props: { children?: any }) { return <div class="store">{props.children}</div>; }`);
 write('store/page.vsk', `component StorePage() { return <div>Store Home</div>; }`);
+// Nested boundaries. `docs/` owns both, so a NotFoundError or a throw under
+// /docs must answer with the DOCS boundary and not the root one — the deepest
+// match the client router already performs.
+write('not-found.vsk', `component RootNotFound() { return <h1>ROOT NOT FOUND</h1>; }`);
+write('docs/not-found.vsk', `component DocsNotFound() { return <h1>DOCS NOT FOUND</h1>; }`);
+write('docs/error.vsk', `component DocsError(props: { error: string }) { return <h1>DOCS ERROR: {props.error}</h1>; }`);
 // sourceDir is relative to the app root — generateSsrFunction resolves
 // `resolve(appDir, sourceDir, ...)`, so files live under appRoot/app.
-for (const f of ['layout.vsk', 'page.vsk', 'error.vsk', 'docs/layout.vsk', 'docs/page.vsk', 'docs/[slug]/page.vsk', 'store/layout.vsk', 'store/page.vsk']) {
+for (const f of [
+  'layout.vsk', 'page.vsk', 'error.vsk', 'not-found.vsk',
+  'docs/layout.vsk', 'docs/page.vsk', 'docs/[slug]/page.vsk', 'docs/not-found.vsk', 'docs/error.vsk',
+  'store/layout.vsk', 'store/page.vsk',
+]) {
   const from = join(appDir, f);
   const dest = join(appDir, 'app', f);
   mkdirSync(join(appDir, 'app', ...f.split('/').slice(0, -1)), { recursive: true });
@@ -50,12 +60,20 @@ const appRoot = { sourceDir: 'app', layoutCompName: 'Layout' };
 const docsNode = { sourceDir: 'app/docs' };
 
 function runFor(node, ancestorLayouts) {
+  // `sourceDir` is ABSOLUTE in a real build — `scanDirectory` starts from the
+  // resolved app dir and joins relative entries. `resolveBoundaryFile` walks it
+  // with `relative(appDir, sourceDir)`, so a relative path would silently resolve
+  // to no boundary at all. Passing the real shape here is what makes these
+  // assertions about boundary selection mean anything.
+  const absolutize = (n) => (n && n.sourceDir && !n.sourceDir.startsWith('/')
+    ? { ...n, sourceDir: join(appDir, n.sourceDir) }
+    : n);
   return generateSsrFunction(
-    node,
+    absolutize(node),
     appDir,
     outDir,
     new Map(),
-    { ancestorLayouts },
+    { ancestorLayouts: (ancestorLayouts || []).map(absolutize) },
   ).funcCode;
 }
 
@@ -154,6 +172,65 @@ console.log('\n\u2550\u2550\u2550 Request-scoped SSR token (data-nav) \u2550\u25
   const navIdx = withLayout.indexOf("x-vesk-data");
   const navBody = withLayout.slice(navIdx, withLayout.indexOf('return __renderHtml', navIdx));
   assert(navBody.includes('withSsrStore('), 'data-nav branch runs in its own withSsrStore scope');
+}
+
+{
+  // A body that throws is not testable from source strings, so the nested
+  // boundary behaviour is pinned here at the generation level and end-to-end in
+  // nested-boundaries.test.ts. What is pinned here is the decision: which
+  // boundary each route compiles in, and that a NotFoundError has a path that
+  // renders it with a 404 instead of being re-thrown.
+  const docsCode = runFor(
+    { sourceDir: 'app/docs', fullPath: '/docs', layout: 'DocsLayout' },
+    [appRoot],
+  );
+  assert(docsCode.includes('_notFoundComp'), 'a not-found boundary is compiled into the function');
+  assert(docsCode.includes('__renderNotFoundBody'), 'not-found render path exists');
+  assert(
+    docsCode.includes('status: notFound ? 404 : (caughtError ? 500 : 200)'),
+    'a not-found render answers 404, not 200',
+  );
+  assert(
+    docsCode.includes('if (nfBody !== null)') && docsCode.includes('throw err;'),
+    'with no boundary the original NotFoundError is re-thrown, so the server still answers 404',
+  );
+  assert(
+    docsCode.includes("renderPage('', _notFoundComp"),
+    'the boundary is rendered through renderPage',
+  );
+  assert(
+    docsCode.includes('__wrapLayouts(params, _body'),
+    'the not-found body goes through the shared layout wrap, so it keeps the app chrome',
+  );
+
+  // Deepest match: docs/not-found.vsk wins for /docs, the root one for /.
+  assert(
+    docsCode.includes('const _notFoundComp = "DocsNotFound"'),
+    '/docs compiles the NESTED not-found boundary',
+  );
+  const rootCode = runFor({ sourceDir: 'app', fullPath: '/', layout: 'Layout' }, []);
+  assert(
+    rootCode.includes('const _notFoundComp = "RootNotFound"'),
+    '/ compiles the root not-found boundary',
+  );
+
+  // No boundary anywhere on the route's path: the feature must degrade to
+  // "re-throw and let the server answer", not to a broken render.
+  const bareCode = runFor({ sourceDir: 'app/docs/[slug]', fullPath: '/docs/[slug]', layout: null }, []);
+  assert(
+    bareCode.includes('_notFoundComp'),
+    'the not-found declarations are emitted for every route',
+  );
+}
+
+{
+  // The error boundary is a deepest match too, and predates this work — pinned
+  // so a regression in resolveErrorFile is caught here rather than in a 500.
+  const docsCode = runFor({ sourceDir: 'app/docs', fullPath: '/docs', layout: 'DocsLayout' }, [appRoot]);
+  assert(docsCode.includes('const _errorComp = "DocsError"'), 'error boundary resolved for /docs');
+  assert(docsCode.includes('__renderErrorBody'), 'error render path exists');
+  const rootCode = runFor({ sourceDir: 'app', fullPath: '/', layout: 'Layout' }, []);
+  assert(rootCode.includes('const _errorComp = "Error"'), 'root error boundary for /');
 }
 
 rmSync(appDir, { recursive: true, force: true });

@@ -55,6 +55,13 @@ export function generateManifest(
     if (r._isrTags) entry.tags = r._isrTags;
     routeEntries.push(entry);
   }
+  // Same precedence rule as the API entries below, and for the same reason:
+  // every consumer takes the FIRST exact-length match, so directory-scan order
+  // decides. `app/docs/[slug]/page.vsk` scanned before `app/docs/boom/page.vsk`
+  // left `/docs/boom` permanently served by the dynamic route — a static page
+  // that 404s or, worse, renders the wrong page's content. The API half of this
+  // fix landed earlier; SSR entries had the identical defect.
+  routeEntries.sort((a, b) => compareSpecificity(a.path, b.path));
 
   const apiEntries: ManifestRouteEntry[] = [];
   for (const r of apiRoutes) {

@@ -12,6 +12,7 @@ import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { loadVeskConfig } from '@vesk/adapter/src/load-config';
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import { installResponsePipeline } from '@vesk/adapter/src/response-pipeline';
+import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
 import { mimeFor } from '@vesk/adapter/src/platform-output';
 import type { SecurityConfig, CompressionConfig, ProdServerOptions } from '@vesk/adapter/src/types';
 
@@ -639,16 +640,42 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     const pageCssUrls = resolveCssUrls({
       enabled: hasBuiltGlobalCss(outDir),
     });
-    const nfPath = resolve(appDir, 'not-found.vsk');
+
+    /**
+     * Render the boundary that owns `url.pathname`.
+     *
+     * Deepest-match over the URL's directories, not a hard read of the root
+     * file: `app/admin/not-found.vsk` is the boundary for `/admin/*`, and the
+     * root one is the fallback. The generated SSR function does the same walk at
+     * build time (`resolveNotFoundFile`) and renders the boundary itself inside
+     * the layout stack; this path is what remains for an unmatched URL, for a
+     * route with no layout (which streams, so its status is already committed),
+     * and for an error thrown outside a page's own try block.
+     */
+    const boundaryCache = new Map<string, string | null>();
+    async function renderBoundaryFile(file: 'not-found.vsk' | 'error.vsk', pathname: string, props: Record<string, unknown>): Promise<string | null> {
+      const boundaryPath = resolveBoundaryFileForUrl(pathname, appDir, file);
+      if (!boundaryPath) return null;
+      const key = `${file}:${boundaryPath}`;
+      let html = boundaryCache.has(key) ? boundaryCache.get(key)! : null;
+      if (html === null) {
+        try {
+          const runtimePath = resolve(outDir, 'server', 'runtime.js');
+          const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
+          const src = readFileSync(boundaryPath, 'utf-8');
+          const compName = resolveComponentName(src) || (file === 'error.vsk' ? 'Error' : 'NotFound');
+          html = await renderFullPage(src, compName, props, new Map(), { hydrate: true, cssUrls: pageCssUrls, clientScriptUrl: buildConfig?.assets?.client?.url || '/_vesk/static/client.js', clientScriptIntegrity: buildConfig?.assets?.client?.integrity, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: boundaryPath, headExtra: bakedHeadExtra });
+        } catch {
+          return null;
+        }
+      }
+      return html;
+    }
+
     let notFoundHtml: string | null = null;
-    if (existsSync(nfPath)) {
-      try {
-        const runtimePath = resolve(outDir, 'server', 'runtime.js');
-        const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
-        const src = readFileSync(nfPath, 'utf-8');
-        const compName = resolveComponentName(src) || 'NotFound';
-        notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: pageCssUrls, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: nfPath, headExtra: bakedHeadExtra });
-      } catch {}
+    {
+      const rendered = await renderBoundaryFile('not-found.vsk', url.pathname, { params: {}, url: url.pathname });
+      notFoundHtml = rendered;
     }
 
     for (const route of buildConfig.routes) {
@@ -722,19 +749,17 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
               if (eventsMod) {
                 await executeError(err, { url: url.href, routePath: route.path, target: 'node', status: 500 }, eventsMod);
               }
-              const errPath = resolve(appDir, 'error.vsk');
-              let errorHtml: string | null = null;
-              if (existsSync(errPath)) {
-                try {
-                  const runtimePath = resolve(outDir, 'server', 'runtime.js');
-                  const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
-                  const src = readFileSync(errPath, 'utf-8');
-                  const compName = resolveComponentName(src) || 'Error';
-                  // never leak stack traces / internal messages to prod error pages
-                  const expose = process.env.NODE_ENV !== 'production';
-                  errorHtml = await renderFullPage(src, compName, { error: expose ? err.message : 'Internal Server Error', stack: expose ? err.stack : '', statusCode: 500, url: url.pathname }, new Map(), { hydrate: true, cssUrls: pageCssUrls, clientScriptUrl: buildConfig?.assets?.client?.url || '/_vesk/static/client.js', clientScriptIntegrity: buildConfig?.assets?.client?.integrity, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: errPath, headExtra: bakedHeadExtra });
-                } catch {}
-              }
+              // Same nearest-boundary walk as not-found above. This is the last resort for a
+              // throw the generated function could not absorb — a layout render
+              // failure, or the error boundary itself failing — and it must pick
+              // the boundary that owns the URL, not the root one.
+              const expose = process.env.NODE_ENV !== 'production';
+              const errorHtml = await renderBoundaryFile('error.vsk', url.pathname, {
+                error: expose ? err.message : 'Internal Server Error',
+                stack: expose ? err.stack : '',
+                statusCode: 500,
+                url: url.pathname,
+              });
               res.writeHead(500, { 'Content-Type': 'text/html' });
               res.end(errorHtml || renderDefaultErrorPage({ message: process.env.NODE_ENV !== 'production' ? err.message : undefined, url: url.pathname, headExtra: bakedHeadExtra }));
               return;
