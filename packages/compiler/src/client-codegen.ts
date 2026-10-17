@@ -848,8 +848,28 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     // (which would miss because SSR emits no marker for static children of dynamic parents).
     const isPureStaticChild = ctx.hydrate && child instanceof StaticNode && isStaticIR(child.children);
     if (isPureStaticChild) {
-      const ssrEl = `${el}.__vsk_ssrEls[${residueBefore}]`;
-      childVar = ssrEl;
+      // `__vsk_ssrEls` only exists on CLAIMED elements — the runtime captures it
+      // in captureSsrElementChildren. A FRESH parent (walker exhausted, or a
+      // tag-mismatch recovery) holds no SSR residue at all, so the unguarded
+      // retrieval crashed every post-hydration re-render that mounted new
+      // static content (opening a dropdown whose panel starts with a plain
+      // header: waterline "Cannot read properties of undefined (reading '0')").
+      // Fall back to building the subtree fresh — the non-hydrate emission —
+      // exactly when the residue is absent. The claimed path is unchanged and
+      // still retrieves, so SSR text is never duplicated.
+      const savedHydrate = ctx.hydrate;
+      ctx.hydrate = false;
+      const buildStart = ctx.lines.length;
+      const freshChild = emitStatic(ctx, child, tracked, effectsVar);
+      const buildLines = ctx.lines.splice(buildStart, ctx.lines.length - buildStart);
+      ctx.hydrate = savedHydrate;
+      const childSlot = ctx.n();
+      ctx.push(`const ${childSlot} = ${el}.__vsk_ssrEls ? ${el}.__vsk_ssrEls[${residueBefore}] : (() => {`);
+      for (const line of buildLines) ctx.push(`\t${line}`);
+      ctx.push(`\treturn ${freshChild ?? "document.createElement('div')"};`);
+      ctx.push(`})();`);
+      childVar = childSlot;
+      const ssrEl = childSlot;
       // Process dynamic attributes on the retrieved SSR element
       const dynAttrs: DynamicBinding[] = [];
       const staticChildren: IRNode[] = [];

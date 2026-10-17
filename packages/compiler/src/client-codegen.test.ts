@@ -675,11 +675,13 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 	});
 
 	// A pure-static subtree child of a claimed (dynamic) element is retrieved
-	// from `el.__vsk_ssrEls` and must NOT have its static text re-emitted —
-	// isStaticIR guarantees no dynamic content, so every descendant already
-	// exists in the SSR DOM. Re-creating the fresh text node would duplicate
-	// the heading (the h1 "The compiler is the product." regression):
-	// the fresh node appends AFTER the retained SSR text node.
+	// from `el.__vsk_ssrEls` and must NOT have its static text re-emitted on
+	// that path — isStaticIR guarantees no dynamic content, so every
+	// descendant already exists in the SSR DOM. Re-creating the fresh text
+	// node unconditionally would duplicate the heading (the h1 "The compiler
+	// is the product." regression). The static build now exists only inside
+	// the guarded fresh-parent fallback (an exhausted walker has no residue
+	// to retrieve), so the claimed path still never re-creates it.
 	bothModes('pure static subtree child reuses SSR text without duplicating it (expr)', `
 		component P() {
 			let &[v] = track('hi');
@@ -687,8 +689,9 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 		}
 	`, (code, mode) => {
 		if (mode === 'hydrate') {
-			expect(code).toContain('__vsk_ssrEls[0]');
-			expect(code).not.toContain('createTextNode("The compiler is the product.")');
+			expect(code).toContain('__vsk_ssrEls[0] : (() => {');
+			expect(code.indexOf('createTextNode("The compiler is the product.")'))
+				.toBeGreaterThan(code.indexOf('(() => {'));
 		} else {
 			expect(code).toContain('createTextNode("The compiler is the product.")');
 			expect(code).not.toContain('__vsk_ssrEls');
@@ -701,8 +704,9 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 		}
 	`, (code, mode) => {
 		if (mode === 'hydrate') {
-			expect(code).toContain('__vsk_ssrEls[0]');
-			expect(code).not.toContain('createTextNode("The compiler is the product.")');
+			expect(code).toContain('__vsk_ssrEls[0] : (() => {');
+			expect(code.indexOf('createTextNode("The compiler is the product.")'))
+				.toBeGreaterThan(code.indexOf('(() => {'));
 		} else {
 			expect(code).toContain('createTextNode("The compiler is the product.")');
 			expect(code).not.toContain('__vsk_ssrEls');
@@ -710,7 +714,9 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 	});
 
 	// Nested pure static children (a grid with two cells) collapse to residue
-	// refs only — no intermediate text re-creation inside the static subtree.
+	// refs only on the claimed path — no intermediate text re-creation inside
+	// the static subtree; the fresh-parent fallback builds them only when the
+	// residue is absent.
 	bothModes('nested pure static subtree emits only SSR refs, no inner text (expr)', `
 		component P() {
 			let &[v] = track('hi');
@@ -718,9 +724,9 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 		}
 	`, (code, mode) => {
 		if (mode === 'hydrate') {
-			expect(code).toContain('__vsk_ssrEls[0]');
-			expect(code).not.toContain('createTextNode("A")');
-			expect(code).not.toContain('createTextNode("B")');
+			expect(code).toContain('__vsk_ssrEls[0] : (() => {');
+			expect(code.indexOf('createTextNode("A")')).toBeGreaterThan(code.indexOf('(() => {'));
+			expect(code.indexOf('createTextNode("B")')).toBeGreaterThan(code.indexOf('(() => {'));
 		} else {
 			expect(code).toContain('createTextNode("A")');
 			expect(code).toContain('createTextNode("B")');

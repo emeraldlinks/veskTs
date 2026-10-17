@@ -295,6 +295,45 @@ export default Page;
 	}
 });
 
+console.log('\n=== hydrate: a conditional opened after hydration builds its static content ===');
+
+it('opening a conditional with a pure-static panel renders the panel (fresh-parent residue fallback)', () => {
+	// The reported crash: clicking a dropdown after hydration mounted a FRESH
+	// panel (the walker is exhausted — SSR rendered the conditional closed), and
+	// the pure-static header child retrieved `panel.__vsk_ssrEls[0]` unguarded.
+	// A fresh parent has no residue list, so this threw "Cannot read properties
+	// of undefined (reading '0')" and the panel never opened. The codegen now
+	// falls back to building the subtree when the residue is absent.
+	const source = `component Menu {
+  const &[open, openCell] = track(false);
+  <div class="mw">
+    <button class="mb" onClick={() => { open = !open; }}>mb</button>
+    if (open) {
+      <div class="panel">
+        <div class="head">MENU HEADER</div>
+        <span class="item">Item one</span>
+      </div>
+    }
+  </div>
+}
+export default Menu;
+`;
+	const m = mountHydrated(source, ssr(source, 'Menu'));
+	try {
+		hydrateChain(m, [{ name: 'Menu' }]);
+		assert(m.document.querySelector('.panel') === null, 'SSR rendered the conditional closed');
+		click(m, '.mb');
+		const head = m.document.querySelector('.head');
+		assert(head, 'the freshly-built panel kept its pure-static header');
+		assert(head.textContent!.includes('MENU HEADER'), 'the header text survived the fresh build');
+		assert(m.document.querySelector('.item'), 'the panel body rendered');
+		click(m, '.mb');
+		assert(m.document.querySelector('.panel') === null, 'closing the conditional removes the fresh panel');
+	} finally {
+		m.restore();
+	}
+});
+
 for (const fn of queue) await fn();
 
 console.log(`\n${'='.repeat(50)}`);
