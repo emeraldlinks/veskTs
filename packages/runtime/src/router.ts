@@ -142,8 +142,14 @@ function ensureChunk(chunkUrl: string): Promise<void> {
 // throttled connection) must not strand the navigation forever — the URL is
 // already updated before chunks load, so a silent stall would leave the new
 // URL showing the old page. After this timeout the load rejects and the
-// navigation renders its error fallback instead.
-const CHUNK_LOAD_TIMEOUT_MS = 10000;
+// navigation renders its error fallback instead. Dev servers hold the chunk
+// request until a cold route compiles and may raise the ceiling through
+// `globalThis.__vesk_chunk_timeout_ms` set by their injected boot scripts; the
+// prod build keeps the 10s default.
+const CHUNK_LOAD_TIMEOUT_MS =
+	(typeof window !== 'undefined' &&
+		Number((window as unknown as Record<string, unknown>).__vesk_chunk_timeout_ms)) ||
+	10000;
 
 /** Loads pending chunks without letting a single failed chunk abort the flow. */
 function loadChunksQuietly(urls: string[]): Promise<void> {

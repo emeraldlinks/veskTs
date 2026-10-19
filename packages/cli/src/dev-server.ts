@@ -1,6 +1,6 @@
 import { readFileSync, watch, statSync, existsSync, mkdirSync, readdirSync, writeFileSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { resolve, extname, join, dirname } from 'node:path';
+import { resolve, extname, join, dirname, relative } from 'node:path';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
@@ -251,12 +251,18 @@ const LOG = {
 };
 
 /**
- * Dev script pair injected before `</body>` in every served dev page shape
+ * Dev scripts injected before `</body>` in every served dev page shape
  * (layout, minimal, not-found, error). Parts are exact and order-sensitive:
- * the client bundle mounts/runs before the HMR client attaches listeners.
+ * the timeout flag must precede the client bundle (which reads it at boot),
+ * and the client bundle mounts/runs before the HMR client attaches listeners.
+ *
+ * The raised chunk timeout covers route chunks still compiling on first
+ * request: the dev server HOLDS the chunk response until the build finishes
+ * (see the /_vesk/static handler), so the browser never sees a bodiless 404
+ * and the only cost is a longer in-flight request.
  */
 export const DEV_SCRIPTS =
-  '\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>';
+  '\t<script src="/_vesk/dev-config.js"></script>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>';
 
 /** Inject the dev script pair at the first `</body>`. No-op when absent. */
 export function injectDevScripts(html: string): string {
@@ -856,6 +862,8 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
   /** Routes whose chunk body has been built this session. */
   const routeChunksBuilt = new Set<string>();
+  /** In-flight route chunk builds, so concurrent callers await one build. */
+  const routeChunkBuilds = new Map<string, Promise<boolean>>();
   /**
    * Bumped whenever an edit invalidates built chunks. An in-flight on-demand
    * build that started before the bump finishes against the PRE-edit file
@@ -914,6 +922,28 @@ export async function startDevServer(port: number, projectDir: string, config: R
     }
   }
 
+  /**
+   * Persist route chunks built on demand, throttled and off the request path.
+   * Without this a restart would restore the entry bundle but rebuild every
+   * route chunk, which is exactly the cold-start cost the cache exists to
+   * remove. Debounced (not awaited) so a burst of first visits writes once.
+   */
+  let persistChunksTimer: ReturnType<typeof setTimeout> | null = null;
+  function persistDevChunksSoon(): void {
+    if (persistChunksTimer) return;
+    persistChunksTimer = setTimeout(() => {
+      persistChunksTimer = null;
+      writeDevBundleCache(
+        clientBundle,
+        [...clientChunks].map(([url, code]) => ({
+          name: url.slice(url.lastIndexOf('/') + 1),
+          code,
+        })),
+      );
+    }, 2000);
+    persistChunksTimer.unref?.();
+  }
+
   function writeDevBundleCache(main: string, chunks: ChunkEntry[]): void {
     try {
       const dir = devCacheDir();
@@ -940,31 +970,47 @@ export async function startDevServer(port: number, projectDir: string, config: R
    */
   async function ensureRouteChunk(fullPath: string): Promise<void> {
     if (routeChunksBuilt.has(fullPath)) return;
-    // Mark first, so a concurrent request for the same route cannot start a
-    // second build, and so a build that throws is retried on the next request
-    // rather than wedging the route for the rest of the session.
-    routeChunksBuilt.add(fullPath);
-    const generation = clientGeneration;
-    const { chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
-      importRuntime: true,
-      hmr: true,
-      codeSplit: true,
-      cache: bundleCache,
-      onlyRoutes: [fullPath],
-      ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
-    });
-    // An edit landed while this build was in flight: its output is built from
-    // the pre-edit cache, so it must not be published. Drop the mark too, so
-    // the next request rebuilds against the new source.
-    if (generation !== clientGeneration) {
-      routeChunksBuilt.delete(fullPath);
+    // Concurrent callers (warm-up walk, chunk requests, parallel loads) must
+    // WAIT for the in-flight build, not skip it: a skipped caller reads the
+    // chunk map before the body lands and would answer with a 404/SPA
+    // fallback. Sharing the promise dedupes the work and preserves the wait.
+    const inFlight = routeChunkBuilds.get(fullPath);
+    if (inFlight) {
+      await inFlight;
       return;
     }
-    // MERGE: a route-level build returns only the bodies it built, and
-    // replacing would drop every body built for an earlier route.
-    const next = new Map(clientChunks);
-    for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
-    clientChunks = next;
+    const build = (async (): Promise<boolean> => {
+      const generation = clientGeneration;
+      const { chunks } = await generateClientBundle(routeTree, appDirPath, new Map(), {
+        importRuntime: true,
+        hmr: true,
+        codeSplit: true,
+        cache: bundleCache,
+        onlyRoutes: [fullPath],
+        ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
+      });
+      // An edit landed while this build was in flight: its output is built
+      // from the pre-edit cache, so it must not be published. No mark either,
+      // so the next request rebuilds against the new source.
+      if (generation !== clientGeneration) return false;
+      // MERGE: a route-level build returns only the bodies it built, and
+      // replacing would drop every body built for an earlier route.
+      const next = new Map(clientChunks);
+      for (const c of chunks) next.set(`/_vesk/static/${c.name}`, c.code);
+      clientChunks = next;
+      return true;
+    })();
+    routeChunkBuilds.set(fullPath, build);
+    try {
+      // A build that throws is retried on the next request rather than
+      // wedging the route: the mark is only set once a body actually landed.
+      if (await build) {
+        routeChunksBuilt.add(fullPath);
+        persistDevChunksSoon();
+      }
+    } finally {
+      routeChunkBuilds.delete(fullPath);
+    }
   }
 
   /** Reverse lookup: the route whose chunk has this file name, if any. */
@@ -1289,8 +1335,53 @@ function routeFullPathForChunk(chunkName: string): string | null {
     let debounceTimer: ReturnType<typeof setTimeout> | null = null;
     let cssDebounceTimer: ReturnType<typeof setTimeout> | null = null;
     const watchDir = projectDir;
-    watch(watchDir, { recursive: true }, (eventType, filename) => {
-        if (!filename) return;
+    // A recursive watch over the project root attaches an inotify handle per
+    // watched path — in this environment that is one per FILE (17k+ including
+    // generated trees), which starves the event loop and stalls every request.
+    // Watch directories instead (one handle each, skipping ignored trees) and
+    // re-arm watches when new directories appear.
+    const dirWatchers = new Map<string, ReturnType<typeof watch>>();
+    const watchDirTree = (dir: string): void => {
+      if (dirWatchers.has(dir)) return;
+      let entries: import('node:fs').Dirent[];
+      try {
+        entries = readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      try {
+        const watcher = watch(dir, (eventType, changed) => {
+          if (!changed) return;
+          const abs = join(dir, String(changed));
+          const rel = relative(projectDir, abs);
+          if (!rel || rel.startsWith('..')) return;
+          if (eventType === 'rename') {
+            try {
+              if (statSync(abs).isDirectory()) {
+                watchDirTree(abs);
+                return;
+              }
+            } catch {
+              // deleted — the parent watcher still reports its own events
+            }
+          }
+          onWatchEvent(eventType, normalizeWatchPath(rel));
+        });
+        watcher.on('error', () => {
+          try { watcher.close(); } catch { /* already closed */ }
+          dirWatchers.delete(dir);
+        });
+        dirWatchers.set(dir, watcher);
+      } catch {
+        return;
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        if (HMR_SKIP_DIRS.has(entry.name)) continue;
+        watchDirTree(join(dir, entry.name));
+      }
+    };
+    const onWatchEvent = (eventType: string, filename: string) => {
         const kind = classifyHmrWatchPath(filename);
         if (kind === 'ignored') return;
 
@@ -1551,7 +1642,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
             }
           }, HMR_DEBOUNCE_MS);
         }
-      });
+    };
+    watchDirTree(watchDir);
   } catch (e) {
     LOG.warn('file watching unavailable, serving without auto-rebuild');
   }
@@ -1638,6 +1730,11 @@ function routeFullPathForChunk(chunkName: string): string | null {
     if (url.pathname === '/_vesk/runtime' || url.pathname === '/_vesk/runtime.js') {
       res.writeHead(200, { 'Content-Type': 'application/javascript' });
       res.end(runtimeBundle);
+      return;
+    }
+    if (url.pathname === '/_vesk/dev-config.js') {
+      res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
+      res.end('globalThis.__vesk_chunk_timeout_ms = 120000;');
       return;
     }
     if (url.pathname === '/_vesk/client' || url.pathname === '/_vesk/client.js') {
@@ -1891,20 +1988,12 @@ function routeFullPathForChunk(chunkName: string): string | null {
     const matched = match;
     const forData = req.headers['x-vesk-data'] === '1';
 
-    // Route chunks are built on demand (see ensureRouteChunk). This must run
-    // before the page HTML is produced, because the rendered HTML carries the
-    // chunk URL the browser will ask for next. Only for real page navigations —
-    // a data request (`x-vesk-data`) returns JSON, not a document.
-    if (!forData && matched && Array.isArray(matched.nodes)) {
-      const leaf = matched.nodes.find((n) => n.page);
-      if (leaf && typeof leaf.fullPath === 'string') {
-        try {
-          await ensureRouteChunk(leaf.fullPath);
-        } catch (e) {
-          LOG.err(`client chunk build failed for ${leaf.fullPath}:`, (e as Error).message);
-        }
-      }
-    }
+    // Route chunks are built on demand (see ensureRouteChunk) — but NOT here.
+    // The chunk URL is published up front by the route tree, so the HTML can
+    // render immediately; a browser request for a not-yet-built chunk builds
+    // it on that request (see the /_vesk/static handler), which holds the
+    // response instead of 404ing. Awaiting the build before rendering made
+    // every first hard load wait on a compile before sending any HTML.
 
     async function renderSSR() {
       // Per-request SSR handoff isolation. renderPage (used for the
@@ -2364,6 +2453,17 @@ function routeFullPathForChunk(chunkName: string): string | null {
     LOG.info(`${pageCount} page${pageCount === 1 ? '' : 's'}: ${routes.join(', ') || '(none)'}`);
     if (apiCount > 0) LOG.info(`${apiCount} api route${apiCount === 1 ? '' : 's'} (app/api)`);
   });
+
+  /**
+   * Startup defers route chunks (see ensureRouteChunk), so a first visit to a
+   * route waits on a cold compile. Building every route eagerly here was worse
+   * than the problem: each build runs the whole compiler and blocks the event
+   * loop, so a warm-up walk over a large app starves the very requests it is
+   * meant to speed up (and can wedge startup on a dead toolchain service).
+   * Chunks are therefore built only on demand; the client holds the chunk
+   * request open with a generous timeout, and each successful build is
+   * persisted so a restart restores a warm session.
+   */
 
   updateSourceMapping();
 
