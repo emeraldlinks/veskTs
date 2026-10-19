@@ -66,7 +66,20 @@ export function reconcile<T>(
 				const marker = document.createComment('k:' + key);
 				const effs: Block[] = [];
 				parent.insertBefore(marker, ref);
+				// Builders insert fresh content before their fixed end anchor
+				// (no claim root at update time), i.e. at the region tail.
+				// Relocate the fresh run directly after its marker; leaving it
+				// at the tail would reverse the list because this loop walks
+				// backwards (D, C, B, A appended in that order).
+				const tail = endAnchor.previousSibling;
 				createItem(newItems[i], i, effs, null);
+				let n = tail ? tail.nextSibling : parent.firstChild;
+				const added: Node[] = [];
+				while (n && n !== endAnchor) {
+					added.push(n);
+					n = n.nextSibling;
+				}
+				for (const node of added) parent.insertBefore(node, ref);
 				map.set(key, { marker, effs });
 				ref = marker;
 			}

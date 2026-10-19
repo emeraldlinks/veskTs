@@ -430,7 +430,7 @@ describe('Client Codegen — Control Flow', () => {
 		component Demo { let &[name] = track('Vesk'); <Link href="/">{name}</Link> }
 	`, (code) => {
 		const iText = code.indexOf('document.createTextNode');
-		const iEffect = code.indexOf('effect(() => { $n');
+		const iEffect = code.indexOf('effect(() => {');
 		const iFragEnd = code.indexOf('return $f; })();');
 		expect(iText >= 0).toBe(true);
 		expect(iEffect >= 0).toBe(true);
@@ -444,7 +444,7 @@ describe('Client Codegen — Control Flow', () => {
 	bothModes('static text child of component call is created in fragment', `
 		component Demo { const name = 'Vesk'; <Link href="/">{name}</Link> }
 	`, (code) => {
-		expect(code).toContain('document.createTextNode(String(name))');
+		expect(code).toContain('document.createTextNode(String((name) ?? \'\'))');
 		expect(code).not.toContain('effect(() => { $n');
 		const iText = code.indexOf('document.createTextNode');
 		const iFragEnd = code.indexOf('return $f; })();');
@@ -461,7 +461,7 @@ describe('Client Codegen — Control Flow', () => {
 			for (const item of items) { <Link href={item.href}>{item.label}{suffix}</Link> }
 		}
 	`, (code) => {
-		expect(code).toContain('__e.push(effect(() => { $n');
+		expect(code).toContain('__e.push(effect(() => {');
 	});
 
 	// Non-tracked text inside a loop body is snapshotted per iteration at
@@ -471,7 +471,7 @@ describe('Client Codegen — Control Flow', () => {
 			for (const item of items) { <span>{item.label}</span> }
 		}
 	`, (code) => {
-		expect(code).toContain('document.createTextNode(String(item.label))');
+		expect(code).toContain('document.createTextNode(String((item.label) ?? \'\'))');
 		expect(code).not.toContain('effect(() => { $n');
 	});
 
@@ -481,7 +481,7 @@ describe('Client Codegen — Control Flow', () => {
 			while (n < 3) { <span>{n}</span>; n = n + 1 }
 		}
 	`, (code, mode) => {
-		expect(code).toContain('document.createTextNode(String(n))');
+		expect(code).toContain('document.createTextNode(String((n) ?? \'\'))');
 		expect(code).not.toContain('effect(() => { $n');
 		if (mode === 'hydrate') {
 			expect(code).toContain('__hydrate.nextElement("span",');
@@ -3153,6 +3153,12 @@ describe('generated code is valid ESM', () => {
 		import { primitive, track } from '@vesk/runtime'
 		const Pair = primitive((props) => '<i>' + props.n + '</i>')
 		component App() { <Pair n={1} /> }`,
+		// The null-safe fallback wraps the user expression; without parens the
+		// emitted `a || b ?? ''` is a SyntaxError and the chunk dies whole.
+		'non-reactive text binding with logical-or': `
+		component App(props: { label: string | null }) { return <span>{props.label || 'TBC'}</span>; }`,
+		'non-reactive text binding with logical-and': `
+		component App(props: { n: number }) { return <span>{props.n && 'yes'}</span>; }`,
 	};
 	for (const [label, source] of Object.entries(sources)) {
 		for (const mode of ['normal', 'hydrate']) {

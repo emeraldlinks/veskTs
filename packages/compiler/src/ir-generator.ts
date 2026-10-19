@@ -27,7 +27,7 @@ import {
 import type { IRNode } from '@vesk/compiler/src/ir';
 import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
 import { createBaseParser } from '@vesk/compiler/src/parser';
-import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, collapseNewlineWhitespace } from '@vesk/compiler/src/scan';
+import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, collapseNewlineWhitespace, skipString, skipComment } from '@vesk/compiler/src/scan';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { stripTypeImport } from '@vesk/compiler/src/vsk-imports';
 import { importBindingPairs } from '@vesk/compiler/src/module-imports';
@@ -44,6 +44,45 @@ let __vskAnnotations: VeskAnnotation[] = [];
  * slot handed to it by a caller that wrote `name={<div/>}`.
  */
 let __slotProps: Set<string> | null = null;
+
+/**
+ * Named type declarations (`interface SectionTitleProps { … }`,
+ * `type Foo = { … }`) in the file being compiled, keyed by name. A component
+ * that annotates its props with a named type must have that type resolved
+ * before slot-prop detection: `slotPropNamesFromType` only understands object
+ * literals, so `props: SectionTitleProps` with `action?: Component` used to
+ * degrade `{props.action}` into a stringified text binding.
+ */
+let __typeTexts: Map<string, string> | null = null;
+
+function resolveNamedTypeText(text: string | null): string | null {
+  if (!text || !__typeTexts || __typeTexts.size === 0) return text;
+  let t = text.trim();
+  for (let i = 0; i < 8; i++) {
+    if (!/^[A-Za-z_$][\w$]*$/.test(t)) return t;
+    const next = __typeTexts.get(t);
+    if (!next || next === t) return t;
+    t = next.trim();
+  }
+  return t;
+}
+
+function collectTypeTexts(ast: any, source: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const node of (ast?.body || []) as any[]) {
+    const decl =
+      (node.type === 'ExportNamedDeclaration' || node.type === 'ExportDefaultDeclaration') && node.declaration
+        ? node.declaration
+        : node;
+    if (decl?.type !== 'TSInterfaceDeclaration' && decl?.type !== 'TSTypeAliasDeclaration') continue;
+    const name = decl.id?.name as string | undefined;
+    if (!name) continue;
+    const typeNode = decl.type === 'TSInterfaceDeclaration' ? decl.body : decl.typeAnnotation;
+    if (!typeNode || typeof typeNode.start !== 'number' || typeof typeNode.end !== 'number') continue;
+    out.set(name, source.slice(typeNode.start, typeNode.end).trim());
+  }
+  return out;
+}
 
 /**
  * The identifier a component binds its props to (`props` by convention, but
@@ -955,6 +994,34 @@ function slotReadPropName(expr: any): string | null {
 }
 
 /**
+ * Splits a type body into members on top-level `;` or newlines. Unlike
+ * `splitTopLevel`, member separators are recognised even when flanked by
+ * identifier characters (`string; action` — the common interface shape).
+ */
+function splitTypeMembers(text: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let last = 0;
+  let i = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '"' || c === "'" || c === '`') { i = skipString(text, i); continue; }
+    if (c === '/' && (text[i + 1] === '/' || text[i + 1] === '*')) { i = skipComment(text, i); continue; }
+    if (c === '(' || c === '[' || c === '{' || c === '<') depth++;
+    else if (c === ')' || c === ']' || c === '}' || c === '>') { if (depth > 0) depth--; }
+    else if (depth === 0 && (c === ';' || c === '\n')) {
+      parts.push(text.slice(last, i));
+      last = i + 1;
+      i++;
+      continue;
+    }
+    i++;
+  }
+  parts.push(text.slice(last));
+  return parts;
+}
+
+/**
  * Parses an inline component props type (`{ trigger: Component; ... }`) and
  * returns the set of prop names declared as renderable content — any member
  * whose type text mentions `Component`. Those props may be handed a JSX
@@ -968,12 +1035,13 @@ function slotPropNamesFromType(propsType: string | null): Set<string> {
     const inner = findBalancedEnd(trimmed, 0) === trimmed.length - 1
       ? trimmed.slice(1, -1)
       : trimmed;
-    for (const part of splitTopLevel(inner, ';')) {
+    const members = splitTypeMembers(inner);
+    for (const part of members) {
       const colon = findTopLevelColon(part);
       if (colon === -1) continue;
-      const namePart = part.slice(0, colon).trim().replace(/^\$/, '').replace(/\?$/, '').trim();
+      const namePart = part.slice(0, colon).trim().replace(/^readonly\s+/, '').replace(/^\$/, '').replace(/\?$/, '').trim();
       const typePart = part.slice(colon + 1).trim();
-      if (namePart && typePart.includes('Component')) out.add(namePart);
+      if (namePart && /^[A-Za-z_$][\w$]*$/.test(namePart) && typePart.includes('Component')) out.add(namePart);
     }
   }
   return out;
@@ -2128,6 +2196,7 @@ function collectIdentifiers(node: any, into: Set<string>): void {
 export function generateIR(ast: any, source: string, filename?: string): IRRoot {
   __vskAnnotations = (ast as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations ?? [];
   __slotProps = null;
+  __typeTexts = collectTypeTexts(ast, source);
   const file = filename || '';
   const components: ComponentIR[] = [];
   const imports: string[] = [];
@@ -2336,7 +2405,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     // so content reads of `props.<name>` compile to slot renders instead of
     // value bindings for THIS component only.
     const prevSlotProps: Set<string> | null = __slotProps;
-    __slotProps = slotPropNamesFromType(propsType);
+    __slotProps = slotPropNamesFromType(resolveNamedTypeText(propsType));
     __propsParam = propsAlias || null;
 
     if (isStatementMode(bodyStmts)) {

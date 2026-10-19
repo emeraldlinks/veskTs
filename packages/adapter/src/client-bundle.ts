@@ -370,7 +370,9 @@ function chunkHasImports(headLen: number, mergeAborted: boolean): boolean {
  * The shared-module pass needs them so the entry bundle publishes exactly the
  * bindings the shared code will read back off `globalThis`.
  */
-function runtimeImportsOf(filePath: string): string[] {
+function runtimeImportsOf(filePath: string, seen: Set<string> = new Set()): string[] {
+  if (seen.has(filePath)) return [];
+  seen.add(filePath);
   let text: string;
   try {
     text = readFileSync(filePath, 'utf8');
@@ -386,6 +388,27 @@ function runtimeImportsOf(filePath: string): string[] {
       if (!cleaned) continue;
       const name = cleaned.split(/\s+as\s+/)[0].trim();
       if (name) names.push(name);
+    }
+  }
+  // Shared modules import each other (student.ts -> ./store), and the shim
+  // redirects EVERY @vesk/runtime import in the shared bundle — including the
+  // transitive ones. Exporting only the direct sources' bindings makes
+  // esbuild reject the build ("No matching export in runtime-shim.js"), the
+  // pass falls back to per-chunk inlining, and every chunk gets its own copy
+  // of the store: writes land in one Cell, components subscribe to another.
+  const relativeImport = /import\s+(?:type\s+)?(?:[^'"]*?\sfrom\s*)?['"](\.[^'"]+)['"]/g;
+  for (const match of text.matchAll(relativeImport)) {
+    const base = resolve(dirname(filePath), match[1]);
+    const candidates = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.jsx`,
+      join(base, 'index.ts'), join(base, 'index.tsx'), join(base, 'index.js')];
+    for (const candidate of candidates) {
+      try {
+        if (!existsSync(candidate) || !statSync(candidate).isFile()) continue;
+      } catch {
+        continue;
+      }
+      names.push(...runtimeImportsOf(candidate, seen));
+      break;
     }
   }
   return names;
@@ -998,6 +1021,13 @@ export async function generateClientBundle(
   if (codeSplit) {
     type ChunkSource = { name: string; code: string; node: RouteNode; imports: boolean; importsTable: ChunkImports };
     const chunkEntries: ChunkSource[] = [];
+    // Import tables of EVERY route chunk, even the ones `onlyRoutes` filters
+    // out. Shared-module selection must not depend on the subset being built:
+    // the entry bundle publishes `globalThis.__veskShared` once at startup,
+    // and an on-demand chunk built from a single route would otherwise see each
+    // module "used once" and inline a duplicate copy — the exact module-scope
+    // duplication (auth/session cells) the shared pass exists to prevent.
+    const allRouteImportTables: ChunkImports[] = [];
 
     function walkSplit(nodes: RouteNode[], _chain: RouteNode[]): void {
       for (const node of nodes) {
@@ -1041,6 +1071,11 @@ export async function generateClientBundle(
         }
         if (chunkCode.length > 0) {
           const chunkName = `page-${buildChunkName(appDir, node)}.js`;
+          // Record the import table before the route-level filter below:
+          // shared-module selection (line ~1130) needs the FULL app graph so
+          // that an on-demand `onlyRoutes` build picks the same shared set as
+          // the entry bundle built at startup.
+          allRouteImportTables.push(chunkImports);
           // Route-level filter for on-demand dev builds. `only` is FILE-level:
           // it keeps a recompile cheap but still walks every route, so it
           // cannot make a COLD build lazy.
@@ -1101,8 +1136,10 @@ export async function generateClientBundle(
      * bundle for every page.
      */
     const sharedUsage = new Map<string, number>();
-    for (const entry of chunkEntries) {
-      for (const source of new Set(entry.importsTable.sources())) {
+    const sharedUsageTables: ChunkImports[] = [...allRouteImportTables];
+    if (sharedCode.length > 0) sharedUsageTables.push(sharedImports);
+    for (const table of sharedUsageTables) {
+      for (const source of new Set(table.sources())) {
         sharedUsage.set(source, (sharedUsage.get(source) ?? 0) + 1);
       }
     }
@@ -1376,7 +1413,7 @@ export async function generateClientBundle(
         if (emitted) {
           const fileName = options?.hmr ? chunkName : hashedName(chunkName, emitted.code);
           node.chunk = `/_vesk/static/${fileName}`;
-        } else if (options?.skipRouteChunks) {
+        } else if (options?.skipRouteChunks && (node.page || node.layout)) {
           // The body is deferred, but the URL must still be published now.
           // The route tree — chunk URLs included — is baked into the ENTRY
           // bundle and the client router fetches `node.chunk` with no server
@@ -1385,6 +1422,19 @@ export async function generateClientBundle(
           // Dev chunk URLs are unhashed, so they depend only on the route and
           // are identical whether or not the body has been built — which also
           // keeps the entry bundle's cache key stable across lazy builds.
+          //
+          // Layout-only container nodes (e.g. `app/public` with `layout.vsk`
+          // but no `page.vsk`) DO own a chunk: hydration calls the layout
+          // hydrator for every chain node, and without this URL the layout
+          // chunk is never loaded -> `hydLayout is not a function` -> the
+          // default 500 page replaces the SSR output.
+          //
+          // Page-less and layout-less container nodes (a directory with only
+          // a dynamic child, e.g. `app/portal/assessments/[assessmentId]`) get
+          // no chunk, exactly as in a production build. Publishing one here
+          // makes the router eagerly preload a URL that is never built: the
+          // 404 surfaces as a dev overlay ("Failed to load chunk") on
+          // unrelated pages.
           node.chunk = `/_vesk/static/${chunkName}`;
         }
         annotate(node.children || []);

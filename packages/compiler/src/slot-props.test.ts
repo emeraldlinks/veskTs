@@ -106,6 +106,28 @@ describe('ir-generator — slot IR shape', () => {
     expect(reads.includes('children')).toBe(false);
   });
 
+  it('resolves a named props interface before slot-prop detection', () => {
+    const src = `
+interface PanelProps { title: string; action?: Component }
+component Panel(props: PanelProps) { return <div>{props.title}{props.action}</div>; }
+component App { return <Panel title="x" action={<button>Go</button>}/>; }
+`;
+    const ir = generateIR(parse(src), src);
+    const panel = ir.components.find((c) => c.name === 'Panel');
+    const reads = [];
+    (function collect(nodes) {
+      for (const n of nodes) {
+        if (n instanceof PropSlotRender) reads.push(n.propName);
+        if (n && Array.isArray(n.children)) collect(n.children);
+      }
+    })(panel.body);
+    expect(reads.includes('action')).toBeTruthy();
+
+    const code = compileClient(src, null, { forceClient: true, hydrate: false });
+    expect(code).toContain('props.action.nodeType !== undefined');
+    expect(code).not.toContain('.data = String(props.action)');
+  });
+
   it('leaves slot props out of the plain props object', () => {
     const ir = generateIR(parse(slotSource), slotSource);
     const app = ir.components.find((c) => c.name === 'App');
@@ -139,6 +161,15 @@ component App { return <Child trigger="hello"/>; }
     const code = compileClient(src, null, { forceClient: true, hydrate: false });
     expect(code).toContain('document.createTextNode(String(props.trigger))');
     expect(code).toContain('props.trigger.nodeType !== undefined');
+  });
+
+  it('guards reactive text bindings against null/undefined instead of printing them', () => {
+    const src = `
+component Demo { let &[note] = track(''); <span>{note}</span> }
+`;
+    const code = compileClient(src, null, { forceClient: true, hydrate: false });
+    expect(code).toContain("const __v = get(note);");
+    expect(code).toContain("__v == null ? '' : String(__v)");
   });
 });
 

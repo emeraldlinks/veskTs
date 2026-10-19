@@ -1,5 +1,5 @@
 import { needsHydration, hydrationCount, createHydrateWalker, createHydrateChildWalker, hydrateOnInteraction, hydrateIdle, hydrate, assertFullyHydrated, auditHydration, setHydrateDevMode, setHydrateStrict, onHydrationMismatch, bumpNavEpoch, isVskMarkerText, parseVskMarker } from '@vesk/runtime/src/hydrate';
-import { reconcileHydrated } from '@vesk/runtime/src/reconcile';
+import { reconcile, reconcileHydrated } from '@vesk/runtime/src/reconcile';
 import { Form } from '@vesk/runtime/src/form';
 import { effect } from '@vesk/runtime/src/ripple-blocks';
 import { flush_sync, get, set, track } from '@vesk/runtime/src/ripple-runtime';
@@ -2396,6 +2396,35 @@ describe('A3: deferred hydration never hydrates a dead page', () => {
     hydrateOnInteraction(c3, () => { runs3++; }, {}, { isCurrent: () => false });
     listenersB.click({ type: 'click' });
     expect(runs3).toBe(0);
+    cleanupDocument();
+  });
+});
+
+describe('reconcile plain update path', () => {
+  it('full key replacement keeps client order (no reversal)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const anchor = document.createComment('map');
+    const endAnchor = document.createComment('map-end');
+    parent.appendChild(anchor);
+    parent.appendChild(endAnchor);
+
+    // Mirrors compiled renderItem: fresh content goes before the fixed end
+    // anchor (no claim root at update time).
+    const createItem = (item, _i, effs, root) => {
+      effs.push(new BlockMock());
+      const row = root || document.createElement('span');
+      row.appendChild(document.createTextNode(String(item)));
+      parent.insertBefore(row, endAnchor);
+    };
+
+    const read = () => parent.childNodes.filter((n) => n.nodeType === 1).map((n) => n.textContent).join('');
+    const update = reconcile(anchor, endAnchor, ['A', 'B', 'C'], (s) => 'q1-' + s, createItem);
+    expect(read()).toBe('ABC');
+    update(['D', 'E', 'F']);
+    expect(read()).toBe('DEF');
+    update(['G', 'H', 'I']);
+    expect(read()).toBe('GHI');
     cleanupDocument();
   });
 });

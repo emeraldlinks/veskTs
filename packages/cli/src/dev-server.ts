@@ -511,7 +511,7 @@ const HMR_SKIP_DIRS = new Set([
 // `packages/foo/dist/index.js` is the same hazard, so the directory names are
 // also matched as path segments.
 const HMR_SKIP_MARKERS = [
-  'node_modules/', '.vesk/', 'tmp-vesk-chunk-',
+  'node_modules/', '.vesk/', 'tmp-vesk-chunk-', 'tmp-vesk-shared-',
   '/dist/', '/build/', '/coverage/', '/out/', '/.next/', '/.nuxt/', '/.output/',
   '/.svelte-kit/', '/.turbo/', '/.cache/', '/.vercel/', '/.netlify/',
 ];
@@ -1015,6 +1015,18 @@ function routeFullPathForChunk(chunkName: string): string | null {
       clientBundle = main;
       devBundleBytes = Buffer.byteLength(main, 'utf8');
       storeChunks(chunks);
+      // `storeChunks` REPLACES the chunk map. The routes marked built belong
+      // to the previous map, so without this reset a full rebuild triggered by
+      // a source edit leaves every previously-visited route looking built but
+      // absent from the map: its chunk 404s forever and the dev overlay turns
+      // every page into "500 Failed to load chunk". Mirror the cache-restore
+      // path: only chunks that actually came back count as built.
+      routeChunksBuilt.clear();
+      for (const c of chunks) {
+        const fullPath = c.name === SHARED_CHUNK_NAME ? null : routeFullPathForChunk(c.name);
+        if (fullPath) routeChunksBuilt.add(fullPath);
+      }
+      clientGeneration++;
       // Only a startup build (which produced every chunk) is cacheable; an
       // on-demand build produces a partial set that would restore as if it
       // were the whole thing.

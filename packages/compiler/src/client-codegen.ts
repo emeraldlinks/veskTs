@@ -1170,7 +1170,9 @@ function emitDynamicBinding(ctx: Ctx, node: DynamicBinding, tracked: Map<string,
   const expr = transformTracked(node.expression as any, tracked);
   const v = ctx.n();
   if (!isReactiveExpression(node.expression, tracked)) {
-    ctx.push(`const ${v} = document.createTextNode(String(${expr}));`);
+    // Parens around `expr`: `a || b ?? ''` is a SyntaxError, and the IR keeps
+    // user precedence verbatim.
+    ctx.push(`const ${v} = document.createTextNode(String((${expr}) ?? ''));`);
     return v;
   }
   // Hydrate-mode sole-dynamic-text snapshot (Hydrate-Todo A5): initialize from
@@ -1180,7 +1182,9 @@ function emitDynamicBinding(ctx: Ctx, node: DynamicBinding, tracked: Map<string,
   // nothing and the `?? ''` keeps the old empty initial.
   const init = ssrTextExpr ? `String(${ssrTextExpr} ?? '')` : `''`;
   ctx.push(`const ${v} = document.createTextNode(${init});`);
-  const eff = `effect(() => { ${v}.data = String(${expr}); })`;
+  // `null`/`undefined` render nothing (matching the SSR `raw()` helper), so a
+  // dynamically absent value never paints the literal string "undefined".
+  const eff = `effect(() => { const __v = ${expr}; ${v}.data = __v == null ? '' : String(__v); })`;
   if (effectsVar) {
     ctx.push(`${effectsVar}.push(${eff});`);
   } else {
