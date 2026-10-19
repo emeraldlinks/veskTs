@@ -413,6 +413,10 @@ async function renderNotFound(
 		} else if (typeof nfDom === 'string') {
 			container.innerHTML = nfDom;
 		}
+		// The not-found boundary still represents the current URL: without
+		// this the match stayed at the previous page and a later back/forward
+		// or `router.route` read reported a route whose DOM was long gone.
+		router._currentMatch = match;
 		return;
 	}
 	if (container.replaceChildren) container.replaceChildren();
@@ -1037,12 +1041,20 @@ async function renderErrorPage(
 	match: RouteMatch,
 	container: HTMLElement,
 	error: unknown,
+	navToken?: number,
 ): Promise<void> {
+	// Staleness guard: this render can be awaited across microtasks (layout /
+	// error components may suspend). When the caller supplies the navigation
+	// token it started under, abort the paint if a newer navigation landed
+	// meanwhile — otherwise the late error DOM clobbers the newer page while
+	// the URL already points at it ("URL changes but the component stays").
+	const stale = () => navToken !== undefined && (router._navToken || 0) !== navToken;
 	clearOfflineFlag(router, container);
 	const chain = match.matchChain;
 	const paramValues = match.params;
 	const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
 	if (!errorFn) {
+		if (stale()) return;
 		if (container.replaceChildren) container.replaceChildren();
 		else container.innerHTML = '';
 		container.innerHTML = defaultErrorHtml(500, 'Internal Server Error');
@@ -1087,6 +1099,7 @@ async function renderErrorPage(
 	};
 
 	const dom = await runInBlockWindow(() => renderErrorChain(0));
+	if (stale()) return;
 	if (dom && typeof dom === 'object' && (dom as Node).nodeType) {
 		if (container.replaceChildren) container.replaceChildren(dom as Node);
 		else { container.innerHTML = ''; container.appendChild(dom as Node); }
@@ -1101,6 +1114,12 @@ async function hydrateInitial(
 	container: HTMLElement,
 	strategy: string,
 ): Promise<void> {
+	// Token at hydration start (usually 0 — before any client navigation).
+	// Every container paint below passes it to its async renderer so a
+	// navigation that happens mid-hydration (slow first paint, heavy SSR
+	// error render) is not clobbered when the hydration render finally
+	// resolves.
+	const hydrationNavToken = router._navToken || 0;
 	const chain = match.matchChain;
 	const paramValues = match.params;
 
@@ -1148,7 +1167,7 @@ async function hydrateInitial(
 				// malformed payload — keep the generic message
 			}
 		}
-		await renderErrorPage(router, match, container, makeSsrError(message));
+		await renderErrorPage(router, match, container, makeSsrError(message), hydrationNavToken);
 		return;
 	}
 
@@ -1180,6 +1199,7 @@ async function hydrateInitial(
 			match,
 			container,
 			chunkErr || new Error(`Component "${pageNode._pageName}" is unavailable`),
+			hydrationNavToken,
 		);
 		return;
 	}
@@ -1302,7 +1322,7 @@ async function hydrateInitial(
 		try {
 			await renderMatch(router, match, container);
 		} catch (err2: unknown) {
-			await renderErrorPage(router, match, container, err2);
+			await renderErrorPage(router, match, container, err2, hydrationNavToken);
 		}
 	}
 }
@@ -1988,7 +2008,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					looksOffline().then((offline) => {
 						navDebug('handleNavFailure verdict', offline ? 'offline' : 'online');
 						if (offline) return void renderOfflinePage(router, match!, container);
-						return void renderErrorPage(router, match!, container, err);
+						return void renderErrorPage(router, match!, container, err, navToken);
 					}).catch(() => {});
 				};
 

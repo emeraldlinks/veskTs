@@ -35,6 +35,7 @@ import type { ChunkEntry, ClientBundleCache } from '@vesk/adapter/src/types';
 import type { RouteNode, VeskPlugin, VeskEventHandlers, ServerEventContext, CompileFileResult } from '@vesk/compiler/src/types';
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
 import { renderDefaultNotFoundPage } from '@vesk/adapter/src/default-pages';
+import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
 import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
 import { buildErrorPayload } from '@vesk/adapter/src/hmr';
 import { resolveClientErrorReport, resolveRuntimeErrorPayload, renderDevErrorPage, formatErrorLocation } from '@vesk/adapter/src/ssr-error';
@@ -1846,21 +1847,29 @@ function routeFullPathForChunk(chunkName: string): string | null {
     const match = matchUrl(routeTree, url.pathname);
 
     if (!match) {
-      const rootNode = routeTree.find(n => (n.fullPath as string) === '/');
+      // Nearest-boundary walk over the URL's directories, the same rule the
+      // client router and prod server use: `app/admin/not-found.vsk` owns
+      // `/admin/*`, the root file is only the fallback. Reading the root file
+      // unconditionally made a hard load of `/admin/<unknown>` show the ROOT
+      // page (or the framework's internal 404 when no root file existed)
+      // while the SPA for the same URL showed the nested one.
       let notFoundHtml: string | null = null;
-      if (rootNode && rootNode.notFound) {
-        const nfPath = resolve(appDirPath, rootNode.sourceDir as string, 'not-found.vsk');
-        if (existsSync(nfPath)) {
-          try {
-            const nfSrc = readFileSync(nfPath, 'utf-8');
-            const nfCompName = extractCompName(nfSrc) || (rootNode.notFound as string);
-            notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: nfPath, cached: cachedSsrCompile(ssrCompileCache, nfSrc, nfPath), plugins: getActiveDevPlugins() as VeskPlugin[] });
-          } catch {}
-        }
+      const nfPath = resolveBoundaryFileForUrl(url.pathname, appDirPath, 'not-found.vsk');
+      if (nfPath) {
+        try {
+          const nfSrc = readFileSync(nfPath, 'utf-8');
+          const nfCompName = extractCompName(nfSrc) || 'NotFound';
+          notFoundHtml = await renderFullPage(nfSrc, nfCompName, { params: {}, url: url.pathname }, new Map(), { hydrate: true, cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: nfPath, cached: cachedSsrCompile(ssrCompileCache, nfSrc, nfPath), plugins: getActiveDevPlugins() as VeskPlugin[] });
+        } catch {}
       }
       logRequest(404);
       res.writeHead(404, { 'Content-Type': 'text/html' });
-      res.end(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname }));
+      // Boundary pages must boot the client router like every other SSR page.
+      // Without the dev scripts the reloaded 404 page had no `window.
+      // __vesk_router` at all: SPA navigation and back/forward then did
+      // nothing (the URL moved, the DOM never did). Same injection the
+      // NotFoundError branch below applies.
+      res.end(notFoundHtml ? injectDevScripts(notFoundHtml) : renderDefaultNotFoundPage({ url: url.pathname }));
       return;
     }
 
