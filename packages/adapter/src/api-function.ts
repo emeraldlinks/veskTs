@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, dirname } from 'node:path';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { resolveImportPath } from '@vesk/compiler/src/module-imports';
 import type { ApiRouteNode, ApiFunctionOptions } from '@vesk/adapter/src/types';
 
 function apiRouteName(fullPath: string): string {
@@ -21,6 +22,23 @@ export function generateApiFunction(
   const routeFilePath = apiNode.filePath;
   if (!routeFilePath) throw new Error(`api route ${apiNode.fullPath} has no filePath`);
   let routeSrc = readFileSync(routeFilePath, 'utf-8');
+
+  // The function file lives in dist/server/api/, so the route's own relative
+  // specifiers (`../../../../src/_lib/...`) would resolve against that layout
+  // and fail to load. Resolve them against the route file's real directory
+  // while it is still known, then point them at build-machine absolute paths:
+  // `vesk start` imports the file directly, and platform bundling inlines it.
+  const routeDir = dirname(routeFilePath);
+  routeSrc = routeSrc.replace(
+    /(from\s+['"]|import\s*\(\s*['"])(\.{1,2}\/[^'"]+)(['"])/g,
+    (match, prefix: string, spec: string, suffix: string) => {
+      try {
+        return prefix + resolveImportPath(spec, routeDir) + suffix;
+      } catch {
+        return match;
+      }
+    },
+  );
 
   routeSrc = routeSrc
     .replace(/from\s+['"]@vesk\/runtime['"]\s*;?/g, "from '../runtime.js';")
@@ -235,9 +253,14 @@ export function generateApiFunction(
     middlewareCode ? "import { parseCookies as __parseCookies } from '../runtime.js';" : '',
     '',
     middlewareCode || '',
-    'export async function handle(request) {',
+    // Underscored internal name: route source is inlined above and commonly
+    // imports a user helper called `handle`, which would otherwise clash with
+    // (and crash) this wrapper. The public export name is preserved.
+    'async function __vesk_api_handle(request) {',
     handleBody,
     '}',
+    '',
+    'export { __vesk_api_handle as handle };',
     '',
   ].filter(Boolean).join('\n');
 

@@ -552,7 +552,9 @@ let htmlFnCode: string;
   ].join('\n');
 
   const actionCode = [
-    'export async function handleAction(request, id) {',
+    // Underscored internal name (see api-function.ts): page source is inlined
+    // into this module and may declare/import `handleAction` itself.
+    'async function __vesk_handleAction(request, id) {',
     '  // CSRF defense: cross-site browser POSTs always carry an Origin header.',
     '  try {',
     '    assertSameOrigin(request);',
@@ -629,6 +631,8 @@ let htmlFnCode: string;
     '    globalThis.__vesk_request = prevReq;',
     '  }',
     '}',
+    '',
+    'export { __vesk_handleAction as handleAction };',
     '',
   ].join('\n');
 

@@ -482,12 +482,16 @@ function regenerateSsrFunction(
     '',
     persistedStoreSsrCode(),
     '',
-    'export async function handle(request) {',
+    // Underscored internal name (see api-function.ts): page source is inlined
+    // above and may declare its own `handle`.
+    'async function __vesk_ssr_handle(request) {',
     '  const url = new URL(request.url);',
     "  const urlParts = url.pathname.split('/').filter(Boolean);",
     `  ${paramsCode}`,
     renderCode,
     '}',
+    '',
+    'export { __vesk_ssr_handle as handle };',
   ].join('\n');
   writeFileSync(funcPath, funcCode, 'utf-8');
 }
