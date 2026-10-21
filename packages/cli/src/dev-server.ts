@@ -45,6 +45,14 @@ import type { HmrErrorPayload } from '@vesk/adapter/src/hmr';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
 
+/** Preserve every Set-Cookie header — Headers collapses them otherwise. */
+function toNodeHeaders(response: Response): Record<string, string | string[]> {
+	const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
+	const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+	if (cookies.length > 0) headers['set-cookie'] = cookies;
+	return headers;
+}
+
 // Shared @vesk/agentic checkpoint manager — module singleton so history persists across requests
 const agenticCheckpointManager = new CheckpointManager();
 
@@ -1904,7 +1912,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
             });
             if (mwResult.response) {
               logRequest(mwResult.response.status);
-              res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
+              res.writeHead(mwResult.response.status, toNodeHeaders(mwResult.response));
               res.end(await mwResult.response.text());
               return;
             }
@@ -1933,7 +1941,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         }
         logRequest(response.status);
         const body = await response.text();
-        res.writeHead(response.status, Object.fromEntries(response.headers));
+        res.writeHead(response.status, toNodeHeaders(response));
         res.end(body);
         return;
       }
@@ -2252,7 +2260,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
           const respRecord = mwResult.response as unknown as Record<string, unknown>;
           if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
           logRequest(mwResult.response.status);
-          res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
+          res.writeHead(mwResult.response.status, toNodeHeaders(mwResult.response));
           res.end(await mwResult.response.text());
           return;
         }

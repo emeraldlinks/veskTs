@@ -3,7 +3,7 @@ import { existsSync } from 'node:fs';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
 import { parse } from '@vesk/compiler/src/parser';
-import { importBindingPairs, resolveImportPath } from '@vesk/compiler/src/module-imports';
+import { importBindingPairs, resolveImportPath, resolveSsrModule } from '@vesk/compiler/src/module-imports';
 import { importModuleTarget, tokenizeCode } from '@vesk/compiler/src/tokens';
 
 /**
@@ -99,12 +99,19 @@ export function collectVskReexportPaths(reexportSources: string[], sourcePath: s
 }
 
 function resolveVskTarget(target: string, sourcePath: string): string | null {
-  if (target.startsWith('.')) {
-    const full = resolve(dirname(sourcePath), target);
-    return existsSync(full) ? full : null;
-  }
-  const aliased = resolveImportPath(target, dirname(sourcePath));
-  return aliased !== target && existsSync(aliased) ? aliased : null;
+	if (target.startsWith('.')) {
+		const full = resolve(dirname(sourcePath), target);
+		return existsSync(full) ? full : null;
+	}
+	// Bare specifiers (`vesk-paystack/components/PayButton.vsk`) are a package
+	// subpath, not a tsconfig alias. `resolveImportPath` only knows aliases and
+	// returns the specifier untouched, so a component library's `.vsk` import
+	// never resolved even though Node's `exports` map — and Vesk's own SSR
+	// resolver — handle it fine. Use the resolver that understands packages.
+	const aliased = resolveImportPath(target, dirname(sourcePath));
+	if (aliased !== target && existsSync(aliased)) return aliased;
+	const published = resolveSsrModule(target, dirname(sourcePath));
+	return published !== null && published.endsWith('.vsk') && existsSync(published) ? published : null;
 }
 
 /**

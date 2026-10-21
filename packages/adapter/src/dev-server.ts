@@ -64,8 +64,16 @@ const devHmrState: () => DevHmrState =
  * Writes a handler Response to the socket, piping a streaming body
  * chunk-by-chunk (SSE / text streams) instead of buffering everything.
  */
+/** Preserve every Set-Cookie header — Headers collapses them otherwise. */
+function toNodeHeaders(response: Response): Record<string, string | string[]> {
+  const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
+  const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+  if (cookies.length > 0) headers['set-cookie'] = cookies;
+  return headers;
+}
+
 async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
-  res.writeHead(response.status, Object.fromEntries(response.headers));
+  res.writeHead(response.status, toNodeHeaders(response));
   const body = response.body;
   if (body && typeof body.getReader === 'function') {
     const reader = body.getReader();

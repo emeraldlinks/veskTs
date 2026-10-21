@@ -4,6 +4,7 @@ dist/
 .DS_Store
 ripple-fork-source/
 test-app/node_modules
+test-app/tmp-vesk-shared-*/
 chrome-headless-shell/
 /.vesk/
 vpngate_list.csv

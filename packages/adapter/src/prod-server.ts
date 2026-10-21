@@ -52,8 +52,16 @@ const DELIVER_BUFFER_LIMIT = 1024 * 1024;
  * or that declares an open-ended content type, falls back to streaming so the
  * memory and time-to-first-byte cost of a genuinely large body is unchanged.
  */
+/** Preserve every Set-Cookie header — Headers collapses them otherwise. */
+function toNodeHeaders(response: Response): Record<string, string | string[]> {
+  const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
+  const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
+  if (cookies.length > 0) headers['set-cookie'] = cookies;
+  return headers;
+}
+
 async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
-  const headers = Object.fromEntries(response.headers);
+  const headers = toNodeHeaders(response);
   const body = response.body;
   if (!body || typeof body.getReader !== 'function') {
     res.writeHead(response.status, headers);
@@ -138,6 +146,26 @@ interface BuildConfig {
 
 interface MatchPathResult {
   [key: string]: string;
+}
+
+function firstHeaderValue(value: string | string[] | undefined): string | undefined {
+  const raw = Array.isArray(value) ? value[0] : value;
+  const trimmed = raw?.split(',')[0]?.trim();
+  return trimmed || undefined;
+}
+
+export function resolveRequestUrl(req: IncomingMessage, port: number, trustProxy: boolean): URL {
+  const proto = (req.socket as { encrypted?: boolean }).encrypted
+    ? 'https'
+    : getClientProtocol({ headers: req.headers } as Record<string, unknown>, trustProxy);
+  const forwardedHost = trustProxy ? firstHeaderValue(req.headers['x-forwarded-host']) : undefined;
+  const host = forwardedHost || (req.headers.host as string) || `localhost:${port}`;
+  const path = req.url || '/';
+  try {
+    return new URL(path, `${proto}://${host}`);
+  } catch {
+    return new URL(path, `http://localhost:${port}`);
+  }
 }
 
 export async function startProdServer(outDir: string, options?: ProdServerOptions): Promise<Server> {
@@ -314,12 +342,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
   }
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
-    const url = new URL(req.url || '/', `http://localhost:${port}`);
-    const reqHost = (req.headers.host as string) || `localhost:${port}`;
-    const proto = (req.socket as { encrypted?: boolean }).encrypted
-      ? 'https'
-      : getClientProtocol({ headers: req.headers } as Record<string, unknown>, !!securityConfig?.trustProxy);
-    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = `${proto}://${reqHost}`;
+    const url = resolveRequestUrl(req, port, !!securityConfig?.trustProxy);
+    (globalThis as Record<string, unknown>).__vesk_ssr_base_url = url.origin;
 
     // Liveness probe. Deliberately the FIRST thing in the handler, ahead of the
     // rate limiter, middleware and the pipeline below:

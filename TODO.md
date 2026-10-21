@@ -5,6 +5,39 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (vesk-paystack integration: compiler/adapter/runtime fixes the
+library exposed):**
+
+- [x] **BUG (compiler): bare `.vsk` imports from a package did not resolve.**
+  A library is expected to ship components (`vesk-paystack/components/PayButton.vsk`)
+  and an app imports them by name; the resolver only handled relative `.vsk`
+  paths. `vsk-imports.ts` now resolves the package export and its `.vsk` entry,
+  with regression tests.
+- [x] **BUG (runtime): `on_destroy()` crashed when `scope()` returned
+  `undefined`.** Cleanup during island teardown dereferenced the absent scope;
+  the guard now checks both `block` and `block.tc` before using them.
+- [x] **BUG (adapter): shared library modules in a client chunk could inline a
+  second runtime.** Non-`.vsk` modules importing `@vesk/runtime` are now
+  hoisted to one shared bundle (`__veskShared`), keyed by resolved file, so the
+  library and the page use one runtime instance. Function exports survive the
+  shim; value exports (`active_block`) do not — the shim wraps every name as a
+  function, so value exports must remain server-only. Regression test still
+  TODO.
+- [x] **BUG (compiler): a top-level `if`/runtime statement before an island's
+  first markup claim dropped the inherited markerless skip budget.** Reproduced
+  in the paystack fixture: the page injected `skip=1`, but the first claim ran
+  with `skip=0`, claimed the preceding `<h2>`, and appended a second button
+  while the SSR button stayed disabled. `claimsWalkerNode()` treated every
+  `OpaqueDynamicRegion` as claiming, even when neither branch contained an
+  element; the region's comment fences do not move the SSR walker. Branch
+  claims are now evaluated under the same `claimStatic` flag as emission, so a
+  statement-only `if` leaves the budget for the next real claim. Regression:
+  `client-codegen.test.ts` 404/404, including the new runtime-only-`if` case.
+- **Verification:** `vesk-paystack` 113/113 unit tests; disposable test-app
+  browser pass (one hydrated button, enabled; one Paystack script; no console
+  errors), SSR disabled button + real form, and a no-JS `303` to a live hosted
+  checkout. Live test-mode verify/webhook replay also passed.
+
 **This session (multipart uploads: docs, E2E — and the plugin was inoperable):**
 
 Writing the E2E turned up three defects that made `@vesk/plugin-multipart`

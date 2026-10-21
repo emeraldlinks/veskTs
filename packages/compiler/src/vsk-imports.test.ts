@@ -173,6 +173,50 @@ describe('collectVskImportPaths', () => {
     }
   });
 
+  it('resolves a package .vsk import through its exports map', () => {
+    const tmp = mkdtempSync('/tmp/vesk-vskimports-test-');
+    try {
+      const srcDir = join(tmp, 'app');
+      const pkgDir = join(tmp, 'node_modules', 'vesk-paystack');
+      mkdirSync(srcDir, { recursive: true });
+      mkdirSync(join(pkgDir, 'components'), { recursive: true });
+      const componentPath = join(pkgDir, 'components', 'PayButton.vsk');
+      writeFileSync(componentPath, 'export component PayButton() {}');
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
+        name: 'vesk-paystack',
+        type: 'module',
+        exports: { './components/PayButton.vsk': './components/PayButton.vsk' },
+      }));
+      const paths = collectVskImportPaths([
+        `import { PayButton } from 'vesk-paystack/components/PayButton.vsk';`,
+      ], join(srcDir, 'page.vsk'));
+      expect(paths.length).toBe(1);
+      expect(paths[0]).toBe(componentPath);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('resolves a package .vsk import without an exports map', () => {
+    const tmp = mkdtempSync('/tmp/vesk-vskimports-test-');
+    try {
+      const srcDir = join(tmp, 'app');
+      const pkgDir = join(tmp, 'node_modules', 'vesk-paystack');
+      mkdirSync(srcDir, { recursive: true });
+      mkdirSync(join(pkgDir, 'components'), { recursive: true });
+      const componentPath = join(pkgDir, 'components', 'PayButton.vsk');
+      writeFileSync(componentPath, 'export component PayButton() {}');
+      writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({ name: 'vesk-paystack' }));
+      const paths = collectVskImportPaths([
+        `import { PayButton } from 'vesk-paystack/components/PayButton.vsk';`,
+      ], join(srcDir, 'page.vsk'));
+      expect(paths.length).toBe(1);
+      expect(paths[0]).toBe(componentPath);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
   it('skips bare non-alias specifiers that are not project files', () => {
     const tmp = mkdtempSync('/tmp/vesk-vskimports-test-');
     try {

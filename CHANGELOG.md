@@ -2,6 +2,23 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## Unreleased
+
+_No breaking changes._
+
+### Features
+
+- **compiler:** resolve bare `.vsk` component imports through package exports, so a library can ship `vesk-lib/components/Button.vsk` and an app can import it by name.
+
+### Fixes
+
+- **compiler:** a top-level `if` containing only statements no longer clears the markerless first-claim skip budget, which could make an island claim the preceding server element and leave its own SSR node stranded.
+- **runtime:** `on_destroy()` no longer crashes cleanup code when `scope()` returns `undefined`.
+- **adapter:** hoist non-`.vsk` modules that import `@vesk/runtime` into the shared client bundle instead of inlining a second runtime per chunk. Function exports work through the shared shim; value exports do not and must stay server-side.
+- **adapter:** catch-all API routes now capture the whole remaining path (for example `signin/google`) instead of only the first segment.
+- **adapter:** the production server builds request URLs from the `Host` header and, when `trustProxy` is enabled, `x-forwarded-host`/`x-forwarded-proto`. OAuth error redirects and same-origin checks no longer fall back to `localhost`.
+- **runtime:** `useSearchParams()` reads the live location while hydration is still populating router state, so query parameters are available on the first render.
+
 ## 0.2.72 — 2026-10-17
 
 _No breaking changes._

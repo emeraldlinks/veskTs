@@ -2759,13 +2759,33 @@ function isStaticIR(body: IRNode[]): boolean {
 function claimsWalkerNode(ctx: Ctx, node: IRNode): boolean {
   if (node instanceof StaticNode) return ctx.claimStatic || !isStaticIR(node.children);
   if (node instanceof ComponentCall) return true;
-  if (node instanceof OpaqueDynamicRegion) return true;
+  // A hydration-mode `if` emits comment fences even when neither branch
+  // contains an element. Those fences are created client-side and do not move
+  // the SSR walker, so the region must not clear an inherited first-claim
+  // budget unless one of its branches actually claims. Treating every region
+  // as claiming made a top-level statement-only `if` (a debug assignment, a
+  // store write) before the first island element consume `takeSkipK()` and
+  // claim the preceding server node.
+  if (node instanceof OpaqueDynamicRegion) {
+    return branchClaimsWalker(ctx, node.consequentNodes) || branchClaimsWalker(ctx, node.alternateNodes);
+  }
   if (node instanceof MapRegion) return true;
   if (node instanceof ForLoop) return true;
   if (node instanceof WhileLoop) return true;
   if (node instanceof SwitchBlock) return true;
   if (node instanceof TryCatch) return true;
   return false;
+}
+
+// Opaque-region branches are emitted with `claimStatic = true`, so a static
+// element in a branch does consume a walker slot. Evaluate the branch under
+// that same flag without leaking it into the caller.
+function branchClaimsWalker(ctx: Ctx, nodes: IRNode[]): boolean {
+  const previous = ctx.claimStatic;
+  ctx.claimStatic = true;
+  const claims = nodes.some((node) => claimsWalkerNode(ctx, node));
+  ctx.claimStatic = previous;
+  return claims;
 }
 
 function isStaticComponent(comp: ComponentIR): boolean {

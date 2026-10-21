@@ -553,7 +553,16 @@ export function usePathname(): string {
 }
 
 export function useSearchParams(): [URLSearchParams, (next: Record<string, string> | string) => void] {
-	const s = get(_state.search) as string;
+	// Hydration can invoke a page before the router has copied the current URL
+	// into `_state.search`. Falling back to the live location keeps the query
+	// available on the first render, including OAuth error redirects, instead
+	// of making pages read `window.location` themselves.
+	const routed = get(_state.search) as string;
+	const s =
+		routed ||
+		(typeof window !== 'undefined' && window.location?.search
+			? window.location.search.replace(/^\?/, '')
+			: '');
 	const sp = new URLSearchParams(s || '');
 	const setter = (next: Record<string, string> | string) => {
 		const q = typeof next === 'string' ? next : new URLSearchParams(next).toString();

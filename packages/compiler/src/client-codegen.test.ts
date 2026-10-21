@@ -2600,6 +2600,22 @@ describe('Client Codegen — Markerless Hydration', () => {
 		expect(code).toContain('nextElement("span", 1)');
 	});
 
+	// A top-level `if` that only runs a statement (no markup) emits hydration
+	// fences but does not move the SSR walker. It must leave the inherited
+	// first-claim budget intact; clearing it made the next element claim the
+	// caller's residue instead of its own slot.
+	it('[markerless hyd] runtime-only top-level if preserves the first-claim budget', () => {
+		const code = compileClient(`
+			component Child() { const &[t] = track('hi'); return <span>{t}</span>; }
+			export default component App() {
+				if (window.__debug === undefined) { window.__debug = []; }
+				<div><em class="static">margin</em><Child/></div>
+			}
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('nextElement("div", $n');
+		expect(code).not.toContain('nextElement("div", 0)');
+	});
+
 	it('[markerless hyd] region claims inside a claimed parent keep relative skipK', () => {
 		const code = compileClient(`
 			const open = true;

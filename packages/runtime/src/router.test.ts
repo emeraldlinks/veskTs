@@ -1,5 +1,5 @@
 import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute } from '@vesk/runtime/src/router';
-import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating, applyHead } from '@vesk/runtime/src/router-components';
+import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating, applyHead, _state } from '@vesk/runtime/src/router-components';
 import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
 import { parseHTML } from 'linkedom';
 import { useLoadingIndicator, isLoadingActive, getLoadingError } from '@vesk/runtime/src/loading-indicator';
@@ -315,6 +315,19 @@ test('useSearchParams returns tuple', () => {
 	const [sp, setter] = useSearchParams();
 	expect(sp instanceof URLSearchParams).toBe(true);
 	expect(typeof setter).toBe('function');
+});
+
+test('useSearchParams reads location before router state is populated', () => {
+	const previous = globalThis.window.location.search;
+	globalThis.window.location.search = '?error=OAuthCallback';
+	const state = _state as unknown as { search: { value: string } };
+	state.search.value = '';
+	try {
+		const [sp] = useSearchParams();
+		expect(sp.get('error')).toBe('OAuthCallback');
+	} finally {
+		globalThis.window.location.search = previous;
+	}
 });
 
 test('buildRouteTree with defineRoute helper', () => {

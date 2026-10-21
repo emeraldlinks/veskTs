@@ -57,9 +57,16 @@ export function generateApiFunction(
   const urlParts = apiNode.fullPath.split('/').filter(Boolean);
   const extracts: string[] = [];
   let partIdx = 0;
-  for (const p of urlParts) {
-    if (p.startsWith(':') && p.includes('...')) {
+  for (let i = 0; i < urlParts.length; i++) {
+    const p = urlParts[i];
+    // Catch-all routes carry `isCatchAll` separately from their `:name`
+    // path segment, so the shape of the segment alone is not enough to tell
+    // `[...rest]` from `[id]`. Consume the whole remaining tail or the param
+    // would silently stop after the first segment.
+    const isCatchAll = apiNode.isCatchAll && i === urlParts.length - 1;
+    if (p.startsWith(':') && (isCatchAll || p.includes('...'))) {
       extracts.push(`${JSON.stringify(p.slice(1))}: urlParts.slice(${partIdx}).join('/')`);
+      partIdx = urlParts.length;
     } else if (p.startsWith(':')) {
       extracts.push(`${JSON.stringify(p.slice(1))}: urlParts[${partIdx}]`);
       partIdx++;

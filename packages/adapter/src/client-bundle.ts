@@ -11,7 +11,7 @@ import { VskComponentOwners } from '@vesk/compiler/src/vsk-collision';
 import { resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { collectVskImportPaths, vskImportLines } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
-import { resolveImportPath, findTsconfigPath } from '@vesk/compiler/src/module-imports';
+import { resolveImportPath, resolveSsrModule, findTsconfigPath } from '@vesk/compiler/src/module-imports';
 import { serverOnlyPlugin } from '@vesk/adapter/src/server-only-plugin';
 import type { RouteNode, ClientBundleOptions, ClientBundleResult, ChunkEntry, MonolithicBundleParts, ClientBundleChunkSpec, ClientBundleFileEntry } from '@vesk/adapter/src/types';
 import { availableParallelism } from 'node:os';
@@ -1145,12 +1145,43 @@ export async function generateClientBundle(
     }
     const isAppLocal = (source: string): boolean =>
       !source.includes('node_modules') && source.startsWith(resolve(appDir, '..'));
-    const sharedSources = [...sharedUsage.entries()]
-      .filter(([source, uses]) => uses > 1 && isAppLocal(source))
-      .map(([source]) => source);
+    // Resolve bare package specifiers (`vesk-paystack/client`) to their real
+    // files before inspecting them. The import tables key bare specifiers as
+    // written, while the shared bundle needs a path esbuild can load from the
+    // temp directory (the app's node_modules is not an ancestor of it).
+    const sharedFilesFor = new Map<string, string>();
+    for (const [source, uses] of sharedUsage) {
+      let file = source;
+      if (!source.startsWith('/')) {
+        try {
+          file = resolveSsrModule(source, appDir) ?? source;
+        } catch {
+          // Unresolvable specifier — not hoistable.
+        }
+      }
+      if (file.endsWith('.vsk') || !existsSync(file)) continue;
+      // A module that imports the runtime carries reactive state: `track()`
+      // cells created in one bundled copy of @vesk/runtime are invisible to
+      // effects subscribed against the entry bundle's copy. Package modules
+      // (`node_modules`) were excluded historically because third-party code
+      // has "no module state worth sharing" — but a hook library that owns a
+      // tracked cell is exactly that state. Hoist any such module into the
+      // shared bundle, where its runtime imports are redirected to the single
+      // entry instance, even when only one chunk uses it.
+      let needsRuntime = false;
+      try {
+        needsRuntime = runtimeImportsOf(file).length > 0;
+      } catch {
+        // Unparseable/unreadable — leave it to the per-chunk bundler.
+      }
+      if (needsRuntime || (uses > 1 && isAppLocal(source))) {
+        sharedFilesFor.set(source, file);
+      }
+    }
+    const sharedSources = [...new Set(sharedFilesFor.values())];
     if (process.env.VESK_DEBUG_SHARED) {
       console.error('[shared] candidates:', [...sharedUsage.entries()].map(([s, n]) => `${n}x ${s}`).join('\n'));
-      console.error('[shared] selected:', sharedSources.join(', '));
+      console.error('[shared] selected:', [...sharedFilesFor.entries()].map(([s, f]) => `${s} -> ${f}`).join('\n'));
     }
 
     const chunkAlias: Record<string, string> = {};
@@ -1209,8 +1240,10 @@ export async function generateClientBundle(
         });
         sharedBundleCode = result.outputFiles[0].text;
         // Per-chunk shims: `export const login = __veskShared['…'].login`.
-        // esbuild inlines these tiny stubs instead of the real module.
-        sharedSources.forEach((source, i) => {
+        // esbuild inlines these tiny stubs instead of the real module. A
+        // package can be imported by its bare specifier in one chunk and by
+        // its absolute path in another; both aliases read the same file entry.
+        [...sharedFilesFor.entries()].forEach(([source, file], i) => {
           const named = new Set<string>();
           let hasDefault = false;
           for (const entry of chunkEntries) {
@@ -1219,7 +1252,7 @@ export async function generateClientBundle(
             hasDefault = hasDefault || bindings.hasDefault;
           }
           const shim = join(tmpBase, `shim-${i}.js`);
-          const shimLines = [`const m = globalThis.__veskShared[${JSON.stringify(source)}];`];
+          const shimLines = [`const m = globalThis.__veskShared[${JSON.stringify(file)}];`];
           if (hasDefault) shimLines.push(`export default m;`);
           for (const name of [...named].sort()) {
             shimLines.push(`export const ${name} = m[${JSON.stringify(name)}];`);

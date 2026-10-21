@@ -237,8 +237,10 @@ export function run_teardown(block: Block): void {
 
 export function on_destroy(fn: () => void): void {
 	const block = scope();
-	if (block === null) return;
-	if (block.tc === null) block.tc = [];
+	// `scope()` can be undefined, not just null: a hook can be called during a
+	// client render that is not inside a block. Treat both as "no owner".
+	if (block == null) return;
+	if (block.tc == null) block.tc = [];
 	block.tc.push(fn);
 }
 
