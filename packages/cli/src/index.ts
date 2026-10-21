@@ -3,6 +3,8 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { resolve, join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+import { spawn } from 'child_process';
 import { loadVeskConfig } from '@vesk/adapter/src/load-config';
 import type { VeskSecurity } from '@vesk/compiler/src/types';
 import { setRedactLogging, setRuntimeModule } from '@vesk/compiler/src/server-utils';
@@ -13,6 +15,7 @@ import * as __veskRuntime from '@vesk/runtime/src/index-server';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = resolve(__filename, '..');
+const requireFromCli = createRequire(import.meta.url);
 
 const args = process.argv.slice(2);
 const cmd = args[0];
@@ -117,6 +120,38 @@ function resolveProjectDirs(projectDir: string, config: Record<string, unknown> 
   };
 }
 
+/**
+ * Next.js-style build gate: a project with a tsconfig must pass `tsc --noEmit`
+ * before the compiler starts producing output. A failed check stops the build
+ * rather than shipping a bundle whose types were already known to be broken.
+ */
+async function typecheckBeforeBuild(projectDir: string): Promise<void> {
+  if (!existsSync(join(projectDir, 'tsconfig.json'))) return;
+
+  let tscPath: string;
+  try {
+    tscPath = requireFromCli.resolve('typescript/bin/tsc', { paths: [projectDir] });
+  } catch {
+    console.error('vesk build: typecheck skipped — TypeScript is not installed in this project.');
+    return;
+  }
+
+  console.error('vesk build: typechecking...');
+  const exitCode = await new Promise<number>((resolveExit) => {
+    const child = spawn(process.execPath, [tscPath, '--noEmit', '-p', projectDir], {
+      cwd: projectDir,
+      stdio: 'inherit',
+    });
+    child.on('error', () => resolveExit(1));
+    child.on('close', (code) => resolveExit(code ?? 1));
+  });
+
+  if (exitCode !== 0) {
+    console.error('vesk build: typecheck failed — fix the errors above and build again.');
+    process.exit(1);
+  }
+}
+
 if (cmd === 'build') {
   const projectDir = process.cwd();
   const rawConfig = (await loadConfig(projectDir) || {}) as Record<string, unknown>;
@@ -148,6 +183,7 @@ if (cmd === 'build') {
   if (config.ssg !== undefined && config.ssg !== false) opts.ssg = true;
 
   try {
+    await typecheckBeforeBuild(projectDir);
     await build(appDirPath, opts);
     const { drainMdHtmlWarnings } = await import('@vesk/runtime/src/md') as { drainMdHtmlWarnings: () => Array<{ tag: string }> };
     const drained = drainMdHtmlWarnings();
