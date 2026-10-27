@@ -182,13 +182,13 @@ export function generateSsrFunction(
   mkdirSync(plansDir, { recursive: true });
 
   function writePlan(planKey: string, planJSON: string): string {
-    const fileName = `plan-${planKey}.json`;
-    writeFileSync(resolve(plansDir, fileName), planJSON, 'utf-8');
+    const fileName = `plan-${planKey}.mjs`;
+    writeFileSync(resolve(plansDir, fileName), `export const plan = ${planJSON};\n`, 'utf-8');
     return `/_vesk/static/ssr-plans/${fileName}`;
   }
 
-  /** Generates a lazy getter that fetches a precompiled plan JSON and compiles
-   *  it with hydratePrecompile on first use, caching the result. Fetch failures
+  /** Generates a lazy getter that imports a precompiled plan module and compiles
+   *  it with hydratePrecompile on first use, caching the result. Import failures
    *  degrade to null (renderPage falls back to compiling from source).
    *  The IIFE form is a single expression so it can be placed anywhere — inside
    *  array literals, object literals, or at module scope — without syntax errors.
@@ -199,9 +199,8 @@ export function generateSsrFunction(
   return async () => {
     if (cache) return cache;
     try {
-      const res = await fetch(${JSON.stringify(planUrl)});
-      const plan = await res.json();
-      cache = hydratePrecompile(plan);
+      const mod = await import(${JSON.stringify(planUrl)});
+      cache = hydratePrecompile(mod.plan);
     } catch { cache = null; }
     return cache;
   };
