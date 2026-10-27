@@ -189,18 +189,23 @@ export function generateSsrFunction(
 
   /** Generates a lazy getter that fetches a precompiled plan JSON and compiles
    *  it with hydratePrecompile on first use, caching the result. Fetch failures
-   *  degrade to null (renderPage falls back to compiling from source). */
+   *  degrade to null (renderPage falls back to compiling from source).
+   *  The IIFE form is a single expression so it can be placed anywhere — inside
+   *  array literals, object literals, or at module scope — without syntax errors.
+   */
   function planGetterCode(varName: string, planUrl: string): string {
-    return `let ${varName}Cache = null;
-const ${varName} = async () => {
-  if (${varName}Cache) return ${varName}Cache;
-  try {
-    const res = await fetch(${JSON.stringify(planUrl)});
-    const plan = await res.json();
-    ${varName}Cache = hydratePrecompile(plan);
-  } catch { ${varName}Cache = null; }
-  return ${varName}Cache;
-}`;
+    return `const ${varName} = (() => {
+  let cache = null;
+  return async () => {
+    if (cache) return cache;
+    try {
+      const res = await fetch(${JSON.stringify(planUrl)});
+      const plan = await res.json();
+      cache = hydratePrecompile(plan);
+    } catch { cache = null; }
+    return cache;
+  };
+})();`;
   }
 
   const parts = routeNode.fullPath.split('/').filter(Boolean);
