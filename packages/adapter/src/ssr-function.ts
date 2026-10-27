@@ -231,7 +231,7 @@ async function ${varName}() {
     const plan = precompilePlan(entryPath);
     layoutDecls.push({
       comp: JSON.stringify(entryComp),
-      planUrl: writePlan('layout-' + li, plan),
+      planUrl: writePlan('layout-' + name + '-' + li, plan),
     });
   }
 
@@ -289,7 +289,7 @@ async function ${varName}() {
   let compCounter = 0;
   for (const [compName, compPath] of compMap) {
     const plan = precompilePlan(compPath);
-    const compPlanUrl = writePlan('comp-' + compCounter, plan);
+    const compPlanUrl = writePlan('comp-' + name + '-' + compCounter, plan);
     const compGetter = '_compiled_' + compCounter;
     compCounter++;
     compRegEntries.push(`  (() => {\n${planGetterCode(compGetter, compPlanUrl)}\n    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: await ${compGetter}() });\n      return result.body;\n    });\n  })();`);
