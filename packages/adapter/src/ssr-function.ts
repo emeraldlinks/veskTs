@@ -192,7 +192,7 @@ export function generateSsrFunction(
    *  degrade to null (renderPage falls back to compiling from source). */
   function planGetterCode(varName: string, planUrl: string): string {
     return `let ${varName}Cache = null;
-async function ${varName}() {
+const ${varName} = async () => {
   if (${varName}Cache) return ${varName}Cache;
   try {
     const res = await fetch(${JSON.stringify(planUrl)});
@@ -261,10 +261,15 @@ async function ${varName}() {
   const pagePlanUrl = writePlan('page-' + name, pagePlan);
   let src = '';
   if (layoutDecls.length > 0) {
+    const pageGetter = planGetterCode('_pageCompiled', pagePlanUrl);
+    const layoutGetters = layoutDecls.map((d, i) =>
+      planGetterCode('_layoutCompiled_' + i, d.planUrl),
+    );
     src = `const _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += planGetterCode('_pageCompiled', pagePlanUrl) + '\n';
+    src += pageGetter + '\n';
+    src += layoutGetters.join('\n') + '\n';
     src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
-    src += `const _layoutCompiledList = [\n${layoutDecls.map((d, i) => '  ' + planGetterCode('_layoutCompiled_' + i, d.planUrl) + ',').join('\n')}\n];\n`;
+    src += `const _layoutCompiledList = [${layoutDecls.map((_, i) => '_layoutCompiled_' + i).join(', ')}];\n`;
     src += errorVars + notFoundVars;
   } else {
     src = `const _comp = ${JSON.stringify(pageComp)};\n`;
