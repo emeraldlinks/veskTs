@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.76 — 2026-10-27
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** add VESK_CHUNK_CONCURRENCY env override for memory-constrained builds
+
 ## 0.2.74 — 2026-10-27
 
 _No breaking changes._
