@@ -2,6 +2,31 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.74 — 2026-10-27
+
+_No breaking changes._
+
+### Features
+
+- **cli:** typecheck before build
+
+### Fixes
+
+- **compiler,adapter,runtime:** package .vsk imports, shared runtime, API catch-all params
+- **adapter:** load production API and SSR functions with project imports
+- **cli,runtime:** non-blocking dev chunks and scoped file watcher
+- **cli,runtime:** nearest-boundary dev 404s and stale-render guards
+- **compiler,runtime,adapter:** hydration correctness and dev-server reliability
+- **compiler:** build pure-static children when a fresh parent has no SSR residue
+
+### Chores
+
+- **perf:** re-baseline client budget after chunk reallocation
+
+### Other
+
+- prepare v0.2.73
+
 ## Unreleased
 
 _No breaking changes._
