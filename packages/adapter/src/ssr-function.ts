@@ -178,13 +178,13 @@ export function generateSsrFunction(
   // instead of being embedded inline. Embedding every page/layout/error plan as
   // inline JSON makes each SSR function module large enough to OOM on memory-
   // constrained build containers (e.g. Vercel's 2048 MB serverless limit).
-  const plansDir = resolve(outDir, 'static', '_vesk', 'ssr-plans');
+  const plansDir = resolve(outDir, 'static', 'ssr-plans');
   mkdirSync(plansDir, { recursive: true });
 
   function writePlan(planKey: string, planJSON: string): string {
     const fileName = `plan-${planKey}.json`;
     writeFileSync(resolve(plansDir, fileName), planJSON, 'utf-8');
-    return `/_vesk/ssr-plans/${fileName}`;
+    return `/_vesk/static/ssr-plans/${fileName}`;
   }
 
   /** Generates a lazy getter that fetches a precompiled plan JSON and compiles
