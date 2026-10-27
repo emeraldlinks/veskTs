@@ -183,8 +183,11 @@ export function generateSsrFunction(
 
   function writePlan(planKey: string, planJSON: string): string {
     const fileName = `plan-${planKey}.mjs`;
-    writeFileSync(resolve(plansDir, fileName), `export const plan = ${planJSON};\n`, 'utf-8');
-    return `/_vesk/static/ssr-plans/${fileName}`;
+    const planFile = resolve(plansDir, fileName);
+    writeFileSync(planFile, `export const plan = ${planJSON};\n`, 'utf-8');
+    // Return a relative path from the SSR function directory so dynamic
+    // import() inside the generated function resolves to the plan module.
+    return relative(resolve(outDir, 'server', 'functions'), planFile);
   }
 
   /** Generates a lazy getter that imports a precompiled plan module and compiles
