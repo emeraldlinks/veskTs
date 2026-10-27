@@ -1427,7 +1427,10 @@ export async function generateClientBundle(
     // Concurrency is capped below the core count: esbuild's own service is
     // already multi-process, so oversubscribing every chunk at once trades
     // throughput for memory on the constrained machines this runs on.
-    const CHUNK_CONCURRENCY = Math.max(1, Math.min(6, (availableParallelism?.() ?? 4) - 1));
+    const envConcurrency = process.env.VESK_CHUNK_CONCURRENCY ? Number(process.env.VESK_CHUNK_CONCURRENCY) : NaN;
+    const CHUNK_CONCURRENCY = Number.isFinite(envConcurrency) && envConcurrency >= 1
+      ? Math.floor(envConcurrency)
+      : Math.max(1, Math.min(6, (availableParallelism?.() ?? 4) - 1));
     const built = await mapWithConcurrency(effectiveChunkEntries, CHUNK_CONCURRENCY, buildChunkEntry);
     for (const c of built) {
       if (c !== null) chunks.push(c);
