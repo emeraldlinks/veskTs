@@ -1,6 +1,6 @@
 {
   "name": "@vesk/runtime",
-  "version": "0.2.76",
+  "version": "0.2.77",
   "type": "module",
   "description": "Vesk runtime — reactivity, blocks, DOM operations, hydration",
   "main": "./dist/index-client.js",
@@ -80,7 +80,7 @@
     }
   },
   "dependencies": {
-    "@vesk/compiler": "^0.2.76"
+    "@vesk/compiler": "^0.2.77"
   },
   "scripts": {
     "typecheck": "tsc --noEmit",

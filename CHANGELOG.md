@@ -2,6 +2,20 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.77 — 2026-10-27
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** use relative file paths for SSR plan module imports
+- **adapter:** import SSR plan modules instead of fetch()
+- **adapter:** correct SSR plan URL path to /_vesk/static/ssr-plans/
+- **adapter:** make SSR plan getters pure expressions via IIFE
+- **adapter:** use const arrow functions for SSR plan getters
+- **adapter:** scope SSR plan keys per route to prevent collisions
+- **adapter:** externalize SSR precompiled plans to static files
+
 ## 0.2.76 — 2026-10-27
 
 _No breaking changes._
