@@ -13,7 +13,7 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { resolveSsrModule, collectModuleBundled, type ModuleCollector } from '@vesk/compiler/src/module-imports';
+import { resolveSsrModule, collectModuleBundled, ModuleRegistry } from '@vesk/compiler/src/module-imports';
 
 let passed = 0;
 let failed = 0;
@@ -153,13 +153,13 @@ it('a workspace package import is bundled into the module closure', () => {
     'node_modules/@acme/ui/dist/index.js': 'export const shared = 1;',
     'node_modules/@acme/ui/dist/button.js': "import { shared } from './index.js';\nexport const Button = shared;",
   });
-  const collector: ModuleCollector = { keysByAbs: new Map(), modules: [] };
-  const key = collectModuleBundled(String(resolveSsrModule('@acme/ui/button', dir)), collector);
+  const registry = new ModuleRegistry();
+  const key = collectModuleBundled(String(resolveSsrModule('@acme/ui/button', dir)), registry);
   assert(key.startsWith('__veskMod'), 'no synthetic module key was produced');
-  const code = collector.modules.map((m) => m.code).join('\n');
+  const code = Object.values(registry.modules()).map((m) => m.code).join('\n');
   assert(code.includes('Button'), 'the workspace export is not in the bundle');
   assert(code.includes('shared'), 'the workspace package internal was not bundled with it');
-  assert(collector.modules.length === 2, `expected the closure to include index.js, got ${collector.modules.length} modules`);
+  assert(Object.keys(registry.modules()).length === 2, `expected the closure to include index.js, got ${Object.keys(registry.modules()).length} modules`);
 });
 
 console.log(`\n${'='.repeat(50)}`);

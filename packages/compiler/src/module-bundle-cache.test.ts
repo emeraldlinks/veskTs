@@ -15,12 +15,12 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readSsrSource, collectModuleBundled } from '@vesk/compiler/src/module-imports';
-import type { ModuleCollector } from '@vesk/compiler/src/module-imports';
+import { readSsrSource, collectModuleBundled, ModuleRegistry } from '@vesk/compiler/src/module-imports';
 
-/** Each `.vsk` compile builds its own collector — that is the whole point. */
-function freshCollector(): ModuleCollector {
-  return { keysByAbs: new Map(), modules: [] };
+/** Each `.vsk` compile registers into a module registry — dedup is global now,
+ *  and the transpiled code cache is keyed by path+mtime. */
+function freshRegistry(): ModuleRegistry {
+  return new ModuleRegistry();
 }
 
 let passed = 0;
@@ -88,12 +88,12 @@ it('a missing module still reports unreadable instead of throwing', () => {
 
 it('two collectors get the same transpiled code for a shared module', () => {
   const { shared } = fixture();
-  const first = freshCollector();
-  const second = freshCollector();
+  const first = freshRegistry();
+  const second = freshRegistry();
   collectModuleBundled(shared, first);
   collectModuleBundled(shared, second);
-  assert(first.modules.length === 1, 'the shared module was not bundled at all');
-  const codeOf = (c: ModuleCollector): string => c.modules.map((m) => m.code).join('\n');
+  assert(Object.keys(first.modules()).length === 1, 'the shared module was not bundled at all');
+  const codeOf = (r: ModuleRegistry): string => Object.values(r.modules()).map((m) => m.code).join('\n');
   assert(
     codeOf(first) === codeOf(second),
     'a second collector produced different code for the same module — the cached code diverges',
@@ -103,15 +103,15 @@ it('two collectors get the same transpiled code for a shared module', () => {
 
 it('an edited shared module changes what the next importer gets', () => {
   const { shared } = fixture();
-  const codeOf = (): string => {
-    const c = freshCollector();
-    collectModuleBundled(shared, c);
-    return c.modules.map((m) => m.code).join('\n');
-  };
-  const before = codeOf();
+  const codeOf = (r: ModuleRegistry): string => Object.values(r.modules()).map((m) => m.code).join('\n');
+  const r1 = freshRegistry();
+  collectModuleBundled(shared, r1);
+  const before = codeOf(r1);
   writeFileSync(shared, 'export const GUIDE = { title: "three" };\n');
   touch(shared, 5);
-  const after = codeOf();
+  const r2 = freshRegistry();
+  collectModuleBundled(shared, r2);
+  const after = codeOf(r2);
   assert(
     before !== after,
     'the bundle cache served the previous module body after the file changed — a stale edit would ship',
@@ -134,15 +134,13 @@ it('a large closure does not thrash the cache (icon-barrel shape)', () => {
     lines.push(`export { v${i} } from './leaf${i}.ts';`);
   }
   writeFileSync(barrel, lines.join('\n') + '\n');
-  const bundle = (): ModuleCollector => {
-    const c = freshCollector();
-    collectModuleBundled(barrel, c);
-    return c;
-  };
-  const first = bundle();
-  const second = bundle();
-  const codeOf = (c: ModuleCollector): string => c.modules.map((m) => m.code).join('\n');
-  assert(first.modules.length > N, `expected the whole closure to be bundled, got ${first.modules.length}`);
+  const bundle = (r: ModuleRegistry) => collectModuleBundled(barrel, r);
+  const first = freshRegistry();
+  bundle(first);
+  const second = freshRegistry();
+  bundle(second);
+  const codeOf = (r: ModuleRegistry): string => Object.values(r.modules()).map((m) => m.code).join('\n');
+  assert(Object.keys(first.modules()).length > N, `expected the whole closure to be bundled, got ${Object.keys(first.modules()).length}`);
   assert(codeOf(first) === codeOf(second), 'a large closure produced different code on the second pass');
   assert(codeOf(second).includes('v699'), 'the tail of the closure is missing from the second pass');
 });
