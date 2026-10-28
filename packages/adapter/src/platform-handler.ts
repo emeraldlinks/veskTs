@@ -362,12 +362,18 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
     // ESM output. Define a real `require` anchored at the bundle URL before
     // the shim initializes so Node loads builtins and node_modules for real.
     // `node:module` stays external (platform: 'node'), so Node resolves it
-    // natively at runtime.
-    banner: {
-      js:
-        'import { createRequire } from "node:module";\n' +
-        'const require = createRequire(import.meta.url);\n',
-    },
+    // natively at runtime. Edge targets keep the empty-node builtin stubs and
+    // must not get this banner (it would collide with their stubbed
+    // `createRequire`).
+    ...(nodeBuiltins
+      ? {
+          banner: {
+            js:
+              'import { createRequire } from "node:module";\n' +
+              'const require = createRequire(import.meta.url);\n',
+          },
+        }
+      : {}),
     logOverride: { 'direct-eval': 'silent' },
     plugins,
   });
