@@ -1,4 +1,4 @@
-import { writeFileSync, mkdirSync, rmSync, cpSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { generatePlatformHandlerSource, bundlePlatformHandler, type PlatformBuildContext } from '@vesk/adapter/src/platform-handler';
 import { ensureCleanDir, writePlatformStatic, writePrerenderedStatic, listStaticDir, mimeFor } from '@vesk/adapter/src/platform-output';

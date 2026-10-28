@@ -352,15 +352,22 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
     outfile,
     minify: false,
     sourcemap: false,
-    // Node targets run from a real deployment root: leave bare packages to the
-    // platform's dependency tracer instead of inlining them. Bundling CJS
-    // packages into the ESM handler turned their `require('events')` and
-    // friends into esbuild's throwing `__require` shim (slintorm's pg driver
-    // failed with "Dynamic require of \"events\" is not supported"), and it
-    // inflated the single function file to millions of lines — the cold-start
-    // memory spike behind the SIGKILLs. Edge targets have no node_modules, so
-    // they keep bundling everything.
-    packages: nodeBuiltins ? 'external' : undefined,
+    // Edge targets have no node_modules so every package is bundled. Node
+    // targets bundle everything too — self-contained functions avoid the
+    // "Cannot find package" failures that externalization causes on hosts that
+    // don't install dependencies for Build Output API functions.
+    // Bundled CJS modules (e.g. pg's internals via slintorm) call
+    // require('events') etc. esbuild rewrites those into its `__require`
+    // shim, which throws 'Dynamic require of "events" is not supported' in
+    // ESM output. Define a real `require` anchored at the bundle URL before
+    // the shim initializes so Node loads builtins and node_modules for real.
+    // `node:module` stays external (platform: 'node'), so Node resolves it
+    // natively at runtime.
+    banner: {
+      js:
+        'import { createRequire } from "node:module";\n' +
+        'const require = createRequire(import.meta.url);\n',
+    },
     logOverride: { 'direct-eval': 'silent' },
     plugins,
   });
