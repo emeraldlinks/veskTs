@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.82 — 2026-10-28
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** externalize packages in node platform bundles so CJS drivers load
+
 ## 0.2.81 — 2026-10-28
 
 _No breaking changes._
