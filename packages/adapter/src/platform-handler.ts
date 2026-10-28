@@ -62,7 +62,25 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
   const hasEvents = !!input.hasEvents;
 
   let imports = '';
-  const routeEntries: string[] = [];
+  // route entry + its routing specificity: static routes must be matched
+  // before dynamic/catch-all routes so a catch-all like
+  // /api/auth/[...path] never shadows a static sibling such as
+  // /api/auth/login. Without this, readdirSync order (ASCII '[' < 'l') can
+  // place the catch-all first and every static route under it 404s with
+  // the catch-all's "Unknown auth endpoint."
+  type RouteEntry = { path: string; entry: string; specificity: number };
+  const routeEntries: RouteEntry[] = [];
+
+  const routeSpecificity = (path: string): number => {
+    if (/:path\b|:rest\b|\[\.\.\./.test(path)) return 3; // catch-all
+    if (/:/.test(path)) return 2; // dynamic param
+    return 1; // static
+  };
+
+  const pushEntry = (path: string, type: string, handler: string, extra: string) => {
+    const entry = `{ path: ${JSON.stringify(path)}, type: '${type}', handler: ${handler}${extra}}`;
+    routeEntries.push({ path, entry, specificity: routeSpecificity(path) });
+  };
 
   for (const r of ssrRoutes) {
     const name = routeName(r.fullPath.split('/').filter(Boolean));
@@ -71,7 +89,7 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
     imports += `import { handle as ${id} } from ${JSON.stringify(funcPath)};\n`;
     const revalidate = r._revalidate != null ? `revalidate: ${r._revalidate}, ` : '';
     const tags = r._isrTags ? `tags: ${JSON.stringify(r._isrTags)}, ` : '';
-    routeEntries.push(`{ path: ${JSON.stringify(r.fullPath)}, type: 'ssr', handler: ${id}, ${revalidate}${tags}}`);
+    pushEntry(r.fullPath, 'ssr', id, `, ${revalidate}${tags}`);
   }
 
   for (const r of apiRoutes) {
@@ -79,8 +97,10 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
     const id = `__api_${toId(name)}`;
     const funcPath = `./server/api/${name}.js`;
     imports += `import { handle as ${id} } from ${JSON.stringify(funcPath)};\n`;
-    routeEntries.push(`{ path: ${JSON.stringify('/api' + r.fullPath)}, type: 'api', handler: ${id} }`);
+    pushEntry('/api' + r.fullPath, 'api', id, '}');
   }
+
+  routeEntries.sort((a, b) => a.specificity - b.specificity);
 
   const mwImport = hasMiddleware ? "import { execute as __executeMw } from './server/middleware.js';" : '';
   const hasMwLiteral = hasMiddleware ? 'true' : 'false';
@@ -112,7 +132,7 @@ ${eventsImport}
 ${prerenderedList}
 ${isrCache}
 ${defaultNotFoundLine}
-const __routes = [${routeEntries.join(',\n')}];
+const __routes = [${routeEntries.map((e) => e.entry).join(',\n')}];
 
 async function __invokeRoute(route, request) {
   try {

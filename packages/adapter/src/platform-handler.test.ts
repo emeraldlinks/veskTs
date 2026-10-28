@@ -123,6 +123,31 @@ async function main() {
     });
   });
 
+  await describe('route ordering: static routes match before catch-all', async () => {
+    stageAdapter();
+    stageCompiler();
+    const { generatePlatformHandlerSource } = await importStaged();
+
+    await it('static /api/auth/login is declared before catch-all /api/auth/:path', async () => {
+      const src = generatePlatformHandlerSource({
+        ssrRoutes: [],
+        apiRoutes: [
+          { fullPath: '/auth/:path' },
+          { fullPath: '/auth/login' },
+        ],
+        prerenderedPaths: [],
+        hasMiddleware: false,
+        appDir: tmpRoot,
+      });
+      const routesBlock = src.split('const __routes = [', 2)[1]?.split('];', 2)[0] ?? '';
+      const loginIdx = routesBlock.indexOf('path: "/api/auth/login"');
+      const catchAllIdx = routesBlock.indexOf('path: "/api/auth/:path"');
+      assert(loginIdx !== -1, 'expected static login api route in __routes');
+      assert(catchAllIdx !== -1, 'expected catch-all api route in __routes');
+      assert(loginIdx < catchAllIdx, `static login route (${loginIdx}) must precede catch-all (${catchAllIdx})`);
+    });
+  });
+
   await describe('generated handleRequest error mapping (edge parity)', async () => {
     const appDir = join(tmpRoot, 'app');
     mkdirSync(appDir, { recursive: true });
