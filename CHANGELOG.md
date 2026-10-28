@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.86 — 2026-10-28
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** align API param extraction with /api mount prefix
+
 ## 0.2.85 — 2026-10-28
 
 _No breaking changes._
