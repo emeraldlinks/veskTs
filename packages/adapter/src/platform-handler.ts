@@ -97,7 +97,7 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
     const id = `__api_${toId(name)}`;
     const funcPath = `./server/api/${name}.js`;
     imports += `import { handle as ${id} } from ${JSON.stringify(funcPath)};\n`;
-    pushEntry('/api' + r.fullPath, 'api', id, '}');
+    pushEntry('/api' + r.fullPath, 'api', id, '');
   }
 
   routeEntries.sort((a, b) => a.specificity - b.specificity);
