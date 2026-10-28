@@ -2,6 +2,19 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.84 — 2026-10-28
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** pass __veskModules registry to every hydratePrecompile call site
+- **adapter:** deduplicate module source across SSR functions to fix cold-start OOM
+
+### Tests
+
+- **compiler:** update bundle-cache and workspace-resolution tests for module registry API
+
 ## 0.2.83 — 2026-10-28
 
 _No breaking changes._
