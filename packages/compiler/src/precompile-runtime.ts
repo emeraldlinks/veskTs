@@ -26,7 +26,7 @@ import {
 } from '@vesk/compiler/src/ir';
 import { loadRuntimeImports, evalTopLevelCode, getRuntimeModule } from '@vesk/compiler/src/server-utils';
 import { applyVskRegistryAliases, vskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
-import type { BundledModuleData, ModuleBindingData } from '@vesk/compiler/src/module-imports';
+import type { ModuleBindingData, ModuleEntry, ModuleRef } from '@vesk/compiler/src/module-imports';
 
 type ScopedFn = Function & { __veskScope?: Record<string, unknown> };
 
@@ -48,7 +48,7 @@ export interface PrecompiledComponentEntry {
   isAsync: boolean;
 }
 
-export type PrecompileBundledModule = BundledModuleData;
+export type PrecompileBundledModule = ModuleRef;
 
 export type PrecompileBinding = ModuleBindingData;
 
@@ -64,8 +64,8 @@ export interface PrecompileFilePlan {
   runtimeImports: string[];
   /** This file's own compiled components. */
   components: PrecompiledComponentEntry[];
-  /** The module bundle backing this file's local value imports. */
-  modules: PrecompileBundledModule[];
+  /** The module bundle backing this file's local value imports (keys into the shared __veskModules registry). */
+  modules: ModuleRef[];
   /** local name -> bundled module export. */
   bindings: PrecompileBinding[];
   /** Top-level statements, already `defineAction`-transformed for `server`. */
@@ -175,27 +175,29 @@ export function irFromJSON(value: unknown): unknown {
 // Hydration.
 // ---------------------------------------------------------------------------
 
-function hydrateModuleScope(scope: Record<string, unknown>, plan: PrecompileFilePlan): void {
+function hydrateModuleScope(
+  scope: Record<string, unknown>,
+  plan: PrecompileFilePlan,
+  modules: Record<string, ModuleEntry>,
+): void {
   if (!plan.modules || plan.modules.length === 0) return;
-  const byKey = new Map<string, PrecompileBundledModule>();
-  for (const m of plan.modules) byKey.set(m.key, m);
 
   const exportsByKey = new Map<string, Record<string, unknown>>();
 
   const evaluateModule = (key: string): Record<string, unknown> | null => {
     const existing = exportsByKey.get(key);
     if (existing) return existing;
-    const mod = byKey.get(key);
-    if (!mod) return null;
+    const entry = modules[key];
+    if (!entry) return null;
     const exportsObj: Record<string, unknown> = {};
     exportsByKey.set(key, exportsObj);
     const moduleObj = { exports: exportsObj };
     const requireShim = (spec: string): unknown => {
-      const depKey = mod.deps[spec];
+      const depKey = entry.deps[spec];
       if (depKey) return evaluateModule(depKey) || {};
       // Framework runtime imports resolve to the instance the SSR bundle
       // already loaded. Leaving them to the real loader broke every
-      // serverless deployment: `mod.dir` is the BUILD-time absolute path
+      // serverless deployment: `entry.dir` is the BUILD-time absolute path
       // (/vercel/path0/src/_lib), which does not exist at runtime, so
       // `require('@vesk/runtime')` walked a market that was not there.
       if (
@@ -211,7 +213,7 @@ function hydrateModuleScope(scope: Record<string, unknown>, plan: PrecompileFile
       // real loader. Anchor at the module's own dir first (dev/local), then at
       // the process cwd, which is the deployment root on serverless hosts.
       let lastErr: unknown;
-      for (const anchor of [mod.dir, process.cwd()]) {
+      for (const anchor of [entry.dir, process.cwd()]) {
         try {
           return createRequire(join(anchor, '__vesk__.js'))(spec);
         } catch (err) {
@@ -219,17 +221,17 @@ function hydrateModuleScope(scope: Record<string, unknown>, plan: PrecompileFile
         }
       }
       throw new Error(
-        `Cannot resolve '${spec}' required by ${mod.key} during SSR hydrate: ${(lastErr as Error)?.message}`
+        `Cannot resolve '${spec}' required by ${key} during SSR hydrate: ${(lastErr as Error)?.message}`
       );
     };
     try {
-      const body = mod.code ? `'use strict';\n${mod.code}` : "'use strict';";
+      const body = entry.code ? `'use strict';\n${entry.code}` : "'use strict';";
       const fn = new Function('require', 'module', 'exports', '__dirname', '__filename', body);
-      fn(requireShim, moduleObj, moduleObj.exports, mod.dir, join(mod.dir, '__vesk__.js'));
+      fn(requireShim, moduleObj, moduleObj.exports, entry.dir, join(entry.dir, '__vesk__.js'));
     } catch (err) {
       exportsByKey.delete(key);
       console.warn(
-        `[vesk] SSR: failed to evaluate bundled module ${mod.key} (${mod.dir}): ` +
+        `[vesk] SSR: failed to evaluate bundled module ${key} (${entry.dir}): ` +
           `${(err as Error)?.message ?? String(err)}`
       );
       return null;
@@ -263,10 +265,14 @@ function hydrateModuleScope(scope: Record<string, unknown>, plan: PrecompileFile
   }
 }
 
-function hydrateFile(plan: PrecompileFilePlan, seen: Set<string>): CompileFileResult {
+function hydrateFile(
+  plan: PrecompileFilePlan,
+  seen: Set<string>,
+  modules: Record<string, ModuleEntry>,
+): CompileFileResult {
   const ir = plan.ir ? (irFromJSON(plan.ir) as IRRoot) : new IRRoot([], [], new Set(), null, null, []);
   const __vesk = loadRuntimeImports(plan.runtimeImports || []);
-  hydrateModuleScope(__vesk, plan);
+  hydrateModuleScope(__vesk, plan, modules);
   evalTopLevelCode(plan.topLevelCode || [], __vesk);
 
   const componentMap = new Map<string, Function>();
@@ -284,7 +290,7 @@ function hydrateFile(plan: PrecompileFilePlan, seen: Set<string>): CompileFileRe
   for (const sub of plan.subFiles || []) {
     if (seen.has(sub.importPath)) continue;
     seen.add(sub.importPath);
-    const subResult = hydrateFile(sub.plan, seen);
+    const subResult = hydrateFile(sub.plan, seen, modules);
     for (const [name, fn] of subResult.componentMap) {
       if (!componentMap.has(name)) componentMap.set(name, fn);
     }
@@ -306,6 +312,9 @@ function hydrateFile(plan: PrecompileFilePlan, seen: Set<string>): CompileFileRe
  * `precompile.ts` plan at SSR function load time. No source, no disk, no
  * syntax analysis — the plan is fully compiled at build time.
  */
-export function hydratePrecompile(plan: PrecompileFilePlan): CompileFileResult {
-  return hydrateFile(plan, new Set());
+export function hydratePrecompile(
+  plan: PrecompileFilePlan,
+  modules: Record<string, ModuleEntry>,
+): CompileFileResult {
+  return hydrateFile(plan, new Set(), modules);
 }

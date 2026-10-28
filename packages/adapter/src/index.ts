@@ -5,6 +5,7 @@ import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
 import { resolveUserCssPath, isTailwindPlugin, resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { collectActionIds } from '@vesk/compiler/src/actions';
+import { ModuleRegistry } from '@vesk/compiler/src/module-imports';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { describeAsset, type AssetDigest } from '@vesk/adapter/src/asset-hash';
 
@@ -386,7 +387,14 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         // For standalone routes the layout chain is cleared — only the
         // standalone node's own layout (if any) applies, no root ancestors.
         const ssrAncestorLayouts = isStandalone ? [] : ancestorLayouts;
-        const { funcPath, funcCode, name } = generateSsrFunction(node, appDir, outDir, componentMap, { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra, clientScriptUrl: clientUrl, clientScriptIntegrity: clientIntegrity });
+        const { funcPath, funcCode, name } = generateSsrFunction(
+          node,
+          appDir,
+          outDir,
+          componentMap,
+          { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra, clientScriptUrl: clientUrl, clientScriptIntegrity: clientIntegrity },
+          registry,
+        );
         writeFileSync(funcPath, funcCode, 'utf-8');
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (existsSync(pagePath)) {
@@ -416,7 +424,14 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
       walk(node.children || [], childAncestorLayouts);
     }
   }
+
+  const registry = new ModuleRegistry();
   walk(routeTree);
+
+  // Every SSR function imports this shared registry: module source code is
+  // stored here ONCE instead of being re-embedded in every function plan,
+  // which keeps the cold-start bundle small enough to initialize.
+  writeFileSync(resolve(outDir, 'server', '__vesk-modules.mjs'), registry.toModuleSource(), 'utf-8');
 
   markPhase('server runtime + ssr functions');
   const apiRoutes: ApiRouteNode[] = [];

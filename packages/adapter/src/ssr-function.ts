@@ -3,6 +3,7 @@ import { resolve, relative, join } from 'node:path';
 import { resolveComponentName, precompileFile } from '@vesk/compiler/src/server-codegen';
 import { resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { renderDefaultErrorFragment } from '@vesk/adapter/src/default-pages';
+import { ModuleRegistry } from '@vesk/compiler/src/module-imports';
 import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapter/src/types';
 
 /**
@@ -68,13 +69,13 @@ function extractCompName(src: string): string | null {
  * compile happens in the deployed function — `hydratePrecompile` rebuilds the
  * render result at module load from this JSON alone.
  */
-function precompilePlan(entryPath: string): string {
+function precompilePlan(entryPath: string, registry: ModuleRegistry): string {
   const src = readFileSync(entryPath, 'utf-8');
-  return JSON.stringify(precompileFile(src, entryPath));
+  return JSON.stringify(precompileFile(src, entryPath, registry));
 }
 
 function hydrateInvoke(planExpr: string): string {
-  return `(() => { try { return hydratePrecompile(${planExpr}); } catch { return null; } })()`;
+  return `(() => { try { return hydratePrecompile(${planExpr}, __veskModules); } catch { return null; } })()`;
 }
 
 function buildParamExtraction(node: RouteNode, urlParts: string[]): string[] {
@@ -168,7 +169,9 @@ export function generateSsrFunction(
   outDir: string,
   componentMap?: Map<string, string>,
   options?: SsrFunctionOptions,
+  registry?: ModuleRegistry,
 ): { funcPath: string; funcCode: string; name: string } {
+  const reg = registry ?? new ModuleRegistry();
   const ancestorLayouts = options?.ancestorLayouts || [];
   const middlewareCode = options?.middlewareCode || null;
   const headExtra = options?.headExtra || null;
@@ -198,7 +201,7 @@ export function generateSsrFunction(
     const entryPath = resolve(appDir, entry.sourceDir, 'layout.vsk');
     const entrySrc = readFileSync(entryPath, 'utf-8');
     const entryComp = extractCompName(entrySrc) || 'Layout';
-    const plan = precompilePlan(entryPath);
+    const plan = precompilePlan(entryPath, reg);
     layoutDecls.push({
       comp: JSON.stringify(entryComp),
       plan,
@@ -206,14 +209,14 @@ export function generateSsrFunction(
     });
   }
 
-  const pagePlan = precompilePlan(pagePath);
+  const pagePlan = precompilePlan(pagePath, reg);
   const pageComp = extractCompName(readFileSync(pagePath, 'utf-8')) || 'Page';
 
   const errorPath = resolveErrorFile(routeNode.sourceDir, appDir);
   const errorSrc = errorPath ? readFileSync(errorPath, 'utf-8') : null;
   const errorComp = errorPath ? (extractCompName(errorSrc as string) || 'Error') : null;
   const errorCompDecl = errorPath ? `const _errorComp = ${JSON.stringify(errorComp)};\n` : 'const _errorComp = null;\n';
-  const errorPlanExpr = errorPath ? hydrateInvoke(precompilePlan(errorPath)) : 'null';
+  const errorPlanExpr = errorPath ? hydrateInvoke(precompilePlan(errorPath, reg)) : 'null';
 
   // Not-found used to have no server-side resolution at all: a NotFoundError was
   // re-thrown out of the function and the prod server answered with the ROOT
@@ -225,7 +228,7 @@ export function generateSsrFunction(
   const notFoundSrc = notFoundPath ? readFileSync(notFoundPath, 'utf-8') : null;
   const notFoundComp = notFoundPath ? (extractCompName(notFoundSrc as string) || 'NotFound') : null;
   const notFoundCompDecl = notFoundPath ? `const _notFoundComp = ${JSON.stringify(notFoundComp)};\n` : 'const _notFoundComp = null;\n';
-  const notFoundPlanExpr = notFoundPath ? hydrateInvoke(precompilePlan(notFoundPath)) : 'null';
+  const notFoundPlanExpr = notFoundPath ? hydrateInvoke(precompilePlan(notFoundPath, reg)) : 'null';
 
   let src = '';
   if (layoutDecls.length > 0) {
@@ -260,7 +263,7 @@ export function generateSsrFunction(
   const compMap = componentMap || new Map();
   const regPlans: string[] = [];
   for (const [compName, compPath] of compMap) {
-    const plan = precompilePlan(compPath);
+    const plan = precompilePlan(compPath, reg);
     regPlans.push(`    __regPlans.set(${JSON.stringify(compName)}, ${JSON.stringify(plan)});`);
     compRegEntries.push(`    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      let _compiled = __regCompiled.get(${JSON.stringify(compName)});\n      if (!_compiled) { _compiled = hydratePrecompile(__regPlans.get(${JSON.stringify(compName)})); __regCompiled.set(${JSON.stringify(compName)}, _compiled); }\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });`);
   }
@@ -641,6 +644,7 @@ let htmlFnCode: string;
   ].join('\n');
 
   const funcCode = [
+    "import { __veskModules } from '../__vesk-modules.mjs';",
     "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
     '',
     middlewareCode || '',

@@ -1430,6 +1430,76 @@ export interface ModuleBindingData {
   kind: string;
 }
 
+/** Lightweight plan-level reference to a bundled module (no source code). */
+export interface ModuleRef {
+  /** Synthetic loader key (e.g. `__veskMod0`), referenced by deps/bindings. */
+  key: string;
+  /** Directory the module lived in at build time (require fallback anchor). */
+  dir: string;
+  /** Relative specifier (as written) -> sibling module key. */
+  deps: Record<string, string>;
+}
+
+/** What the registry stores per key: the transpiled body plus anchor dir/deps. */
+export interface ModuleEntry {
+  /** ESM->CJS rewritten body (or raw CJS / JSON `module.exports` body). */
+  code: string;
+  /** Directory the module lived in at build time (require fallback anchor). */
+  dir: string;
+  /** Relative specifier (as written) -> sibling module key. */
+  deps: Record<string, string>;
+}
+
+/**
+ * Global registry of bundled module source code, shared across every SSR
+ * function in a single build. Without it, every page plan re-embedded the
+ * full source of every module it transitively imports — a docs-style app
+ * whose 40 pages all import `lucide-vevk` stored its ~1.8 MB `buildSvgString`
+ * 40 times, inflating the single serverless handler to hundreds of megabytes
+ * and OOM-killing cold starts. Modules are registered once and every plan
+ * references them by key; the registry source is emitted into one shared file
+ * imported by every SSR function.
+ */
+export class ModuleRegistry {
+  private keysByAbs = new Map<string, string>();
+  private data = new Map<string, ModuleEntry>();
+
+  has(absPath: string): boolean {
+    return this.keysByAbs.has(absPath);
+  }
+
+  getKey(absPath: string): string | undefined {
+    return this.keysByAbs.get(absPath);
+  }
+
+  get size(): number {
+    return this.data.size;
+  }
+
+  /** Register a module's transpiled body, returning its globally-unique key. */
+  register(absPath: string, entry: ModuleEntry): string {
+    const existing = this.keysByAbs.get(absPath);
+    if (existing) return existing;
+    const key = `__veskMod${this.data.size}`;
+    this.keysByAbs.set(absPath, key);
+    this.data.set(key, entry);
+    return key;
+  }
+
+  getModule(key: string): ModuleEntry | undefined {
+    return this.data.get(key);
+  }
+
+  /** Emit a self-contained module registry source file. */
+  toModuleSource(): string {
+    const parts: string[] = [];
+    for (const [key, { code }] of this.data) {
+      parts.push(`${JSON.stringify(key)}: ${JSON.stringify(code)}`);
+    }
+    return `export const __veskModules = {${parts.join(',')}};\n`;
+  }
+}
+
 function isRelativeSpec(spec: string): boolean {
   return spec.startsWith('./') || spec.startsWith('../');
 }
@@ -1481,19 +1551,16 @@ function collectModuleSpecifiers(ast: any): Set<string> {
 }
 
 export type ModuleCollector = {
-  keysByAbs: Map<string, string>;
-  modules: BundledModuleData[];
+  modules: ModuleRef[];
 };
 
 /**
  * Bundles one module file (plus its relative closure) into `collector`.
  * Returns the synthetic key loaded modules use to reference it.
  */
-export function collectModuleBundled(absPath: string, collector: ModuleCollector): string {
-  const existing = collector.keysByAbs.get(absPath);
+export function collectModuleBundled(absPath: string, registry: ModuleRegistry): string {
+  const existing = registry.getKey(absPath);
   if (existing) return existing;
-  const key = `__veskMod${collector.keysByAbs.size}`;
-  collector.keysByAbs.set(absPath, key);
   const dir = dirname(absPath);
 
   if (absPath.endsWith('.json')) {
@@ -1503,8 +1570,7 @@ export function collectModuleBundled(absPath: string, collector: ModuleCollector
     } catch (err) {
       raw = '{}';
     }
-    collector.modules.push({ key, code: `module.exports = ${raw};`, dir, deps: {} });
-    return key;
+    return registry.register(absPath, { code: `module.exports = ${raw};`, dir, deps: {} });
   }
 
   // The transpiled code and the relative specifiers of a module do not depend
@@ -1533,8 +1599,7 @@ export function collectModuleBundled(absPath: string, collector: ModuleCollector
       // file into `new Function` and blames some unrelated module later.
       if (src?.parseError) throw src.parseError;
       const raw = src ? src.raw : '// unreadable during build\nmodule.exports = {};';
-      collector.modules.push({ key, code: raw, dir, deps: {} });
-      return key;
+      return registry.register(absPath, { code: raw, dir, deps: {} });
     }
     let stripped = src.ast;
     if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
@@ -1550,11 +1615,10 @@ export function collectModuleBundled(absPath: string, collector: ModuleCollector
     if (!isRelativeSpec(spec)) continue;
     const depPath = resolveSsrModule(spec, dir);
     if (!depPath) continue;
-    deps[spec] = collectModuleBundled(depPath, collector);
+    deps[spec] = collectModuleBundled(depPath, registry);
   }
 
-  collector.modules.push({ key, code, dir, deps });
-  return key;
+  return registry.register(absPath, { code, dir, deps });
 }
 
 const bundledCodeCache = new Map<string, { mtimeMs: number; code: string; specifiers: string[] }>();
@@ -1568,10 +1632,12 @@ const bundledCodeCache = new Map<string, { mtimeMs: number; code: string; specif
 export function collectModuleBundle(
   importStrs: string[],
   fromDir: string | undefined,
+  registry: ModuleRegistry,
   collector: ModuleCollector
 ): ModuleBindingData[] {
   const bindings: ModuleBindingData[] = [];
   if (!fromDir) return bindings;
+  const seenKeys = new Set<string>();
   for (const imp of importStrs) {
     const target = importModuleTarget(imp);
     if (!target || isCompilerOwnedTarget(target) || isValueLessTarget(target)) continue;
@@ -1580,7 +1646,12 @@ export function collectModuleBundle(
       // Keep render behavior identical to the runtime loader (warn + skip).
       continue;
     }
-    const key = collectModuleBundled(resolved, collector);
+    const key = collectModuleBundled(resolved, registry);
+    const mod = registry.getModule(key);
+    if (mod && !seenKeys.has(key)) {
+      seenKeys.add(key);
+      collector.modules.push({ key, dir: mod.dir, deps: mod.deps });
+    }
     for (const pair of importBindingPairs(imp)) {
       bindings.push({ local: pair.local, key, kind: pair.imported });
     }

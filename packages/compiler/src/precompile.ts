@@ -10,6 +10,7 @@ import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-in
 import {
   collectModuleBundle,
   type ModuleCollector,
+  ModuleRegistry,
 } from '@vesk/compiler/src/module-imports';
 import type {
   PrecompileFilePlan,
@@ -28,13 +29,18 @@ import { irToJSON } from '@vesk/compiler/src/precompile-runtime';
  * `CompileFileResult` at load time with `hydratePrecompile`, with no disk
  * access and no `.vsk` source embedded in the deployment.
  */
-export function precompileFile(source: string, sourcePath?: string): PrecompileFilePlan {
-  if (sourcePath === undefined) return precompileFileInternal(source, sourcePath, new Set());
+export function precompileFile(
+  source: string,
+  sourcePath?: string,
+  registry?: ModuleRegistry,
+): PrecompileFilePlan {
+  const reg = registry ?? new ModuleRegistry();
+  if (sourcePath === undefined) return precompileFileInternal(source, sourcePath, new Set(), reg);
   const hit = precompileCache.get(sourcePath);
   // Compare the source, not just the path: the dev server rebuilds in-process
   // and a stale plan would silently ship yesterday's component.
   if (hit !== undefined && hit.source === source) return hit.plan;
-  const plan = precompileFileInternal(source, sourcePath, new Set());
+  const plan = precompileFileInternal(source, sourcePath, new Set(), reg);
   // Bound it: plans are sizeable on a large app, and a watch session can
   // outlive many builds.
   if (precompileCache.size >= 512) precompileCache.clear();
@@ -63,7 +69,8 @@ export function clearPrecompileCache(): void {
 function precompileFileInternal(
   source: string,
   sourcePath: string | undefined,
-  seenImportFiles: Set<string>
+  seenImportFiles: Set<string>,
+  registry: ModuleRegistry,
 ): PrecompileFilePlan {
   if (sourcePath) {
     const dir = dirname(sourcePath);
@@ -91,9 +98,9 @@ function precompileFileInternal(
   const metadataSource = (ir as { metadataSource?: string | null }).metadataSource || null;
   const runtimeImports = ir.imports.slice();
 
-  const collector: ModuleCollector = { keysByAbs: new Map(), modules: [] };
+  const collector: ModuleCollector = { modules: [] };
   const bindings =
-    sourcePath !== undefined ? collectModuleBundle(ir.imports, dirname(sourcePath), collector) : [];
+    sourcePath !== undefined ? collectModuleBundle(ir.imports, dirname(sourcePath), registry, collector) : [];
 
   const subFiles: PrecompileSubFilePlan[] = [];
   if (sourcePath !== undefined) {
@@ -106,7 +113,7 @@ function precompileFileInternal(
       seenImportFiles.add(importPath);
       try {
         const importedSrc = readFileSync(importPath, 'utf-8');
-        const subPlan = precompileFileInternal(importedSrc, importPath, seenImportFiles);
+        const subPlan = precompileFileInternal(importedSrc, importPath, seenImportFiles, registry);
         subFiles.push({ importPath, plan: subPlan });
       } catch {
         // skip unresolvable imports — identical to compileFileInternal
