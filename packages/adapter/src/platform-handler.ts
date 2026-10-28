@@ -352,6 +352,15 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
     outfile,
     minify: false,
     sourcemap: false,
+    // Node targets run from a real deployment root: leave bare packages to the
+    // platform's dependency tracer instead of inlining them. Bundling CJS
+    // packages into the ESM handler turned their `require('events')` and
+    // friends into esbuild's throwing `__require` shim (slintorm's pg driver
+    // failed with "Dynamic require of \"events\" is not supported"), and it
+    // inflated the single function file to millions of lines — the cold-start
+    // memory spike behind the SIGKILLs. Edge targets have no node_modules, so
+    // they keep bundling everything.
+    packages: nodeBuiltins ? 'external' : undefined,
     logOverride: { 'direct-eval': 'silent' },
     plugins,
   });

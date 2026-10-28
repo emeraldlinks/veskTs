@@ -11,7 +11,7 @@
  * Run: npx tsx packages/adapter/src/platform-handler.test.ts
  */
 
-import { mkdirSync, writeFileSync, rmSync, cpSync } from 'node:fs';
+import { mkdirSync, writeFileSync, readFileSync, rmSync, cpSync } from 'node:fs';
 import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { tmpdir } from 'node:os';
@@ -205,6 +205,49 @@ export async function handle(request) {
       assert(res.status === 200, `expected 200, got ${res.status}`);
       const body = await res.text();
       assert(body.includes('// no ssr data'), `expected no-op script body, got: ${body}`);
+    });
+  });
+
+  await describe('bundlePlatformHandler dependency handling', async () => {
+    const appDir = join(tmpRoot, 'bundle-app');
+    const pkgDir = join(appDir, 'node_modules', 'fake-native-driver');
+    mkdirSync(pkgDir, { recursive: true });
+    writeFileSync(join(pkgDir, 'package.json'), JSON.stringify({
+      name: 'fake-native-driver',
+      version: '1.0.0',
+      type: 'module',
+      exports: './index.js',
+    }));
+    writeFileSync(join(pkgDir, 'index.js'), [
+      'export const marker = "FAKE_PKG_INLINED";',
+      'export const load = () => import("./cjs-driver.cjs");',
+      '',
+    ].join('\n'));
+    writeFileSync(join(pkgDir, 'cjs-driver.cjs'), [
+      'const { EventEmitter } = require("events");',
+      'module.exports = { EventEmitter };',
+      '',
+    ].join('\n'));
+    const entry = join(appDir, 'entry.js');
+    writeFileSync(entry, 'import { marker } from "fake-native-driver";\nexport const handle = () => marker;\n');
+
+    const { bundlePlatformHandler } = await import(
+      pathToFileURL(join(__dirname, 'platform-handler.ts')).href
+    ) as typeof import('./platform-handler.js');
+
+    await it('externalizes node packages for node targets (Vercel trace owns them)', async () => {
+      const outfile = join(appDir, 'bundle-node.mjs');
+      await bundlePlatformHandler({ entry, outfile, nodeBuiltins: true });
+      const out = readFileSync(outfile, 'utf8');
+      assert(out.includes('"fake-native-driver"') || out.includes("'fake-native-driver'"), 'expected the bare package specifier to stay external');
+      assert(!out.includes('FAKE_PKG_INLINED'), 'expected the package body NOT to be inlined for node targets');
+    });
+
+    await it('still bundles packages for edge targets (no node_modules at runtime)', async () => {
+      const outfile = join(appDir, 'bundle-edge.mjs');
+      await bundlePlatformHandler({ entry, outfile, nodeBuiltins: false });
+      const out = readFileSync(outfile, 'utf8');
+      assert(out.includes('FAKE_PKG_INLINED'), 'expected the package body to be inlined for edge targets');
     });
   });
 
