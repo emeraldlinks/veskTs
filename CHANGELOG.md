@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.85 — 2026-10-28
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler:** include dir and deps in emitted module registry
+
 ## 0.2.84 — 2026-10-28
 
 _No breaking changes._
