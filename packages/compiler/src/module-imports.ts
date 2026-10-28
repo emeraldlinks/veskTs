@@ -1499,8 +1499,8 @@ export class ModuleRegistry {
   /** Emit a self-contained module registry source file. */
   toModuleSource(): string {
     const parts: string[] = [];
-    for (const [key, { code }] of this.data) {
-      parts.push(`${JSON.stringify(key)}: ${JSON.stringify(code)}`);
+    for (const [key, entry] of this.data) {
+      parts.push(`${JSON.stringify(key)}: ${JSON.stringify({ code: entry.code, dir: entry.dir, deps: entry.deps })}`);
     }
     return `export const __veskModules = {${parts.join(',')}};\n`;
   }
