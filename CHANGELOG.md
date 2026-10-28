@@ -2,6 +2,19 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.83 — 2026-10-28
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** only add createRequire banner for node targets
+- **adapter:** bundle node packages, fix CJS require shim for builtins
+
+### Tests
+
+- **adapter:** assert packages are bundled, not externalized
+
 ## 0.2.82 — 2026-10-28
 
 _No breaking changes._
