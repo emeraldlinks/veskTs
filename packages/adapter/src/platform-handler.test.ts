@@ -235,12 +235,12 @@ export async function handle(request) {
       pathToFileURL(join(__dirname, 'platform-handler.ts')).href
     ) as typeof import('./platform-handler.js');
 
-    await it('externalizes node packages for node targets (Vercel trace owns them)', async () => {
+    await it('bundles node packages for node targets (self-contained handler)', async () => {
       const outfile = join(appDir, 'bundle-node.mjs');
       await bundlePlatformHandler({ entry, outfile, nodeBuiltins: true });
       const out = readFileSync(outfile, 'utf8');
-      assert(out.includes('"fake-native-driver"') || out.includes("'fake-native-driver'"), 'expected the bare package specifier to stay external');
-      assert(!out.includes('FAKE_PKG_INLINED'), 'expected the package body NOT to be inlined for node targets');
+      assert(out.includes('FAKE_PKG_INLINED'), 'expected the package body to be inlined for node targets');
+      assert(!out.includes('"fake-native-driver"') && !out.includes("'fake-native-driver'"), 'expected no bare package specifier left unresolved');
     });
 
     await it('still bundles packages for edge targets (no node_modules at runtime)', async () => {
