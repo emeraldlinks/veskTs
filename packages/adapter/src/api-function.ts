@@ -54,7 +54,15 @@ export function generateApiFunction(
     }
   }
 
-  const urlParts = apiNode.fullPath.split('/').filter(Boolean);
+  // fullPath carries the leading "/api" mount prefix; the request's urlParts
+  // is built from url.pathname with "/api" already removed. Drop it here so
+  // segment indices line up for dynamic and catch-all extraction. Without this,
+  // a catch-all like `/api/auth/[...path]` matched against `/api/auth/signin/
+  // credentials` produced params.path="credentials" instead of
+  // "signin/credentials", so the auth catch-all could never route a
+  // multi-segment path and returned "Unknown auth endpoint."
+  const routeParts = apiNode.fullPath.split('/').filter(Boolean);
+  const urlParts = routeParts[0] === 'api' ? routeParts.slice(1) : routeParts;
   const extracts: string[] = [];
   let partIdx = 0;
   for (let i = 0; i < urlParts.length; i++) {

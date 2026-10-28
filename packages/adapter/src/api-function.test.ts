@@ -44,6 +44,16 @@ it('a catch-all API param captures the whole remaining tail', () => {
 	expectIncludes(funcCode, `"path": urlParts.slice(1).join('/')`);
 });
 
+const catchAllMounted: ApiRouteNode = {
+	...catchAll,
+	fullPath: '/api/auth/:path',
+};
+
+it('a catch-all under the /api mount still captures the tail after the mount prefix', () => {
+	const { funcCode } = generateApiFunction(catchAllMounted, join(root, 'api'), join(root, 'out'));
+	expectIncludes(funcCode, `"path": urlParts.slice(1).join('/')`);
+});
+
 const dynamic: ApiRouteNode = {
 	path: ':id',
 	fullPath: '/auth/:id',
