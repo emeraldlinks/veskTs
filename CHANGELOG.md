@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.78 — 2026-10-27
+
+_No breaking changes._
+
+### Other
+
+- restore inline precompiled plans in SSR functions
+
 ## 0.2.77 — 2026-10-27
 
 _No breaking changes._
