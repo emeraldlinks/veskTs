@@ -212,9 +212,8 @@ export function generateSsrFunction(
   const errorPath = resolveErrorFile(routeNode.sourceDir, appDir);
   const errorSrc = errorPath ? readFileSync(errorPath, 'utf-8') : null;
   const errorComp = errorPath ? (extractCompName(errorSrc as string) || 'Error') : null;
-  const errorVars = errorPath
-    ? `const _errorComp = ${JSON.stringify(errorComp)};\nconst _errorCompiled = ${hydrateInvoke(precompilePlan(errorPath))};\n`
-    : 'const _errorComp = null;\nconst _errorCompiled = null;\n';
+  const errorCompDecl = errorPath ? `const _errorComp = ${JSON.stringify(errorComp)};\n` : 'const _errorComp = null;\n';
+  const errorPlanExpr = errorPath ? hydrateInvoke(precompilePlan(errorPath)) : 'null';
 
   // Not-found used to have no server-side resolution at all: a NotFoundError was
   // re-thrown out of the function and the prod server answered with the ROOT
@@ -225,21 +224,24 @@ export function generateSsrFunction(
   const notFoundPath = resolveNotFoundFile(routeNode.sourceDir, appDir);
   const notFoundSrc = notFoundPath ? readFileSync(notFoundPath, 'utf-8') : null;
   const notFoundComp = notFoundPath ? (extractCompName(notFoundSrc as string) || 'NotFound') : null;
-  const notFoundVars = notFoundPath
-    ? `const _notFoundComp = ${JSON.stringify(notFoundComp)};\nconst _notFoundCompiled = ${hydrateInvoke(precompilePlan(notFoundPath))};\n`
-    : 'const _notFoundComp = null;\nconst _notFoundCompiled = null;\n';
+  const notFoundCompDecl = notFoundPath ? `const _notFoundComp = ${JSON.stringify(notFoundComp)};\n` : 'const _notFoundComp = null;\n';
+  const notFoundPlanExpr = notFoundPath ? hydrateInvoke(precompilePlan(notFoundPath)) : 'null';
 
   let src = '';
   if (layoutDecls.length > 0) {
-    src = `const _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _pageCompiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })();\n`;
+    src = errorCompDecl + notFoundCompDecl;
+    src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
+    src += `let _pageCompiled = null;\nfunction __getPageCompiled() { if (!_pageCompiled) _pageCompiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })(); return _pageCompiled; }\n`;
     src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
-    src += `const _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n];\n`;
-    src += errorVars + notFoundVars;
+    src += `let _layoutCompiledList = null;\nfunction __getLayoutCompiledList() { if (!_layoutCompiledList) { _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n]; } return _layoutCompiledList; }\n`;
+    src += `let _errorCompiled = null;\nfunction __getErrorCompiled() { if (!_errorCompiled) _errorCompiled = ${errorPlanExpr}; return _errorCompiled; }\n`;
+    src += `let _notFoundCompiled = null;\nfunction __getNotFoundCompiled() { if (!_notFoundCompiled) _notFoundCompiled = ${notFoundPlanExpr}; return _notFoundCompiled; }\n`;
   } else {
-    src = `const _comp = ${JSON.stringify(pageComp)};\n`;
-    src += `const _compiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })();\n`;
-    src += errorVars + notFoundVars;
+    src = errorCompDecl + notFoundCompDecl;
+    src += `const _comp = ${JSON.stringify(pageComp)};\n`;
+    src += `let _compiled = null;\nfunction __getCompiled() { if (!_compiled) _compiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })(); return _compiled; }\n`;
+    src += `let _errorCompiled = null;\nfunction __getErrorCompiled() { if (!_errorCompiled) _errorCompiled = ${errorPlanExpr}; return _errorCompiled; }\n`;
+    src += `let _notFoundCompiled = null;\nfunction __getNotFoundCompiled() { if (!_notFoundCompiled) _notFoundCompiled = ${notFoundPlanExpr}; return _notFoundCompiled; }\n`;
   }
 
   const urlParts = routeNode.fullPath.split('/').filter(Boolean);
@@ -256,14 +258,16 @@ export function generateSsrFunction(
   let registryCode = '';
   const compRegEntries: string[] = [];
   const compMap = componentMap || new Map();
+  const regPlans: string[] = [];
   for (const [compName, compPath] of compMap) {
     const plan = precompilePlan(compPath);
-    compRegEntries.push(`  (() => {\n    const _compiled = (() => { try { return hydratePrecompile(${plan}); } catch { return null; } })();\n    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });\n  })();`);
+    regPlans.push(`    __regPlans.set(${JSON.stringify(compName)}, ${JSON.stringify(plan)});`);
+    compRegEntries.push(`    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      let _compiled = __regCompiled.get(${JSON.stringify(compName)});\n      if (!_compiled) { _compiled = hydratePrecompile(__regPlans.get(${JSON.stringify(compName)})); __regCompiled.set(${JSON.stringify(compName)}, _compiled); }\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });`);
   }
   if (compRegEntries.length > 0) {
-    registryCode = 'const __componentRegistry = new Map();\n{\n' + compRegEntries.join('\n') + '\n}\n';
+    registryCode = 'const __componentRegistry = new Map();\nconst __regPlans = new Map();\nconst __regCompiled = new Map();\n{\n' + regPlans.join('\n') + '\n' + compRegEntries.join('\n') + '\n}\n';
   } else {
-    registryCode = 'const __componentRegistry = new Map();\n';
+    registryCode = 'const __componentRegistry = new Map();\nconst __regPlans = new Map();\nconst __regCompiled = new Map();\n';
   }
 
 let htmlFnCode: string;
@@ -272,7 +276,7 @@ let htmlFnCode: string;
       'async function __renderErrorBody(props) {',
       '  if (!_errorComp) throw props.error || new Error("Internal Server Error");',
       '  try {',
-      '    const result = await renderPage(\'\', _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled });',
+      '    const result = await renderPage(\'\', _errorComp, props, __componentRegistry, { hydrate: true, cached: __getErrorCompiled() });',
       '    return result.body;',
       '  } catch {',
       `    return ${JSON.stringify(renderDefaultErrorFragment())};`,
@@ -285,7 +289,7 @@ let htmlFnCode: string;
       'async function __renderNotFoundBody(props) {',
       '  if (!_notFoundComp) return null;',
       '  try {',
-      '    const result = await renderPage(\'\', _notFoundComp, props, __componentRegistry, { hydrate: true, cached: _notFoundCompiled });',
+      '    const result = await renderPage(\'\', _notFoundComp, props, __componentRegistry, { hydrate: true, cached: __getNotFoundCompiled() });',
       '    return result.body;',
       '  } catch {',
       '    return null;',
@@ -299,11 +303,11 @@ let htmlFnCode: string;
       '  let _b = body;',
       '  let _h = head || "";',
       '  for (let _i = _layoutCompList.length - 1; _i > 0; _i--) {',
-      "    const _inner = await renderPage('', _layoutCompList[_i], { params, children: _b }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i] });",
+      "    const _inner = await renderPage('', _layoutCompList[_i], { params, children: _b }, __componentRegistry, { hydrate: true, cached: __getLayoutCompiledList()[_i] });",
       '    _b = _inner.body;',
       '    if (_inner.head) _h = _inner.head + _h;',
       '  }',
-      "  return renderFullPage('', _layoutCompList[0], { params, children: _b }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[0]" + bakedOptions + clientScriptOption + dataScriptOption + ", pageHead: _h });",
+      "  return renderFullPage('', _layoutCompList[0], { params, children: _b }, __componentRegistry, { hydrate: true, cached: __getLayoutCompiledList()[0]" + bakedOptions + clientScriptOption + dataScriptOption + ", pageHead: _h });",
       '}',
       '',
       'async function __renderHtml(params, requestUrl) {',
@@ -314,7 +318,7 @@ let htmlFnCode: string;
       '  let notFound = false;',
       "  const __expose = process.env.NODE_ENV !== 'production';",
       '  try {',
-      '    page = await renderPage(\'\', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled });',
+      '    page = await renderPage(\'\', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: __getPageCompiled() });',
       '  } catch (err) {',
       "    if (err && err.name === 'Redirect') throw err;",
       "    if (err && err.name === 'NotFoundError') {",
@@ -351,7 +355,7 @@ let htmlFnCode: string;
       "  const message = err && typeof err === 'object' && 'message' in err ? String(err.message) : String(err);",
       "  const stack = err && typeof err === 'object' && 'stack' in err ? String(err.stack) : '';",
       "  const props = { params, statusCode: 500, error: __expose ? message : 'Internal Server Error', stack: __expose ? stack : '', url: requestUrl || '' };",
-      "  return renderFullPage('', _errorComp, props, __componentRegistry, { hydrate: true, cached: _errorCompiled" + bakedOptions + clientScriptOption + dataScriptOption + " });",
+      "  return renderFullPage('', _errorComp, props, __componentRegistry, { hydrate: true, cached: __getErrorCompiled()" + bakedOptions + clientScriptOption + dataScriptOption + " });",
       '}',
       '',
       'async function __renderHtml(params, requestUrl) {',
@@ -366,7 +370,7 @@ let htmlFnCode: string;
       // though it runs outside the ALS scope.
       "  const __streamToken = globalThis.__vsk_ssr_token || '';",
       '  try {',
-      "    stream = renderPageStream('', _comp, { params }, __componentRegistry, { hydrate: true, cached: _compiled" + bakedOptions + clientScriptOption + dataScriptOption + ' });',
+      "    stream = renderPageStream('', _comp, { params }, __componentRegistry, { hydrate: true, cached: __getCompiled()" + bakedOptions + clientScriptOption + dataScriptOption + ' });',
       '  } catch (err) {',
       '    if (err && (err.name === \'NotFoundError\' || err.name === \'Redirect\')) throw err;',
       '    const html = await __renderErrorFullPage(params, requestUrl, err);',
@@ -455,7 +459,7 @@ let htmlFnCode: string;
       '    try {',
       '      let dataPage;',
       '      try {',
-      "        dataPage = await renderPage('', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: _pageCompiled });",
+       "        dataPage = await renderPage('', _pageComp, { params }, __componentRegistry, { hydrate: true, cached: __getPageCompiled() });",
       '      } catch (err) {',
       "        if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;",
       '        const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
@@ -463,7 +467,7 @@ let htmlFnCode: string;
       '      }',
       '      let _dataHead = dataPage.head || \'\';',
       '      for (let _i = _layoutCompList.length - 1; _i >= 0; _i--) {',
-      "        const _dl = await renderPage('', _layoutCompList[_i], { params, children: '' }, __componentRegistry, { hydrate: true, cached: _layoutCompiledList[_i] });",
+      "        const _dl = await renderPage('', _layoutCompList[_i], { params, children: '' }, __componentRegistry, { hydrate: true, cached: __getLayoutCompiledList()[_i] });",
       '        _dataHead = (_dl.head || \'\') + _dataHead;',
       '      }',
       "      return new Response(JSON.stringify({ path: url.pathname, params, props: dataPage.props || { params }, head: _dataHead }), {",
@@ -481,7 +485,7 @@ let htmlFnCode: string;
       '    try {',
       '      let dataPage;',
       '      try {',
-      "        dataPage = await renderPage('', _comp, { params }, __componentRegistry, { hydrate: true, cached: _compiled });",
+       "        dataPage = await renderPage('', _comp, { params }, __componentRegistry, { hydrate: true, cached: __getCompiled() });",
       '      } catch (err) {',
       "        if (err && (err.name === 'NotFoundError' || err.name === 'Redirect')) throw err;",
       '        const message = err && typeof err === \'object\' && \'message\' in err ? String(err.message) : String(err);',
