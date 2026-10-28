@@ -2,6 +2,15 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.87 — 2026-10-28
+
+_No breaking changes._
+
+### Fixes
+
+- **adapter:** generated handler syntax + route specificity + param alignment
+- **adapter:** static routes match before catch-all in generated handler
+
 ## 0.2.86 — 2026-10-28
 
 _No breaking changes._
