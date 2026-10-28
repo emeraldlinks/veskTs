@@ -3,7 +3,7 @@
  *
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
-import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate, setVskMarkerless } from '@vesk/compiler/src/server-codegen';
+import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate, setVskMarkerless, precompileFile, hydratePrecompile } from '@vesk/compiler/src/server-codegen';
 import { mergeHeadHtml } from '@vesk/compiler/src/server-codegen';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2428,6 +2428,24 @@ describe('self-closing elements in SSR output', () => {
 		expect(render('component App { return <div><span>a</span></div>; }', 'App')).toBe('<div><span>a</span></div>');
 	});
 });
+describe('AOT hydrate — serverless module resolution', () => {
+	it('resolves @vesk/runtime through the SSR runtime when the build dir is gone', async () => {
+		// Serverless hosts build at one absolute path and run at another, so a
+		// bundled module's `dir` is a dead path at request time. A module that
+		// imports the runtime must still hydrate from the in-memory runtime
+		// instance instead of a filesystem require.
+		const dir = mkdtempSync(join(tmpdir(), 'vesk-hydrate-'));
+		writeFileSync(join(dir, 'lib.ts'), "import { createStore } from '@vesk/runtime/store';\nexport const store = createStore({ n: 41 });\n");
+		writeFileSync(join(dir, 'page.vsk'), "import { store } from './lib.ts';\nexport component Page() { <p>{store.get().n + 1}</p> }\n");
+		const plan = precompileFile(readFileSync(join(dir, 'page.vsk'), 'utf-8'), join(dir, 'page.vsk'));
+		for (const m of plan.modules) m.dir = join(dir, 'vanished');
+		rmSync(dir, { recursive: true, force: true });
+		const cached = hydratePrecompile(plan);
+		const result = await renderPage('', 'Page', {}, new Map(), { hydrate: true, cached });
+		expect(result.body).toContain('42');
+	});
+});
+
 asyncChain.then(() => {
 	console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 	if (failed > 0) process.exit(1);

@@ -1148,6 +1148,25 @@ export function setRuntimeModule(mod: Record<string, unknown>): void {
   __cachedRuntimeModule = mod;
 }
 
+/**
+ * The runtime module instance the SSR bundle registered via
+ * `setRuntimeModule` (or the statically imported server barrel).
+ *
+ * Bundled project modules (`src/_lib/*.ts` and friends) keep their bare
+ * `@vesk/runtime` imports as real `require()` calls. On a serverless host the
+ * build-time absolute directory they were anchored to no longer exists, so
+ * resolving the package through the loader fails. Substituting this in-memory
+ * instance keeps a single copy of the reactive runtime and works everywhere
+ * the runtime itself does.
+ */
+export function getRuntimeModule(): Record<string, unknown> | null {
+  return (
+    __cachedRuntimeModule ||
+    (__defaultRuntimeModule as unknown as Record<string, unknown>) ||
+    null
+  );
+}
+
 export function loadRuntimeImports(importStrs: string[]): Record<string, unknown> {
   const pairs = extractRuntimeBindingPairs(importStrs);
   const mod: Record<string, unknown> = __cachedRuntimeModule || __defaultRuntimeModule as unknown as Record<string, unknown>;

@@ -24,7 +24,7 @@ import {
   ClientBlock,
   HeadBlock,
 } from '@vesk/compiler/src/ir';
-import { loadRuntimeImports, evalTopLevelCode } from '@vesk/compiler/src/server-utils';
+import { loadRuntimeImports, evalTopLevelCode, getRuntimeModule } from '@vesk/compiler/src/server-utils';
 import { applyVskRegistryAliases, vskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
 import type { BundledModuleData, ModuleBindingData } from '@vesk/compiler/src/module-imports';
 
@@ -193,14 +193,34 @@ function hydrateModuleScope(scope: Record<string, unknown>, plan: PrecompileFile
     const requireShim = (spec: string): unknown => {
       const depKey = mod.deps[spec];
       if (depKey) return evaluateModule(depKey) || {};
-      // Bare specifier, builtin, or node_modules dependency — hand it to the
-      // real loader (node_modules ships with the serverless deployment).
-      try {
-        const local = createRequire(join(mod.dir, '__vesk__.js'));
-        return local(spec);
-      } catch (err) {
-        throw new Error(`Cannot resolve '${spec}' required by ${mod.key} during SSR hydrate: ${(err as Error)?.message}`);
+      // Framework runtime imports resolve to the instance the SSR bundle
+      // already loaded. Leaving them to the real loader broke every
+      // serverless deployment: `mod.dir` is the BUILD-time absolute path
+      // (/vercel/path0/src/_lib), which does not exist at runtime, so
+      // `require('@vesk/runtime')` walked a market that was not there.
+      if (
+        spec === '@vesk/runtime' ||
+        spec === '@vesk/reactivity' ||
+        spec.startsWith('@vesk/runtime/') ||
+        spec.startsWith('@vesk/reactivity/')
+      ) {
+        const runtime = getRuntimeModule();
+        if (runtime) return runtime;
       }
+      // Bare specifier, builtin, or node_modules dependency — hand it to the
+      // real loader. Anchor at the module's own dir first (dev/local), then at
+      // the process cwd, which is the deployment root on serverless hosts.
+      let lastErr: unknown;
+      for (const anchor of [mod.dir, process.cwd()]) {
+        try {
+          return createRequire(join(anchor, '__vesk__.js'))(spec);
+        } catch (err) {
+          lastErr = err;
+        }
+      }
+      throw new Error(
+        `Cannot resolve '${spec}' required by ${mod.key} during SSR hydrate: ${(lastErr as Error)?.message}`
+      );
     };
     try {
       const body = mod.code ? `'use strict';\n${mod.code}` : "'use strict';";
