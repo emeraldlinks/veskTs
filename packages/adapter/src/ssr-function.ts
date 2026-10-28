@@ -234,7 +234,7 @@ export function generateSsrFunction(
   if (layoutDecls.length > 0) {
     src = errorCompDecl + notFoundCompDecl;
     src += `const _pageComp = ${JSON.stringify(pageComp)};\n`;
-    src += `let _pageCompiled = null;\nfunction __getPageCompiled() { if (!_pageCompiled) _pageCompiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })(); return _pageCompiled; }\n`;
+    src += `let _pageCompiled = null;\nfunction __getPageCompiled() { if (!_pageCompiled) _pageCompiled = (() => { try { return hydratePrecompile(${pagePlan}, __veskModules); } catch { return null; } })(); return _pageCompiled; }\n`;
     src += `const _layoutCompList = [${layoutDecls.map((d) => d.comp).join(', ')}];\n`;
     src += `let _layoutCompiledList = null;\nfunction __getLayoutCompiledList() { if (!_layoutCompiledList) { _layoutCompiledList = [\n${layoutDecls.map((d) => '  ' + d.compiled + ',').join('\n')}\n]; } return _layoutCompiledList; }\n`;
     src += `let _errorCompiled = null;\nfunction __getErrorCompiled() { if (!_errorCompiled) _errorCompiled = ${errorPlanExpr}; return _errorCompiled; }\n`;
@@ -242,7 +242,7 @@ export function generateSsrFunction(
   } else {
     src = errorCompDecl + notFoundCompDecl;
     src += `const _comp = ${JSON.stringify(pageComp)};\n`;
-    src += `let _compiled = null;\nfunction __getCompiled() { if (!_compiled) _compiled = (() => { try { return hydratePrecompile(${pagePlan}); } catch { return null; } })(); return _compiled; }\n`;
+    src += `let _compiled = null;\nfunction __getCompiled() { if (!_compiled) _compiled = (() => { try { return hydratePrecompile(${pagePlan}, __veskModules); } catch { return null; } })(); return _compiled; }\n`;
     src += `let _errorCompiled = null;\nfunction __getErrorCompiled() { if (!_errorCompiled) _errorCompiled = ${errorPlanExpr}; return _errorCompiled; }\n`;
     src += `let _notFoundCompiled = null;\nfunction __getNotFoundCompiled() { if (!_notFoundCompiled) _notFoundCompiled = ${notFoundPlanExpr}; return _notFoundCompiled; }\n`;
   }
@@ -265,7 +265,7 @@ export function generateSsrFunction(
   for (const [compName, compPath] of compMap) {
     const plan = precompilePlan(compPath, reg);
     regPlans.push(`    __regPlans.set(${JSON.stringify(compName)}, ${JSON.stringify(plan)});`);
-    compRegEntries.push(`    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      let _compiled = __regCompiled.get(${JSON.stringify(compName)});\n      if (!_compiled) { _compiled = hydratePrecompile(__regPlans.get(${JSON.stringify(compName)})); __regCompiled.set(${JSON.stringify(compName)}, _compiled); }\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });`);
+    compRegEntries.push(`    __componentRegistry.set(${JSON.stringify(compName)}, async (props, __registry, __vesk) => {\n      let _compiled = __regCompiled.get(${JSON.stringify(compName)});\n      if (!_compiled) { _compiled = hydratePrecompile(__regPlans.get(${JSON.stringify(compName)}), __veskModules); __regCompiled.set(${JSON.stringify(compName)}, _compiled); }\n      const result = await renderPage('', ${JSON.stringify(compName)}, props, __registry, { hydrate: true, cached: _compiled });\n      return result.body;\n    });`);
   }
   if (compRegEntries.length > 0) {
     registryCode = 'const __componentRegistry = new Map();\nconst __regPlans = new Map();\nconst __regCompiled = new Map();\n{\n' + regPlans.join('\n') + '\n' + compRegEntries.join('\n') + '\n}\n';

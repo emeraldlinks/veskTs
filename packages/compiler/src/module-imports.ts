@@ -1490,6 +1490,12 @@ export class ModuleRegistry {
     return this.data.get(key);
   }
 
+  /** All registered modules as a plain object keyed by synthetic key, for
+   *  passing to `hydratePrecompile` at SSR load time. */
+  modules(): Record<string, ModuleEntry> {
+    return Object.fromEntries(this.data.entries());
+  }
+
   /** Emit a self-contained module registry source file. */
   toModuleSource(): string {
     const parts: string[] = [];

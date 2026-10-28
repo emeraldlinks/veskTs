@@ -4,6 +4,7 @@
  * Run with: node --experimental-vm-modules packages/compiler/src/server-codegen.test.js
  */
 import { render, renderPage, irNodeToJS, compileFile, renderFullPage, renderPageStream, setVskHydrate, setVskMarkerless, precompileFile, hydratePrecompile } from '@vesk/compiler/src/server-codegen';
+import { ModuleRegistry } from '@vesk/compiler/src/module-imports';
 import { mergeHeadHtml } from '@vesk/compiler/src/server-codegen';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -2437,10 +2438,15 @@ describe('AOT hydrate — serverless module resolution', () => {
 		const dir = mkdtempSync(join(tmpdir(), 'vesk-hydrate-'));
 		writeFileSync(join(dir, 'lib.ts'), "import { createStore } from '@vesk/runtime/store';\nexport const store = createStore({ n: 41 });\n");
 		writeFileSync(join(dir, 'page.vsk'), "import { store } from './lib.ts';\nexport component Page() { <p>{store.get().n + 1}</p> }\n");
-		const plan = precompileFile(readFileSync(join(dir, 'page.vsk'), 'utf-8'), join(dir, 'page.vsk'));
+		const registry = new ModuleRegistry();
+		const plan = precompileFile(
+			readFileSync(join(dir, 'page.vsk'), 'utf-8'),
+			join(dir, 'page.vsk'),
+			registry,
+		);
 		for (const m of plan.modules) m.dir = join(dir, 'vanished');
 		rmSync(dir, { recursive: true, force: true });
-		const cached = hydratePrecompile(plan);
+		const cached = hydratePrecompile(plan, registry.modules());
 		const result = await renderPage('', 'Page', {}, new Map(), { hydrate: true, cached });
 		expect(result.body).toContain('42');
 	});
