@@ -1,6 +1,6 @@
 {
   "name": "create-vesk",
-  "version": "0.2.80",
+  "version": "0.2.81",
   "type": "module",
   "description": "Create a new Vesk project with zero configuration",
   "bin": {
