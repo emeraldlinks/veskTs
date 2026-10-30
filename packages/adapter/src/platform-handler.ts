@@ -6,7 +6,7 @@ import type { RouteNode, ApiRouteNode } from '@vesk/adapter/src/types';
 // when the dist is copied into a registry-style node_modules layout — see
 // platform-handler.test.ts. No other runtime import in this file, so the pack
 // stays standalone.
-import { renderDefaultNotFoundPage } from './default-pages';
+import { renderDefaultNotFoundPage, renderDefaultErrorPage } from './default-pages';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -184,9 +184,10 @@ function __matchPath(pattern, pathname) {
 }
 
 export async function handleRequest(request) {
-  const url = new URL(request.url);
-  const pathname = url.pathname;
-  const isDataRequest = request.headers.get('x-vesk-data') === '1';
+  try {
+    const url = new URL(request.url);
+    const pathname = url.pathname;
+    const isDataRequest = request.headers.get('x-vesk-data') === '1';
 ${serverStoreLine}
 
   if (__prerendered.has(pathname) && !isDataRequest) {
@@ -281,6 +282,17 @@ ${eventsRequestLine}
     status: 404,
     headers: { 'Content-Type': 'text/html' },
   });
+  } catch (e) {
+    // Any error that escapes the route (a thrown exception, a bad import, a
+    // middleware failure, ...) must not bubble out of handleRequest. On
+    // serverless platforms (Vercel, Netlify, Cloudflare) an uncaught throw is
+    // surfaced as FUNCTION_INVOCATION_FAILED — Next.js avoids this by wrapping
+    // its entry points the same way. Convert it into a proper 500 response.
+    return new Response(renderDefaultErrorPage({ url: request.url }), {
+      status: 500,
+      headers: { 'Content-Type': 'text/html' },
+    });
+  }
 }
 `;
 }

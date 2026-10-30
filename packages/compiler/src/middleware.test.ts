@@ -206,6 +206,25 @@ test('redirect errors become redirect responses', async () => {
 	cleanup(tmp);
 });
 
+test('middleware returning Response.redirect(relative) short-circuits to a redirect', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			"  const _ = ctx.cookies;", // reading cookies must not break the redirect
+			'  return Response.redirect(\'/login\', 302);',
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/', { headers: { cookie: 'session=abc' } }), {}, {});
+	expect(result.response.status).toBe(302);
+	expect(result.response.headers.get('Location')).toBe('/login');
+	expect(result.redirected).toBe(true);
+	cleanup(tmp);
+});
+
 test('next(rewrite) records rewriteUrl and updates ctx.url', async () => {
 	const tmp = createFixture({
 		'app/page.vsk': '',

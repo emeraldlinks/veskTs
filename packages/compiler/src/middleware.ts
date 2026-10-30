@@ -222,6 +222,15 @@ export async function executeMiddlewareChain(
           headers: { Location: err.url || '' },
         });
       }
+      // undici's `Response.redirect()` rejects *relative* URLs with a
+      // TypeError ("Failed to parse URL from /login"). A middleware returning
+      // `Response.redirect('/login', 302)` should work just like
+      // `ServerResponse.redirect('/login')` — normalize it into a redirect
+      // response instead of surfacing a 500.
+      if (e instanceof TypeError && /Failed to parse URL from/.test(String(e.message))) {
+        const target = /Failed to parse URL from (\S+)/.exec(String(e.message))?.[1] ?? '';
+        return new Response(null, { status: 302, headers: { Location: target } });
+      }
       throw e;
     }
   }
