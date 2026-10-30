@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.90 — 2026-10-30
+
+_No breaking changes._
+
+### Fixes
+
+- ensure redirect/permanentRedirect/notFound are always available in SSR component scope
+
+### Other
+
+- remove accidentally committed build output from test-app/.vesk2/
+
 ## 0.2.89 — 2026-10-30
 
 _No breaking changes._
