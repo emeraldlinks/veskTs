@@ -111,7 +111,7 @@ export async function executeMiddlewareChain(
   const url = new URL(request.url, 'http://localhost');
   const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
   const locals: Record<string, unknown> = Object.assign({}, serverStore || {});
-  const cookies = parseCookies(request.headers?.get('cookie') || '');
+  const cookies = parseCookies(request.headers?.get('cookie') || '') || {};
 
   const ctx = new Proxy({
     request,
@@ -230,6 +230,15 @@ export async function executeMiddlewareChain(
       if (e instanceof TypeError && /Failed to parse URL from/.test(String(e.message))) {
         const target = /Failed to parse URL from (\S+)/.exec(String(e.message))?.[1] ?? '';
         return new Response(null, { status: 302, headers: { Location: target } });
+      }
+      // Any other TypeError from the middleware (e.g. reading a property of
+      // `undefined` like `ctx.cookies[SESSION_COOKIE]` when `ctx.cookies` is
+      // missing) must not crash the server. On serverless platforms (Vercel,
+      // Netlify, Cloudflare) an uncaught throw surfaces as
+      // FUNCTION_INVOCATION_FAILED — Next.js avoids this by wrapping entry
+      // points the same way. Return a 500 instead.
+      if (e instanceof TypeError) {
+        return new Response(null, { status: 500 });
       }
       throw e;
     }
