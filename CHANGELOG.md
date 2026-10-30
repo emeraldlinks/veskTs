@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.89 — 2026-10-30
+
+_No breaking changes._
+
+### Fixes
+
+- catch middleware TypeErrors (ctx.cookies undefined) instead of crashing server
+
 ## 0.2.88 — 2026-10-30
 
 _No breaking changes._
