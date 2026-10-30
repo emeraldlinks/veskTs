@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.88 — 2026-10-30
+
+_No breaking changes._
+
+### Fixes
+
+- prevent middleware redirect/throws from becoming 500/FUNCTION_INVOCATION_FAILED
+
 ## 0.2.87 — 2026-10-28
 
 _No breaking changes._

@@ -1,6 +1,6 @@
 {
   "name": "@vesk/plugin-multipart",
-  "version": "0.2.87",
+  "version": "0.2.88",
   "type": "module",
   "description": "Streaming multipart/form-data uploads for Vesk — real File values, per-file/per-field limits enforced as bytes arrive",
   "main": "./dist/index.js",
@@ -26,7 +26,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/types": "^0.2.87"
+    "@vesk/types": "^0.2.88"
   },
   "devDependencies": {
     "typescript": "^5.8.0"
