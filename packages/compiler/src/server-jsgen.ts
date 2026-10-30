@@ -738,6 +738,16 @@ function bodyNeedsRuntimeCells(nodes: IRNode[]): boolean {
  * that reconstruct the same functions at function-bundle load time).
  */
 export function buildComponentEntries(irRoot: IRRoot): ComponentMapEntry[] {
+  // `redirect`, `permanentRedirect`, `notFound` are SSR-level control-flow
+  // functions that layouts/pages call as bare identifiers (`redirect('/login')`).
+  // The compiler's auto-import doesn't always detect them, so inject them
+  // unconditionally so they're always loaded into `__vesk` and destructured
+  // into component scope.
+  for (const name of ['redirect', 'permanentRedirect', 'notFound']) {
+    if (!irRoot.imports.includes(`import { ${name} } from '@vesk/runtime';`)) {
+      irRoot.imports.push(`import { ${name} } from '@vesk/runtime';`);
+    }
+  }
   const runtimeNames = extractRuntimeNames(irRoot.imports);
   const localValueNames = localValueImportNames(irRoot.imports);
   const topNames = extractTopLevelNames(irRoot.topLevelCode);
