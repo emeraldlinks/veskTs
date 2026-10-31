@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.92 — 2026-10-31
+
+_No breaking changes._
+
+### Fixes
+
+- dev-script pair count mismatch — remove dev-config.js from DEV_SCRIPTS
+
 ## 0.2.91 — 2026-10-31
 
 _No breaking changes._
