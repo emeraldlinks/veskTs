@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.91 — 2026-10-31
+
+_No breaking changes._
+
+### Fixes
+
+- SSR relative fetch URLs + middleware top-level const declarations
+
 ## 0.2.90 — 2026-10-30
 
 _No breaking changes._
