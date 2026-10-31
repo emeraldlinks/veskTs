@@ -408,7 +408,7 @@ describe('Client Codegen — Control Flow', () => {
 		component Child(props: { n: string }) { return <span>{props.n}</span>; }
 		component App { return <div><Child n="x" /></div>; }
 	`, (code, mode) => {
-		expect(code).toContain('__components[');
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators[' : '__components[');
 		expect(code).toContain('Child');
 		if (mode === 'hydrate') expect(code).toContain('__hydrate');
 	});
@@ -419,7 +419,7 @@ describe('Client Codegen — Control Flow', () => {
 			<Child n="x" />
 		}
 	`, (code, mode) => {
-		expect(code).toContain('__components[');
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators[' : '__components[');
 		expect(code).toContain('Child');
 		if (mode === 'hydrate') expect(code).toContain('__hydrate');
 	});
@@ -1072,7 +1072,7 @@ describe('Client Codegen — Islands & Zero-JS Detection', () => {
 	it('[hydrate] client keyword forces JS expression mode', () => {
 		const code = compileClient('component App client { return <div>Static</div>; }', 'App', { hydrate: true });
 		expect(code).not.toBe('');
-		expect(code).toContain('__components');
+		expect(code).toContain('__hydrators');
 	});
 	it('[normal] client keyword forces JS statement mode', () => {
 		const code = compileClient('component App client { <div>Static</div> }', 'App');
@@ -1082,7 +1082,7 @@ describe('Client Codegen — Islands & Zero-JS Detection', () => {
 	it('[hydrate] client keyword forces JS statement mode', () => {
 		const code = compileClient('component App client { <div>Static</div> }', 'App', { hydrate: true });
 		expect(code).not.toBe('');
-		expect(code).toContain('__components');
+		expect(code).toContain('__hydrators');
 	});
 
 	// Zero-JS: no client + static = no JS emitted
@@ -1129,10 +1129,10 @@ describe('Client Codegen — Standalone layout directive', () => {
 		const Markup = () => null;
 		export const standalone = true
 		component Layout client { return <div>L</div> }
-	`, (code) => {
+	`, (code, mode) => {
 		expect(code).not.toContain('export const standalone');
 		expect(code).not.toContain('standalone = true');
-		expect(code).toContain('__components["Layout"]');
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators["Layout"]' : '__components["Layout"]');
 	});
 
 	bothModes('let standalone directive is dropped from client output', `
@@ -1148,7 +1148,7 @@ describe('Client Codegen — Standalone layout directive', () => {
 		component Layout client { return <div>L</div> }
 	`, (code, mode) => {
 		expect(code).toContain('keep');
-		expect(code).toContain('__components["Layout"]');
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators["Layout"]' : '__components["Layout"]');
 	});
 });
 
@@ -1345,7 +1345,7 @@ describe('Keyed .map() reconciliation', () => {
 		// region would emit `__cl.push(` / a collect array instead.
 		if (!/\(item, __e, __r, __root\) =>/.test(code)) throw new Error('Expected 4-arg keyed renderItem with __root:\n' + code.slice(0, 800));
 		if (code.includes('__cl.push(')) throw new Error('component-keyed map must not degrade to the __place/collect region:\n' + code.slice(0, 500));
-		if (!code.includes('__components["ItemRow"]')) throw new Error('Expected ItemRow call inside the keyed renderItem:\n' + code.slice(0, 500));
+		if (!code.includes('__hydrators["ItemRow"]')) throw new Error('Expected ItemRow call inside the keyed renderItem:\n' + code.slice(0, 500));
 	});
 });
 
@@ -2231,7 +2231,7 @@ describe('Client Codegen — Async Components', () => {
 			}
 		`, null, { hydrate: true, forceClient: true });
 		expect(code).toContain('async (props, __registry, __hydrate) => {');
-		expect(code).toContain('await __components["Child"]');
+		expect(code).toContain('await __hydrators["Child"]');
 	});
 
 	it('[normal] deeply nested async chain awaits at every level', () => {
@@ -2317,7 +2317,7 @@ describe('Client Codegen — Async Components', () => {
 			}
 		`, null, { hydrate: true, forceClient: true });
 		expect(code).toContain('async (props, __registry, __hydrate) => {');
-		expect(code).toContain('await __components["SyncChild"]');
+		expect(code).toContain('await __hydrators["SyncChild"]');
 	});
 });
 
@@ -2501,26 +2501,26 @@ describe('Dynamic component tags — member expressions + bound values', () => {
 
 	// Guards against over-correction: file-defined components keep
 	// registry resolution, including over a same-named top-level binding.
-	// (Static children hydrate through a `__components` stub — the real
-	// `__hydrators` map entry only exists for non-static components.)
+	// Hydrate mode registers the component on `__hydrators`; the plain
+	// `__components` map is only used by fresh-render paths.
 	bothModes('same-file static component still resolves via registry', `
 		component Inner { return <span>hi</span>; }
 		component App { return <div><Inner /></div>; }
-	`, (code) => {
-		expect(code).toContain('__components["Inner"]');
+	`, (code, mode) => {
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators["Inner"]' : '__components["Inner"]');
 	});
 	bothModes('same-file interactive component still resolves via registry', `
 		component Inner { return <button onClick={() => {}}>hi</button>; }
 		component App { return <div><Inner /></div>; }
-	`, (code) => {
-		expect(code).toContain('__components["Inner"]');
+	`, (code, mode) => {
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators["Inner"]' : '__components["Inner"]');
 	});
 	bothModes('component declaration wins over same-named top-level binding', `
 		const Foo = (props) => null;
 		component Foo { return <span>comp</span>; }
 		component App { return <div><Foo /></div>; }
-	`, (code) => {
-		expect(code).toContain('__components["Foo"]');
+	`, (code, mode) => {
+		expect(code).toContain(mode === 'hydrate' ? '__hydrators["Foo"]' : '__components["Foo"]');
 	});
 });
 

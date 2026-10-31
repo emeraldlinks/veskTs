@@ -561,6 +561,15 @@ hydrate = false;
   // item element already claimed by key) instead of walking for a new element.
   rootClaim = false;
   walker = '__hydrate';
+  // Registry a hydrate-mode component call must resolve through. The hydrate
+  // bundle registers its functions under `__hydrators`, while non-hydrate
+  // nested renders (children of self-claiming components, client-only blocks,
+  // fresh map items) must keep calling the plain `__components` map. Emitting
+  // the hydrate registry name directly avoids the old global
+  // `__components` → `__hydrators` text rewrite, which also rewrote those
+  // nested fresh-render calls and handed them the 3-argument hydrator with no
+  // walker (`Cannot read properties of undefined (reading 'root')`).
+  hydrateRegistry = '__hydrators';
   asyncComps = new Set<string>();
   isAsyncScope = false;
   // While emitting a loop body, names the boolean flag a `break` sets (see
@@ -1279,7 +1288,7 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     const access = calleeExpr
       ?? (ctx.importedNames.has(node.componentName)
         ? node.componentName
-        : `__components[${JSON.stringify(node.componentName)}]`);
+        : `${ctx.hydrateRegistry}[${JSON.stringify(node.componentName)}]`);
     // Registry lookups can resolve to `undefined` when a JSX tag names a
     // component that was never declared, imported, or registered (e.g.
     // `<Slot/>` in a framework where `{props.children}` is the channel).
@@ -2620,7 +2629,8 @@ function buildParamInit(paramNames: string[], propsAlias: string | null = null):
 
 function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc, markerless = true): string {
   const mapLines: string[] = [];
-  mapLines.push(`const __components = {};`);
+  const registry = hydrate ? '__hydrators' : '__components';
+  mapLines.push(`const ${registry} = {};`);
   const asyncComps = computeAsyncComponents(irRoot.components);
 
   // Wipe-style router components (Link/NavLink) replace their SSR children on
@@ -2662,11 +2672,11 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc, m
         ? `__hydrate.claimOnly(undefined, (typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0))`
         : `__hydrate.claimOnly()`;
       const stub = `(props, __registry, __hydrate) => { return ${claimExpr}; }`;
-      mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${stub};`);
+      mapLines.push(`${registry}[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }
     const code = generateComponent(comp, directNames, hydrate, asyncComps, linkNames, selfClaimNames, alloc, markerless);
-    mapLines.push(`__components[${JSON.stringify(comp.name)}] = ${code};`);
+    mapLines.push(`${registry}[${JSON.stringify(comp.name)}] = ${code};`);
   }
 
   mapLines.push(`function __cleanup(start, end) {`);
@@ -2934,12 +2944,13 @@ function emitClientFromIR(ir: IRRoot, options: { forceClient?: boolean; hydrate?
   const topCode = (options.includeTopLevel === false ? [] : transformTopLevelForActions(ir.topLevelCode, 'client')).join('\n') + '\n';
 
   const exportLines: string[] = [];
+  const registry = options.hydrate ? '__hydrators' : '__components';
   for (const comp of ir.components) {
     if (comp.exported) {
       if (comp.defaultExport) {
-        exportLines.push(`export default __components[${JSON.stringify(comp.name)}];`);
+        exportLines.push(`export default ${registry}[${JSON.stringify(comp.name)}];`);
       } else {
-        exportLines.push(`export const ${comp.name} = __components[${JSON.stringify(comp.name)}];`);
+        exportLines.push(`export const ${comp.name} = ${registry}[${JSON.stringify(comp.name)}];`);
       }
     }
   }

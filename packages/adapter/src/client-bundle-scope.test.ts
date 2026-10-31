@@ -123,6 +123,12 @@ component Home {
     'component and hydrator share one file block',
   );
 
+  // Hydrate-mode codegen emits `export default __hydrators["X"];`. A chunk is
+  // a classic script (no module syntax), and two surviving defaults in one
+  // module raise `SyntaxError: Identifier '.default' has already been
+  // declared`, killing every page script before hydration starts.
+  await assert(!/\bexport\s+default\b/.test(chunkText), 'no component re-exports survive in chunks');
+
   // HMR eval snippets must carry the file's top-level scope without the
   // registry preamble, and survive repeated evals. A sliced per-component
   // assignment closes over file bindings (const navItems, …) missing from

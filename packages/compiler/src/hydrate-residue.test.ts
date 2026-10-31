@@ -89,20 +89,22 @@ function mountHydrated(source: string, html: string): Mounted {
 		g[key] = value;
 	}
 
-	// Two transformations the CHUNK BUNDLER performs on this module before it
-	// reaches a browser, mirrored here so the test evaluates exactly what a page
-	// evaluates: the hydrate half registers under `__hydrators` (the bundle
-	// renames the registry) and the registry is hoisted onto globalThis so
-	// separate chunks can see one another's components.
+	// The CHUNK BUNDLER declares both registries in the shared module scope and
+	// hoists them onto globalThis so separate chunks can see one another's
+	// components. Hydrate-mode codegen emits `__hydrators[...]` for hydrator
+	// calls and keeps `__components[...]` for nested FRESH renders (keyed map
+	// items, self-claiming components) — those must never be text-rewritten to
+	// the hydrator registry, which is what broke `NavIcon` in the portal chunk.
+	// Mirror that preamble here instead of rewriting the registry name.
 	const names = [...code.matchAll(/^import \{([^}]*)\} from '@vesk\/runtime';?\s*$/gm)]
 		.flatMap((m) => m[1]!.split(','))
 		.map((s) => s.trim())
 		.filter(Boolean);
 	const body = code
-		.replace(/__components/g, '__hydrators')
 		.replace(/^import \{[^}]*\} from '@vesk\/runtime';?\s*$/gm, '')
 		.replace(/^export default [A-Za-z0-9_$]+;?\s*$/gm, '')
-		.replace(/^const __hydrators = \{\};$/m, 'const __hydrators = globalThis.__hydrators = globalThis.__hydrators || {};');
+		.replace(/^const __hydrators = \{\};$/m, 'const __hydrators = globalThis.__hydrators = globalThis.__hydrators || {};')
+		.replace(/^const __components = \{\};$/m, 'const __components = globalThis.__components = globalThis.__components || {};');
 	const values = names.map((n) => (runtime as unknown as Record<string, unknown>)[n]);
 	const unbound = names.filter((_, i) => values[i] === undefined);
 	assert(unbound.length === 0, `generated code imports runtime names this test cannot bind: ${unbound.join(', ')}`);

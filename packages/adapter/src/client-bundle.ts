@@ -167,33 +167,42 @@ function isAnyImport(node: CompiledNode): boolean {
 
 /**
  * Generated client-preamble nodes the bundle must not re-emit: the local
- * `const __components = {}` registry plus the `__cleanup` / `__place` helpers —
- * the chunk IIFEs already define their own `__components`, so a second
- * declaration in the same scope would be a syntax error.
+ * `const __components = {}` / `const __hydrators = {}` registries plus the
+ * `__cleanup` / `__place` helpers — the chunk IIFEs already define their own
+ * registries, so a second declaration in the same scope would shadow the live
+ * map (registrations would land on a detached object).
  */
 function isRuntimePreamble(node: CompiledNode): boolean {
   if (node.type === 'FunctionDeclaration' && (node.id?.name === '__cleanup' || node.id?.name === '__place')) {
     return true;
   }
   if (node.type === 'VariableDeclaration') {
-    return node.declarations?.[0]?.id?.name === '__components';
+    const name = node.declarations?.[0]?.id?.name;
+    return name === '__components' || name === '__hydrators';
   }
   return false;
 }
 
 /**
  * `export default __components[<name>];` / `export const <name> = __components[<name>];`
- * aliases emitted by codegen. The bundle registers components on `__components`
- * directly, so these module-level re-exports must go.
+ * aliases emitted by codegen. Hydrate-mode codegen emits the same alias against
+ * `__hydrators`. The bundle registers components on those maps directly, so
+ * these module-level re-exports must go — two surviving `export default`s in
+ * one chunk are a `SyntaxError: Identifier '.default' has already been
+ * declared` that kills every page script.
  */
 function isComponentExport(node: CompiledNode): boolean {
+  const isRegistry = (ref: unknown): boolean => {
+    const n = ref as { type?: string; object?: { type?: string; name?: string } } | null | undefined;
+    return !!n && n.type === 'MemberExpression' && n.object?.type === 'Identifier'
+      && (n.object.name === '__components' || n.object.name === '__hydrators');
+  };
   if (node.type === 'ExportDefaultDeclaration') {
-    const d = node.declaration;
-    return !!d && d.type === 'MemberExpression' && d.object?.type === 'Identifier' && d.object.name === '__components';
+    return isRegistry(node.declaration);
   }
   if (node.type === 'ExportNamedDeclaration') {
     const init = node.declaration?.type === 'VariableDeclaration' ? node.declaration.declarations?.[0]?.init : undefined;
-    return !!init && init.type === 'MemberExpression' && init.object?.type === 'Identifier' && init.object.name === '__components';
+    return isRegistry(init);
   }
   return false;
 }
@@ -607,7 +616,7 @@ function removeRanges(code: string, ranges: Array<[number, number]>): string {
  */
 function fallbackReplay(cached: ClientBundleFileEntry, filePath: string, imports: ChunkImports): string {
   const comp = cached.compCode ? imports.add(cached.compCode, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-  const hyd = cached.hydCode ? imports.add(cached.hydCode, filePath).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+  const hyd = cached.hydCode ? imports.add(cached.hydCode, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
   return [comp, hyd].filter(Boolean).join('\n');
 }
 
@@ -945,7 +954,7 @@ export async function generateClientBundle(
     const compSpecs: ClientBundleChunkSpec[] = [];
     const hydSpecs: ClientBundleChunkSpec[] = [];
     const compCode = compWithImports ? imports.add(compWithImports, filePath, compSpecs).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-    const hydCode = hydWithImports ? imports.add(hydWithImports, filePath, hydSpecs).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+    const hydCode = hydWithImports ? imports.add(hydWithImports, filePath, hydSpecs).replace(/^\n+/, '').replace(/\n+$/, '') : '';
     if (rawComp) collectRuntimeImports(rawComp);
     if (rawHyd) collectRuntimeImports(rawHyd);
 
@@ -1525,7 +1534,7 @@ export async function generateClientBundle(
       if (hydCode) collectRuntimeImports(hydCode);
       // Comp and hyd share the file's top-level bindings — scope together.
       const strippedComp = compCode ? stripExports(stripVskImports(stripRuntimeImport(compCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-      const strippedHyd = hydCode ? stripExports(stripVskImports(stripRuntimeImport(hydCode))).replace(/__components/g, '__hydrators').replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      const strippedHyd = hydCode ? stripExports(stripVskImports(stripRuntimeImport(hydCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
       const fileCode = [strippedComp, strippedHyd].filter(Boolean).join('\n');
       if (fileCode.trim()) componentLines.push(scopeFileContribution(fileCode));
 
