@@ -57,7 +57,22 @@ export function extractMiddlewareParts(src: string): { params: string; body: str
       ? src.slice(target.params[0].start, target.params[target.params.length - 1].end)
       : '';
     const body = src.slice(target.body.start + 1, target.body.end - 1);
-    return { params, body: body.trim() };
+    // Prepend top-level const/let/var declarations from the middleware source
+    // so that references like `SESSION_COOKIE` resolve inside the inlined
+    // function body. Without this, top-level declarations are dropped and
+    // accessing them throws a ReferenceError that surfaces as a 500.
+    const decls: string[] = [];
+    for (const stmt of ast.body) {
+      if (stmt.type === 'VariableDeclaration') {
+        decls.push(src.slice((stmt as any).start, (stmt as any).end).trim());
+      } else if (stmt.type === 'ExportNamedDeclaration' && stmt.declaration?.type === 'VariableDeclaration') {
+        decls.push(src.slice((stmt.declaration as any).start, (stmt.declaration as any).end).trim());
+      }
+    }
+    const bodyWithDecls = decls.length > 0
+      ? decls.join('\n') + '\n' + body.trim()
+      : body.trim();
+    return { params, body: bodyWithDecls };
   } catch {
     return fallbackExtractMiddleware(src);
   }

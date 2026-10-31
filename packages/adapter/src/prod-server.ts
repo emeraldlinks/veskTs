@@ -680,9 +680,22 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         if (params) {
           const mod = await loadFunction(route.function);
             if (mod) {
-            try {
               const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-              let cachedResult: { html: string; headers: Record<string, string> } | null = null;
+              // During SSR, fetch() with a relative URL (e.g. '/api/student') throws
+              // because undici requires an absolute URL and there is no browser
+              // origin to resolve against. Wrap globalThis.fetch for the duration
+              // of the SSR render so relative API calls resolve against the
+              // request's origin — matching what the client does automatically.
+              const origin = new URL(url.href).origin;
+              const origFetch = globalThis.fetch;
+              globalThis.fetch = async (input, init) => {
+                if (typeof input === 'string' && input.startsWith('/')) {
+                  input = origin + input;
+                }
+                return origFetch(input as any, init);
+              };
+              try {
+                let cachedResult: { html: string; headers: Record<string, string> } | null = null;
               if (route.revalidate && route.revalidate > 0) {
                 const { pageIsr } = await import('@vesk/runtime/src/index-server') as unknown as { pageIsr: (path: string, fn: () => Promise<{ html: string; headers: Record<string, string> }>, opts: { revalidate: number; tags: string[] }) => Promise<{ html: string; headers: Record<string, string> } | null> };
                 cachedResult = await pageIsr(url.pathname, async () => {
@@ -759,6 +772,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
               res.writeHead(500, { 'Content-Type': 'text/html' });
               res.end(errorHtml || renderDefaultErrorPage({ message: process.env.NODE_ENV !== 'production' ? err.message : undefined, url: url.pathname, headExtra: bakedHeadExtra }));
               return;
+            } finally {
+              globalThis.fetch = origFetch;
             }
           }
         }

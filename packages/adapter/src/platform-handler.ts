@@ -189,6 +189,19 @@ export async function handleRequest(request) {
     const pathname = url.pathname;
     const isDataRequest = request.headers.get('x-vesk-data') === '1';
 ${serverStoreLine}
+    // During SSR, fetch() with a relative URL (e.g. '/api/student') throws
+    // because undici requires an absolute URL and there is no browser
+    // origin to resolve against. Wrap globalThis.fetch for the duration
+    // of the handler so relative API calls resolve against the request's
+    // origin — matching what the client does automatically.
+    const origin = url.origin;
+    const origFetch = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (typeof input === 'string' && input.startsWith('/')) {
+        input = origin + input;
+      }
+      return origFetch(input, init);
+    };
 
   if (__prerendered.has(pathname) && !isDataRequest) {
     return new Response(null, { status: 308, headers: { Location: '/_vesk/static/public' + (pathname.endsWith('/') ? pathname + 'index.html' : pathname + '.html') } });
@@ -283,6 +296,7 @@ ${eventsRequestLine}
     headers: { 'Content-Type': 'text/html' },
   });
   } catch (e) {
+    globalThis.fetch = origFetch;
     // Any error that escapes the route (a thrown exception, a bad import, a
     // middleware failure, ...) must not bubble out of handleRequest. On
     // serverless platforms (Vercel, Netlify, Cloudflare) an uncaught throw is

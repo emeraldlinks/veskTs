@@ -2015,6 +2015,19 @@ function routeFullPathForChunk(chunkName: string): string | null {
       // adapter ssr-function.ts dataNavCleanup contract.
       const ssg = globalThis as Record<string, unknown>;
       ssg.__vsk_ssr_data = {};
+      // During SSR, fetch() with a relative URL (e.g. '/api/student') throws
+      // because undici requires an absolute URL and there is no browser
+      // origin to resolve against. Wrap globalThis.fetch for the duration
+      // of the SSR render so relative API calls resolve against the
+      // request's origin — matching what the client does automatically.
+      const origin = url.origin;
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        if (typeof input === 'string' && input.startsWith('/')) {
+          input = origin + input;
+        }
+        return origFetch(input, init);
+      };
       // Fresh token per request, minted INSIDE the render scope: the token is
       // request-scoped (ssr-store.ts backs the global with AsyncLocalStorage),
       // so minting it out here would be dropped.
@@ -2091,6 +2104,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
       });
       } finally {
         const token = freshToken;
+        globalThis.fetch = origFetch;
         dropSsrSlot(token);
         delete ssg[`__vsk_ssr_data_${token}`];
         delete ssg[`__vsk_ssr_promises_${token}`];
@@ -2114,6 +2128,16 @@ function routeFullPathForChunk(chunkName: string): string | null {
       // below deletes it once iteration ends.
       const sst = globalThis as Record<string, unknown>;
       sst.__vsk_ssr_data = {};
+      // During SSR, fetch() with a relative URL throws because undici requires
+      // an absolute URL. Wrap globalThis.fetch for the duration of the stream.
+      const origin = url.origin;
+      const origFetchStream = globalThis.fetch;
+      globalThis.fetch = async (input, init) => {
+        if (typeof input === 'string' && input.startsWith('/')) {
+          input = origin + input;
+        }
+        return origFetchStream(input, init);
+      };
       async function* raw() {
       const chain = cleanChain;
       const hasLayout = chain.some(n => n.layout && existsSync(resolve(appDirPath, n.sourceDir as string, 'layout.vsk')));
@@ -2201,6 +2225,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         } while (!result.done);
         } finally {
           const token = streamStore.token;
+          globalThis.fetch = origFetchStream;
           dropSsrSlot(token);
           if (token) {
             delete sst[`__vsk_ssr_data_${token}`];
