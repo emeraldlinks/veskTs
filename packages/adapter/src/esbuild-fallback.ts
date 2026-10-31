@@ -34,12 +34,15 @@ async function getWasm() {
 
 export async function build(options: any): Promise<any> {
   await loadNative();
-  if (_nativeBuild) {
+  if (_nativeBuild && !_nativeDead) {
     try {
-      return await _nativeBuild(options);
+      return await Promise.race([
+        _nativeBuild(options),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('esbuild native timeout')), 30000)),
+      ]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes('SIGILL') || msg.includes('illegal hardware instruction') || msg.includes('cannot execute binary file')) {
+      if (msg.includes('SIGILL') || msg.includes('illegal hardware instruction') || msg.includes('cannot execute binary file') || msg.includes('esbuild native timeout')) {
         console.warn('vesk: native esbuild failed, falling back to esbuild-wasm:', msg);
         _nativeDead = true;
       } else {
