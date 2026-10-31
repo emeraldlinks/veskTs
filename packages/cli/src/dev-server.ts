@@ -270,7 +270,7 @@ const LOG = {
  * and the only cost is a longer in-flight request.
  */
 export const DEV_SCRIPTS =
-  '\t<script src="/_vesk/dev-config.js"></script>\n\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>';
+  '\t<script type="module" src="/_vesk/client.js"></script>\n\t<script type="module" src="/_vesk/hmr.js"></script>';
 
 /** Inject the dev script pair at the first `</body>`. No-op when absent. */
 export function injectDevScripts(html: string): string {
