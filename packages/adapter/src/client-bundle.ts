@@ -1330,30 +1330,33 @@ export async function generateClientBundle(
           // Pass the app tsconfig so esbuild resolves tsconfig `paths` aliases
           // (`@/x`, `@app/x`) inside transitively bundled modules too.
           const appTsconfig = findTsconfigPath(appDir);
-          const result = await build({
-            entryPoints: [tmpFile],
-            bundle: true,
-            format: 'iife',
-            platform: 'browser',
-            write: false,
-            logLevel: 'silent',
-            loader: { '.js': 'tsx' },
-            // Bundled dependencies (lucide-vesk above all) carry a license
-            // banner per module, and a barrel import pulls in hundreds of
-            // them. Those banners were ~339 KB of a 350 KB chunk, which is
-            // what kept a barrel import from being usable at all. Attribution
-            // for a dependency stays in its own package; shipping every
-            // module's header inside our own chunk adds nothing.
-            legalComments: 'none',
-            // Shared app modules are NOT inlined here: the resolver below
-            // redirects them to a generated shim reading
-            // `globalThis.__veskShared`, so the single copy in
-            // shared-modules.js serves every route chunk. (esbuild's `alias`
-            // option only accepts bare package names, so this is a resolver
-            // rather than a map.)
-            ...(sharedRedirectPlugin ? { plugins: [sharedRedirectPlugin, serverOnlyGuard] } : { plugins: [serverOnlyGuard] }),
-            ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
-          });
+          const result = await Promise.race([
+            build({
+              entryPoints: [tmpFile],
+              bundle: true,
+              format: 'iife',
+              platform: 'browser',
+              write: false,
+              logLevel: 'silent',
+              loader: { '.js': 'tsx' },
+              // Bundled dependencies (lucide-vesk above all) carry a license
+              // banner per module, and a barrel import pulls in hundreds of
+              // them. Those banners were ~339 KB of a 350 KB chunk, which is
+              // what kept a barrel import from being usable at all. Attribution
+              // for a dependency stays in its own package; shipping every
+              // module's header inside our own chunk adds nothing.
+              legalComments: 'none',
+              // Shared app modules are NOT inlined here: the resolver below
+              // redirects them to a generated shim reading
+              // `globalThis.__veskShared`, so the single copy in
+              // shared-modules.js serves every route chunk. (esbuild's `alias`
+              // option only accepts bare package names, so this is a resolver
+              // rather than a map.)
+              ...(sharedRedirectPlugin ? { plugins: [sharedRedirectPlugin, serverOnlyGuard] } : { plugins: [serverOnlyGuard] }),
+              ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
+            }),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('chunk esbuild timeout')), 60000)),
+          ]);
           finalCode = result.outputFiles[0].text;
         } catch (e) {
           const err = e as { errors?: Array<{ text: string; location?: { file?: string; line?: number; column?: number } }>; message?: string };
@@ -1723,25 +1726,28 @@ async function bundleRuntimeNames(
     try { mkdirSync(dirname(entry), { recursive: true }); } catch { /* exists */ }
     try { rmSync(entry); } catch { /* not present yet */ }
     writeFileSync(entry, `export { ${unique.join(', ')} } from ${JSON.stringify(indexClient)};\n`);
-    const result = await build({
-      entryPoints: [esbuildPath(entry)],
-      bundle: true,
-      format: 'iife',
-      globalName: '__veskRuntime',
-      platform: 'browser',
-      target: ['es2022'],
-      treeShaking: true,
-      // Do not let esbuild rename identifiers here. This bundle is one large
-      // IIFE built from many runtime modules, and the renaming pass of some
-      // esbuild versions (observed on 0.25.12) emits a free reference to an
-      // undefined minified name (ReferenceError: m is not defined) that kills
-      // client hydration for the whole app. Whitespace-only output keeps the
-      // runtime deterministic at a modest size cost; tree-shaking still prunes
-      // unreachable modules, so names coming out of the IIFE are untouched.
-      minify: false,
-      write: false,
-      logLevel: 'silent',
-    });
+    const result = await Promise.race([
+      build({
+        entryPoints: [esbuildPath(entry)],
+        bundle: true,
+        format: 'iife',
+        globalName: '__veskRuntime',
+        platform: 'browser',
+        target: ['es2022'],
+        treeShaking: true,
+        // Do not let esbuild rename identifiers here. This bundle is one large
+        // IIFE built from many runtime modules, and the renaming pass of some
+        // esbuild versions (observed on 0.25.12) emits a free reference to an
+        // undefined minified name (ReferenceError: m is not defined) that kills
+        // client hydration for the whole app. Whitespace-only output keeps the
+        // runtime deterministic at a modest size cost; tree-shaking still prunes
+        // unreachable modules, so names coming out of the IIFE are untouched.
+        minify: false,
+        write: false,
+        logLevel: 'silent',
+      }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('runtime esbuild timeout')), 60000)),
+    ]);
     const bundle = result.outputFiles[0].text;
     return `${bundle}\nconst { ${unique.join(', ')} } = __veskRuntime;\nexport { ${unique.join(', ')} };\n`;
   } catch (e) {

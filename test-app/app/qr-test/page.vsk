@@ -1,0 +1,308 @@
+import { CofoundrMatrix, RawHtml } from "vesk-qr"
+
+async component QrTestPage() {
+	const QRR_DATA = "https://cofoundr.ng/variants"
+
+	const qrSquare = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-square",
+		style: { preset: "architectural", module: "square", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+	const qrSmallSquare = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-small-square",
+		style: { preset: "architectural", module: "small-square", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+	const qrRoundedSquare = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-rounded-square",
+		style: { preset: "architectural", module: "rounded-square", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+	const qrMicroSquare = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-micro-square",
+		style: { preset: "architectural", module: "micro-square", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+	const qrCircle = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-circle",
+		style: { preset: "architectural", module: "circle", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+	const qrRectangle = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-rectangle",
+		style: { preset: "architectural", module: "rectangle", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+	const qrCombination = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/shape-combination",
+		style: { preset: "architectural", module: "combination", connectors: true, microDetails: true },
+		options: { size: 240, seed: 42 },
+	})
+
+	const qrArchitectural = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/preset-architectural",
+		style: { preset: "architectural" },
+		options: { size: 240, seed: 42 },
+	})
+	const qrMinimal = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/preset-minimal",
+		style: { preset: "architectural-minimal" },
+		options: { size: 240, seed: 42 },
+	})
+	const qrTechnical = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/preset-technical",
+		style: { preset: "architectural-technical" },
+		options: { size: 240, seed: 42 },
+	})
+	const qrMicro = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/preset-micro",
+		style: { preset: "architectural-micro" },
+		options: { size: 240, seed: 42 },
+	})
+	const qrStructural = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/preset-structural",
+		style: { preset: "architectural-structural" },
+		options: { size: 240, seed: 42 },
+	})
+	const qrMonochrome = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/preset-monochrome",
+		style: { preset: "architectural-monochrome" },
+		options: { size: 240, seed: 42 },
+	})
+
+	const qrECL = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/ec-L",
+		options: { errorCorrection: "L", size: 240, seed: 42 },
+	})
+	const qrECM = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/ec-M",
+		options: { errorCorrection: "M", size: 240, seed: 42 },
+	})
+	const qrECQ = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/ec-Q",
+		options: { errorCorrection: "Q", size: 240, seed: 42 },
+	})
+	const qrECH = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/ec-H",
+		options: { errorCorrection: "H", size: 240, seed: 42 },
+	})
+
+	const qrCustom = await CofoundrMatrix.generate({
+		data: QRR_DATA + "/custom-colors",
+		style: { preset: "architectural" },
+		colors: { foreground: "#FF6B35", background: "#2C3E50" },
+		options: { size: 240, seed: 42 },
+	})
+
+	<div class="p-8 max-w-7xl mx-auto">
+		<h1 class="text-3xl font-bold mb-2 text-gray-900">vesk-qr — Complete Variant Preview</h1>
+		<p class="text-gray-600 mb-8">
+			Every module shape, preset, error-correction level, and color configuration supported by vesk-qr.
+			<span class="font-semibold">Module borders are NOT statically square — seven shapes are supported.</span>
+		</p>
+
+		<section class="mb-12">
+			<h2 class="text-xl font-semibold mb-4 border-b border-gray-200 pb-2">Module Shapes</h2>
+			<p class="text-sm text-gray-500 mb-4">
+				Data modules rendered in different geometric shapes. All use the architectural preset with connectors and micro-details.
+			</p>
+			<div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrSquare.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Square</h3>
+					<code class="text-[10px] text-gray-400 break-all">square</code>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrSmallSquare.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Small Square</h3>
+					<code class="text-[10px] text-gray-400 break-all">small-square</code>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrRoundedSquare.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Rounded Square</h3>
+					<code class="text-[10px] text-gray-400 break-all">rounded-square</code>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrMicroSquare.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Micro Square</h3>
+					<code class="text-[10px] text-gray-400 break-all">micro-square</code>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrCircle.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Circle</h3>
+					<code class="text-[10px] text-gray-400 break-all">circle</code>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrRectangle.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Rectangle</h3>
+					<code class="text-[10px] text-gray-400 break-all">rectangle</code>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrCombination.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Combination</h3>
+					<code class="text-[10px] text-gray-400 break-all">combination</code>
+				</div>
+			</div>
+		</section>
+
+		<section class="mb-12">
+			<h2 class="text-xl font-semibold mb-4 border-b border-gray-200 pb-2">Presets</h2>
+			<p class="text-sm text-gray-500 mb-4">
+				Six built-in presets, all configurations of the same rendering engine.
+			</p>
+			<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrArchitectural.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Architectural</h3>
+					<code class="text-[10px] text-gray-400 break-all">architectural</code>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrArchitectural.getMetadata().version} · {qrArchitectural.getMetadata().moduleCount}×{qrArchitectural.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrMinimal.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Minimal</h3>
+					<code class="text-[10px] text-gray-400 break-all">architectural-minimal</code>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrMinimal.getMetadata().version} · {qrMinimal.getMetadata().moduleCount}×{qrMinimal.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrTechnical.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Technical</h3>
+					<code class="text-[10px] text-gray-400 break-all">architectural-technical</code>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrTechnical.getMetadata().version} · {qrTechnical.getMetadata().moduleCount}×{qrTechnical.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrMicro.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Micro</h3>
+					<code class="text-[10px] text-gray-400 break-all">architectural-micro</code>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrMicro.getMetadata().version} · {qrMicro.getMetadata().moduleCount}×{qrMicro.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrStructural.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Structural</h3>
+					<code class="text-[10px] text-gray-400 break-all">architectural-structural</code>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrStructural.getMetadata().version} · {qrStructural.getMetadata().moduleCount}×{qrStructural.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrMonochrome.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Monochrome</h3>
+					<code class="text-[10px] text-gray-400 break-all">architectural-monochrome</code>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrMonochrome.getMetadata().version} · {qrMonochrome.getMetadata().moduleCount}×{qrMonochrome.getMetadata().moduleCount}
+					</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="mb-12">
+			<h2 class="text-xl font-semibold mb-4 border-b border-gray-200 pb-2">Error Correction Levels</h2>
+			<p class="text-sm text-gray-500 mb-4">
+				Same payload, different EC levels. Higher EC = more redundancy = larger module count.
+			</p>
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrECL.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">L (Low)</h3>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrECL.getMetadata().version} · {qrECL.getMetadata().moduleCount}×{qrECL.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrECM.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">M (Medium)</h3>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrECM.getMetadata().version} · {qrECM.getMetadata().moduleCount}×{qrECM.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrECQ.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Q (Quartile)</h3>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrECQ.getMetadata().version} · {qrECQ.getMetadata().moduleCount}×{qrECQ.getMetadata().moduleCount}
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrECH.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">H (High)</h3>
+					<p class="text-[10px] text-gray-500 mt-1">
+						v{qrECH.getMetadata().version} · {qrECH.getMetadata().moduleCount}×{qrECH.getMetadata().moduleCount}
+					</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="mb-12">
+			<h2 class="text-xl font-semibold mb-4 border-b border-gray-200 pb-2">Custom Colors</h2>
+			<div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrCustom.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Custom Colors</h3>
+					<p class="text-[10px] text-gray-500 mt-1">
+						fg: #FF6B35 · bg: #2C3E50
+					</p>
+				</div>
+				<div class="border border-gray-200 rounded-lg p-3 bg-white flex flex-col items-center">
+					<div class="w-24 h-24 border border-gray-100 rounded mb-2 overflow-hidden">
+						<RawHtml svg={qrMonochrome.toSVG()} />
+					</div>
+					<h3 class="text-xs font-medium text-gray-900 mb-1">Monochrome</h3>
+					<p class="text-[10px] text-gray-500 mt-1">
+						fg: #000000 · bg: #FFFFFF
+					</p>
+				</div>
+			</div>
+		</section>
+
+		<section class="mt-12 p-6 bg-gray-50 rounded-lg border border-gray-200">
+			<h2 class="text-sm font-semibold mb-2 text-gray-900 uppercase tracking-wider">Determinism</h2>
+			<p class="text-sm text-gray-700">
+				Same payload + config + seed → identical SVG output every time. All previews above use
+				<code class="bg-white px-1 py-0.5 rounded">seed: 42</code> so they are reproducible.
+			</p>
+		</section>
+	</div>
+}

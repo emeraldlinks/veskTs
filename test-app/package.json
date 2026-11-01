@@ -15,7 +15,9 @@
     "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.72-ci.1792527905740.tgz",
     "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.72-ci.1792527905740.tgz",
     "@vesk/types": "file:./tarballs/vesk-types-0.2.72-ci.1792527905740.tgz",
-    "vesk": "file:./tarballs/vesk-0.2.72-ci.1792527905740.tgz"
+    "qrcode-generator": "^1.5.2",
+    "vesk": "file:./tarballs/vesk-0.2.72-ci.1792527905740.tgz",
+    "vesk-qr": "file:tarballs/vesk-qr-0.1.0.tgz"
   },
   "devDependencies": {
     "@types/node": "^26.1.2",

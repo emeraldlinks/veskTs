@@ -1,0 +1,18 @@
+/**
+ * @vesk-qr/components/RawHtml.vsk — Renders an HTML string raw (unescaped).
+ *
+ * Component call return values are rendered as raw HTML by Vesk (not escaped
+ * like `{expr}` bindings). Use this to inject trusted SVG markup.
+ *
+ * Usage:
+ *
+ *   <RawHtml svg={qr.toSVG()} />
+ */
+
+interface RawHtmlProps {
+  svg: string
+}
+
+component RawHtml(props: RawHtmlProps) {
+  return props.svg
+}

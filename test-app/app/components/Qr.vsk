@@ -1,0 +1,16 @@
+import { CofoundrMatrix } from "vesk-qr"
+
+interface QrProps {
+  data: string
+  size?: number
+  seed?: number
+}
+
+async component Qr(props: QrProps) {
+  const qr = await CofoundrMatrix.generate({
+    data: props.data,
+    options: { size: props.size ?? 300, seed: props.seed ?? 42 },
+  })
+
+  return qr.toSVG()
+}

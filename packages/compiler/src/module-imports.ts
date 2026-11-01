@@ -949,6 +949,11 @@ export function resolveImportPath(spec: string, fromDir: string): string {
   if (!isAbsolute(spec)) {
     const aliased = resolveAliasModule(spec, fromDir);
     if (aliased) return aliased;
+    // Bare npm specifiers (e.g. "vesk-qr") must resolve to absolute paths so
+    // the client-chunk bundler (esbuild from a temp dir) can find them in
+    // the app's node_modules via the package's exports map.
+    const resolved = resolveSsrModule(spec, fromDir);
+    if (resolved) return resolved;
   }
   return spec;
 }

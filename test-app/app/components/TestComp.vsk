@@ -1,0 +1,3 @@
+component TestComp() {
+	<span>Test Component</span>
+}

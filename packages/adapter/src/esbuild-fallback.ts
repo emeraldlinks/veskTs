@@ -4,7 +4,7 @@
 // the compiler's dependency-free `stripCodeTypes` (acorn-based), so no
 // transformSync path exists anymore.
 let _nativeBuild: ((options: any) => Promise<any>) | null = null;
-let _nativeDead = false;
+let _nativeDead = process.env.VESK_NO_NATIVE_ESBUILD === 'true';
 let _wasm: any | null = null;
 let _wasmReady: Promise<any> | null = null;
 
