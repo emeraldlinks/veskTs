@@ -270,11 +270,19 @@ export function loadSsrModule(absPath: string): Record<string, unknown> | null {
         exportsObj = createLazyBarrelExports(buildBarrelSpec(body), dirname(absPath));
       } else {
         exportsObj = {};
+        // Wrap exportsObj in a module object so CJS modules that do
+        // `module.exports = factory()` (e.g. qrcode-generator) have their
+        // export captured correctly. Without this, module.exports is replaced
+        // but exportsObj still points to the original empty object.
+        const moduleObj = { exports: exportsObj };
         EVALUATING.set(absPath, exportsObj);
-        const ran = evaluateModuleFile(absPath, exportsObj, src);
+        const ran = evaluateModuleFile(absPath, moduleObj, src);
         // Runtime evaluation failure (already warned) — give Node's own loader
         // a chance before giving up.
         if (!ran) exportsObj = null;
+        // Prefer module.exports when a CJS module replaced it (e.g.
+        // qrcode-generator), otherwise fall back to exportsObj.
+        else if (moduleObj.exports !== exportsObj) exportsObj = moduleObj.exports;
       }
     }
 
@@ -607,7 +615,7 @@ function createLazyBarrelExports(spec: BarrelSpec, dir: string): Record<string, 
  */
 function evaluateModuleFile(
   absPath: string,
-  exportsObj: Record<string, unknown>,
+  moduleObj: Record<string, unknown>,
   src?: SsrSource | null
 ): boolean {
   let raw: string;
@@ -641,7 +649,7 @@ function evaluateModuleFile(
     // Not parseable as ESM — run verbatim as CJS.
     try {
       const fn = new Function('require', 'module', 'exports', '__dirname', '__filename', raw);
-      fn(createModuleRequire(dirname(absPath)), { exports: exportsObj }, exportsObj, dirname(absPath), absPath);
+      fn(createModuleRequire(dirname(absPath)), moduleObj, moduleObj.exports, dirname(absPath), absPath);
     } catch (err) {
       console.warn(`[vesk] SSR: failed to load ${absPath}: ${(err as Error)?.message ?? String(err)}`);
       return false;
@@ -668,7 +676,7 @@ function evaluateModuleFile(
   // ESM modules are always strict; mirror per-spec `this === undefined`.
   try {
     const fn = new Function('require', 'module', 'exports', '__dirname', '__filename', "'use strict';\n" + body);
-    fn(createModuleRequire(dirname(absPath)), { exports: exportsObj }, exportsObj, dirname(absPath), absPath);
+    fn(createModuleRequire(dirname(absPath)), moduleObj, moduleObj.exports, dirname(absPath), absPath);
   } catch (err) {
     console.warn(`[vesk] SSR: failed to load ${absPath}: ${(err as Error)?.message ?? String(err)}`);
     return false;

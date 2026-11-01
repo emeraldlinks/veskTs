@@ -1354,6 +1354,10 @@ export async function generateClientBundle(
               // rather than a map.)
               ...(sharedRedirectPlugin ? { plugins: [sharedRedirectPlugin, serverOnlyGuard] } : { plugins: [serverOnlyGuard] }),
               ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
+              // Resolve bare specifiers (e.g. "vesk-qr") from the app's
+              // node_modules rather than the temp chunk dir, which esbuild
+              // defaults to when no resolveDir is set.
+              resolveDir: appDir,
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('chunk esbuild timeout')), 60000)),
           ]);
