@@ -424,10 +424,12 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
           // (e.g. qrcode-generator via vesk-qr) can't be bundled as ESM —
           // esbuild adds `__require` shims that throw in ESM output. Mark them
           // external so they're left as bare imports instead of `__require`
-          // shims. On edge hosts without node_modules these will fail at
-          // runtime (expected — CJS packages don't run on edge), but the
-          // bundle itself is valid ESM.
-          external: ['qrcode-generator', 'vesk-qr'],
+          // shims. vesk-qr is ESM but internally requires() its CJS deps,
+          // which would generate __require shims — externalize it too so its
+          // code never enters the bundle. On edge hosts without node_modules
+          // these external imports fail at runtime (expected — CJS packages
+          // don't run on edge), but the bundle itself is valid ESM.
+          external: ['vesk-qr', 'qrcode-generator', 'canvas', '@zxing/browser', '@zxing/node'],
         }),
     logOverride: { 'direct-eval': 'silent' },
     plugins,
