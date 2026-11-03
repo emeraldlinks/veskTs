@@ -657,7 +657,7 @@ it('async parent of async child compiles to awaited hydrate call', async () => {
    const code = compileClient(source, null, { hydrate: true, forceClient: true });
    show('  client', code.slice(0, 600));
    assert(code.includes('async (props, __registry, __hydrate) => {'), 'parent hydrate fn is async');
-   assert(code.includes('await __components["Child"]'), 'child call is awaited');
+   assert(code.includes('await __hydrators["Child"]'), 'child call is awaited');
 });
 
 it('load function receives params from props', async () => {

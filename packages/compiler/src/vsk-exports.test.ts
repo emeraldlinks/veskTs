@@ -247,7 +247,7 @@ describe('a .vsk namespace import resolves component tags', () => {
   it('client hydrate codegen emits a registry lookup plus the not-found guard', () => {
     const src = "import * as NS from './lib.vsk'\ncomponent Page { <div><NS.Icon /></div> }\n";
     const code = compileClient(src, 'Page', { sourcePath: 'page.vsk', hydrate: true });
-    expect(code).toContain('__components["Icon"]');
+    expect(code).toContain('__hydrators["Icon"]');
     expect(code).toContain('was not found while rendering');
   });
 

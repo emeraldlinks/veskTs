@@ -961,7 +961,7 @@ export function resolveImportPath(spec: string, fromDir: string): string {
     // the client-chunk bundler (esbuild from a temp dir) can find them in
     // the app's node_modules via the package's exports map.
     const resolved = resolveSsrModule(spec, fromDir);
-    if (resolved) return resolved;
+    if (resolved) return isBuiltinPath(resolved) ? resolved.slice(BUILTIN_PREFIX.length) : resolved;
   }
   return spec;
 }
