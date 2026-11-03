@@ -1155,9 +1155,14 @@ export function resolveViaPackageModuleField(specifier: string, fromDir: string)
     const pkgPath = join(dir, 'node_modules', pkgName, 'package.json');
     if (statOrNull(pkgPath) !== null) {
       try {
-        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { module?: unknown };
-        if (typeof pkg.module === 'string' && pkg.module.length > 0) {
-          const found = probeFile(resolve(join(dir, 'node_modules', pkgName), pkg.module));
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as { module?: unknown; main?: unknown };
+        const entry = typeof pkg.module === 'string' && pkg.module.length > 0
+          ? pkg.module
+          : typeof pkg.main === 'string' && pkg.main.length > 0
+            ? pkg.main
+            : null;
+        if (entry) {
+          const found = probeFile(resolve(join(dir, 'node_modules', pkgName), entry));
           if (found) return toRealPath(found);
         }
       } catch {
