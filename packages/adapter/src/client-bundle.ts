@@ -1383,22 +1383,7 @@ export async function generateClientBundle(
             return x.text + at;
           }).join(' | ') || err?.message || String(e);
           console.error('[vesk] chunk bundle failed', entry.name, detail);
-          // Under --strict this must fail the build. The fallback below is a
-          // DEVELOPMENT convenience only: it strips the unresolvable import
-          // and leaves every name it bound dangling, so the chunk parses, the
-          // build exits 0, and the page dies at hydration with `X is not
-          // defined` — far from the import that caused it. A wrong-case deep
-          // import (`lucide-vesk/icons/terminal`) hit exactly this.
-          if (options?.strict) {
-            throw new Error(`[vesk] chunk bundle failed: ${entry.name} — ${detail}`);
-          }
-          // Fall back to the historical behavior: strip every import so the
-          // classic script at least parses. Bindings imported from native-only
-          // `@vesk/*` libraries get throwing stubs (a readable degradation
-          // instead of a baffling `X is not defined`); every other stripped
-          // name stays dangling, which is the pre-existing failure mode.
-          const stripped = demoteExports(removeCompiledNodes(entry.code, isAnyImport));
-          finalCode = chunkIIFE(nativeLibraryImportStubs(entry.code) + stripped);
+          throw new Error(`[vesk] chunk bundle failed: ${entry.name} — ${detail}`);
         } finally {
           try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
         }

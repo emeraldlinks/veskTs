@@ -456,7 +456,12 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     }
   }
 
-await doBuild().catch(() => {});
+await doBuild();
+    if (pendingInitialError) {
+      console.error(`vesk dev: initial build failed — ${(pendingInitialError as HmrErrorPayload).message}`);
+      console.error(`vesk dev: cannot start server with a broken build. Fix the errors above and restart.`);
+      process.exit(1);
+    }
 
     const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     const url = new URL(req.url || '/', `http://localhost:${port}`);

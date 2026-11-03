@@ -24,7 +24,7 @@ function usage(code = 0) {
   console.error('Vesk CLI — Compiler-First Framework for the Post-VDOM Web');
   console.error('');
   console.error('Usage:');
-  console.error('  vesk build [--platform <name>] [--seo] [--strict] [--skip-split]  Build app/ for production');
+  console.error('  vesk build [--platform <name>] [--seo] [--no-strict] [--skip-split]  Build app/ for production');
   console.error('  vesk build                       Auto-detect platform from CI env (vercel/netlify/cf/deno/aws/coxmos)');
   console.error('  vesk seo [--strict]           Run SEO analysis on app/');
   console.error('  vesk typecheck [--no-strict]  Typecheck .vsk/.ts files via tsc-in-.vsk (strict by default)');
@@ -164,7 +164,7 @@ if (cmd === 'build') {
 
   const restArgs = process.argv.slice(3);
   const seo = restArgs.includes('--seo');
-  const strict = restArgs.includes('--strict');
+  const strict = !restArgs.includes('--no-strict');
 
   const platformIdx = restArgs.indexOf('--platform');
   const platform = platformIdx !== -1 ? restArgs[platformIdx + 1] : undefined;
