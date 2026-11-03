@@ -22,6 +22,16 @@ export { Md } from '@vesk/runtime/src/md';
 export { Show, For, Switch, Match } from '@vesk/runtime/src/headless';
 export { primitive, leaf, isPrimitive, isLeaf, isVeskComponent, toDomNode, rerenderNode } from '@vesk/runtime/src/primitive';
 export type { VeskLeafComponent, VeskPrimitiveComponent, VeskTaggedLeafComponent, VeskComponentRegistry, VeskScope } from '@vesk/types';
+
+/**
+ * Request-scoped locals for the current request. On the client there is no
+ * request context, so this always returns an empty object. Use
+ * `locals<{ user: User }>()` to read typed locals in server-rendered
+ * components; on the client it returns `{}`.
+ */
+export function locals<L extends object = Record<string, unknown>>(): L {
+	return {} as L;
+}
 export { LoadingIndicator, useLoadingIndicator, configureLoadingIndicator, getLoadingProgress, isLoadingActive, getLoadingError, LOADING_INDICATOR_DEFAULT_COLOR, LOADING_INDICATOR_DEFAULT_ERROR_COLOR } from '@vesk/runtime/src/loading-indicator';
 export type { LoadingIndicatorHandle, LoadingIndicatorOptions, LoadingIndicatorProps } from '@vesk/runtime/src/loading-indicator';
 export { defineAction, getAction, clearActions, validateActionInput, issuesToFieldMap, isFormAction } from '@vesk/runtime/src/action';
