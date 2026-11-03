@@ -419,7 +419,16 @@ export const createHash = () => ({ update: () => {}, digest: () => '' });
               'const require = createRequire(import.meta.url);\n',
           },
         }
-      : {}),
+      : {
+          // Edge/neutral targets bundle everything into ESM. CJS dependencies
+          // (e.g. qrcode-generator via vesk-qr) can't be bundled as ESM —
+          // esbuild adds `__require` shims that throw in ESM output. Mark them
+          // external so they're left as bare imports instead of `__require`
+          // shims. On edge hosts without node_modules these will fail at
+          // runtime (expected — CJS packages don't run on edge), but the
+          // bundle itself is valid ESM.
+          external: ['qrcode-generator', 'vesk-qr'],
+        }),
     logOverride: { 'direct-eval': 'silent' },
     plugins,
   });

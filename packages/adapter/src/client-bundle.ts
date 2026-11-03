@@ -1330,6 +1330,21 @@ export async function generateClientBundle(
           // Pass the app tsconfig so esbuild resolves tsconfig `paths` aliases
           // (`@/x`, `@app/x`) inside transitively bundled modules too.
           const appTsconfig = findTsconfigPath(appDir);
+          // Build an alias map so esbuild can resolve bare specifiers
+          // (e.g. "vesk-qr") from the app's node_modules. The entry code lives
+          // in a temp directory, so esbuild's default resolver (walking up from
+          // the entry file) can't find app-level node_modules. resolveDir
+          // doesn't exist in this esbuild version, so we alias each bare
+          // specifier to its resolved absolute path.
+          const alias: Record<string, string> = {};
+          for (const source of entry.importsTable.sources()) {
+            if (source.startsWith('/') || source.startsWith('./') || source.startsWith('../')) continue;
+            let resolved = resolveSsrModule(source, appDir);
+            if (!resolved) resolved = resolveImportPath(source, appDir);
+            if (resolved && !resolved.startsWith('\0builtin:')) {
+              alias[source] = resolved;
+            }
+          }
           const result = await Promise.race([
             build({
               entryPoints: [tmpFile],
@@ -1354,10 +1369,9 @@ export async function generateClientBundle(
               // rather than a map.)
               ...(sharedRedirectPlugin ? { plugins: [sharedRedirectPlugin, serverOnlyGuard] } : { plugins: [serverOnlyGuard] }),
               ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
-              // Resolve bare specifiers (e.g. "vesk-qr") from the app's
-              // node_modules rather than the temp chunk dir, which esbuild
-              // defaults to when no resolveDir is set.
-              resolveDir: appDir,
+              // Alias bare specifiers to their resolved absolute paths so
+              // esbuild can find them from the temp chunk dir.
+              ...(Object.keys(alias).length ? { alias } : {}),
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('chunk esbuild timeout')), 60000)),
           ]);
