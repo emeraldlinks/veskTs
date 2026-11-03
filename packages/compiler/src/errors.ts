@@ -457,30 +457,171 @@ export class VeskError extends Error {
     );
   }
 
+  /**
+   * A `{ ... }` block statement wrapping regular JS in statement mode.
+   * Vesk statement mode doesn't need braces around statements —
+   * `if (cond) { <jsx/> }` is written without the outer `{ }`.
+   */
+  static blockStatementInStatementMode(context: VeskErrorOptions = {}): VeskError {
+    return new VeskError(
+      'Unnecessary `{ ... }` block around statements in statement mode. Vesk statement mode does not use braces around `if`/`for`/`while`/etc. — write the statement directly.',
+      {
+        ...context,
+        code: context.code || 'V0424',
+        suggestions: [
+          'Remove the outer `{ }` and write the statement directly:',
+          '  `{ if (cond) { <div/> } }` → `if (cond) { <div/> }`',
+          'Braces are only needed around JSX expression containers `{ expr }` inside JSX, not around statements.',
+        ],
+        nextSteps: [
+          'Delete the opening `{` and closing `}` that wrap the statement.',
+          'If you meant to group multiple statements, they can appear directly one after another in statement mode.',
+        ],
+        tip: 'Vesk statement mode accepts bare JSX, if/for/while/switch/try without wrapping braces — no `{ }` needed around statements.',
+      },
+    );
+  }
+
+  /**
+   * An opening JSX tag was never closed, e.g. `<div><span>hello</div>`.
+   * Acorn reports this as "Expected corresponding JSX closing tag for <span>"
+   * or, when wrapped in a component body, as a generic "Unexpected token".
+   */
+  static jsxUnclosedTag(
+    tagName: string,
+    context: VeskErrorOptions & { closingTag?: string; suggestedFix?: string } = {},
+  ): VeskError {
+    const closing = context.closingTag ?? `</${tagName}>`;
+    return new VeskError(
+      `Unclosed JSX tag \`<${tagName}>\` — expected \`${closing}\` before the closing tag.`,
+      {
+        ...context,
+        code: context.code || 'V0420',
+        suggestions: [
+          `Add \`${closing}\` to close the \`<${tagName}>\` tag.`,
+          `Every opening JSX tag must have a matching closing tag: \`<${tagName}></${tagName}>\`.`,
+        ],
+        nextSteps: [
+          context.suggestedFix ?? `Insert \`${closing}\` right before the tag that closes the parent element.`,
+          `Check that all JSX elements in this component are properly closed and nested.`,
+        ],
+        tip: `The \`<${tagName}>\` tag on the marked line was opened but never closed.`,
+      },
+    );
+  }
+
+  /**
+   * A JSX closing tag doesn't match the most recent opening tag,
+   * e.g. `<div></span>`.
+   */
+  static jsxMismatchedTag(
+    openingTag: string,
+    closingTag: string,
+    context: VeskErrorOptions = {},
+  ): VeskError {
+    return new VeskError(
+      `Expected closing tag \`</${openingTag}>\` to match \`<${openingTag}>\`, but found \`</${closingTag}>\`.`,
+      {
+        ...context,
+        code: context.code || 'V0421',
+        suggestions: [
+          `Change \`</${closingTag}>\` to \`</${openingTag}>\` to close the \`<${openingTag}>\` tag.`,
+          `Or change the opening tag to \`<${closingTag}>\` if that was the intended element.`,
+        ],
+        nextSteps: [
+          `Fix the mismatched tag on the marked line so opening and closing tags agree.`,
+        ],
+        tip: `JSX closing tags must match their opening tag: \`<${openingTag}></${openingTag}>\`, not \`<${openingTag}></${closingTag}>\`.`,
+      },
+    );
+  }
+
+  /**
+   * JSX content was never terminated before end of file, e.g. `<div>` with no `>`.
+   */
+  static jsxUnterminated(context: VeskErrorOptions = {}): VeskError {
+    return new VeskError(
+      'Unterminated JSX contents — the JSX block was never closed before the end of the file.',
+      {
+        ...context,
+        code: context.code || 'V0422',
+        suggestions: [
+          'Close the JSX element with `>` or `/>` before the end of the file.',
+          'Make sure every `<` that opens a JSX tag has a matching `>` (or `/>`).',
+        ],
+        nextSteps: [
+          'Add the missing `>` or `/>` to close the JSX tag.',
+          'Check that no string or comment is swallowing the closing bracket.',
+        ],
+        tip: 'The JSX block on the marked line was opened but never terminated.',
+      },
+    );
+  }
+
+  /**
+   * An empty JSX expression container `{}`, which is not allowed.
+   */
+  static jsxEmptyExpression(context: VeskErrorOptions = {}): VeskError {
+    return new VeskError(
+      'Empty JSX expression container `{}` — JSX expressions must contain a value.',
+      {
+        ...context,
+        code: context.code || 'V0423',
+        suggestions: [
+          'Fill the braces with an expression: `{ count }`, `{ item.name }`, or `{ true }`.',
+          'If you meant literal braces, escape them: `{ \'{\' }` and `{ \'}\' }`.',
+        ],
+        nextSteps: [
+          'Replace `{}` with a real expression, or remove the empty braces.',
+        ],
+        tip: '`{}` is not valid JSX — put a value inside the braces.',
+      },
+    );
+  }
+
   toString(): string {
-    let out = this.code ? `[vesk ${this.code}] ${this.message}` : `[vesk] ${this.message}`;
+    const lines: string[] = [];
+    // Header: `error[V####]: message` — rustc-style error code first.
+    lines.push(this.code ? `error[${this.code}]: ${this.message}` : `error: ${this.message}`);
+
+    // Location: `--> file:line:col`
+    let loc = '  --> ';
+    let hasLoc = false;
     if (this.file) {
-      out += `\n  File: ${this.file}`;
-      if (this.line) {
-        out += `:${this.line}`;
-        if (this.column) out += `:${this.column}`;
+      loc += this.file;
+      hasLoc = true;
+    }
+    if (this.line) {
+      loc += `:${this.line}`;
+      hasLoc = true;
+    }
+    if (this.column) {
+      loc += `:${this.column}`;
+      hasLoc = true;
+    }
+    if (hasLoc) lines.push(loc);
+
+    // Code frame: source context with a `^` caret under the offending column.
+    if (this.frame) {
+      lines.push('  |');
+      for (const frameLine of this.frame.split('\n')) {
+        lines.push(`  ${frameLine}`);
       }
-      if (this.line && this.column) out += ` (line ${this.line}, column ${this.column})`;
-      else if (this.line) out += ` (line ${this.line})`;
     } else if (this.line) {
-      out += `\n  at line ${this.line}${this.column ? `, column ${this.column}` : ''}`;
+      lines.push('  |');
     }
-    if (this.code) out += `\n\n${this.code}`;
-    if (this.suggestions.length) {
-      out += '\n\n  Suggestions:';
-      for (const s of this.suggestions.slice(0, 4)) out += `\n    • ${s}`;
+
+    // Help lines, rustc-style `= help:` — tip first, then next steps / suggestions.
+    const help: string[] = [];
+    if (this.tip) help.push(this.tip);
+    for (const s of this.nextSteps) help.push(s);
+    for (const s of this.suggestions) help.push(s);
+    if (help.length) {
+      lines.push('  |');
+      for (const h of help) lines.push(`= help: ${h}`);
     }
-    if (this.nextSteps.length) {
-      out += '\n\n  Next steps:';
-      for (const s of this.nextSteps.slice(0, 4)) out += `\n    • ${s}`;
-    }
-    if (this.tip) out += `\n\n  Tip: ${this.tip}`;
-    return out;
+
+    return lines.join('\n');
   }
 
   toJSON(): Record<string, unknown> {

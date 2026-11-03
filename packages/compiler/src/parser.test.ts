@@ -81,6 +81,10 @@ function shouldThrow(fn, pattern) {
 	}
 }
 
+function checkContains(haystack: string, needle: string, label: string): void {
+	if (!haystack.includes(needle)) throw new Error(`${label}: expected to contain ${JSON.stringify(needle)}`);
+}
+
 // ============================================================
 // Phase 0 Regression — Base parser still works
 // ============================================================
@@ -1502,6 +1506,114 @@ describe('generic arrow functions', () => {
 	it('leaves a <T,> inside a string or comment alone', () => {
 		expect(parses('const s = "<T,>(x) => x";')).toBe(true);
 		expect(parses('// <T,>(x) => x\nconst a = 1;')).toBe(true);
+	});
+});
+
+describe('Backtick template literals as JSX attribute values', () => {
+	it('parses a bare backtick attribute on an HTML element', () => {
+		const ast = parse(`<a href=\`/x/\${id}\`>click</a>`);
+		const attr = ast.body[0].expression.openingElement.attributes[0];
+		expect(attr.value.type).toBe('TemplateLiteral');
+		expect(attr.value.quasis.length).toBe(2);
+		expect(attr.value.expressions.length).toBe(1);
+	});
+
+	it('parses a bare backtick attribute on a component', () => {
+		const ast = parse(`<Link href=\`/admin/\${id}\`>click</Link>`);
+		const attr = ast.body[0].expression.openingElement.attributes[0];
+		expect(attr.value.type).toBe('TemplateLiteral');
+	});
+
+	it('parses multiple backtick attributes', () => {
+		const ast = parse(`<a href=\`/x/\${a}\` title=\`t: \${b}\`>x</a>`);
+		const attrs = ast.body[0].expression.openingElement.attributes;
+		expect(attrs[0].value.type).toBe('TemplateLiteral');
+		expect(attrs[1].value.type).toBe('TemplateLiteral');
+		expect(attrs.length).toBe(2);
+	});
+
+	it('parses a backtick attribute in statement mode (no return)', () => {
+		const ast = parse(`component Page {
+  return <a href=\`/x/\${id}\`>click</a>;
+}`);
+		const el = ast.body[0].body.body[0].argument;
+		const attr = el.openingElement.attributes[0];
+		expect(attr.value.type).toBe('TemplateLiteral');
+	});
+
+	it('still throws on an unterminated backtick attribute', () => {
+		shouldThrow(() => parse(`<a href=\`/unterminated>x</a>`), 'Unterminated template');
+	});
+
+	function checkContains(haystack: string, needle: string, label: string): void {
+		if (!haystack.includes(needle)) throw new Error(`${label}: expected to contain ${JSON.stringify(needle)}`);
+	}
+
+	it('reports an unclosed JSX tag with error code V0420', () => {
+		let e;
+		try {
+			parse(`component Page {
+  return <div><span>hello</div>
+}`);
+		} catch (err) { e = err; }
+		expect(e).toBeTruthy();
+		expect(e.code).toBe('V0420');
+		checkContains(e.toString(), 'error[V0420]:', 'header');
+		checkContains(e.toString(), '--> ', 'location');
+		checkContains(e.toString(), '^', 'caret');
+		expect(e.nextSteps.length).toBeGreaterThan(0);
+	});
+
+	it('reports a mismatched closing tag with error code V0421', () => {
+		let e;
+		try {
+			parse(`component Page {
+  return <div></span>
+}`);
+		} catch (err) { e = err; }
+		expect(e).toBeTruthy();
+		expect(e.code).toBe('V0421');
+		checkContains(e.toString(), 'error[V0421]:', 'header');
+		checkContains(e.toString(), '--> ', 'location');
+		checkContains(e.toString(), '^', 'caret');
+	});
+
+	it('reports unterminated JSX with error code V0422', () => {
+		let e;
+		try {
+			parse(`component Page {
+  return <div>
+`);
+		} catch (err) { e = err; }
+		expect(e).toBeTruthy();
+		expect(e.code).toBe('V0422');
+		checkContains(e.toString(), 'error[V0422]:', 'header');
+		checkContains(e.toString(), '--> ', 'location');
+		checkContains(e.toString(), '^', 'caret');
+	});
+
+	it('produces rustc-style output with location and caret', () => {
+		let e;
+		try {
+			parse(`component Page {
+  return <div><span>hello</div>
+}`, { filename: 'app/page.vsk' });
+		} catch (err) { e = err; }
+		expect(e).toBeTruthy();
+		const out = e.toString();
+		// Header: error[V####]: message
+		expect(out.startsWith('error[')).toBe(true);
+		// Location: --> file:line:col
+		checkContains(out, '--> ', 'location');
+		// Code frame with caret
+		checkContains(out, '|', 'frame');
+		checkContains(out, '^', 'caret');
+		// Help lines
+		checkContains(out, '= help:', 'help');
+		// No generic fallback text
+		if (out.includes('Check the line indicated by the ^ marker')) {
+			throw new Error('Generic fallback text should not appear');
+		}
 	});
 });
 

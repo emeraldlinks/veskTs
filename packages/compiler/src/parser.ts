@@ -531,26 +531,344 @@ export function parse(source: string, options: ParseOptions = {}): Program {
       line = err.loc.line;
       column = (err.loc.column ?? 0) + 1;
     } else {
-      const m = err.message.match(/\((\d+):(\d+)\)/);
-      if (m) {
-        line = parseInt(m[1], 10);
-        column = parseInt(m[2], 10) + 1;
+      // Parse "(line:column)" from the message without regex.
+      const parenOpen = err.message.indexOf('(');
+      if (parenOpen >= 0) {
+        const parenClose = err.message.indexOf(')', parenOpen);
+        if (parenClose > parenOpen) {
+          const inside = err.message.slice(parenOpen + 1, parenClose);
+          const colon = inside.indexOf(':');
+          if (colon > 0) {
+            line = parseInt(inside.slice(0, colon), 10);
+            column = parseInt(inside.slice(colon + 1), 10) + 1;
+          }
+        }
       }
     }
     const filename = (options.filename as string) || '';
-    const cleanMessage = err.message.replace(/\s*\(\d+:\d+\)\s*$/, '');
-    const frame = line > 0 ? codeFrame(source, line, column, 5, 5) : '';
+    // Strip the trailing "(line:column)" acorn appends, without regex.
+    let cleanMessage = err.message;
+    const lastParen = cleanMessage.lastIndexOf('(');
+    if (lastParen >= 0) {
+      const closeParen = cleanMessage.indexOf(')', lastParen);
+      if (closeParen > lastParen) {
+        const inside = cleanMessage.slice(lastParen + 1, closeParen);
+        const colon = inside.indexOf(':');
+        if (
+          colon > 0 &&
+          inside.slice(0, colon).split('').every((ch) => ch >= '0' && ch <= '9') &&
+          inside.slice(colon + 1).split('').every((ch) => ch >= '0' && ch <= '9')
+        ) {
+          cleanMessage = cleanMessage.slice(0, lastParen).trimEnd();
+        }
+      }
+    }
+
+    // --- Convert acorn's raw JSX errors into descriptive Vesk messages ---
+    let message = cleanMessage;
+    let errLine = line;
+    let errColumn = column;
+    let code: string | undefined;
+    const extraHelp: string[] = [];
+
+    const frame = errLine > 0 ? codeFrame(source, errLine, errColumn, 5, 5) : '';
     const hint = filename ? ` in ${filename}` : '';
-    throw new VeskError(`${cleanMessage}${hint}`, {
+
+    // "Unterminated JSX contents" — acorn hit EOF inside a JSX block.
+    if (cleanMessage.includes('Unterminated JSX contents')) {
+      throw VeskError.jsxUnterminated({
+        file: filename,
+        line: errLine,
+        column: errColumn,
+        frame,
+      });
+    }
+
+    // "JSX attributes must only be assigned a non-empty expression" — `{}`.
+    if (cleanMessage.includes('JSX attributes must only be assigned a non-empty expression')) {
+      throw VeskError.jsxEmptyExpression({
+        file: filename,
+        line: errLine,
+        column: errColumn,
+        frame,
+      });
+    }
+
+    // "Expected corresponding JSX closing tag for <X>" — acorn points at the
+    // opening tag, but it could mean either a mismatched closing tag
+    // (<div></span>) or a genuinely unclosed tag (<div><span>...</div>).
+    const jsxClosePrefix = 'Expected corresponding JSX closing tag for <';
+    if (cleanMessage.startsWith(jsxClosePrefix)) {
+      const mismatched = findMismatchedJsxTag(source, errLine);
+      if (mismatched) {
+        throw VeskError.jsxMismatchedTag(mismatched.openingTag, mismatched.closingTag, {
+          file: filename,
+          line: mismatched.line,
+          column: mismatched.column,
+          frame: codeFrame(source, mismatched.line, mismatched.column, 5, 5),
+        });
+      }
+      const rest = cleanMessage.slice(jsxClosePrefix.length);
+      const gt = rest.indexOf('>');
+      const tagName = gt >= 0 ? rest.slice(0, gt) : rest;
+      throw VeskError.jsxUnclosedTag(tagName, {
+        file: filename,
+        line: errLine,
+        column: errColumn,
+        frame,
+        suggestedFix: `Insert </${tagName}> before the tag that closes the parent element.`,
+      });
+    }
+
+    // "Unexpected token" inside a component body often means a JSX tag was
+    // opened but never closed — acorn reports it late, at the closing `}`.
+    if (cleanMessage.includes('Unexpected token') && errLine > 0) {
+      const srcLine = (source.split('\n')[errLine - 1] ?? '').trim();
+      const isBlockCloser = srcLine.startsWith('}') || srcLine.startsWith(')');
+      if (isBlockCloser) {
+        const unclosed = findUnclosedJsxTag(source, errLine);
+        if (unclosed) {
+          throw VeskError.jsxUnclosedTag(unclosed.tagName, {
+            file: filename,
+            line: unclosed.line,
+            column: unclosed.column,
+            frame: errLine > 0 ? codeFrame(source, unclosed.line, unclosed.column, 5, 5) : '',
+            suggestedFix: `Insert </${unclosed.tagName}> before the tag that closes the parent element.`,
+          });
+        }
+      }
+
+      // `{if (cond) { <jsx/> }}` — LLMs often wrap statements in braces in
+      // statement mode, but Vesk doesn't need them. Look for `{` immediately
+      // before the offending token (skipping whitespace) followed by a
+      // statement keyword (`if`, `for`, `while`, `switch`, `try`, `const`,
+      // `let`, `var`, `function`, `class`, `return`).
+      if (errColumn > 1) {
+        const lineText = source.split('\n')[errLine - 1] ?? '';
+        // Walk back from the error column to find the `{` that opened the
+        // block (or JSX expression container) that shouldn't be there.
+        let j = errColumn - 2; // 0-based index of char before error token
+        while (j >= 0 && (lineText[j] === ' ' || lineText[j] === '\t')) j--;
+        if (j >= 0 && lineText[j] === '{') {
+          // Read the keyword after `{` (skipping whitespace)
+          let k = errColumn - 1; // 0-based index of error token start
+          while (k < lineText.length && (lineText[k] === ' ' || lineText[k] === '\t')) k++;
+          let keyword = '';
+          while (k < lineText.length && ((lineText[k] >= 'a' && lineText[k] <= 'z') || (lineText[k] >= 'A' && lineText[k] <= 'Z') || lineText[k] === '_' || lineText[k] === '$')) {
+            keyword += lineText[k];
+            k++;
+          }
+          const statementKeywords = new Set(['if', 'for', 'while', 'switch', 'try', 'const', 'let', 'var', 'function', 'class', 'return', 'do', 'with']);
+          if (statementKeywords.has(keyword)) {
+            const startLine = errLine;
+            const startColumn = j + 1; // 1-based column of `{`
+            throw VeskError.blockStatementInStatementMode({
+              file: filename,
+              line: startLine,
+              column: startColumn,
+              frame: codeFrame(source, startLine, startColumn, 5, 5),
+            });
+          }
+        }
+      }
+    }
+
+    // Targeted help for a bare template literal used as a JSX attribute value,
+    // e.g. <Link href=`/admin/learners/${id}`>. JSX attributes must be a quoted
+    // string or a `{...}` expression; a backtick on its own is not valid JSX.
+    if (
+      errLine > 0 &&
+      cleanMessage.includes('JSX value should be either an expression or a quoted JSX text')
+    ) {
+      const srcLine = (source.split('\n')[errLine - 1] ?? '');
+      if (srcLine.includes('`')) {
+        extraHelp.push(
+          'JSX attribute values must be a quoted string (`href="..."`) or a `{...}` expression (`href={expr}`).',
+          'A bare backtick template literal is not valid JSX — wrap it in braces:',
+          '  href={`/admin/learners/${id}`}',
+        );
+      }
+    }
+
+    throw new VeskError(`${message}${hint}`, {
       file: filename,
-      line,
-      column,
-      code: frame,
-      nextSteps: [
-        'Check the line indicated by the ^ marker for missing brackets, quotes, or JSX syntax.',
-        'If you wrote literal { or } inside JSX text, escape them as {\'{\'} and {\'}\'} or use &lbrace; &rbrace;.',
-        'Ensure all JSX tags are properly closed and component names start with an uppercase letter.',
-      ],
+      line: errLine,
+      column: errColumn,
+      frame,
+      code,
+      nextSteps: extraHelp.length ? extraHelp : [],
     });
   }
+}
+
+/**
+ * Scan the source (character by character, no regex) tracking JSX opening and
+ * closing tags up to `upToLine`. Returns the most recently opened tag that
+ * was never closed, or `null` if all tags are balanced. Used only to produce
+ * a better error message when acorn reports a generic "Unexpected token"
+ * for an unclosed JSX tag.
+ */
+function findUnclosedJsxTag(
+  source: string,
+  upToLine: number,
+): { tagName: string; line: number; column: number } | null {
+  const stack: Array<{ tagName: string; line: number; column: number }> = [];
+  let i = 0;
+  let currentLine = 1;
+
+  const isIdentStart = (code: number) =>
+    (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || code === 95; // a-z A-Z _
+
+  while (i < source.length) {
+    if (source[i] === '\n') {
+      currentLine++;
+      i++;
+      if (currentLine > upToLine) break;
+      continue;
+    }
+    if (currentLine > upToLine) break;
+
+    if (source[i] === '<') {
+      // Closing tag: </tagName>
+      if (i + 1 < source.length && source[i + 1] === '/') {
+        let j = i + 2;
+        while (j < source.length && source[j] !== '>' && source[j] !== '\n') j++;
+        const tagName = source.slice(i + 2, j);
+        // Only pop if it matches the most recently opened unclosed tag.
+        if (stack.length > 0 && stack[stack.length - 1].tagName === tagName) {
+          stack.pop();
+        }
+        // Skip past the closing >.
+        while (j < source.length && source[j] !== '>') j++;
+        if (j < source.length) j++;
+        i = j;
+        continue;
+      }
+
+      // Opening tag: <tagName ...> (skip namespace prefixes like ns.)
+      let j = i + 1;
+      while (
+        j < source.length &&
+        (source[j] === '.' || source[j] === ':' ||
+          (source.charCodeAt(j) >= 97 && source.charCodeAt(j) <= 122) ||
+          (source.charCodeAt(j) >= 65 && source.charCodeAt(j) <= 90) ||
+          source.charCodeAt(j) === 95)
+      ) {
+        j++;
+      }
+      const tagName = source.slice(i + 1, j);
+      if (tagName.length > 0 && isIdentStart(tagName.charCodeAt(0))) {
+        // Check for self-closing: <tagName />
+        let k = j;
+        let selfClosing = false;
+        while (k < source.length && source[k] !== '>') {
+          if (source[k] === '/' && k + 1 < source.length && source[k + 1] === '>') {
+            selfClosing = true;
+            break;
+          }
+          k++;
+        }
+        if (!selfClosing) {
+          const loc = offsetToLineCol(source, i);
+          stack.push({ tagName, line: loc.line, column: loc.column });
+        }
+      }
+
+      // Skip past the closing >.
+      while (j < source.length && source[j] !== '>') j++;
+      if (j < source.length) j++;
+      i = j;
+      continue;
+    }
+
+    i++;
+  }
+
+  // The most recently opened tag still on the stack is the unclosed one.
+  if (stack.length > 0) {
+    return stack[stack.length - 1];
+  }
+  return null;
+}
+
+/**
+ * Scan the source tracking JSX tags up to `upToLine`. Returns the first
+ * closing tag that does not match the most recently opened tag,
+ * e.g. `</span>` after `<div>`. Character scan only — no regex.
+ */
+function findMismatchedJsxTag(
+  source: string,
+  upToLine: number,
+): { openingTag: string; closingTag: string; line: number; column: number } | null {
+  const stack: string[] = [];
+  let i = 0;
+  let currentLine = 1;
+
+  const isIdentStart = (code: number) =>
+    (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || code === 95;
+
+  while (i < source.length) {
+    if (source[i] === '\n') {
+      currentLine++;
+      i++;
+      if (currentLine > upToLine) break;
+      continue;
+    }
+    if (currentLine > upToLine) break;
+
+    if (source[i] === '<') {
+      // Closing tag: </tagName>
+      if (i + 1 < source.length && source[i + 1] === '/') {
+        let j = i + 2;
+        while (j < source.length && source[j] !== '>' && source[j] !== '\n') j++;
+        const closingTag = source.slice(i + 2, j);
+        while (j < source.length && source[j] !== '>') j++;
+        if (j < source.length) j++;
+        const loc = offsetToLineCol(source, i);
+        // Mismatch: a closing tag that doesn't match the most recent opening tag.
+        if (stack.length > 0 && stack[stack.length - 1] !== closingTag) {
+          return { openingTag: stack[stack.length - 1], closingTag, line: loc.line, column: loc.column };
+        }
+        // Match: pop the stack.
+        if (stack.length > 0) stack.pop();
+        i = j;
+        continue;
+      }
+
+      // Opening tag: <tagName ...>
+      let j = i + 1;
+      while (
+        j < source.length &&
+        (source[j] === '.' || source[j] === ':' ||
+          (source.charCodeAt(j) >= 97 && source.charCodeAt(j) <= 122) ||
+          (source.charCodeAt(j) >= 65 && source.charCodeAt(j) <= 90) ||
+          source.charCodeAt(j) === 95)
+      ) {
+        j++;
+      }
+      const tagName = source.slice(i + 1, j);
+      if (tagName.length > 0 && isIdentStart(tagName.charCodeAt(0))) {
+        // Self-closing: <tagName />
+        let k = j;
+        let selfClosing = false;
+        while (k < source.length && source[k] !== '>') {
+          if (source[k] === '/' && k + 1 < source.length && source[k + 1] === '>') {
+            selfClosing = true;
+            break;
+          }
+          k++;
+        }
+        if (!selfClosing) stack.push(tagName);
+      }
+
+      while (j < source.length && source[j] !== '>') j++;
+      if (j < source.length) j++;
+      i = j;
+      continue;
+    }
+
+    i++;
+  }
+
+  return null;
 }

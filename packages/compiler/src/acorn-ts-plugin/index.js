@@ -774,6 +774,7 @@ function generateJsxParser(acorn, acornTypeScript, Parser, jsxOptions) {
           return node;
         case tok.jsxTagStart:
         case tt.string:
+        case tt.backQuote:
           return this.parseExprAtom();
         default:
           this.raise(this.start, "JSX value should be either an expression or a quoted JSX text");

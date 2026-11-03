@@ -938,6 +938,12 @@ function processAttribute(source: string, attr: any): { name: string; value: str
   const name = attr.name.type === 'JSXIdentifier' ? attr.name.name : getSource(source, attr.name);
   if (attr.value === null) return { name, value: '' };
   if (attr.value.type === 'Literal') return { name, value: String(attr.value.value) };
+  if (attr.value.type === 'TemplateLiteral') {
+    // A bare backtick template literal in a JSX attribute, e.g.
+    // `<Link href=`/admin/learners/${id}` />`. It is a dynamic value, so it
+    // becomes an attribute binding rather than a static string.
+    return { name, value: toExpression(source, attr.value) };
+  }
   if (attr.value.type === 'JSXExpressionContainer') {
     const expr = attr.value.expression;
     if (expr.type === 'Literal') return { name, value: String(expr.value) };
@@ -1550,6 +1556,10 @@ function extractProps(source: string, element: any): { props: { name: string; va
           continue;
         }
         value = toExpression(source, expr);
+      } else if (attr.value.type === 'TemplateLiteral') {
+        // A bare backtick template literal prop value, e.g.
+        // `<Comp href=`/admin/learners/${id}` />`.
+        value = toExpression(source, attr.value);
       } else {
         value = new Expression(JSON.stringify(attr.value.value));
       }
@@ -1704,6 +1714,7 @@ function getLoopControlGuard(consequent: any, kind: 'continue' | 'break'): { pre
 function isStatementMode(bodyStmts: any[]): boolean {
   if (bodyStmts.some((s) => s.type === 'JSXElement' || s.type === 'JSXExpressionContainer' || s.type === 'JSXFragment')) return true;
   for (const stmt of bodyStmts) {
+    if (stmt.type === 'BlockStatement' && hasJSXInSubtree(stmt)) return true;
     if (stmt.type === 'IfStatement' && !isGuardClause(stmt) && hasJSXInSubtree(stmt)) return true;
     if (stmt.type === 'ForOfStatement' && hasJSXInSubtree(stmt)) return true;
     if (stmt.type === 'ForStatement' && hasJSXInSubtree(stmt)) return true;
@@ -1848,6 +1859,47 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
       if (name) nodes.push(new TrackDecl(name, init, rawName));
       const refName = getComponentRefName(stmt);
       if (refName) nodes.push(new ComponentRef(refName));
+    } else if (stmt.type === 'VariableDeclaration') {
+      // Plain variable declarations (`const items = [1, 2, 3]`, `let x = 1`)
+      // that are not track() declarations are regular JavaScript. Emit them
+      // verbatim as runtime statements so they execute in statement mode.
+      const raw = getSource(source, stmt);
+      if (raw) nodes.push(new RuntimeStatement(raw, stmt, source));
+    } else if (stmt.type === 'BlockStatement') {
+      // Braces around statements are unnecessary in Vesk statement mode —
+      // `if (cond) { <jsx/> }` is written without the outer `{ }`. If the
+      // block contains only JSX children, unwrap them; otherwise give a
+      // clear error (braces around `if`/`for`/`const`/etc. are not needed).
+      const innerStmts = stmt.body || [];
+      const hasNonJSX = innerStmts.some(
+        (s: any) =>
+          s.type !== 'JSXElement' && s.type !== 'JSXExpressionContainer' && s.type !== 'JSXFragment',
+      );
+      if (hasNonJSX) {
+        const start = (stmt as unknown as { start?: number }).start ?? 0;
+        let line = 1;
+        let column = 1;
+        for (let i = 0; i < start && i < source.length; i++) {
+          if (source.charCodeAt(i) === 10) { line++; column = 1; } else { column++; }
+        }
+        throw VeskError.blockStatementInStatementMode({
+          file: filename || '',
+          line,
+          column,
+          code: codeFrame(source, line, column),
+        });
+      }
+      // Pure JSX block: unwrap the children directly.
+      for (const child of innerStmts) {
+        if (child.type === 'JSXElement') {
+          nodes.push(...processJSXElement(source, child));
+        } else if (child.type === 'JSXExpressionContainer') {
+          if (child.expression.type === 'JSXEmptyExpression') continue;
+          nodes.push(...exprToIR(source, child.expression));
+        } else if (child.type === 'JSXFragment') {
+          for (const c of child.children) nodes.push(...processJSXChildren(source, [c]));
+        }
+      }
     } else if (stmt.type === 'IfStatement') {
       // Guard-clause early return (`if (c) return X` with no else): everything
       // after this statement becomes the alternate branch, mirroring

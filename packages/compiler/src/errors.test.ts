@@ -16,7 +16,7 @@ const ok = (cond: boolean, msg: string): void => {
 {
   const e = VeskError.notFound('Menu');
   ok(e.code === 'V0401', `notFound() code is V0401 (got ${String(e.code)})`);
-  ok(e.toString().startsWith('[vesk V0401]'), 'toString prefixes the code');
+  ok(e.toString().startsWith('error[V0401]:'), 'toString prefixes the code');
 }
 {
   const e = VeskError.classDecl();
@@ -64,7 +64,7 @@ const ok = (cond: boolean, msg: string): void => {
 // --- no-code fallback keeps the legacy `[vesk]` prefix ---
 {
   const e = new VeskError('plain');
-  ok(e.code === undefined && e.toString().startsWith('[vesk] '), 'uncoded VeskError renders the legacy prefix');
+  ok(e.code === undefined && e.toString().startsWith('error: '), 'uncoded VeskError renders the legacy prefix');
 }
 
 // --- helpers still work (regression guard) ---
