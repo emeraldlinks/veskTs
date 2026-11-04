@@ -47,8 +47,6 @@ async component Home (){
 	
 	
 	<h1 class="text-4xl font-bold mb-2">Welcome to Vesk</h1>
-	<TernaryTest enabled={true} />
-	<TernaryTest enabled={false} />
 	<p class="text-gray-500 mb-4 text-purple-500">
 		A compiler-first reactive UI framework for the post-VDOM web. I love to build technology people use everyday
 	</p>
@@ -114,19 +112,4 @@ export component Appxx(props: CountProps)  {
 	} catch(e) {
 		<p class="error">Error: {(e as Error).message}</p>
 	}
-}
-
-export component TernaryTest(props: { enabled: boolean }) client {
-	const label = "test-capability";
-	return (
-		<div>
-			{props.enabled ? (
-				<>
-					holds <code class="text-amber-200">{label}</code>, so you can see this page.
-				</>
-			) : (
-				<>reached this page without <code class="text-amber-200">{label}</code>.</>
-			)}
-		</div>
-	);
 }
