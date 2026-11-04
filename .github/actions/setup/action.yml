@@ -24,6 +24,11 @@ runs:
       run: npm install --no-audit --no-fund
       shell: bash
 
+    - name: Install test-app dependencies
+      run: npm install --no-audit --no-fund
+      shell: bash
+      working-directory: test-app
+
     - name: Build packages (incremental — no-op when dist is fresh)
       run: npx tsx packages/cli/src/build-packages.ts
       shell: bash
