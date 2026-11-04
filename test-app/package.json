@@ -9,14 +9,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.92+ci.1793818173397.tgz",
-    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.92+ci.1793818173397.tgz",
-    "@vesk/plugin-pwa": "file:./tarballs/vesk-plugin-pwa-0.2.92+ci.1793818173397.tgz",
-    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.92+ci.1793818173397.tgz",
-    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.92+ci.1793818173397.tgz",
-    "@vesk/types": "file:./tarballs/vesk-types-0.2.92+ci.1793818173397.tgz",
+    "@vesk/adapter": "file:./tarballs/vesk-adapter-0.2.92+ci.1793835575233.tgz",
+    "@vesk/compiler": "file:./tarballs/vesk-compiler-0.2.92+ci.1793835575233.tgz",
+    "@vesk/plugin-pwa": "file:./tarballs/vesk-plugin-pwa-0.2.92+ci.1793835575233.tgz",
+    "@vesk/plugin-tailwind": "file:./tarballs/vesk-plugin-tailwind-0.2.92+ci.1793835575233.tgz",
+    "@vesk/runtime": "file:./tarballs/vesk-runtime-0.2.92+ci.1793835575233.tgz",
+    "@vesk/types": "file:./tarballs/vesk-types-0.2.92+ci.1793835575233.tgz",
     "qrcode-generator": "^1.5.2",
-    "vesk": "file:./tarballs/vesk-0.2.92+ci.1793818173397.tgz",
+    "vesk": "file:./tarballs/vesk-0.2.92+ci.1793835575233.tgz",
     "vesk-qr": "file:./tarballs/vesk-qr-0.1.0.tgz"
   },
   "devDependencies": {
