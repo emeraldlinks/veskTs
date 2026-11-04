@@ -192,5 +192,60 @@ await it('the shared bundle does not carry its own copy of the runtime', async (
   }
 });
 
+/**
+ * Default exports take a different shim path from named bindings. The shim
+ * must forward `m["default"]`; emitting the namespace itself (`export default
+ * m`) makes `lucide-vesk` icons call a module object and throws
+ * `TypeError: ... is not a function` on hydration. The chunk has a single
+ * default-import binding, so esbuild inlines that expression into the chunk.
+ */
+await it('default imports from a shared module forward the module default binding', async () => {
+  const { mkdirSync: md, writeFileSync: w } = await import('node:fs');
+  const dir = mkdtempSync(join(fixtureRoot(), 'default-'));
+  const appDir = join(dir, 'app');
+  md(join(appDir, 'one'), { recursive: true });
+  md(join(appDir, 'two'), { recursive: true });
+  md(join(dir, 'src'), { recursive: true });
+  w(
+    join(dir, 'src', 'icon.ts'),
+    "export const ICON_BODY_MARKER = 'default-icon-body';\nexport default function Icon() { return 'icon'; }\n",
+  );
+  w(join(appDir, 'page.vsk'), 'component Page() { <h1>home</h1> }\n');
+  w(
+    join(appDir, 'one', 'page.vsk'),
+    "import Icon from '../../src/icon';\ncomponent One() { <div><Icon /></div> }\n",
+  );
+  w(
+    join(appDir, 'two', 'page.vsk'),
+    "import Icon from '../../src/icon';\ncomponent Two() { <div><Icon /></div> }\n",
+  );
+  const routeTree: Array<Record<string, unknown>> = [
+    {
+      fullPath: '/',
+      sourceDir: '',
+      page: 'Page',
+      children: [
+        { fullPath: '/one', sourceDir: 'one', page: 'One', children: [] },
+        { fullPath: '/two', sourceDir: 'two', page: 'Two', children: [] },
+      ],
+    },
+  ];
+  const built = await generateClientBundle(routeTree as never, appDir, new Map(), {
+    codeSplit: true,
+    importRuntime: true,
+  });
+  let checked = 0;
+  for (const chunk of built.chunks) {
+    if (!chunk.code.includes('__veskShared')) continue;
+    checked++;
+    const bare = chunk.code.match(/shim_\d+_default\s*=\s*m\d+\s*;/);
+    assert(
+      !bare,
+      `${chunk.name} forwarded the module namespace as the default export (${bare?.[0]}); it must read m["default"]`,
+    );
+  }
+  assert(checked > 0, 'expected a route chunk to consume the shared default binding through a shim');
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

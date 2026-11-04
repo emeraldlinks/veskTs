@@ -1262,7 +1262,7 @@ export async function generateClientBundle(
           }
           const shim = join(tmpBase, `shim-${i}.js`);
           const shimLines = [`const m = globalThis.__veskShared[${JSON.stringify(file)}];`];
-          if (hasDefault) shimLines.push(`export default m;`);
+          if (hasDefault) shimLines.push(`export default m["default"];`);
           for (const name of [...named].sort()) {
             shimLines.push(`export const ${name} = m[${JSON.stringify(name)}];`);
           }
@@ -1522,6 +1522,14 @@ export async function generateClientBundle(
     let aliasLines: string[] = [];
     let hydratorAliasLines: string[] = [];
 
+    // Mono builds bundle every file into one module scope. External-package
+    // imports (e.g. vesk-qr) are not stripped by stripVskImports/stripRuntimeImport,
+    // so multiple files importing the same package would emit duplicate
+    // `import { X } from "pkg"` declarations — a SyntaxError. Fold them into
+    // one deduped import block instead (mirrors what ChunkImports does for
+    // code-split chunks).
+    const monoImports = new ChunkImports();
+
     function compileFileMono(filePath: string, resolvedName: string): void {
       if (seen.has(filePath)) return;
       seen.add(filePath);
@@ -1539,8 +1547,15 @@ export async function generateClientBundle(
       if (compCode) collectRuntimeImports(compCode);
       if (hydCode) collectRuntimeImports(hydCode);
       // Comp and hyd share the file's top-level bindings — scope together.
-      const strippedComp = compCode ? stripExports(stripVskImports(stripRuntimeImport(compCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
-      const strippedHyd = hydCode ? stripExports(stripVskImports(stripRuntimeImport(hydCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      let strippedComp = compCode ? stripExports(stripVskImports(stripRuntimeImport(compCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      let strippedHyd = hydCode ? stripExports(stripVskImports(stripRuntimeImport(hydCode))).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      // Fold remaining external-package imports into the shared dedup set and
+      // strip them from each file's contribution, so the same package imported
+      // by multiple files only emits one `import` statement.
+      if (monoImports.ok) {
+        strippedComp = strippedComp ? monoImports.add(strippedComp, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+        strippedHyd = strippedHyd ? monoImports.add(strippedHyd, filePath).replace(/^\n+/, '').replace(/\n+$/, '') : '';
+      }
       const fileCode = [strippedComp, strippedHyd].filter(Boolean).join('\n');
       if (fileCode.trim()) componentLines.push(scopeFileContribution(fileCode));
 
@@ -1575,6 +1590,17 @@ export async function generateClientBundle(
     const compMap = componentMap || new Map();
     for (const [compName, compPath] of compMap) {
       compileFileMono(compPath, compName);
+    }
+
+    // Emit the deduplicated external-package import block at the top of the
+    // bundle so every file can reference those bindings without duplicate
+    // declarations. If the import merge aborted (conflicting bindings), log a
+    // warning and leave imports in place (best-effort, matches historical behaviour).
+    if (monoImports.ok) {
+      const head = monoImports.render();
+      if (head) componentLines.unshift(head);
+    } else {
+      console.error('[vesk] mono import merge aborted:', monoImports.reason);
     }
 
     const main = await buildMainBundle(routeTree, runtimeDir, false, {

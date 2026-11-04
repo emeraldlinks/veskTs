@@ -472,6 +472,69 @@ test('NavLink hydrate consumes its walker claim marker (no leftover markers)', (
 	}
 });
 
+test('NavLink hydrate keeps SSR children on a claimed anchor', () => {
+	// SSR shape: <a><span class="logo">SSR</span></a> with a marker before it.
+	// Hydration must claim the anchor in place and leave its server-rendered
+	// interior alone — mounting the fresh child fragment would detach every
+	// SSR element inside the link (the hydration "claim, don't replace" rule).
+	const span = document.createElement('span');
+	const marker = document.createComment('vsk:c:Link');
+	const a = document.createElement('a');
+	const ssrChild = document.createElement('span');
+	ssrChild.className = 'logo';
+	ssrChild.textContent = 'SSR';
+	a.appendChild(ssrChild);
+	span.appendChild(marker);
+	span.appendChild(a);
+	const container = document.createElement('div');
+	container.appendChild(span);
+	const walker = createHydrateWalker(container, [marker]);
+	const frag = document.createDocumentFragment();
+	frag.appendChild(document.createTextNode('Home'));
+	setIsHydrating(true);
+	try {
+		const out = NavLink({ href: '/', class: 'nav', children: frag }, undefined, walker);
+		expect(walker.done()).toBe(true);
+		expect(out.nodeType).toBe(11);
+		expect(a.parentNode).toBe(span);
+		expect(a.children.length).toBe(1);
+		expect(a.children[0].className).toBe('logo');
+		expect(a.textContent).toBe('SSR');
+		expect(a.className).toBe('nav');
+	} finally {
+		setIsHydrating(false);
+	}
+});
+
+test('Link hydrate keeps SSR children on a claimed anchor', () => {
+	const span = document.createElement('span');
+	const marker = document.createComment('vsk:c:Link');
+	const a = document.createElement('a');
+	const ssrChild = document.createElement('span');
+	ssrChild.className = 'logo';
+	ssrChild.textContent = 'SSR';
+	a.appendChild(ssrChild);
+	span.appendChild(marker);
+	span.appendChild(a);
+	const container = document.createElement('div');
+	container.appendChild(span);
+	const walker = createHydrateWalker(container, [marker]);
+	const frag = document.createDocumentFragment();
+	frag.appendChild(document.createTextNode('Home'));
+	try {
+		const out = Link({ href: '/', class: 'nav', children: frag }, undefined, walker);
+		expect(walker.done()).toBe(true);
+		expect(out.nodeType).toBe(11);
+		expect(a.parentNode).toBe(span);
+		expect(a.children.length).toBe(1);
+		expect(a.children[0].className).toBe('logo');
+		expect(a.textContent).toBe('SSR');
+		expect(a.className).toBe('nav');
+	} finally {
+		setIsHydrating(false);
+	}
+});
+
 test('Outlet returns a DOM node', () => {
 	const result = Outlet({});
 	expect(result).toBeTruthy();

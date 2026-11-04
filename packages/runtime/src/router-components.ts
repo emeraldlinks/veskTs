@@ -360,11 +360,17 @@ export function Link(
 		const claimed = a ? a.parentNode !== null : false;
 		if (!a) a = document.createElement('a');
 		applyLinkDom(a, props, href);
-		if (props.children != null) {
+		// A claimed anchor already carries the server-rendered interior. The
+		// compiler builds this child fragment fresh (hydrate mode is disabled
+		// for self-claiming runtime components), so mounting it would detach
+		// every SSR element inside the link and re-attach a duplicate — the
+		// hydration contract is "claim, don't replace". Only an empty root (a
+		// fresh anchor, or an SSR shell whose children were not emitted) needs
+		// the fragment mounted.
+		if (a.childNodes.length === 0 && props.children != null) {
 			if (typeof props.children === 'string' || typeof props.children === 'number') {
 				a.textContent = String(props.children);
 			} else {
-				a.replaceChildren();
 				mountLinkChildren(a, props.children);
 			}
 		}
@@ -463,11 +469,10 @@ export function NavLink(
 		const claimed = a ? a.parentNode !== null : false;
 		if (!a) a = document.createElement('a');
 		applyLinkDom(a, props, props.href);
-		if (props.children != null) {
+		if (a.childNodes.length === 0 && props.children != null) {
 			if (typeof props.children === 'string' || typeof props.children === 'number') {
 				a.textContent = String(props.children);
 			} else {
-				a.replaceChildren();
 				mountLinkChildren(a, props.children);
 			}
 		}
@@ -493,11 +498,12 @@ export function NavLink(
 		const q = document.querySelector(`a[href="${props.href}"]`) as HTMLAnchorElement;
 		if (q) {
 			applyLinkDom(q, props, props.href);
-			if (props.children != null) {
+			// Same claim-don't-replace rule as the walker path: `q` came from the
+			// document, so its SSR interior is authoritative on first hydration.
+			if (q.childNodes.length === 0 && props.children != null) {
 				if (typeof props.children === 'string' || typeof props.children === 'number') {
 					q.textContent = String(props.children);
 				} else {
-					q.replaceChildren();
 					mountLinkChildren(q, props.children);
 				}
 			}
