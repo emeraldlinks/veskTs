@@ -25,7 +25,7 @@ runs:
       shell: bash
 
     - name: Install test-app dependencies
-      run: npm install --no-audit --no-fund
+      run: npm install --no-audit --no-fund --legacy-peer-deps
       shell: bash
       working-directory: test-app
 
