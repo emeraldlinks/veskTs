@@ -30,7 +30,6 @@ packages/runtime/*.tgz
 .vesk-cache/
 test-app/.vesk-smoke/
 test-app/.vesk-hydr/
-test-app/tarballs/
 
 # Build output for the browser-hydration fixture app (tests/residue-hydration-
 # test.mjs builds it on demand; the source under tests/fixtures/ IS tracked).
