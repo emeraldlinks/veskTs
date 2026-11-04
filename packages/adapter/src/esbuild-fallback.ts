@@ -24,9 +24,9 @@ async function getWasm() {
     _wasmReady = import('esbuild-wasm').then(m => {
       _wasm = m;
       return m;
-    }).catch(() => {
+    }).catch((e) => {
       _wasmReady = null;
-      throw new Error('esbuild-wasm not available — install it with: npm install esbuild-wasm');
+      throw new Error(`esbuild-wasm not available — install it with: npm install esbuild-wasm (underlying: ${e instanceof Error ? e.message : String(e)})`);
     });
   }
   return _wasmReady;
@@ -38,7 +38,7 @@ export async function build(options: any): Promise<any> {
     try {
       return await Promise.race([
         _nativeBuild(options),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('esbuild native timeout')), 30000)),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('esbuild native timeout')), 120000)),
       ]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

@@ -2310,7 +2310,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       imports.push(cleaned);
       for (const spec of node.specifiers) {
         if (spec.importKind === 'type') continue;
-        if (spec.type === 'ImportSpecifier') {
+        if (spec.type === 'ImportSpecifier' || spec.type === 'ImportDefaultSpecifier' || spec.type === 'ImportNamespaceSpecifier') {
           importedNames.add(spec.local.name);
         }
       }

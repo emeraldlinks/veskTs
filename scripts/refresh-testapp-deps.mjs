@@ -100,7 +100,7 @@ mkdirSync(tarballsDir, { recursive: true });
 
 // Remove previously generated CI tarballs so the directory stays tidy.
 for (const f of readdirSync(tarballsDir)) {
-	if (/^-ci\.\d+\.tgz$/.test(f.split('/').pop()) || /-ci\.\d+\.tgz$/.test(f)) {
+	if (/[-+]ci\.\d+\.tgz$/.test(f.split('/').pop()) || /[-+]ci\.\d+\.tgz$/.test(f)) {
 		rmSync(join(tarballsDir, f));
 	}
 }
@@ -111,7 +111,7 @@ for (const target of TARGETS) {
 	const srcPkgPath = join(root, 'packages', target.dir, 'package.json');
 	const srcPkg = JSON.parse(readFileSync(srcPkgPath, 'utf-8'));
 	const baseVersion = srcPkg.version || '0.0.0';
-	const ciVersion = `${baseVersion}-ci.${epoch}`;
+	const ciVersion = `${baseVersion}+ci.${epoch}`;
 
 	const tmp = join(root, '.ci-pack', target.dir.replace(/[\\/]/g, '_'));
 	rmSync(tmp, { recursive: true, force: true });
