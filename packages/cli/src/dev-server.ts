@@ -6,6 +6,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
 import type { Server } from 'node:http';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { parse } from '@vesk/compiler/src/parser';
 import { renderPage, renderFullPage, renderPageStream, buildDataScripts, securityHeaders, corsHeaders, corsPreflight, createRateLimiter, applyTrustProxy, prettifyHtml, resolveComponentName, getClientProtocol, randomToken, DEFAULT_MAX_BODY_BYTES, applyHeadInjects, applyHtmlPlugins, compileFile, resetVskState } from '@vesk/compiler/src/server-codegen';
 import { withSsrStore, withSsrStoreOf, createSsrStore, resetSsrToken, dropSsrSlot, ssrSink } from '@vesk/compiler/src/ssr-store';
 import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
@@ -847,9 +848,27 @@ export async function startDevServer(port: number, projectDir: string, config: R
 
 
   function runtimeImportNamesFrom(clientJs: string): string[] | null {
-    const m = clientJs.match(/^import\s*\{([^}]*)\}\s*from\s*['"]\/_vesk\/runtime\.js['"];?\s*$/m);
-    if (!m) return null;
-    const names = m[1].split(',').map((s) => s.trim()).filter(Boolean);
+    const ast = parse(clientJs, { filename: 'client-bundle.js' });
+    const names: string[] = [];
+    for (const node of ast.body) {
+      const n = node as unknown as Record<string, unknown>;
+      if (n.type === 'ImportDeclaration') {
+        const src = (n.source as unknown as Record<string, unknown>).value;
+        if (src !== '/_vesk/runtime.js') continue;
+        for (const spec of (n.specifiers as unknown as Record<string, unknown>[])) {
+          if (spec.type === 'ImportSpecifier') {
+            const local = (spec.local as unknown as Record<string, unknown>).name;
+            if (local) names.push(String(local));
+          } else if (spec.type === 'ImportDefaultSpecifier') {
+            const local = (spec.local as unknown as Record<string, unknown>).name;
+            if (local) names.push(String(local));
+          } else if (spec.type === 'ImportNamespaceSpecifier') {
+            const local = (spec.local as unknown as Record<string, unknown>).name;
+            if (local) names.push(String(local));
+          }
+        }
+      }
+    }
     return names.length > 0 ? names : null;
   }
 

@@ -1626,14 +1626,42 @@ export function buildRuntimeCode(runtimeDir: string): string {
 /**
  * Names the client runtime actually exports, so the tree-shaken bundle only
  * emits the modules reachable from the used set.
+ *
+ * Parses index-client.js with the AST parser instead of regex so that direct
+ * declarations (export function locals() {}, export const x = 1, export class
+ * Foo {}) are captured alongside re-exports (export { X } from '...').
  */
 export function runtimeExportNames(runtimeDir: string): Set<string> {
   const indexSrc = readFileSync(join(runtimeDir, 'index-client.js'), 'utf-8');
   const names = new Set<string>();
-  for (const m of indexSrc.matchAll(/export\s*\{([^}]+)\}\s*from/g)) {
-    for (const raw of m[1].split(',')) {
-      const n = raw.trim().split(/\s+as\s+/).pop()!.trim();
-      if (n) names.add(n);
+  const ast = parse(indexSrc, { filename: join(runtimeDir, 'index-client.js') });
+  for (const node of ast.body) {
+    const n = node as unknown as Record<string, unknown>;
+    if (n.type === 'ExportNamedDeclaration') {
+      if (n.declaration) {
+        // Direct declaration: export function foo() {}, export const x = 1,
+        // export class Bar {}
+        const decl = n.declaration as unknown as Record<string, unknown>;
+        if (decl.type === 'FunctionDeclaration' && decl.id) {
+          names.add(String((decl.id as unknown as Record<string, unknown>).name));
+        } else if (decl.type === 'ClassDeclaration' && decl.id) {
+          names.add(String((decl.id as unknown as Record<string, unknown>).name));
+        } else if (decl.type === 'VariableDeclaration') {
+          for (const d of (decl.declarations as unknown as Record<string, unknown>[])) {
+            if ((d.id as unknown as Record<string, unknown>).type === 'Identifier') {
+              names.add(String((d.id as unknown as Record<string, unknown>).name));
+            }
+          }
+        }
+      } else if (n.source) {
+        // Re-export: export { X } from '...' or export { X as Y } from '...'
+        for (const spec of (n.specifiers as unknown as Record<string, unknown>[])) {
+          if (spec.type === 'ExportSpecifier') {
+            const exported = (spec.exported as unknown as Record<string, unknown>).name;
+            if (exported) names.add(String(exported));
+          }
+        }
+      }
     }
   }
   return names;
