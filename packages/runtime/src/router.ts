@@ -710,9 +710,10 @@ async function renderPageOnly(router: RouterInstance, match: RouteMatch): Promis
 	const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
 	const pageProps = { params: match.params, ...(pageNode.props as Record<string, unknown>) };
 	const result = await runInBlockWindow(() => pageNode!.page!(pageProps, new Map(), walker) as Node | string | undefined);
-	if (result && (result as Node).nodeType === 1 && pageNode._pageName && router.__componentInstances) {
+	if (result && pageNode._pageName && router.__componentInstances) {
 		const list = router.__componentInstances.get(pageNode._pageName as string);
-		if (list && list.length > 0) list[list.length - 1].root = result as Element;
+		const rootEl = firstElementChildOf(result as Node);
+		if (list && list.length > 0 && rootEl) list[list.length - 1].root = rootEl;
 	}
 	return result;
 }
@@ -773,20 +774,37 @@ function replacePageContent(container: HTMLElement, newContent: Node | string | 
 	return true;
 }
 
+/** Extracts the first element child from a Node (Element or DocumentFragment). */
+function firstElementChildOf(node: Node): Element | null {
+	if (node.nodeType === 1) return node as Element;
+	if (node.nodeType === 11) {
+		// DocumentFragment: return first element child
+		for (let i = 0; i < (node as DocumentFragment).childNodes.length; i++) {
+			const child = (node as DocumentFragment).childNodes[i];
+			if (child.nodeType === 1) return child as Element;
+		}
+	}
+	return null;
+}
+
 function storePageInstance(router: RouterInstance, pageNode: RouteNode, pageProps: Record<string, unknown>, result: unknown): void {
-	if (!router || !pageNode._pageName || !result || (result as Node).nodeType !== 1) return;
+	if (!router || !pageNode._pageName || !result) return;
+	const rootEl = firstElementChildOf(result as Node);
+	if (!rootEl) return;
 	if (!router.__componentInstances) router.__componentInstances = new Map();
 	const name = pageNode._pageName as string;
 	if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
-	router.__componentInstances.get(name)!.push({ root: result as Element, props: pageProps as Record<string, unknown>, node: pageNode, type: 'page' });
+	router.__componentInstances.get(name)!.push({ root: rootEl, props: pageProps as Record<string, unknown>, node: pageNode, type: 'page' });
 }
 
 function storeLayoutInstance(router: RouterInstance, node: RouteNode, layoutProps: Record<string, unknown>, result: unknown): void {
-	if (!router || !node._layoutName || !result || (result as Node).nodeType !== 1) return;
+	if (!router || !node._layoutName || !result) return;
+	const rootEl = firstElementChildOf(result as Node);
+	if (!rootEl) return;
 	if (!router.__componentInstances) router.__componentInstances = new Map();
 	const name = node._layoutName as string;
 	if (!router.__componentInstances.has(name)) router.__componentInstances.set(name, []);
-	router.__componentInstances.get(name)!.push({ root: result as Element, props: layoutProps as Record<string, unknown>, node, type: 'layout' });
+	router.__componentInstances.get(name)!.push({ root: rootEl, props: layoutProps as Record<string, unknown>, node, type: 'layout' });
 }
 
 function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLElement, navToken?: number): void | Promise<void> {
@@ -1706,10 +1724,25 @@ export function createRouter(
 								root(() => {
 									newDom = newFn!(inst.props, new Map(), walker);
 								});
-								if (newDom && (newDom as Node).nodeType === 1 && inst.root && inst.root.parentNode) {
-									inst.root.parentNode.replaceChild(newDom as Node, inst.root);
-									inst.root = newDom as Element;
-									didUpdate = true;
+								if (newDom && typeof (newDom as Promise<unknown>).then === 'function') {
+									const promise = newDom as Promise<Node>;
+									promise.then((resolvedDom) => {
+										if (resolvedDom && inst.root && inst.root.parentNode) {
+											const rootEl = firstElementChildOf(resolvedDom as Node);
+											if (rootEl) {
+												inst.root.parentNode.replaceChild(rootEl, inst.root);
+												inst.root = rootEl;
+												didUpdate = true;
+											}
+										}
+									}).catch((e) => console.error('HMR update error:', e));
+								} else if (newDom && inst.root && inst.root.parentNode) {
+									const rootEl = firstElementChildOf(newDom as Node);
+									if (rootEl) {
+										inst.root.parentNode.replaceChild(rootEl, inst.root);
+										inst.root = rootEl;
+										didUpdate = true;
+									}
 								}
 							} catch (e) {
 								console.error('HMR update error:', e);

@@ -2152,11 +2152,18 @@ export function createDevClient(opts?: DevClientOptions): { dispose(): void } {
 
 	function handleUpdate(msg: Record<string, unknown>): void {
 		if (msg.fnSources && typeof msg.fnSources === 'object') {
+			// The HMR snippet uses `__components` and `__hydrators` which are module-level
+			// bindings in the client bundle, but this HMR client is a separate module.
+			// Provide them from globalThis so the snippet's registrations reach the live registry.
+			const components = (globalThis as Record<string, unknown>).__components as Record<string, unknown> | undefined;
+			const hydrators = (globalThis as Record<string, unknown>).__hydrators as Record<string, unknown> | undefined;
 			const evaler =
 				(global.__vesk_hmr_eval as ((c: string, n?: string) => unknown) | undefined) ||
 				function (c: string) {
 					try {
-						return eval(c);
+						// Use Function constructor to create a scope with __components and __hydrators
+						// bound to the global registries. This avoids strict-mode eval scope issues.
+						return new Function('__components', '__hydrators', c)(components, hydrators);
 					} catch (ex) {
 						console.error('HMR eval error:', ex);
 					}

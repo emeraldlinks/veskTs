@@ -560,6 +560,25 @@ await doBuild();
       return;
     }
 
+    // Serve the dev client bundle at /_vesk/client.js. The file is written to
+    // devDir/static/client.js by the build step. The SSR-injected script tag
+    // references this exact URL.
+    if (url.pathname === '/_vesk/client.js') {
+      const clientPath = resolve(devDir, 'static', 'client.js');
+      try {
+        if (existsSync(clientPath)) {
+          res.writeHead(200, { 'Content-Type': 'application/javascript' });
+          res.end(readFileSync(clientPath, 'utf-8'));
+          return;
+        }
+      } catch {
+        /* fall through to 404 below */
+      }
+      res.writeHead(404, { 'Content-Type': 'text/plain' });
+      res.end('client.js not built yet');
+      return;
+    }
+
     // External data scripts (/ssr-data.js?t=...) are emitted by
     // storeDataScriptGlobal once a render serializes SSR data. Without this
     // route the dev SPA fallback served the HTML document as the script's
