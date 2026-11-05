@@ -378,17 +378,45 @@ export const sep = '/';
 export const delimiter = ':';
 export const spawnSync = () => ({ status: 0 });
 export const execSync = () => '';
-export const randomBytes = () => ({});
-export const createHash = () => ({ update: () => {}, digest: () => '' });
 `;
-          return {
-            contents,
-            loader: 'js',
-          };
+          return { contents, loader: 'js' };
         });
       },
     });
   }
+  // Edge/neutral targets bundle everything into ESM. CJS dependencies (e.g.
+  // qrcode-generator via vesk-qr) can't be bundled as ESM — esbuild rewrites
+  // their require() calls into `__require` shims that throw in ESM output.
+  // esbuild 0.28's string `external` option does not externalize resolvable
+  // bare specifiers (it emits `__require` shims instead), so resolve these
+  // packages to empty stub modules. Nothing from them is bundled, so no
+  // `__require` definition or call leaks into the edge bundle. vesk-qr and its
+  // optional CJS deps (qrcode-generator, canvas, @zxing/*) are optional at
+  // runtime on edge (they fail gracefully), so stubbing them at build time is
+  // safe and keeps the bundle valid ESM.
+  plugins.push({
+    name: 'stub-edge-packages',
+    setup(build: any) {
+      build.onResolve(
+        { filter: /^(vesk-qr|qrcode-generator|canvas|@zxing\/(browser|node))(\/|$)/ },
+        (args: any) => ({ path: args.path, namespace: 'vesk-edge-stub' }),
+      );
+      build.onLoad({ filter: /.*/, namespace: 'vesk-edge-stub' }, () => ({
+        contents: [
+          'export const CofoundrMatrix = undefined;\n',
+          'export const generate = undefined;\n',
+          'export const Qr = undefined;\n',
+          'export const RawHtml = undefined;\n',
+          'export const CanvasUnavailableError = undefined;\n',
+          'export const InvalidConfigError = undefined;\n',
+          'export const QREncodingError = undefined;\n',
+          'export const ScanReliabilityError = undefined;\n',
+          'export const QRError = undefined;\n',
+        ].join(''),
+        loader: 'js',
+      }));
+    },
+  });
   const result = await build({
     entryPoints: [entry],
     bundle: true,

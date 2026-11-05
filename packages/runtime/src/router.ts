@@ -1561,6 +1561,15 @@ export function createRouter(
 				return;
 			}
 
+			// Never push a duplicate of the current URL: consecutive identical
+			// history entries break back/forward (back() lands on an identical
+			// page and never reaches the previous one). Compare against the
+			// live window location (pushState/replaceState update it
+			// synchronously), not the batched _state signal.
+			const targetFull = (mode && typeof raw === 'string' && raw.startsWith('#/') ? '#' : '') + url.pathname + url.search;
+			const currentFull = window.location.pathname + window.location.search + window.location.hash;
+			if (!opts.replace && targetFull === currentFull) return;
+
 			match.pathname = url.pathname;
 
 			// Navigation guards (programmatic/Link navigations only).
@@ -1944,6 +1953,15 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				}
 				return;
 			}
+
+			// Never push a duplicate of the current URL: consecutive identical
+			// history entries break back/forward (back() lands on an identical
+			// page and never reaches the previous one). Compare against the
+			// live window location (pushState/replaceState update it
+			// synchronously), not the batched _state signal.
+			const targetFull2 = (mode && typeof pathname === 'string' && pathname.startsWith('#/') ? '#' : '') + url.pathname + url.search;
+			const currentFull2 = window.location.pathname + window.location.search + window.location.hash;
+			if (!opts.replace && targetFull2 === currentFull2) return;
 
 			match.pathname = url.pathname;
 
