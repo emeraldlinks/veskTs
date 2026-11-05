@@ -519,10 +519,12 @@ export async function renderFullPage(
   registry: Map<string, Function> = new Map(),
   options: FullPageOptions = {}
 ): Promise<string> {
-  // Each renderFullPage call owns an isolated store so concurrent renders never
-  // share an AsyncLocalStorage scope (withSsrStore reuses the ambient store,
-  // which would let concurrent renders cross-contaminate SSR data via ssrSink).
-  const store = createSsrStore();
+  // Adopt the ambient request store when one is open: renderPage runs in the
+  // enclosing withSsrStore scope and attributes setSsrData writes to that
+  // store's token, so renderFullPage must read the same slot to hand off SSR
+  // data. Only mint a fresh store when called stand-alone (no ambient scope),
+  // which keeps concurrent requests isolated through their distinct tokens.
+  const store = adoptSsrStore();
   const renderToken = store.token as string;
   keepSsrSlot(renderToken);
   pruneSsrDataSlots();
