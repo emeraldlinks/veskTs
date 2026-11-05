@@ -207,7 +207,11 @@ export function devBootstrapScript(): string {
  */
 export function injectDevScripts(html: string): string {
   if (!html.includes('</body>')) return html;
-  const scripts = '\t<script type="module" src="/_vesk/hmr.js"></script>\n' + devBootstrapScript() + '\n';
+  const scripts =
+    '\t<script type="module" src="/_vesk/client.js"></script>\n' +
+    '\t<script type="module" src="/_vesk/hmr.js"></script>\n' +
+    devBootstrapScript() +
+    '\n';
   return html.replace('</body>', scripts + '</body>');
 }
 
