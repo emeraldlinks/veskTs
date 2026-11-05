@@ -1561,15 +1561,6 @@ export function createRouter(
 				return;
 			}
 
-			// Never push a duplicate of the current URL: consecutive identical
-			// history entries break back/forward (back() lands on an identical
-			// page and never reaches the previous one). Compare against the
-			// live window location (pushState/replaceState update it
-			// synchronously), not the batched _state signal.
-			const targetFull = (mode && typeof raw === 'string' && raw.startsWith('#/') ? '#' : '') + url.pathname + url.search;
-			const currentFull = window.location.pathname + window.location.search + window.location.hash;
-			if (!opts.replace && targetFull === currentFull) return;
-
 			match.pathname = url.pathname;
 
 			// Navigation guards (programmatic/Link navigations only).
@@ -1593,13 +1584,26 @@ export function createRouter(
 				const updateUrl = () => {
 					const fullPath = url.pathname + url.search;
 					const target = mode ? (fullPath.startsWith('/') ? '#' + fullPath : '#' + fullPath) : fullPath;
-					if (!opts.replace) {
-						window.history.pushState({ path: url.pathname }, '', target);
+					// Never push a duplicate of the current URL: consecutive identical
+					// history entries break back/forward (back() lands on an identical
+					// page and never reaches the previous one). Compare against the
+					// live window location (pushState/replaceState update it
+					// synchronously), not the batched _state signal.
+					const targetFull = (mode && typeof raw === 'string' && raw.startsWith('#/') ? '#' : '') + url.pathname + url.search;
+					const currentFull = window.location.pathname + window.location.search + window.location.hash;
+					if (!opts.replace && targetFull === currentFull) {
+						// Skip the history entry but keep _state in sync.
+						set(_state.path, url.pathname);
+						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 					} else {
-						window.history.replaceState({ path: url.pathname }, '', target);
+						if (!opts.replace) {
+							window.history.pushState({ path: url.pathname }, '', target);
+						} else {
+							window.history.replaceState({ path: url.pathname }, '', target);
+						}
+						set(_state.path, url.pathname);
+						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 					}
-					set(_state.path, url.pathname);
-					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 				};
 
 				const renderContent = () => {
@@ -1954,15 +1958,6 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				return;
 			}
 
-			// Never push a duplicate of the current URL: consecutive identical
-			// history entries break back/forward (back() lands on an identical
-			// page and never reaches the previous one). Compare against the
-			// live window location (pushState/replaceState update it
-			// synchronously), not the batched _state signal.
-			const targetFull2 = (mode && typeof pathname === 'string' && pathname.startsWith('#/') ? '#' : '') + url.pathname + url.search;
-			const currentFull2 = window.location.pathname + window.location.search + window.location.hash;
-			if (!opts.replace && targetFull2 === currentFull2) return;
-
 			match.pathname = url.pathname;
 
 			const afterGuards = () => {
@@ -1994,13 +1989,25 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				const updateUrl = () => {
 					const fullUrl = url.pathname + url.search;
 					const target = mode ? (fullUrl.startsWith('/') ? '#' + fullUrl : '#' + fullUrl) : fullUrl;
-					if (!opts.replace) {
-						window.history.pushState({ path: fullUrl }, '', target);
+					// Never push a duplicate of the current URL: consecutive identical
+					// history entries break back/forward (back() lands on an identical
+					// page and never reaches the previous one). Compare against the
+					// live window location (pushState/replaceState update it
+					// synchronously), not the batched _state signal.
+					const targetFull = (mode && typeof pathname === 'string' && pathname.startsWith('#/') ? '#' : '') + url.pathname + url.search;
+					const currentFull = window.location.pathname + window.location.search + window.location.hash;
+					if (!opts.replace && targetFull === currentFull) {
+						set(_state.path, url.pathname);
+						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 					} else {
-						window.history.replaceState({ path: fullUrl }, '', target);
+						if (!opts.replace) {
+							window.history.pushState({ path: fullUrl }, '', target);
+						} else {
+							window.history.replaceState({ path: fullUrl }, '', target);
+						}
+						set(_state.path, url.pathname);
+						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 					}
-					set(_state.path, url.pathname);
-					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 				};
 
 				const renderContent = () => {
