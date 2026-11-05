@@ -296,7 +296,7 @@ function resolveFetchUrl(url: string): string {
 		: null;
 	if (resolver) return resolver(url);
 	const reqUrl = ctx?.url;
-	const base = typeof reqUrl === 'string' && /^https?:\/\//i.test(reqUrl)
+	let base = typeof reqUrl === 'string' && /^https?:\/\//i.test(reqUrl)
 		? reqUrl
 		: (globalThis as Record<string, unknown>).__vesk_ssr_base_url as string || '';
 	if (base) return new URL(url, base).href;

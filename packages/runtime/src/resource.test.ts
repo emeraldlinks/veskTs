@@ -775,6 +775,40 @@ it('useFetch.json resolves relative URLs and awaits cleanly', async () => {
   mock.restore();
 });
 
+it('useFetch resolves relative URLs against __vesk_ssr_base_url on SSR without resolveUrl', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vesk_ssr_base_url = 'http://localhost:4173';
+  const mock = mockFetch(() => jsonResponse({ base: true }));
+  const res = useFetch<{ base: boolean }>('/api/base');
+  await waitFor(() => !res.loading);
+  expect(mock.calls.length).toBe(1);
+  expect(mock.calls[0].url).toBe('http://localhost:4173/api/base');
+  expect(res.data).toEqual({ base: true });
+  mock.restore();
+  cleanupGlobals();
+});
+
+it('useFetch does not fall back to http://localhost when no request context exists on SSR', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  // deliberately no __vesk_request and no __vesk_ssr_base_url
+  const seen: string[] = [];
+  const mock = mockFetch(async ({ url }) => {
+    seen.push(String(url));
+    return jsonResponse({ ok: true });
+  });
+  const res = useFetch<{ ok: boolean }>('/api/no-context');
+  await waitFor(() => !res.loading);
+  // the bare relative URL must be passed through, never rewritten to localhost
+  expect(seen.length).toBe(1);
+  expect(seen[0]).toBe('/api/no-context');
+  expect(String(seen[0]).includes('localhost')).toBe(false);
+  expect(res.data).toEqual({ ok: true });
+  mock.restore();
+  cleanupGlobals();
+});
+
 // ============================================================
 // createResource (fn form) + into
 // ============================================================
