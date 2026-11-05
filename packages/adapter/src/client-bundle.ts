@@ -1383,30 +1383,26 @@ export async function generateClientBundle(
             return x.text + at;
           }).join(' | ') || err?.message || String(e);
           console.error('[vesk] chunk bundle failed', entry.name, detail);
+          // A module-scope server-only use is diagnosed here rather than after
+          // the try: the bundler itself throws when the transitive TCP driver
+          // (pg → node:net) can't be browser-bundled, which would otherwise
+          // shadow the real, actionable problem.
+          if (eagerHits.length > 0) {
+            const eagerDetail = eagerHits
+              .map(h => `${h.importer} uses ${h.bindings.map(b => `"${b}"`).join(', ')} from "${h.specifier}" at module scope`)
+              .join('; ');
+            console.error('[vesk] server-only package used at module scope in client code', entry.name + ':', eagerDetail);
+            throw new Error(
+              `[vesk] ${entry.name}: ${eagerDetail}.\n` +
+              'A module-scope statement runs the moment the browser evaluates the chunk, so a ' +
+              'server-only package cannot be substituted there. Move that work into an API route ' +
+              '(app/api/**/route.ts) or a server action — if the binding is only used from inside ' +
+              'a function, this build already handles it.',
+            );
+          }
           throw new Error(`[vesk] chunk bundle failed: ${entry.name} — ${detail}`);
         } finally {
           try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
-        }
-        // Checked OUTSIDE the try above, deliberately. A TCP driver cannot be
-        // stubbed into a browser bundle — a page that looked fine and failed on
-        // its first query would be worse than a build error — and the catch
-        // block degrades every failure into "strip the imports and carry on",
-        // which is exactly the wrong outcome for this one.
-        if (eagerHits.length > 0) {
-          // A stub would throw while the chunk is still evaluating, so the page
-          // would die before a component existed. That is the worst place to
-          // learn about it: refuse the build instead.
-          const detail = eagerHits
-            .map(h => `${h.importer} uses ${h.bindings.map(b => `"${b}"`).join(', ')} from "${h.specifier}" at module scope`)
-            .join('; ');
-          console.error('[vesk] server-only package used at module scope in client code', entry.name + ':', detail);
-          throw new Error(
-            `[vesk] ${entry.name}: ${detail}.\n` +
-            'A module-scope statement runs the moment the browser evaluates the chunk, so a ' +
-            'server-only package cannot be substituted there. Move that work into an API route ' +
-            '(app/api/**/route.ts) or a server action — if the binding is only used from inside ' +
-            'a function, this build already handles it.',
-          );
         }
         if (driverHits.length > 0) {
           const detail = [...new Set(driverHits.map(h => `${h.specifier} (from ${h.importer})`))].join(', ');
@@ -1603,9 +1599,39 @@ export async function generateClientBundle(
       console.error('[vesk] mono import merge aborted:', monoImports.reason);
     }
 
-    const main = await buildMainBundle(routeTree, runtimeDir, false, {
+    let main = await buildMainBundle(routeTree, runtimeDir, false, {
       componentLines, hydratorLines, aliasLines, hydratorAliasLines,
     }, !!options?.hmr, !!options?.importRuntime, runtimeImportNames, options?.routeDataCache);
+    // Bundle the monolithic output through esbuild so bare external-package
+    // imports (e.g. vesk-qr) are inlined instead of shipped as filesystem
+    // paths the browser cannot load. Without this, client.js contains
+    // `import ... from "/absolute/path/to/node_modules/…"` — the dev server
+    // answers that with its SPA fallback (text/html), the module script dies,
+    // the router never starts and hydration never completes.
+    const appTsconfig = findTsconfigPath(appDir);
+    const tmpBase = mkdtempSync(join(resolve(appDir, '..'), 'tmp-vesk-mono-'));
+    try {
+      const tmpFile = join(tmpBase, 'entry.js');
+      writeFileSync(tmpFile, main, 'utf-8');
+      const result = await build({
+        entryPoints: [tmpFile],
+        bundle: true,
+        format: 'iife',
+        platform: 'browser',
+        write: false,
+        logLevel: 'silent',
+        loader: { '.js': 'tsx' },
+        legalComments: 'none',
+        ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
+      });
+      main = result.outputFiles[0].text;
+    } catch (e) {
+      const detail = (e as { errors?: Array<{ text: string }> })?.errors?.map((x) => x.text).join(' | ') || (e as Error).message || String(e);
+      console.error('[vesk] client bundle failed', detail);
+      throw new Error(`[vesk] client bundle failed — ${detail}`);
+    } finally {
+      try { rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+    }
     // Mono (non-codeSplit) builds are the production path — no incremental cache.
     componentOwners.report('client bundle');
     return { main: await applyTransformPlugins(main, 'client.js'), chunks: [] };

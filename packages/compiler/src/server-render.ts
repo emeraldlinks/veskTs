@@ -519,22 +519,22 @@ export async function renderFullPage(
   registry: Map<string, Function> = new Map(),
   options: FullPageOptions = {}
 ): Promise<string> {
-  return withSsrStore(async () => {
-  (globalThis as any).__vsk_ssr = true;
-  // Reuse the request token when a page/layout render already started one (the
-  // generated adapter handler renders page -> layouts -> document within one
-  // process), otherwise start fresh. One request = one token = one data slot.
-  if (!(globalThis as any).__vsk_ssr_token) (globalThis as any).__vsk_ssr_token = Math.random().toString(36).slice(2);
-  const renderToken = (globalThis as any).__vsk_ssr_token as string;
+  // Each renderFullPage call owns an isolated store so concurrent renders never
+  // share an AsyncLocalStorage scope (withSsrStore reuses the ambient store,
+  // which would let concurrent renders cross-contaminate SSR data via ssrSink).
+  const store = createSsrStore();
+  const renderToken = store.token as string;
   keepSsrSlot(renderToken);
   pruneSsrDataSlots();
+  (globalThis as any).__vsk_ssr = true;
   // Start this render's handoff store fresh: setSsrData mirrors into
   // globalThis.__vsk_ssr_data (see resource.ts) because the AsyncLocalStorage
   // sink snapshot can be empty when the write runs in a forked async context.
-  // Resetting here also gives the /about-after-/posts no-leak behavior the
-  // ALS isolation was introduced to fix.
+  // Resetting here also gives the /about-after-/posts no-leak behavior.
   (globalThis as any).__vsk_ssr_data = {};
+  let result: string;
   try {
+    result = await withSsrStoreOf(store, async () => {
     let ssrProps = { ...props };
     let serializedProps: string | null = null;
     const cached = (options.cached as CompileFileResult | undefined) || undefined;
@@ -555,18 +555,20 @@ export async function renderFullPage(
     // promises before cleanup; this covers any resource started here (loadFn).
     await settleSsrPromises(renderToken);
 
-    // Merge the ALS sink snapshot with the request's per-token data slot. The
-    // slot is the deterministic channel for writes that happened in a forked
-    // async context (native fetch) — the sink alone can miss them. The slot is
-    // request-scoped (deleted below), so a late write can never leak into a
-    // following request the way the flat global would.
+    // Merge the request's per-token data slot. The slot is the deterministic
+    // channel for writes that happened in a forked async context (native fetch
+    // .then() callbacks run outside the ALS scope) and is keyed per render
+    // token, so concurrent renders never mix data. The ALS sink (ssrSink) is
+    // NOT read here because withSsrStore reuses the ambient store when one is
+    // already open, so concurrent renderFullPage calls share a single sink and
+    // their writes would cross-contaminate. Every setSsrData write also lands
+    // in the slot, so the slot alone is a complete handoff source.
     const slot = ((globalThis as any)[`__vsk_ssr_data_${renderToken}`] as Record<string, unknown>) || {};
     const ssrData: Record<string, unknown> = {
-      ...ssrSink.snapshot(),
       ...slot,
     };
     if (process.env.VESK_SSR_TRACE) {
-      console.error(`[render-trace] renderFullPage comp=${componentName} keys=${Object.keys(ssrData).join(',') || '∅'} slot=${Object.keys(slot).join(',') || '∅'} sink=${Object.keys(ssrSink.snapshot()).join(',') || '∅'}`);
+      console.error(`[render-trace] renderFullPage comp=${componentName} keys=${Object.keys(ssrData).join(',') || '∅'} slot=${Object.keys(slot).join(',') || '∅'}`);
     }
 
     let headHtml = rendered.head;
@@ -624,16 +626,14 @@ ${bodyHtml}
 ${dataScriptBlock}${clientScript}</body>
 </html>`;
     return applyHtmlPlugins(docHtml, options.plugins, { sourcePath: options.sourcePath, url: (options.__vesk?.url as string) || undefined });
+    });
   } finally {
     delete (globalThis as any).__vsk_ssr;
     delete (globalThis as any)[`__vsk_ssr_data_${renderToken}`];
-    // The token lives in the AsyncLocalStorage store now (see ssr-store.ts);
-    // it goes away with the scope. Deleting the global would destroy the
-    // request-scoped accessor that generated render code reads.
     dropSsrSlot(renderToken);
     pruneSsrDataSlots();
   }
-  });
+  return result;
 }
 
 export function renderPageStream(
