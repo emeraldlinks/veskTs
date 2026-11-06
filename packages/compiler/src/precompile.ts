@@ -10,6 +10,7 @@ import { inlineMdImportsFrom, guessProjectRoots } from '@vesk/compiler/src/md-in
 import {
   collectModuleBundle,
   type ModuleCollector,
+  type ModuleEntry,
   ModuleRegistry,
 } from '@vesk/compiler/src/module-imports';
 import type {
@@ -39,13 +40,50 @@ export function precompileFile(
   const hit = precompileCache.get(sourcePath);
   // Compare the source, not just the path: the dev server rebuilds in-process
   // and a stale plan would silently ship yesterday's component.
-  if (hit !== undefined && hit.source === source) return hit.plan;
+  if (hit !== undefined && hit.source === source) {
+    // A plan is only half of the output: it references module keys that live
+    // in the caller's registry. A second build in the same process (prod then
+    // dev under `e2e-setup`) starts with a fresh registry, so replaying the
+    // memoized plan without its modules left `__veskModules` empty and every
+    // bare-package import (`vesk-qr`, …) resolved to `undefined`. Keys are
+    // path-derived, so registering the same absPaths here is idempotent.
+    for (const { absPath, entry } of hit.modules) reg.register(absPath, entry);
+    return hit.plan;
+  }
   const plan = precompileFileInternal(source, sourcePath, new Set(), reg);
   // Bound it: plans are sizeable on a large app, and a watch session can
   // outlive many builds.
   if (precompileCache.size >= 512) precompileCache.clear();
-  precompileCache.set(sourcePath, { source, plan });
+  precompileCache.set(sourcePath, { source, plan, modules: collectPlanModules(plan, reg) });
   return plan;
+}
+
+/**
+ * Every module entry a plan (and its nested `.vsk` sub-plans) resolves
+ * against, including transitive deps. The shared `__veskModules` registry
+ * must contain the whole closure, not just the keys named by `plan.modules`,
+ * or `evaluateModule` cannot walk `deps` at hydrate time.
+ */
+function collectPlanModules(
+  plan: PrecompileFilePlan,
+  registry: ModuleRegistry,
+): Array<{ absPath: string; entry: ModuleEntry }> {
+  const out: Array<{ absPath: string; entry: ModuleEntry }> = [];
+  const seen = new Set<string>();
+  const visitKey = (key: string): void => {
+    if (seen.has(key)) return;
+    seen.add(key);
+    const entry = registry.getModule(key);
+    if (!entry || !entry.absPath) return;
+    out.push({ absPath: entry.absPath, entry });
+    for (const depKey of Object.values(entry.deps)) visitKey(depKey);
+  };
+  const visitPlan = (p: PrecompileFilePlan): void => {
+    for (const mod of p.modules) visitKey(mod.key);
+    for (const sub of p.subFiles) visitPlan(sub.plan);
+  };
+  visitPlan(plan);
+  return out;
 }
 
 /**
@@ -59,7 +97,10 @@ export function precompileFile(
  * pure function of (source, path) and callers only JSON.stringify it into the
  * generated function, so one compile per file per build is enough.
  */
-const precompileCache = new Map<string, { source: string; plan: PrecompileFilePlan }>();
+const precompileCache = new Map<
+  string,
+  { source: string; plan: PrecompileFilePlan; modules: Array<{ absPath: string; entry: ModuleEntry }> }
+>();
 
 /** Drop the plan cache (tests, and any caller that compiles outside a build). */
 export function clearPrecompileCache(): void {

@@ -1466,6 +1466,43 @@ export interface ModuleEntry {
   dir: string;
   /** Relative specifier (as written) -> sibling module key. */
   deps: Record<string, string>;
+  /**
+   * Absolute path the entry was registered under. Kept so a plan can be
+   * replayed into a fresh registry (see `precompile.ts`), where the module
+   * key is derived from this path. Never emitted into the deployment
+   * registry (which only serializes code/dir/deps).
+   */
+  absPath?: string;
+}
+
+/**
+ * Synthetic key for a module. Derived from the absolute path rather than the
+ * registry's insertion order so the SAME module always gets the same key in
+ * every build. Positional keys (`__veskMod${size}`) made cross-build plan
+ * caching unsafe: a second in-process build (the dev server after the prod
+ * build) started with an empty registry, served cached plans whose keys
+ * referred to modules it never registered, and emitted `export const
+ * __veskModules = {}`. Paired with the plan cache replaying each plan's
+ * modules into the fresh registry, a path-derived key makes that replay
+ * idempotent and collision-free.
+ */
+function moduleKeyFor(absPath: string): string {
+  // Four independent FNV-1a 32-bit lanes → 128 bits of key space, which makes
+  // an accidental collision between two paths (which would silently swap one
+  // module for another) effectively impossible. Hand-rolled rather than
+  // `node:crypto` because this file is bundled into the edge/server runtime,
+  // where a `node:` import fails to resolve.
+  const seeds = [0x811c9dc5, 0x9e3779b1, 0x85ebca6b, 0xc2b2ae35];
+  let hex = '';
+  for (const seed of seeds) {
+    let h = seed >>> 0;
+    for (let i = 0; i < absPath.length; i++) {
+      h ^= absPath.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    hex += h.toString(16).padStart(8, '0');
+  }
+  return `__veskMod${hex}`;
 }
 
 /**
@@ -1494,13 +1531,13 @@ export class ModuleRegistry {
     return this.data.size;
   }
 
-  /** Register a module's transpiled body, returning its globally-unique key. */
+  /** Register a module's transpiled body, returning its stable key. */
   register(absPath: string, entry: ModuleEntry): string {
     const existing = this.keysByAbs.get(absPath);
     if (existing) return existing;
-    const key = `__veskMod${this.data.size}`;
+    const key = moduleKeyFor(absPath);
     this.keysByAbs.set(absPath, key);
-    this.data.set(key, entry);
+    this.data.set(key, { ...entry, absPath });
     return key;
   }
 

@@ -15,7 +15,11 @@
  *
  * Run with: npx tsx packages/compiler/src/precompile-cache.test.ts
  */
+import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { precompileFile, clearPrecompileCache } from '@vesk/compiler/src/precompile';
+import { ModuleRegistry } from '@vesk/compiler/src/module-imports';
 
 let passed = 0;
 let failed = 0;
@@ -88,6 +92,39 @@ it('clearPrecompileCache forces the next call to compile', () => {
   clearPrecompileCache();
   const after = precompileFile(SOURCE, path);
   assert(before !== after, 'clearPrecompileCache did not drop the memo');
+});
+
+it('a memo hit replays the plan modules into a fresh registry', () => {
+  // e2e-setup builds prod and dev in ONE process: the second `build()` creates
+  // a fresh ModuleRegistry, but every `precompileFile` call hits the memo. If
+  // the hit returns the plan without re-registering its modules, the emitted
+  // `__veskModules` is `{}` and every bare-package import (`vesk-qr`, …)
+  // resolves to undefined at SSR — /qr-test returned 500 with
+  // "Cannot read properties of undefined (reading 'generate')".
+  clearPrecompileCache();
+  const root = mkdtempSync(join(tmpdir(), 'vesk-precompile-'));
+  mkdirSync(join(root, 'lib'), { recursive: true });
+  writeFileSync(join(root, 'lib', 'greeting.ts'), "export const greeting = 'hi';\n", 'utf-8');
+  const path = join(root, 'page.vsk');
+  const source = `import { greeting } from './lib/greeting.ts'\ncomponent Page() {\n\t<p>{greeting}</p>\n}\n`;
+
+  const regA = new ModuleRegistry();
+  const planA = precompileFile(source, path, regA);
+  assert(regA.size > 0, 'the first compile did not register the imported module');
+
+  const regB = new ModuleRegistry();
+  const planB = precompileFile(source, path, regB);
+  assert(planA === planB, 'the second compile did not hit the memo (test premise broken)');
+  assert(regB.size > 0, 'a memo hit left the fresh registry empty — __veskModules would be {}');
+  const keysA = planA.modules.map((m) => m.key).sort();
+  const keysB = planB.modules.map((m) => m.key).sort();
+  assert(
+    JSON.stringify(keysA) === JSON.stringify(keysB),
+    'the memoized plan references keys the fresh registry does not have',
+  );
+  for (const key of keysA) {
+    assert(regB.getModule(key) !== undefined, `memo hit did not replay module ${key}`);
+  }
 });
 
 console.log(`\n${'='.repeat(50)}`);
