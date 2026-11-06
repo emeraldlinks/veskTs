@@ -2,6 +2,51 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.93 — 2026-11-06
+
+_No breaking changes._
+
+### Features
+
+- vesk-qr SSR integration + esbuild timeout guards
+
+### Fixes
+
+- **router:** run guards on same-URL nav, skip duplicate render/fetch
+- **cli:** rebuild CLI bundle from build-packages
+- **compiler:** skip compiler-owned and builtin targets in SSR closure
+- **compiler:** bundle bare npm specifiers into SSR module closure
+- **router:** never push duplicate history entries on same-URL navigation
+- **runtime:** remove http://localhost fallback from resolveFetchUrl
+- **test-app:** rebuild vesk-qr tarball with package root files
+- **test-app:** update vesk-qr lockfile integrity for rebuilt tarball
+- dev hydration, edge bundle SSR shims, and back/forward history
+- **adapter:** renderFullPage adopts ambient store token for SSR handoff
+- **compiler:** renderFullPage isolated store per call + slot-only ssrData read
+- inject /_vesk/client.js in adapter dev-server HTML
+- HMR updates and client.js serving in adapter dev server
+- dedupe external-package imports in mono client bundle
+- **adapter,runtime:** forward shared default exports and claim Link children in place
+- rebuild test-app CI tarballs with latest package changes
+- remove TernaryTest from test-app page.vsk
+- allow test-app tarballs in git
+- include test-app tarballs in git
+- install test-app deps with --legacy-peer-deps
+- install vesk-qr in test-app during CI
+- ternaries in JSX work correctly; fix esbuild-wasm loading; fix refresh script version scheme
+- resolve vsk build/dev silently shipping broken hydration
+- convert regex-based export/import parsing to AST-based
+- build and dev fail loudly when hydration cannot work
+- export locals from client runtime
+- resolve Vesk via package main field
+- edge bundle externalize vesk-qr and CJS deps
+- CI edge test failures
+- three pre-existing CI failures
+- rustc-style diagnostics, backtick JSX attrs, nested if/for, block-statement error
+- SSR module loading for CJS packages and esbuild bare specifier resolution
+- **adapter:** add timeout to native esbuild builds with wasm fallback
+- **client:** emit hydrate registry per call site and strip hydrate exports
+
 ## 0.2.92 — 2026-10-31
 
 _No breaking changes._
