@@ -276,6 +276,49 @@ export async function handle(request) {
     });
   });
 
+  await describe('QR encoder deps: bundled for node, stubbed for edge', async () => {
+    const appDir = join(tmpRoot, 'qr-app');
+    const qrPkg = join(appDir, 'node_modules', 'vesk-qr');
+    const encPkg = join(appDir, 'node_modules', 'qrcode-generator');
+    mkdirSync(qrPkg, { recursive: true });
+    mkdirSync(encPkg, { recursive: true });
+    writeFileSync(join(qrPkg, 'package.json'), JSON.stringify({
+      name: 'vesk-qr', version: '1.0.0', type: 'module', exports: './index.js',
+    }));
+    writeFileSync(join(qrPkg, 'index.js'), [
+      'export const QR_REAL_MARKER = "VESK_QR_REAL";',
+      'export const CofoundrMatrix = { marker: QR_REAL_MARKER, generate: () => import("qrcode-generator") };',
+      '',
+    ].join('\n'));
+    writeFileSync(join(encPkg, 'package.json'), JSON.stringify({
+      name: 'qrcode-generator', version: '1.0.0', main: 'index.js',
+    }));
+    writeFileSync(join(encPkg, 'index.js'), 'module.exports = function encode() { return "ENCODER_BODY"; };\n');
+    const entry = join(appDir, 'entry.js');
+    writeFileSync(entry, 'import { CofoundrMatrix } from "vesk-qr";\nexport const handle = () => CofoundrMatrix;\n');
+
+    const { bundlePlatformHandler } = await import(
+      pathToFileURL(join(__dirname, 'platform-handler.ts')).href
+    ) as typeof import('./platform-handler.js');
+
+    await it('bundles vesk-qr and its CJS encoder for node targets', async () => {
+      const outfile = join(appDir, 'qr-node.mjs');
+      await bundlePlatformHandler({ entry, outfile, nodeBuiltins: true });
+      const out = readFileSync(outfile, 'utf8');
+      assert(out.includes('VESK_QR_REAL'), 'expected vesk-qr to be bundled for node targets');
+      assert(out.includes('ENCODER_BODY'), 'expected qrcode-generator to be bundled for node targets');
+      assert(!out.includes('import("qrcode-generator")'), 'encoder must not be left as a bare runtime import');
+    });
+
+    await it('stubs vesk-qr and its encoder for edge targets', async () => {
+      const outfile = join(appDir, 'qr-edge.mjs');
+      await bundlePlatformHandler({ entry, outfile, nodeBuiltins: false });
+      const out = readFileSync(outfile, 'utf8');
+      assert(!out.includes('VESK_QR_REAL'), 'edge targets must not bundle vesk-qr');
+      assert(!out.includes('ENCODER_BODY'), 'edge targets must not bundle qrcode-generator');
+    });
+  });
+
   rmSync(tmpRoot, { recursive: true, force: true });
 }
 
