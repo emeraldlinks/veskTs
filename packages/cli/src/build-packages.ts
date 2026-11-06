@@ -136,4 +136,19 @@ export function ensurePackagesBuilt(): void {
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   buildPackages(process.argv.includes('--force'));
+  // The CLI (`dist/cli.js`) is a single esbuild bundle that INLINES
+  // `@vesk/compiler` and `@vesk/adapter`. Rebuilding only `packages/*/dist`
+  // therefore leaves `vesk build` running a stale compiler — the exact reason
+  // a bare-specifier SSR bundling fix did nothing on Vercel. When this script
+  // is run directly (the documented post-compiler-edit command), re-bundle the
+  // CLI too.
+  //
+  // Guard on `.ts`: inside the bundled CLI every module's `import.meta.url` is
+  // `dist/cli.js`, so the outer check above is also true there. Re-bundling in
+  // that case would recurse while `cli.js` is executing. The non-literal
+  // dynamic import keeps `esbuild` out of the CLI bundle graph.
+  if (fileURLToPath(import.meta.url).endsWith('build-packages.ts')) {
+    const { bundleCli } = await import(new URL('./bundle-cli.ts', import.meta.url).href);
+    await bundleCli();
+  }
 }
