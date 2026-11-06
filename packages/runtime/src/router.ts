@@ -1567,6 +1567,18 @@ export function createRouter(
 			const self = this as RouterInstance;
 			const guardResult = self._runGuards(url.pathname);
 			const proceedNav = () => {
+				// Never re-render, re-fetch, or push a duplicate history entry
+				// when the target equals the live window location. This runs
+				// AFTER guards so a beforeEach guard still executes (and can
+				// redirect/block) on a same-URL navigation. Compare against the
+				// live location (pushState/replaceState update it
+				// synchronously), not the batched _state signal. `replace`
+				// navigations (popstate, redirects) always proceed.
+				if (!opts.replace) {
+					const targetFull = (mode && typeof raw === 'string' && raw.startsWith('#/') ? '#' : '') + url.pathname + url.search;
+					const currentFull = window.location.pathname + window.location.search + window.location.hash;
+					if (targetFull === currentFull) return;
+				}
 				if (!_isPopStateNavigation) {
 					_scrollPositions.set(routeKey(mode), window.scrollY);
 				}
@@ -1584,26 +1596,13 @@ export function createRouter(
 				const updateUrl = () => {
 					const fullPath = url.pathname + url.search;
 					const target = mode ? (fullPath.startsWith('/') ? '#' + fullPath : '#' + fullPath) : fullPath;
-					// Never push a duplicate of the current URL: consecutive identical
-					// history entries break back/forward (back() lands on an identical
-					// page and never reaches the previous one). Compare against the
-					// live window location (pushState/replaceState update it
-					// synchronously), not the batched _state signal.
-					const targetFull = (mode && typeof raw === 'string' && raw.startsWith('#/') ? '#' : '') + url.pathname + url.search;
-					const currentFull = window.location.pathname + window.location.search + window.location.hash;
-					if (!opts.replace && targetFull === currentFull) {
-						// Skip the history entry but keep _state in sync.
-						set(_state.path, url.pathname);
-						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
+					if (!opts.replace) {
+						window.history.pushState({ path: url.pathname }, '', target);
 					} else {
-						if (!opts.replace) {
-							window.history.pushState({ path: url.pathname }, '', target);
-						} else {
-							window.history.replaceState({ path: url.pathname }, '', target);
-						}
-						set(_state.path, url.pathname);
-						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
+						window.history.replaceState({ path: url.pathname }, '', target);
 					}
+					set(_state.path, url.pathname);
+					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 				};
 
 				const renderContent = () => {
@@ -1958,9 +1957,19 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				return;
 			}
 
+			// Never re-render, re-fetch, or push a duplicate history entry when
+			// the target equals the live window location. This runs after the
+			// guards below so a beforeEach guard still executes (and can
+			// redirect/block) on a same-URL navigation. `replace` navigations
+			// (popstate, redirects) always proceed.
 			match.pathname = url.pathname;
 
 			const afterGuards = () => {
+				if (!opts.replace) {
+					const targetFull = (mode && typeof pathname === 'string' && pathname.startsWith('#/') ? '#' : '') + url.pathname + url.search;
+					const currentFull = window.location.pathname + window.location.search + window.location.hash;
+					if (targetFull === currentFull) return;
+				}
 				if (!_isPopStateNavigation) {
 					_scrollPositions.set(routeKey(mode), window.scrollY);
 				}
@@ -1989,25 +1998,13 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				const updateUrl = () => {
 					const fullUrl = url.pathname + url.search;
 					const target = mode ? (fullUrl.startsWith('/') ? '#' + fullUrl : '#' + fullUrl) : fullUrl;
-					// Never push a duplicate of the current URL: consecutive identical
-					// history entries break back/forward (back() lands on an identical
-					// page and never reaches the previous one). Compare against the
-					// live window location (pushState/replaceState update it
-					// synchronously), not the batched _state signal.
-					const targetFull = (mode && typeof pathname === 'string' && pathname.startsWith('#/') ? '#' : '') + url.pathname + url.search;
-					const currentFull = window.location.pathname + window.location.search + window.location.hash;
-					if (!opts.replace && targetFull === currentFull) {
-						set(_state.path, url.pathname);
-						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
+					if (!opts.replace) {
+						window.history.pushState({ path: fullUrl }, '', target);
 					} else {
-						if (!opts.replace) {
-							window.history.pushState({ path: fullUrl }, '', target);
-						} else {
-							window.history.replaceState({ path: fullUrl }, '', target);
-						}
-						set(_state.path, url.pathname);
-						set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
+						window.history.replaceState({ path: fullUrl }, '', target);
 					}
+					set(_state.path, url.pathname);
+					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
 				};
 
 				const renderContent = () => {

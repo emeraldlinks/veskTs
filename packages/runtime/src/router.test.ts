@@ -943,6 +943,10 @@ test('NavLink does not have active class when path does not match', () => {
 });
 
 test('Link scrollBehavior prop forwards the scroll behavior on navigate', () => {
+	globalThis.window.location.pathname = '/';
+	globalThis.window.location.search = '';
+	globalThis.window.location.hash = '';
+	globalThis.window.location.href = 'http://localhost/';
 	const container = document.createElement('div');
 	const tree = buildRouteTree([
 		{ path: '/', page: () => document.createTextNode('Home') },
@@ -959,6 +963,10 @@ test('Link scrollBehavior prop forwards the scroll behavior on navigate', () => 
 });
 
 test('NavLink scrollBehavior prop forwards the scroll behavior on navigate', () => {
+	globalThis.window.location.pathname = '/';
+	globalThis.window.location.search = '';
+	globalThis.window.location.hash = '';
+	globalThis.window.location.href = 'http://localhost/';
 	const container = document.createElement('div');
 	const tree = buildRouteTree([
 		{ path: '/', page: () => document.createTextNode('Home') },
@@ -975,6 +983,10 @@ test('NavLink scrollBehavior prop forwards the scroll behavior on navigate', () 
 });
 
 test('Link without scrollBehavior defaults to auto scroll behavior', () => {
+	globalThis.window.location.pathname = '/';
+	globalThis.window.location.search = '';
+	globalThis.window.location.hash = '';
+	globalThis.window.location.href = 'http://localhost/';
 	const container = document.createElement('div');
 	const tree = buildRouteTree([
 		{ path: '/', page: () => document.createTextNode('Home') },
