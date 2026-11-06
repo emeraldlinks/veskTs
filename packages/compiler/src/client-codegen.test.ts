@@ -574,6 +574,26 @@ describe('Client Codegen — layout slot scoping & claimed-sibling appends', () 
 		}
 	});
 
+	// A slot nested under a compiled component (shell → gate → slot) must be
+	// built lazily so the component that owns the containing element can pass
+	// its scoped sub-walker. Eagerly building the fragment on the caller's
+	// walker hydrates the page against the shell's own SSR root and detaches
+	// the shell. See `containsSlot` in client-codegen.
+	bothModes('slot nested under a component uses the component-scoped walker', `
+		component Gated(props) { return <div>{props.children}</div>; }
+		component Shell(props) { return <main>{props.children}</main>; }
+		component Layout(props) { return <Shell><Gated>{props.children}</Gated></Shell>; }
+	`, (code, mode) => {
+		if (mode === 'hydrate') {
+			expect(code).toContain('(__childWalker) =>');
+			expect(code).toContain('createLayoutSlot(__childWalker,');
+			expect(code).not.toContain('createLayoutSlot(__hydrate,');
+		} else {
+			expect(code).not.toContain('createLayoutSlot');
+			expect(code).not.toContain('__childWalker');
+		}
+	});
+
 	// Claimed static children already sit in their SSR position. appendChild
 	// would move them to the end of the parent, reordering the document.
 	// Hydrate mode must guard the append; normal mode must stay plain.

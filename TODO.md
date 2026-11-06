@@ -5,6 +5,42 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (production hydration: admin shell preservation + managed
+control-flow effects):**
+
+- [x] **BUG (compiler): a layout slot nested under a component that mounts its
+  children in a scoped subtree claimed the parent's SSR root.** `emitComponentCall`
+  eagerly built hydration children on the caller's walker, so `AdminShell`'s
+  `<main>` slot detached `<aside>/<header>/<main>` on hard reload. Slot children
+  are now built lazily on their own walker; sync `DocumentFragment` returns are
+  appended to the slot parent.
+- [x] **BUG (runtime): control-flow reruns orphaned child effects.**
+  `destroy_non_branch_children` had a fast path that cleared `parent.first/last`
+  without destroying/unsubscribing effect children, and `run_block` always
+  cleared children. Added `MANAGED_CHILDREN`; `effect(fn, managed)`; `run_block`
+  skips child destruction for managed blocks; the compiler marks all 11
+  control-flow effects managed. This fixed `/admin/referrals` staying on
+  "Loading promoter roster…".
+- [x] **AdminShell** now calls `visibleNav()` and inlines `currentUser()` /
+  `currentRole()` / `canAny(...)` so the sidebar and user survive hydration.
+- [x] **BUG (runtime): ownerless store updates stopped at a derived created
+  inside an effect block.** `create_dependency` recorded readers only for
+  orphan cells, so `bootstrapStateCell` -> `derived(bootstrap)` -> hydration
+  branch effect never invalidated; `/portal/dashboard` stayed on its skeleton
+  after bootstrap became ready. Deriveds now record their readers and
+  `unsubscribe_reaction` clears them. Added the shared-cell regression test;
+  academy `portal · dashboard loading` E2E passes.
+- [x] Tests: `track.test.ts` 23 (managed/unmanaged child lifecycle + shared-cell
+  propagation),
+  `hydrate-residue.test.ts` 8, `client-codegen.test.ts` all green; new E2E
+  `a hard reload keeps the admin sidebar and signed-in user`; production
+  `tests/run-all.mjs` admin suite 8/8; `shell-scan.mjs` 18/18 admin routes
+  preserve shell; `hydration-test.mjs` production build 490 passed / 0 failed /
+  3 skipped.
+- **Known/deferred:** the certificate-sheet iframe does not mount after
+  "GENERATE CERTIFICATE" (the only remaining production suite failure). Dev-mode
+  `hydration-test.mjs` is flaky on `networkidle0`; the production build is clean.
+
 **This session (vesk-paystack integration: compiler/adapter/runtime fixes the
 library exposed):**
 

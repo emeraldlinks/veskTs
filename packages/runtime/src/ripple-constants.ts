@@ -20,6 +20,7 @@ export const DEFERRED = 1 << 19;
 export const PAUSED = 1 << 20;
 export const DESTROYED = 1 << 21;
 export const UPDATE_SOURCE = 1 << 22;
+export const MANAGED_CHILDREN = 1 << 23;
 
 export const CONTROL_FLOW_BLOCK = FOR_BLOCK | IF_BLOCK | SWITCH_BLOCK | TRY_BLOCK | COMPOSITE_BLOCK;
 

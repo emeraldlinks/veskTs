@@ -17,6 +17,7 @@ import {
 	CONTAINS_UPDATE,
 	DESTROYED,
 	EFFECT_BLOCK,
+	MANAGED_CHILDREN,
 	PAUSED,
 	PRE_EFFECT_BLOCK,
 	ROOT_BLOCK,
@@ -349,7 +350,9 @@ export function run_block(block: Block): void {
 		unsubscribe_reaction(block);
 		active_component = block.co;
 
-		destroy_non_branch_children(block);
+		if ((block.f & MANAGED_CHILDREN) === 0) {
+			destroy_non_branch_children(block);
+		}
 		run_teardown(block);
 
 		tracking = (block.f & (ROOT_BLOCK | BRANCH_BLOCK)) === 0;
@@ -548,7 +551,7 @@ function create_dependency(tracked: Tracked | Derived): Dependency {
 	// the router's block window reads a store created at module scope), so
 	// walking up from the cell reaches nobody. They are recorded here and
 	// invalidated directly instead. Owned cells keep the scoped-flush path.
-	if (is_orphan(tracked.b)) {
+	if (is_orphan(tracked.b) || (tracked.f & DERIVED) !== 0) {
 		((tracked as Tracked).r ??= new Set()).add(reaction);
 	}
 
@@ -841,7 +844,7 @@ export function unsubscribe_reaction(reaction: Block | Derived | null): void {
 	let dep = reaction.d;
 	while (dep !== null) {
 		const t = dep.t;
-		if (is_orphan(t.b) && t.r !== null) {
+		if (t.r !== null) {
 			t.r.delete(reaction);
 		}
 		dep = dep.n;

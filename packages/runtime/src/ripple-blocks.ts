@@ -5,6 +5,7 @@ import {
 	CONTAINS_TEARDOWN,
 	DESTROYED,
 	EFFECT_BLOCK,
+	MANAGED_CHILDREN,
 	PAUSED,
 	PRE_EFFECT_BLOCK,
 	RENDER_BLOCK,
@@ -52,8 +53,8 @@ export function user_effect(fn: () => void): Block | void {
 	return block(EFFECT_BLOCK, fn);
 }
 
-export function effect(fn: () => void): Block {
-	return block(EFFECT_BLOCK, fn);
+export function effect(fn: () => void, managed = false): Block {
+	return block(EFFECT_BLOCK | (managed ? MANAGED_CHILDREN : 0), fn);
 }
 
 export function pre_effect(fn: () => void): Block {
@@ -158,20 +159,12 @@ export function destroy_block_children(parent: Block, remove_dom = false): void 
 export function destroy_non_branch_children(parent: Block, remove_dom = false): void {
 	let block = parent.first;
 
-	if (
-		(parent.f & CONTAINS_TEARDOWN) === 0 &&
-		parent.first !== null &&
-		(parent.first.f & BRANCH_BLOCK) === 0
-	) {
-		parent.first = parent.last = null;
-	} else {
-		while (block !== null) {
-			const next = block.next;
-			if ((block.f & BRANCH_BLOCK) === 0) {
-				destroy_block(block, remove_dom);
-			}
-			block = next;
+	while (block !== null) {
+		const next = block.next;
+		if ((block.f & BRANCH_BLOCK) === 0) {
+			destroy_block(block, remove_dom);
 		}
+		block = next;
 	}
 }
 

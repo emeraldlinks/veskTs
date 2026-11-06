@@ -695,6 +695,7 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
       ctx.push(`    const __slot = createLayoutSlot(${ctx.walker}, ${parentVar});`);
       ctx.push(`    const __child = props.children(__slot.walker);`);
       ctx.push(`    if (__child && typeof __child.then === 'function') __pendingChild = __slot.track(__child);`);
+      ctx.push(`    else if (__child && __child.nodeType === 11) ${parentVar}.appendChild(__child);`);
       ctx.push(`  } else {`);
       ctx.push(`    ${parentVar}.appendChild(props.children);`);
       ctx.push(`  }`);
@@ -1230,6 +1231,45 @@ function emitFragment(ctx: Ctx, nodes: IRNode[], tracked: Map<string, TrackedInf
   return frag;
 }
 
+/**
+ * True when any node in the subtree is a layout `{props.children}` slot.
+ *
+ * A slot must be hydrated on the walker scoped to the element that will
+ * actually contain it. Building the children fragment eagerly on the caller's
+ * walker is only correct when the callee appends that fragment to its own
+ * mount point. A component that forwards children through a scoped container
+ * (e.g. a shell that renders `{props.children}` inside `<main>`) invokes the
+ * child hydrator with a sub-walker; passing an eagerly-built fragment skips
+ * that scope and lets the page claim the shell's own SSR root.
+ */
+function containsSlot(nodes: IRNode[]): boolean {
+  for (const node of nodes) {
+    if (node instanceof SlotNode) return true;
+    if (node instanceof StaticNode) {
+      if (containsSlot(node.children)) return true;
+    } else if (node instanceof ComponentCall) {
+      if (containsSlot(node.children)) return true;
+    } else if (node instanceof OpaqueDynamicRegion) {
+      if (containsSlot(node.consequentNodes) || containsSlot(node.alternateNodes)) return true;
+    } else if (node instanceof MapRegion) {
+      if (containsSlot(node.bodyTemplate) || containsSlot(node.alternateNodes)) return true;
+    } else if (node instanceof WhileLoop) {
+      if (containsSlot(node.bodyTemplate)) return true;
+    } else if (node instanceof ForLoop) {
+      if (containsSlot(node.bodyTemplate)) return true;
+    } else if (node instanceof SwitchBlock) {
+      for (const c of node.cases) if (containsSlot(c.body)) return true;
+    } else if (node instanceof TryCatch) {
+      if (containsSlot(node.bodyTemplate) || containsSlot(node.catchBody)) return true;
+    } else if (node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) {
+      if (containsSlot(node.children)) return true;
+    } else if (node instanceof PropSlot) {
+      if (containsSlot(node.body)) return true;
+    }
+  }
+  return false;
+}
+
 function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, TrackedInfo>, effectsVar: string | null, parentVar?: string, compPrefix = '__components', skipK = 0, regionBudget?: string): string | null {
   const propsEntries: string[] = node.props.map((p) => {
     if (typeof p.value === 'string') return `${JSON.stringify(p.name)}: ${JSON.stringify(p.value)}`;
@@ -1360,18 +1400,51 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
       // deliberately preserves the SSR interior, so construct the argument
       // fresh and let the runtime component adopt the existing root.
       if (wipeMount || ctx.selfClaimNames.has(node.componentName)) ctx.hydrate = false;
-      ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
-      const savedEffects = ctx.effects;
-      ctx.effects = [];
-      for (const child of regChildren) {
-        const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
-        if (childVar) ctx.push(`$f.appendChild(${childVar});`);
+      // A slot nested under a compiled component must be built by that
+      // component's scoped walker, not the caller's. Pass children as a lazy
+      // hydrator so the callee can invoke it with the walker for the element
+      // that actually contains the slot (e.g. `<main>` in a shell). Eagerly
+      // building the fragment here hydrates the page against the shell's own
+      // SSR root, which detaches the shell on hydration.
+      const lazySlotChildren = ctx.hydrate && !plainTarget && !ctx.selfClaimNames.has(node.componentName) && containsSlot(regChildren);
+      if (lazySlotChildren) {
+        const fnVar = ctx.n();
+        const savedLines = ctx.lines;
+        const savedEffects = ctx.effects;
+        const savedWalker = ctx.walker;
+        ctx.lines = [];
+        ctx.effects = [];
+        ctx.walker = '__childWalker';
+        ctx.push(`const $f = document.createDocumentFragment();`);
+        for (const child of regChildren) {
+          const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
+          if (childVar) ctx.push(`$f.appendChild(${childVar});`);
+        }
+        for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
+        ctx.push(`return $f;`);
+        const body = ctx.lines.join('\n');
+        ctx.lines = savedLines;
+        ctx.effects = savedEffects;
+        ctx.walker = savedWalker;
+        const asyncKw = ctx.isAsyncScope ? 'async ' : '';
+        ctx.push(`const ${fnVar} = ${asyncKw}(__childWalker) => {`);
+        ctx.push(indent(body));
+        ctx.push(`};`);
+        propsEntries.push(`children: ${fnVar}`);
+      } else {
+        ctx.push(`const ${frag} = (() => { const $f = document.createDocumentFragment();`);
+        const savedEffects = ctx.effects;
+        ctx.effects = [];
+        for (const child of regChildren) {
+          const childVar = emitNode(ctx, child, tracked, effectsVar, '$f');
+          if (childVar) ctx.push(`$f.appendChild(${childVar});`);
+        }
+        for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
+        ctx.effects = savedEffects;
+        ctx.push(`return $f; })();`);
+        propsEntries.push(`children: ${frag}`);
       }
-      for (const eff of ctx.effects) ctx.push(effectsVar ? `${effectsVar}.push(${effectBlockToHandlerExpr(eff)});` : eff);
-      ctx.effects = savedEffects;
       ctx.hydrate = savedHydrate;
-      ctx.push(`return $f; })();`);
-      propsEntries.push(`children: ${frag}`);
     }
     // Deposit the residue for the child's first top-level claim (it runs on
     // this same walker with its own zero `topPendingSkip`). A region budget is
@@ -1617,7 +1690,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
       ${effArr}.length = 0;
       __cleanup(${anchor}, ${endAnchor});
       try { ${asyncKw}${tryRenderComp}(); } catch(${catchParam}) { ${hasCatch ? `${asyncKw}${catchRenderComp}(${catchParam});` : 'throw ${catchParam};'} }
-    });
+    }, true);
   }`);
 
   return null;
@@ -1709,7 +1782,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
           ${effInner}
           __iv = __new;
         }
-      });`;
+      }, true);`;
     if (effTarget) {
       ctx.push(`${effTarget}.push((() => {
       let __iv = ${branchInit};
@@ -1798,7 +1871,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
         ${renderBranch}
         __iv = __nv;
       }
-    });`;
+    }, true);`;
 
   // A static condition renders once; an effect referencing it would only ever
   // reference statement/loop-local bindings that are out of scope at the flush
@@ -1896,7 +1969,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
       __busy = false;
       __iv = (${condExpr});
     }
-  });
+  }, true);
 }`);
 
   return null;
@@ -2000,7 +2073,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
       __busy = false;
       __iv = (${srcExpr});
     }
-  });
+  }, true);
 }`);
   } else {
     const condReactive = isReactiveExpression(node.condition as any, tracked);
@@ -2065,7 +2138,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     __cleanup(${anchor}, ${endAnchor});
     ${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();
     __busy = false;
-  });
+  }, true);
 }`);
     }
   }
@@ -2141,7 +2214,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
       __busy = false;
       __iv = (${discExpr});
     }
-  });
+  }, true);
 }`);
 
   return null;
@@ -2341,7 +2414,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
     if (__new) { ${initList}(); } else { ${aw}${emptyRenderName}(); }
-  })`);
+  }, true)`);
     } else {
       ctx.push(`${initList}();`);
       if (!reactiveSource) return null;
@@ -2349,7 +2422,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     const __nv = ${arrExpr};
     if (__first) { __first = false; __nv; ${breakReset}${reconciler}(${arrExpr}); return; }
     ${breakVar ? `if (${breakVar}) ${breakVar} = false;` : ''}${reconciler}(${arrExpr});
-  })`);
+  }, true)`);
     }
   } else {
     const renderAllItems = (ind: string, collect: string | null): string => {
@@ -2400,7 +2473,7 @@ ${renderAllItems('        ', null)}
     if (__new) {
 ${renderAllItems('      ', null)}
     } else { ${aw}${emptyRenderName}(${collectVar ? collectVar : ''}); }
-  })`);
+  }, true)`);
     } else {
       const collectVar = hyd ? ctx.n() : null;
       if (collectVar) ctx.push(`const ${collectVar} = [];`);
@@ -2414,7 +2487,7 @@ ${renderAllItems('      ', null)}
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
 ${renderAllItems('    ', null)}
-  })`);
+  }, true)`);
     }
   }
 

@@ -279,6 +279,59 @@ describe('Effect', () => {
 			expect(runs).toBe(4);
 		});
 	});
+
+	it('managed effects keep child effects alive across re-runs', () => {
+		root(() => {
+			const parent = track(0);
+			const child = track(0);
+			let parentRuns = 0;
+			let childRuns = 0;
+			flush_sync(() => {
+				effect(() => {
+					get(parent);
+					parentRuns++;
+					if (parentRuns === 1) {
+						effect(() => {
+							get(child);
+							childRuns++;
+						});
+					}
+				}, true);
+			});
+			expect(parentRuns).toBe(1);
+			expect(childRuns).toBe(1);
+			set(parent, 1);
+			flush_sync();
+			expect(parentRuns).toBe(2);
+			set(child, 1);
+			flush_sync();
+			expect(childRuns).toBe(2);
+		});
+	});
+
+	it('unmanaged effects replace child effects on re-run', () => {
+		root(() => {
+			const parent = track(0);
+			const child = track(0);
+			let childRuns = 0;
+			flush_sync(() => {
+				effect(() => {
+					get(parent);
+					effect(() => {
+						get(child);
+						childRuns++;
+					});
+				});
+			});
+			expect(childRuns).toBe(1);
+			set(parent, 1);
+			flush_sync();
+			expect(childRuns).toBe(2);
+			set(child, 1);
+			flush_sync();
+			expect(childRuns).toBe(3);
+		});
+	});
 });
 
 // ============================================================
@@ -351,6 +404,34 @@ describe('DOM-like integration', () => {
 			set(active, 'btn-active');
 			flush_sync();
 			expect(el.className).toBe('btn-active');
+		});
+	});
+});
+
+// ============================================================
+// Shared cells across roots
+// ============================================================
+describe('Shared cells across roots', () => {
+	it('propagates through a derived created inside an effect block', () => {
+		const shared = track({ ready: false });
+		root(() => {
+			let runs = 0;
+			let seen = false;
+			flush_sync(() => {
+				effect(() => {
+					const view = derived(() => get(shared) as { ready: boolean });
+					effect(() => {
+						seen = (get(view) as { ready: boolean }).ready;
+						runs++;
+					});
+				});
+			});
+			expect(runs).toBe(1);
+			expect(seen).toBe(false);
+			set(shared, { ready: true });
+			flush_sync();
+			expect(runs).toBe(2);
+			expect(seen).toBe(true);
 		});
 	});
 });

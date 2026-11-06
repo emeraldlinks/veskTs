@@ -280,6 +280,48 @@ export default RootLayout;
 	}
 });
 
+it('a page slot nested inside a shell component hydrates inside the shell, not the root', () => {
+	// Mirrors the admin app shape: the group layout wraps its children in a
+	// shell component, and the shell renders them inside `<main>`. Eagerly
+	// building the gate/slot fragment on the caller's walker let the page claim
+	// the shell's own SSR root and detach `<aside>/<header>/<main>`.
+	const source = `${TOGGLE}
+component GroupPage { <h2 class="ph">page</h2> }
+component Gate(props: { children?: any }) {
+  <div class="gate">{props.children}</div>
+}
+component Shell(props: { children?: any }) {
+  <div class="shell"><aside class="nav">nav</aside><main class="main">{props.children}</main></div>
+}
+component AdminLayout(props: { children?: any }) {
+  <span class="al">admin</span>
+  <Shell><Gate>{props.children}</Gate></Shell>
+}
+component RootLayout(props: { children?: any }) {
+  <span class="rl">root</span>
+  {props.children}
+}
+export default RootLayout;
+`;
+	const html = ssr(source, 'RootLayout', {
+		children: ssr(source, 'AdminLayout', { children: ssr(source, 'ChildToggle') }),
+	});
+	const m = mountHydrated(source, html);
+	try {
+		hydrateChain(m, [{ name: 'RootLayout' }, { name: 'AdminLayout' }, { name: 'ChildToggle' }]);
+		assert(m.document.querySelector('.shell') && m.root.contains(m.document.querySelector('.shell')), 'the shell root stayed in the document');
+		assert(m.document.querySelector('.nav') && m.root.contains(m.document.querySelector('.nav')), 'the shell aside stayed in the document');
+		assert(m.document.querySelector('.main') && m.root.contains(m.document.querySelector('.main')), 'the shell main stayed in the document');
+		const gate = m.document.querySelector('.gate');
+		assert(gate && m.root.contains(gate), 'the gate wrapper stayed in the document');
+		assert(gate!.contains(m.document.querySelector('.cw')), 'the page hydrated inside the gate, not at the root');
+		click(m, '.cb');
+		assert((m.document.querySelector('.cn') as Element).textContent!.includes('CHILD-ON'), 'the page component reacted after hydrating inside the shell');
+	} finally {
+		m.restore();
+	}
+});
+
 console.log('\n=== hydrate: no residue, no cursor movement ===');
 
 it('a component with no residue emits no cursor step and still claims correctly', () => {
