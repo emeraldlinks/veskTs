@@ -14,7 +14,7 @@ import { mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { mkdtempSync } from 'node:fs';
-import { shipNodeDriverClosures } from '@vesk/adapter/src/platform-deploy';
+import { shipNodeDriverClosures, vercelBootstrapSource } from '@vesk/adapter/src/platform-deploy';
 
 let passed = 0;
 let failed = 0;
@@ -77,6 +77,14 @@ it('skips nested node_modules (flattened by name) and builtins', () => {
   assert(!existsSync(resolve(funcDir, 'node_modules/node:sqlite')), 'node: builtins must not be shipped');
   assert(!existsSync(resolve(funcDir, 'node_modules/node:net')), 'node: builtins must not be shipped');
   rmSync(root, { recursive: true, force: true });
+});
+
+it('resolves SSR fetch URLs against the forwarded public host, not the protected host', () => {
+  const source = vercelBootstrapSource();
+  assert(source.includes("req.headers['x-forwarded-host']"), 'must prefer x-forwarded-host for the public alias');
+  assert(source.includes("req.headers['x-forwarded-proto']"), 'must honor x-forwarded-proto for https');
+  assert(!source.includes("'http://' + (req.headers.host"), 'must not hardcode http against the raw host');
+  assert(source.includes('new URL(req.url, `${__proto}://${__host}`)'), 'request URL must use the resolved proto/host');
 });
 
 it('is a no-op when no driver is installed', () => {

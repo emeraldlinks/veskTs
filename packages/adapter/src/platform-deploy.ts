@@ -289,6 +289,46 @@ function serveEmbeddedStatic(request) {
 }`;
 }
 
+/**
+ * Vercel Node entry source.
+ *
+ * The request URL is the base that SSR helpers resolve relative
+ * `useFetch('/api/…')` calls against. On Vercel, `req.headers.host` can be the
+ * deployment-specific host, which sits behind deployment protection, while
+ * `x-forwarded-host` carries the public alias the browser used. Preferring the
+ * forwarded host/proto keeps internal SSR fetches on the public origin; hitting
+ * the protected host follows a redirect to Vercel's auth HTML, which then fails
+ * `res.json()` with `Unexpected token '<'`.
+ */
+export function vercelBootstrapSource(): string {
+  return [
+    'export default async function veskNodeEntry(req, res) {',
+    "  const __fwdHost = String(req.headers['x-forwarded-host'] || '').split(',')[0].trim();",
+    "  const __host = __fwdHost || req.headers.host || 'localhost';",
+    "  const __fwdProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();",
+    "  const __local = __host === 'localhost' || __host.startsWith('127.') || __host === '[::1]';",
+    "  const __proto = __fwdProto || (__local ? 'http' : 'https');",
+    '  const url = new URL(req.url, `${__proto}://${__host}`);',
+    "  const method = req.method || 'GET';",
+    '  let body;',
+    "  if (method !== 'GET' && method !== 'HEAD') {",
+    '    body = await new Promise((resolveBody, reject) => {',
+    '      const chunks = [];',
+    "      req.on('data', (c) => chunks.push(c));",
+    '      req.on("error", reject);',
+    '      req.on("end", () => resolveBody(Buffer.concat(chunks)));',
+    '    });',
+    '  }',
+    '  const headers = {};',
+    '  for (const key in req.headers) headers[key] = req.headers[key];',
+    '  const request = new Request(url, { method, headers, body });',
+    '  const response = await handleRequest(request);',
+    '  res.writeHead(response.status, Object.fromEntries(response.headers));',
+    '  res.end(await response.text());',
+    '}',
+  ].join('\n');
+}
+
 function shellFor(platform: Platform): Shell {
   switch (platform) {
     case 'vercel':
@@ -309,27 +349,7 @@ function shellFor(platform: Platform): Shell {
           shouldAddSourcemapSupport: false,
           supportsResponseStreaming: true,
         },
-        bootstrap: [
-          'export default async function veskNodeEntry(req, res) {',
-          "  const url = new URL(req.url, 'http://' + (req.headers.host || 'localhost'));",
-          "  const method = req.method || 'GET';",
-          '  let body;',
-          "  if (method !== 'GET' && method !== 'HEAD') {",
-          '    body = await new Promise((resolveBody, reject) => {',
-          '      const chunks = [];',
-          "      req.on('data', (c) => chunks.push(c));",
-          '      req.on("error", reject);',
-          '      req.on("end", () => resolveBody(Buffer.concat(chunks)));',
-          '    });',
-          '  }',
-          '  const headers = {};',
-          '  for (const key in req.headers) headers[key] = req.headers[key];',
-          '  const request = new Request(url, { method, headers, body });',
-          '  const response = await handleRequest(request);',
-          '  res.writeHead(response.status, Object.fromEntries(response.headers));',
-          '  res.end(await response.text());',
-          '}',
-        ].join('\n'),
+        bootstrap: vercelBootstrapSource(),
       };
 
     case 'netlify':
