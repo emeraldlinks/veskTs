@@ -1524,10 +1524,6 @@ export class ModuleRegistry {
   }
 }
 
-function isRelativeSpec(spec: string): boolean {
-  return spec.startsWith('./') || spec.startsWith('../');
-}
-
 function stringLiteralValue(node: unknown): string | null {
   const n = node as { type?: string; value?: unknown } | null | undefined;
   if (n && (n.type === 'Literal' || n.type === 'StringLiteral') && typeof n.value === 'string') {
@@ -1636,7 +1632,6 @@ export function collectModuleBundled(absPath: string, registry: ModuleRegistry):
 
   const deps: Record<string, string> = {};
   for (const spec of specifiers) {
-    if (!isRelativeSpec(spec)) continue;
     const depPath = resolveSsrModule(spec, dir);
     if (!depPath) continue;
     deps[spec] = collectModuleBundled(depPath, registry);
