@@ -2,6 +2,24 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.94 — 2026-11-06
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler,runtime:** stabilize hydration control flow
+- **compiler:** resolve nested dynamic imports through the SSR registry
+- **adapter:** bundle vesk-qr encoder for node SSR targets
+- **adapter:** ship qrcode-generator in the client bundle
+- **compiler:** replay precompiled plan modules into fresh registries
+- **adapter:** build SSR base URL from forwarded host on Vercel
+- **adapter:** ship TCP driver closures into Node functions
+
+### Tests
+
+- **edge:** ignore inlined client bytes in require-shim assertion
+
 ## 0.2.93 — 2026-11-06
 
 _No breaking changes._
