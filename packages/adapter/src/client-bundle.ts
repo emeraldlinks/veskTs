@@ -1623,17 +1623,23 @@ export async function generateClientBundle(
         loader: { '.js': 'tsx' },
         legalComments: 'none',
         ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
-        // Stub optional CJS deps (qrcode-generator via vesk-qr, canvas,
-        // @zxing/*) so esbuild never bundles their CJS source into the client
-        // bundle — that would emit a `__require` shim that throws in the
-        // browser. vesk-qr now lazy-loads them via dynamic import; stubbing
-        // keeps the bundle valid ESM without shipping dead code.
+        // Stub only the OPTIONAL CJS deps (canvas for raster export, @zxing/*
+        // for scan validation). They degrade gracefully and their absence must
+        // not break the bundle.
+        //
+        // `qrcode-generator` must NOT be stubbed: it is the pure-JS encoder
+        // every client-side QR (vesk-qr's dynamic `import("qrcode-generator")`)
+        // runs on. Stubbing it to `export {}` makes `getQrcode()` resolve to an
+        // empty object, so `CofoundrMatrix.generate()` throws
+        // "QREncodingError: generator is not a function" during hydration and
+        // the page falls back to the client error boundary. esbuild bundles it
+        // as CJS fine; only genuinely Node-only/optional deps belong here.
         plugins: [
           {
             name: 'stub-browser-packages',
             setup(b: any) {
               b.onResolve(
-                { filter: /^(qrcode-generator|canvas|@zxing\/(browser|node))(\/|$)/ },
+                { filter: /^(canvas|@zxing\/(browser|node))(\/|$)/ },
                 (args: any) => ({ path: args.path, namespace: 'browser-stub' }),
               );
               b.onLoad({ filter: /.*/, namespace: 'browser-stub' }, () => ({
