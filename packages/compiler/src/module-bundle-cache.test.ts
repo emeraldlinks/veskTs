@@ -145,6 +145,33 @@ it('a large closure does not thrash the cache (icon-barrel shape)', () => {
   assert(codeOf(second).includes('v699'), 'the tail of the closure is missing from the second pass');
 });
 
+it('routes a bundled dynamic import through the require shim, not a bare import()', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'vesk-modcache-dyn-'));
+  const pkgDir = join(dir, 'node_modules', 'qrcode-dep');
+  mkdirSync(pkgDir, { recursive: true });
+  writeFileSync(
+    join(pkgDir, 'package.json'),
+    JSON.stringify({ name: 'qrcode-dep', version: '1.0.0', main: 'index.js' }),
+  );
+  writeFileSync(join(pkgDir, 'index.js'), 'module.exports = function qrcode() {};\n');
+  const encoder = join(dir, 'encoder.ts');
+  writeFileSync(
+    encoder,
+    "export async function load() { const mod = await import('qrcode-dep'); return mod.default || mod; }\n",
+  );
+  const registry = freshRegistry();
+  collectModuleBundled(encoder, registry);
+  const entry = Object.values(registry.modules()).find((m) => m.dir === dir);
+  assert(entry !== undefined, 'the encoder module was not bundled');
+  assert(entry!.deps['qrcode-dep'] !== undefined, 'the dynamic import target was not resolved into deps');
+  assert(!entry!.code.includes('import('), `a bare dynamic import survived: ${entry!.code}`);
+  assert(
+    entry!.code.includes('Promise.resolve().then') &&
+      (entry!.code.includes('require("qrcode-dep")') || entry!.code.includes("require('qrcode-dep')")),
+    `the dynamic import was not rewritten through require: ${entry!.code}`,
+  );
+});
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) {

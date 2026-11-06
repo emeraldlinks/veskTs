@@ -1317,10 +1317,89 @@ function exportGetter(lines: string[], key: string, valueExpr: string): void {
 
 let exportCounter = 0;
 
+/**
+ * `Promise.resolve().then(() => require("<spec>"))` as an AST expression.
+ * Reusing the original literal node keeps its raw quoting.
+ */
+function promiseOfRequire(sourceNode: Record<string, unknown>): Record<string, unknown> {
+  return {
+    type: 'CallExpression',
+    optional: false,
+    callee: {
+      type: 'MemberExpression',
+      optional: false,
+      computed: false,
+      object: {
+        type: 'CallExpression',
+        optional: false,
+        callee: {
+          type: 'MemberExpression',
+          optional: false,
+          computed: false,
+          object: { type: 'Identifier', name: 'Promise' },
+          property: { type: 'Identifier', name: 'resolve' },
+        },
+        arguments: [],
+      },
+      property: { type: 'Identifier', name: 'then' },
+    },
+    arguments: [
+      {
+        type: 'ArrowFunctionExpression',
+        id: null,
+        expression: true,
+        generator: false,
+        async: false,
+        params: [],
+        body: {
+          type: 'CallExpression',
+          optional: false,
+          callee: { type: 'Identifier', name: 'require' },
+          arguments: [sourceNode],
+        },
+      },
+    ],
+  };
+}
+
+/**
+ * Rewrites `import("<spec>")` for specifiers the SSR module bundle resolved
+ * (those present in the module's `deps`) into a promise of the same
+ * `require` the static-import rewrite emits.
+ *
+ * Registry bodies run inside `new Function`, where a native dynamic `import()`
+ * has no referrer and Node resolves it against the generated function's
+ * location (`/var/task` on Vercel). That directory ships no node_modules, so
+ * e.g. vesk-qr's lazy `import("qrcode-generator")` fails even though the
+ * encoder is already in the bundle. Routing it through the require shim makes
+ * it use `entry.deps`, exactly like a static import.
+ *
+ * Specifiers that were not bundled (framework-owned, `.vsk`, builtins) keep
+ * their original form: the shim and the host loader know how to handle them.
+ */
+function rewriteDynamicImports(
+  node: { type: string } & Record<string, unknown>,
+  specs: ReadonlySet<string>,
+): { type: string } & Record<string, unknown> {
+  return walk(node as any, null, {
+    ImportExpression(n: Record<string, unknown>) {
+      const spec = stringLiteralValue(n.source);
+      if (!spec || !specs.has(spec)) return;
+      return promiseOfRequire(n.source as Record<string, unknown>);
+    },
+  }) as { type: string } & Record<string, unknown>;
+}
+
 /** Rewrites an ESM program body (imports/exports removed) into CJS statements. */
-export function esmToCjs(body: Array<{ type: string } & Record<string, unknown>>): string {
+export function esmToCjs(
+  body: Array<{ type: string } & Record<string, unknown>>,
+  rewriteImports?: ReadonlySet<string>,
+): string {
+  const statements = rewriteImports
+    ? body.map((stmt) => rewriteDynamicImports(stmt, rewriteImports))
+    : body;
   const lines: string[] = [];
-  for (const stmt of body) {
+  for (const stmt of statements) {
     switch (stmt.type) {
       case 'ImportDeclaration': {
         const source = printNode(stmt.source);
@@ -1576,32 +1655,46 @@ function stringLiteralValue(node: unknown): string | null {
  */
 function collectModuleSpecifiers(ast: any): Set<string> {
   const specs = new Set<string>();
+  // Every type-specific visitor MUST call `next()`. zimmerframe only recurses
+  // into a node's children when its visitor does — the default visitor is the
+  // one that calls `next`. Without it, an `import()`/`require()` nested inside
+  // an exported function (e.g. vesk-qr's lazy encoder load) was never seen, so
+  // the module was neither bundled nor recorded in `deps`.
   walk(ast, null, {
-    ImportDeclaration(node: Record<string, unknown>) {
-      if (node.importKind === 'type') return;
-      const v = stringLiteralValue(node.source);
-      if (v) specs.add(v);
+    ImportDeclaration(node: Record<string, unknown>, ctx: any) {
+      if (node.importKind !== 'type') {
+        const v = stringLiteralValue(node.source);
+        if (v) specs.add(v);
+      }
+      ctx.next();
     },
-    ExportNamedDeclaration(node: Record<string, unknown>) {
-      if ((node.exportKind === 'type') || !node.source) return;
-      const v = stringLiteralValue(node.source);
-      if (v) specs.add(v);
+    ExportNamedDeclaration(node: Record<string, unknown>, ctx: any) {
+      if (node.exportKind !== 'type' && node.source) {
+        const v = stringLiteralValue(node.source);
+        if (v) specs.add(v);
+      }
+      ctx.next();
     },
-    ExportAllDeclaration(node: Record<string, unknown>) {
-      if (node.exportKind === 'type') return;
-      const v = stringLiteralValue(node.source);
-      if (v) specs.add(v);
+    ExportAllDeclaration(node: Record<string, unknown>, ctx: any) {
+      if (node.exportKind !== 'type') {
+        const v = stringLiteralValue(node.source);
+        if (v) specs.add(v);
+      }
+      ctx.next();
     },
-    CallExpression(node: Record<string, unknown>) {
+    CallExpression(node: Record<string, unknown>, ctx: any) {
       const callee = node.callee as { type?: string; name?: string } | null | undefined;
-      if (!callee || callee.type !== 'Identifier' || callee.name !== 'require') return;
-      const args = (node.arguments || []) as unknown[];
-      const v = stringLiteralValue(args[0]);
-      if (v) specs.add(v);
+      if (callee && callee.type === 'Identifier' && callee.name === 'require') {
+        const args = (node.arguments || []) as unknown[];
+        const v = stringLiteralValue(args[0]);
+        if (v) specs.add(v);
+      }
+      ctx.next();
     },
-    ImportExpression(node: Record<string, unknown>) {
+    ImportExpression(node: Record<string, unknown>, ctx: any) {
       const v = stringLiteralValue(node.source);
       if (v) specs.add(v);
+      ctx.next();
     },
   });
   return specs;
@@ -1645,6 +1738,7 @@ export function collectModuleBundled(absPath: string, registry: ModuleRegistry):
   const cached = mtimeMs >= 0 ? bundledCodeCache.get(absPath) : undefined;
   let code: string;
   let specifiers: string[];
+  let deps: Record<string, string> | null = null;
   if (cached && cached.mtimeMs === mtimeMs) {
     code = cached.code;
     specifiers = cached.specifiers;
@@ -1662,25 +1756,42 @@ export function collectModuleBundled(absPath: string, registry: ModuleRegistry):
     if (hasTsSyntax(src.ast)) stripped = stripTsTypes(src.ast);
     stripped.body = (stripped.body || []).filter((n: unknown) => (n ? !isTypeOnlyStatement(n) : false));
     specifiers = [...collectModuleSpecifiers(src.ast)];
-    code = esmToCjs(stripped.body as Array<{ type: string }>);
+    // Resolve the closure first: the emitter needs the set of specifiers that
+    // became registry modules so it can route `import("<spec>")` through the
+    // same require shim instead of leaving a bare dynamic import for the host
+    // loader (see `rewriteDynamicImports`).
+    deps = resolveBundledDeps(specifiers, dir, registry);
+    code = esmToCjs(stripped.body as Array<{ type: string }>, new Set(Object.keys(deps)));
     bundledCodeCache.set(absPath, { mtimeMs, code, specifiers });
     evict(bundledCodeCache);
   }
 
+  if (!deps) deps = resolveBundledDeps(specifiers, dir, registry);
+
+  return registry.register(absPath, { code, dir, deps });
+}
+
+/**
+ * Resolves every specifier a module reaches for into the registry key of its
+ * bundled closure. Compiler-owned (`@vesk/*`) targets are injected by the SSR
+ * require shim at runtime (`precompile-runtime.ts`), never bundled: their built
+ * JS may contain identifiers the `.vsk` grammar reserves (`component` in
+ * ripple-runtime.js) and would fail to parse here. `.vsk`/`.css`/`.md` carry no
+ * SSR value. Node builtins load natively through the shim.
+ */
+function resolveBundledDeps(
+  specifiers: readonly string[],
+  dir: string,
+  registry: ModuleRegistry,
+): Record<string, string> {
   const deps: Record<string, string> = {};
   for (const spec of specifiers) {
-    // Compiler-owned (`@vesk/*`) targets are injected by the SSR require shim
-    // at runtime (`precompile-runtime.ts`), never bundled: their built JS may
-    // contain identifiers the `.vsk` grammar reserves (`component` in
-    // ripple-runtime.js) and would fail to parse here. `.vsk`/`.css`/`.md`
-    // carry no SSR value. Node builtins load natively through the shim.
     if (isCompilerOwnedTarget(spec) || isValueLessTarget(spec)) continue;
     const depPath = resolveSsrModule(spec, dir);
     if (!depPath || isBuiltinPath(depPath)) continue;
     deps[spec] = collectModuleBundled(depPath, registry);
   }
-
-  return registry.register(absPath, { code, dir, deps });
+  return deps;
 }
 
 const bundledCodeCache = new Map<string, { mtimeMs: number; code: string; specifiers: string[] }>();
