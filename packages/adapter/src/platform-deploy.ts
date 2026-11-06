@@ -1,12 +1,72 @@
-import { writeFileSync, mkdirSync, rmSync, cpSync, readFileSync } from 'node:fs';
+import { writeFileSync, mkdirSync, rmSync, cpSync, readFileSync, existsSync } from 'node:fs';
 import { resolve, dirname, relative } from 'node:path';
 import { generatePlatformHandlerSource, bundlePlatformHandler, type PlatformBuildContext } from '@vesk/adapter/src/platform-handler';
 import { ensureCleanDir, writePlatformStatic, writePrerenderedStatic, listStaticDir, mimeFor } from '@vesk/adapter/src/platform-output';
+import { tcpDriverPackages } from '@vesk/adapter/src/server-only';
 import type { SsgRouteResult } from '@vesk/adapter/src/types';
 import type { Platform } from '@vesk/adapter/src/platform';
 
 export interface DeployContext extends PlatformBuildContext {
   prerenderedRoutes: SsgRouteResult[];
+}
+
+/**
+ * Resolve an installed package directory the way Node does: walk up from the
+ * project root looking for `node_modules/<name>` (handles npm hoisting and
+ * monorepo workspaces). Returns null when the package is not installed.
+ */
+function resolveInstalledPackage(projectRoot: string, name: string): string | null {
+  let dir = projectRoot;
+  while (true) {
+    const candidate = resolve(dir, 'node_modules', name);
+    if (existsSync(resolve(candidate, 'package.json'))) return candidate;
+    const parent = dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
+/**
+ * Ship the installed TCP driver packages (and their transitive dependency
+ * closures) into a Node function's `node_modules`.
+ *
+ * A serverless function built by Vesk is otherwise self-contained — esbuild
+ * inlines everything. But a driver loaded through a variable `import(spec)`
+ * (e.g. `slintorm`'s `importDriver("pg")`) is invisible to esbuild *and* to the
+ * host's dependency tracer, and Build Output API functions do not install
+ * package.json dependencies. Without this the Postgres driver fails at runtime
+ * with `Cannot find module 'pg'` even though it is installed at build time.
+ *
+ * Only `dependencies`/`optionalDependencies` are followed (never dev deps), and
+ * nested `node_modules` are skipped because every dependency is flattened into
+ * the function's `node_modules` by name.
+ */
+export function shipNodeDriverClosures(projectRoot: string, funcDir: string): void {
+  const destModules = resolve(funcDir, 'node_modules');
+  const seen = new Set<string>();
+  const queue = tcpDriverPackages();
+  while (queue.length > 0) {
+    const name = queue.shift() as string;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const pkgDir = resolveInstalledPackage(projectRoot, name);
+    if (!pkgDir) continue;
+    const dest = resolve(destModules, name);
+    mkdirSync(dirname(dest), { recursive: true });
+    cpSync(pkgDir, dest, {
+      recursive: true,
+      filter: (src) => !relative(pkgDir, src).split(/[\\/]/).includes('node_modules'),
+    });
+    let pkg: Record<string, unknown> = {};
+    try {
+      pkg = JSON.parse(readFileSync(resolve(pkgDir, 'package.json'), 'utf-8')) as Record<string, unknown>;
+    } catch { /* unreadable package.json: copy the package as-is */ }
+    const deps = {
+      ...((pkg.dependencies as Record<string, string> | undefined) || {}),
+      ...((pkg.optionalDependencies as Record<string, string> | undefined) || {}),
+    };
+    for (const dep of Object.keys(deps)) queue.push(dep);
+  }
 }
 
 interface Shell {
@@ -91,6 +151,7 @@ export async function emitPlatformOutput(platform: Platform, ctx: DeployContext)
     }
     handlerRel = `${shell.functionFile.dir}/${shell.functionFile.file}`;
     await bundlePlatformHandler({ entry, outfile: resolve(funcDir, shell.functionFile.file), nodeBuiltins: shell.nodeBuiltins });
+    if (shell.nodeBuiltins) shipNodeDriverClosures(projectRoot, funcDir);
   } else {
     handlerRel = shell.outfile || 'index.js';
     await bundlePlatformHandler({ entry, outfile: resolve(outRoot, handlerRel), nodeBuiltins: shell.nodeBuiltins });

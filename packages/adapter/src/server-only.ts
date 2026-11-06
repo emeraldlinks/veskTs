@@ -89,6 +89,18 @@ const TCP_DRIVERS = new Set([
   'node:tls',
 ]);
 
+/**
+ * The TCP drivers that are real npm packages (not `node:` builtins). A Node
+ * serverless function bundles statically-imported code, but a driver loaded
+ * through a variable `import(spec)` (e.g. `slintorm`'s `importDriver("pg")`)
+ * cannot be traced by the bundler or the platform's dependency tracer. Node
+ * targets ship these package closures into the function's `node_modules` so
+ * that dynamic import resolves at runtime.
+ */
+export function tcpDriverPackages(): string[] {
+  return [...TCP_DRIVERS].filter((spec) => !spec.startsWith('node:'));
+}
+
 export type ServerOnlyKind = 'server-only-package' | 'tcp-driver';
 
 /**
