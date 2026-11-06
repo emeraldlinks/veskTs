@@ -128,7 +128,12 @@ async function main() {
   {
     const bundle = (await import('fs')).readFileSync(resolve(edgeOut, 'index.js'), 'utf-8');
     assert(!/from ['"]node:/.test(bundle), 'no node: imports in edge bundle');
-    assert(!bundle.includes('__require'), 'no cjs require shims in edge bundle');
+    // The edge shell inlines static assets (including the browser client bundle)
+    // as JSON strings; a legitimately bundled CJS dep carries esbuild's benign
+    // `__commonJS` helper (whose inner function is named `__require`) inside
+    // that string. What must never appear is esbuild's THROWING shim, which is
+    // only emitted for an unresolved dynamic require and panics at runtime.
+    assert(!bundle.includes('Dynamic require of'), 'no throwing cjs require shim in edge bundle');
     assert(bundle.includes('handleEdgeRequest'), 'edge bootstrap exported');
   }
 
