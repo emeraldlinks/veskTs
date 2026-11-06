@@ -1632,8 +1632,14 @@ export function collectModuleBundled(absPath: string, registry: ModuleRegistry):
 
   const deps: Record<string, string> = {};
   for (const spec of specifiers) {
+    // Compiler-owned (`@vesk/*`) targets are injected by the SSR require shim
+    // at runtime (`precompile-runtime.ts`), never bundled: their built JS may
+    // contain identifiers the `.vsk` grammar reserves (`component` in
+    // ripple-runtime.js) and would fail to parse here. `.vsk`/`.css`/`.md`
+    // carry no SSR value. Node builtins load natively through the shim.
+    if (isCompilerOwnedTarget(spec) || isValueLessTarget(spec)) continue;
     const depPath = resolveSsrModule(spec, dir);
-    if (!depPath) continue;
+    if (!depPath || isBuiltinPath(depPath)) continue;
     deps[spec] = collectModuleBundled(depPath, registry);
   }
 

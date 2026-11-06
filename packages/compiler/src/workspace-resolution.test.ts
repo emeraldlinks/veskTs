@@ -162,6 +162,34 @@ it('a workspace package import is bundled into the module closure', () => {
   assert(Object.keys(registry.modules()).length === 2, `expected the closure to include index.js, got ${Object.keys(registry.modules()).length} modules`);
 });
 
+it('bundles bare npm specifiers but never compiler-owned or builtins', () => {
+  // A bare npm specifier (e.g. `vesk-qr`) must be inlined into the SSR module
+  // closure because serverless file-tracing cannot follow the dynamic
+  // `require(spec)` in the precompile shim — the package is simply absent from
+  // /var/task/node_modules at runtime. But compiler-owned `@vesk/*` targets are
+  // injected by that shim and their built JS may use identifiers the `.vsk`
+  // grammar reserves (`component`), and Node builtins load natively — neither
+  // may be bundled.
+  const dir = workspace({
+    'app/lib/data.ts': [
+      "import { helper } from 'my-lib';",
+      "import { track } from '@vesk/runtime';",
+      "import { readFileSync } from 'node:fs';",
+      'export const value = helper;',
+    ].join('\n'),
+    'node_modules/my-lib/package.json': JSON.stringify({ name: 'my-lib', exports: { '.': './dist/index.js' } }),
+    'node_modules/my-lib/dist/index.js': 'export const helper = 42;',
+    'node_modules/@vesk/runtime/package.json': JSON.stringify({ name: '@vesk/runtime', exports: { '.': './dist/index.js' } }),
+    'node_modules/@vesk/runtime/dist/index.js': 'export function track(v) { return v; }',
+  });
+  const registry = new ModuleRegistry();
+  collectModuleBundled(join(dir, 'app/lib/data.ts'), registry);
+  const allDeps = Object.values(registry.modules()).flatMap((m) => Object.keys(m.deps));
+  assert(allDeps.includes('my-lib'), 'a bare npm specifier must be bundled into the closure');
+  assert(!allDeps.includes('@vesk/runtime'), 'compiler-owned @vesk targets must not be bundled');
+  assert(!allDeps.includes('node:fs'), 'node builtins must not be bundled');
+});
+
 console.log(`\n${'='.repeat(50)}`);
 console.log(`Results: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) {
