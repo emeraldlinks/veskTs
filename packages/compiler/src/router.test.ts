@@ -1,6 +1,6 @@
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
-import { scanRoutes, matchUrl, collectSources, generateRouteManifest, extractMiddleware } from '@vesk/compiler/src/router';
+import { scanRoutes, matchUrl, collectSources, generateRouteManifest, extractMiddleware, extractMiddlewareParts } from '@vesk/compiler/src/router';
 
 let passed = 0;
 let failed = 0;
@@ -399,6 +399,17 @@ test('extracts body with braces and template strings', () => {
 		expect(out).toContain('if (ctx.ok) { return; }');
 		expect(out).toContain('return msg;');
 	} finally { cleanup(tmp); }
+});
+
+test('preserves bare package imports in middleware parts', () => {
+	const parts = extractMiddlewareParts([
+		"import { VeskResponse } from '@vesk/runtime/server';",
+		'export async function middleware(ctx, next) {',
+		'  return VeskResponse.redirect(\'/login\', 302);',
+		'}',
+	].join('\n'));
+	expect(parts).not.toBeNull();
+	expect(parts!.imports).toContain("import { VeskResponse } from '@vesk/runtime/server';");
 });
 
 test('returns null when no middleware export exists', () => {

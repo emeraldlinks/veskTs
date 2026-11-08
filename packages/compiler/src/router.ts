@@ -40,7 +40,7 @@ export function collapseSlashes(p: string): string {
   return out;
 }
 
-export function extractMiddlewareParts(src: string): { params: string; body: string } | null {  try {
+export function extractMiddlewareParts(src: string): { params: string; body: string; imports: string[] } | null {  try {
     let ast = parse(src, { filename: 'middleware.ts' });
     let target = findMiddlewareFn(ast);
     if (!target) return null;
@@ -69,10 +69,20 @@ export function extractMiddlewareParts(src: string): { params: string; body: str
         decls.push(src.slice((stmt.declaration as any).start, (stmt.declaration as any).end).trim());
       }
     }
+    const imports: string[] = [];
+    for (const stmt of ast.body) {
+      if (stmt.type !== 'ImportDeclaration') continue;
+      if ((stmt as any).importKind === 'type') continue;
+      const source = (stmt as any).source?.value;
+      if (typeof source !== 'string') continue;
+      if (source.startsWith('.') || source.startsWith('/')) continue;
+      const line = src.slice((stmt as any).start, (stmt as any).end).trim();
+      if (line && !imports.includes(line)) imports.push(line);
+    }
     const bodyWithDecls = decls.length > 0
       ? decls.join('\n') + '\n' + body.trim()
       : body.trim();
-    return { params, body: bodyWithDecls };
+    return { params, body: bodyWithDecls, imports };
   } catch {
     return fallbackExtractMiddleware(src);
   }
@@ -94,7 +104,7 @@ function findMiddlewareFn(ast: any): any {
  * its token neighbours, then extracts the parameter list and body with balanced
  * delimiter scans (so nested parens/braces and strings stay intact).
  */
-function fallbackExtractMiddleware(src: string): { params: string; body: string } | null {
+function fallbackExtractMiddleware(src: string): { params: string; body: string; imports: string[] } | null {
   const tokens = tokenizeCode(src);
   if (tokens === null) return null;
   for (let i = 0; i < tokens.length; i++) {
@@ -121,7 +131,7 @@ function fallbackExtractMiddleware(src: string): { params: string; body: string 
       m++;
     }
     const body = src.slice(b + 1, m - 1);
-    return { params, body: body.trim() };
+    return { params, body: body.trim(), imports: [] };
   }
   return null;
 }

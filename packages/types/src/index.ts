@@ -180,6 +180,7 @@ export interface VeskEventHandlers {
 export interface MiddlewareExtractResult {
   params: string;
   body: string;
+  imports: string[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

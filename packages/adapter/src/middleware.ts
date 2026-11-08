@@ -6,18 +6,20 @@ import { extractMiddlewareParts } from '@vesk/compiler/src/router';
 function extractMiddlewareBody(src: string): MiddlewareExtractResult | null {
   const parts = extractMiddlewareParts(src);
   if (!parts) return null;
-  return { params: parts.params, body: parts.body };
+  return { params: parts.params, body: parts.body, imports: parts.imports };
 }
 
 export function compileMiddleware(mwChain: MiddlewareChainItem[], _appDir: string): string | null {
   if (mwChain.length === 0) return null;
 
   const parts: string[] = [];
+  const imports: string[] = [];
   for (let i = 0; i < mwChain.length; i++) {
     const { sourcePath } = mwChain[i];
     const src = readFileSync(sourcePath, 'utf-8');
     const extracted = extractMiddlewareBody(src);
     if (!extracted) continue;
+    for (const line of extracted.imports) if (!imports.includes(line)) imports.push(line);
     parts.push(`async function mw_${i}(${extracted.params}) {\n${extracted.body}\n}`);
   }
 
@@ -26,6 +28,8 @@ export function compileMiddleware(mwChain: MiddlewareChainItem[], _appDir: strin
   const code = [
     '// Auto-generated middleware chain — do not edit',
     '',
+    ...imports,
+    ...(imports.length ? [''] : []),
     parts.join('\n\n'),
     '',
     `const chain = [${parts.map((_, i) => `mw_${i}`).join(', ')}];`,
@@ -98,9 +102,11 @@ export function compileMiddlewareCode(mwSourceTexts: string[]): string | null {
   if (!mwSourceTexts || mwSourceTexts.length === 0) return null;
 
   const parts: string[] = [];
+  const imports: string[] = [];
   for (let i = 0; i < mwSourceTexts.length; i++) {
     const extracted = extractMiddlewareBody(mwSourceTexts[i]);
     if (!extracted) continue;
+    for (const line of extracted.imports) if (!imports.includes(line)) imports.push(line);
     parts.push(`async function mw_${i}(${extracted.params}) {\n${extracted.body}\n}`);
   }
 
@@ -109,6 +115,8 @@ export function compileMiddlewareCode(mwSourceTexts: string[]): string | null {
   const code = [
     '// ── Middleware chain (inline) ──',
     '',
+    ...imports,
+    ...(imports.length ? [''] : []),
     parts.join('\n\n'),
     '',
     `const __mwChain = [${parts.map((_, i) => `mw_${i}`).join(', ')}];`,
