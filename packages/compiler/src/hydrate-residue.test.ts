@@ -54,6 +54,12 @@ function ssr(source: string, component: string, props: Record<string, unknown> =
 	return page.body;
 }
 
+/** SSR one component in marker mode (vsk claim + region branch markers). */
+function ssrMarked(source: string, component: string, props: Record<string, unknown> = {}): string {
+	const page = renderPage(source, component, props, new Map(), { hydrate: true, markerless: false }) as { body: string };
+	return page.body;
+}
+
 interface Mounted {
 	document: Document;
 	root: HTMLElement;
@@ -373,6 +379,102 @@ export default Menu;
 		assert(m.document.querySelector('.item'), 'the panel body rendered');
 		click(m, '.mb');
 		assert(m.document.querySelector('.panel') === null, 'closing the conditional removes the fresh panel');
+	} finally {
+		m.restore();
+	}
+});
+
+console.log('\n=== hydrate: a tracked condition that resolves before the first effect flush ===');
+
+it('swaps the SSR empty branch when data arrives before the first effect run', () => {
+	// The reported /admin/cohorts bug: SSR rendered the empty state because the
+	// class cell was empty, then the bootstrap island hydrated the persisted
+	// roster before this region's re-render effect first ran. The old `__first`
+	// guard recorded the *new* condition without reconciling the DOM, leaving
+	// "No classes yet" in the page forever alongside the real class cards.
+	const source = `component App client {
+  const &[items, itemsCell] = track<string[]>([]);
+  <div class="wrap">
+    if (items.length) {
+      <p class="full">FULL</p>
+    } else {
+      <p class="empty">EMPTY</p>
+    }
+  </div>
+  {#client}
+    items = ['a'];
+  {/client}
+}
+export default App;
+`;
+	const html = ssr(source, 'App');
+	assert(html.includes('EMPTY'), 'SSR rendered the empty branch');
+	assert(!html.includes('FULL'), 'SSR did not render the full branch');
+	const m = mountHydrated(source, html);
+	try {
+		hydrateChain(m, [{ name: 'App' }]);
+		assert(m.document.querySelector('.full'), 'the full branch replaced the empty branch');
+		assert(m.document.querySelector('.empty') === null, 'the stale empty branch was removed');
+	} finally {
+		m.restore();
+	}
+});
+
+it('drops the SSR branch when the client initial condition differs (markerless)', () => {
+	// Same divergence in the default markerless mode: SSR rendered the empty
+	// branch, but the client's very first render already chose the full branch.
+	// The structural claim must validate the static class fingerprint and
+	// substitute the same-tag slot instead of adopting the empty <p>.
+	const source = `component App() {
+  const onClient = typeof window !== 'undefined';
+  <div class="wrap">
+    if (onClient) {
+      <p class="full">FULL</p>
+    } else {
+      <p class="empty">EMPTY</p>
+    }
+  </div>
+}
+export default App;
+`;
+	const html = ssr(source, 'App');
+	assert(html.includes('EMPTY'), 'SSR rendered the empty branch');
+	assert(!html.includes('vesk-r:'), 'markerless SSR carries no region markers');
+	const m = mountHydrated(source, html);
+	try {
+		hydrateChain(m, [{ name: 'App' }]);
+		assert(m.document.querySelector('.full'), 'the client branch rendered');
+		assert(m.document.querySelector('.empty') === null, 'the stale SSR branch was removed');
+	} finally {
+		m.restore();
+	}
+});
+
+it('drops the SSR branch when the client initial condition differs', () => {
+	// The /admin/cohorts failure in marker mode: SSR (no auth/data) rendered the
+	// empty/read-only branch, while the client's initial render already had the
+	// roster and chose the other branch. The server branch's claim markers were
+	// then stolen by the next region, leaving "No classes yet" in the DOM.
+	const source = `component App() {
+  const onClient = typeof window !== 'undefined';
+  <div class="wrap">
+    if (onClient) {
+      <p class="full">FULL</p>
+    } else {
+      <p class="empty">EMPTY</p>
+    }
+  </div>
+}
+export default App;
+`;
+	const html = ssrMarked(source, 'App');
+	assert(html.includes('EMPTY'), 'SSR rendered the empty branch');
+	assert(html.includes('vesk-r:'), 'SSR recorded the branch index');
+	const m = mountHydrated(source, html);
+	try {
+		hydrateChain(m, [{ name: 'App' }]);
+		assert(m.document.querySelector('.full'), 'the client branch rendered');
+		assert(m.document.querySelector('.empty') === null, 'the stale SSR branch was removed');
 	} finally {
 		m.restore();
 	}

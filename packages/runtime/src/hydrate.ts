@@ -44,16 +44,33 @@ export interface ClaimByKeyOptions {
 	skipK?: number;
 }
 
+/**
+ * Minimal compiler-generated shape descriptor for a structural claim. It never
+ * touches the DOM; the client program carries it. Only stable, source-authored
+ * static class tokens are validated — dynamic values are deliberately ignored
+ * because SSR text/attributes may legitimately differ at first paint.
+ */
+export interface HydrateClaimDescriptor {
+  class?: string;
+}
+
+export interface StructuralRegionBranchDescriptor {
+  tag?: string;
+  descriptor?: HydrateClaimDescriptor | null;
+  count: number;
+}
+
+
 export interface HydrateWalker {
 	root: HTMLElement | null;
 	done(): boolean;
-	nextElement(tag?: string, skipK?: number): Element;
+	nextElement(tag?: string, skipK?: number, descriptor?: HydrateClaimDescriptor): Element;
 	/**
 	 * Claim an element like `nextElement` but without stripping its direct text
 	 * children. Used by static-component stubs whose SSR content is preserved
 	 * as-is (no client-side re-creation of text nodes).
 	 */
-	claimOnly?(tag?: string): Element;
+	claimOnly?(tag?: string, skipK?: number, descriptor?: HydrateClaimDescriptor): Element;
 	/**
 	 * Drop any remaining markers whose comment node is no longer attached to
 	 * the document. Self-claiming runtime components (Link/NavLink/Md/Form/
@@ -112,6 +129,13 @@ export interface HydrateWalker {
 	 */
 	injectSkipK?(n: number): void;
 	takeSkipK?(): number;
+	/**
+	 * Markerless structural branch reconciliation: identify the SSR branch
+	 * sitting at the region's cursor slot by its static descriptor, and
+	 * discard that branch's SSR residue when the client selected a different
+	 * branch (or no branch). Returns true when a branch was discarded.
+	 */
+	discardStructuralRegion?(branches: StructuralRegionBranchDescriptor[], selected: number, skipK?: number): boolean;
 }
 
 interface HydrateIdleOptions {
@@ -206,6 +230,7 @@ export function setHydrateDevMode(enabled: boolean): void {
 
 export type HydrationIssueKind =
 	| 'tag-mismatch'
+	| 'descriptor-mismatch'
 	| 'exhausted'
 	| 'leftover-marker'
 	| 'twin'
@@ -1089,16 +1114,68 @@ class WalkerEngine implements HydrateWalker {
 // markerless design walks PLAIN server HTML: a per-parent stack of element
 // lists, claimed positionally by `skipK` (the number of source siblings the
 // caller already consumed — static residues it retrieved from `__vsk_ssrEls`)
-// and by tag. The compiler emits `nextElement(tag, skipK)` claims with the
-// descriptor implicit in the tag; divergence follows §2.2 step 4: a tag
-// mismatch consumes exactly one slot, reports, detaches the provably-owned
-// direct-child ghost, and hands back a fresh element that the caller mounts.
-// The SSR node is never bound.
+// by tag and, at component/region roots, an optional compiler-generated static
+// class descriptor. The compiler emits `nextElement(tag, skipK, descriptor)`
+// claims; divergence follows §2.2 step 4: a tag or descriptor mismatch consumes
+// exactly one slot, reports, detaches the provably-owned direct-child ghost,
+// and hands back a fresh element that the caller mounts. The SSR node is never
+// bound.
 //
 // The same engine backs `createHydrateChildWalker`, so runtime components that
 // claim offspring positionally (loading stubs, slot content) keep working with
 // identical semantics.
 // ---------------------------------------------------------------------------
+
+/**
+ * Split a class attribute into tokens without a regex (runtime helpers follow
+ * the tokenizer style used by md.ts). Only used for the descriptor's static
+ * class fingerprint.
+ */
+function classTokens(value: string): string[] {
+	const out: string[] = [];
+	let token = '';
+	for (let i = 0; i < value.length; i++) {
+		const ch = value[i];
+		if (ch === ' ' || ch === '\n' || ch === '\t' || ch === '\r' || ch === '\f') {
+			if (token) {
+				out.push(token);
+				token = '';
+			}
+		} else {
+			token += ch;
+		}
+	}
+	if (token) out.push(token);
+	return out;
+}
+
+function descriptorMatches(el: Element, descriptor?: HydrateClaimDescriptor): boolean {
+	if (!descriptor || !descriptor.class) return true;
+	const wanted = classTokens(descriptor.class);
+	if (wanted.length === 0) return true;
+	const actual = el.classList;
+	if (actual) {
+		for (const token of wanted) {
+			if (!actual.contains(token)) return false;
+		}
+		return true;
+	}
+	// Minimal DOM shims (tests, linkedom variants) may expose className or only
+	// the class attribute instead of a live classList.
+	const raw = el.getAttribute('class') ?? (el as Element & { className?: string }).className ?? '';
+	const present = classTokens(String(raw));
+	for (const token of wanted) {
+		if (!present.includes(token)) return false;
+	}
+	return true;
+}
+
+function structuralBranchMatches(el: Element, branch: StructuralRegionBranchDescriptor): boolean {
+	const actualTag = el.tagName.toLowerCase();
+	if (branch.tag && actualTag !== branch.tag) return false;
+	if (branch.descriptor) return descriptorMatches(el, branch.descriptor);
+	return !!branch.tag;
+}
 
 class StructuralWalker implements HydrateWalker {
 	root: HTMLElement | null;
@@ -1196,7 +1273,7 @@ class StructuralWalker implements HydrateWalker {
 		return n;
 	}
 
-	private claimAt(tag: string | undefined, skipK: number, raw: boolean): Element {
+	private claimAt(tag: string | undefined, skipK: number, raw: boolean, descriptor?: HydrateClaimDescriptor): Element {
 		if ((globalThis as { __vesk_hydrate_debug?: boolean }).__vesk_hydrate_debug) {
 			// eslint-disable-next-line no-console
 			console.error('[hyd-dbg] claimAt', tag, 'skip=', skipK, 'idx=', this.idx, 'els=', this.els.length);
@@ -1214,17 +1291,21 @@ class StructuralWalker implements HydrateWalker {
 		if (target > this.els.length) target = this.idx;
 		while (target < this.els.length) {
 			const el = this.els[target];
-			if (tag && el.tagName.toLowerCase() !== tag) {
+			const actualTag = el.tagName.toLowerCase();
+			const tagMismatch = !!tag && actualTag !== tag;
+			const descriptorMismatch = !tagMismatch && !descriptorMatches(el, descriptor);
+			if (tagMismatch || descriptorMismatch) {
 				// §2.2 step 4: descriptor failed. Consume exactly ONE slot and
 				// hand back a fresh element. The direct-child SSR ghost is
 				// detached below; nested recovery remains owned by its child walker.
 				this.idx = this.advancePastSkippable(target + 1);
+				const expectedTag = tag || 'div';
 				const ghost: ClaimRecord = {
 					state: 'ghost',
 					el,
 					owner: this.root,
-					expectedTag: tag || 'div',
-					actualTag: el.tagName.toLowerCase(),
+					expectedTag,
+					actualTag,
 					detached: false,
 				};
 				recordClaim(this.root, ghost);
@@ -1239,20 +1320,20 @@ class StructuralWalker implements HydrateWalker {
 						// The final sweep will report/repair a still-owned ghost.
 					}
 				}
-				const fresh = document.createElement(tag || 'div');
+				const fresh = document.createElement(expectedTag);
 				recordClaim(this.root, {
 					state: 'fresh',
 					el: fresh,
 					owner: this.root,
-					expectedTag: tag || 'div',
+					expectedTag,
 					actualTag: fresh.tagName.toLowerCase(),
 					detached: false,
 				});
-				reportMiss(
-					'tag-mismatch',
-					`descriptor wanted <${tag}> but the SSR slot holds <${el.tagName.toLowerCase()}>; consumed one slot, detached the local ghost, and rendered fresh.`,
-					false
-				);
+				const actualClass = el.getAttribute('class') || '';
+				const detail = descriptorMismatch
+					? `descriptor wanted <${expectedTag} class="${descriptor?.class || ''}"> but the SSR slot holds <${actualTag} class="${actualClass}">; consumed one slot, detached the local ghost, and rendered fresh.`
+					: `descriptor wanted <${tag}> but the SSR slot holds <${actualTag}>; consumed one slot, detached the local ghost, and rendered fresh.`;
+				reportMiss(descriptorMismatch ? 'descriptor-mismatch' : 'tag-mismatch', detail, false);
 				return fresh;
 			}
 			if (this.adopted.has(el)) {
@@ -1289,12 +1370,76 @@ class StructuralWalker implements HydrateWalker {
 		return fresh;
 	}
 
-	nextElement(tag?: string, skipK = 0): Element {
-		return this.claimAt(tag, skipK, false);
+	nextElement(tag?: string, skipK = 0, descriptor?: HydrateClaimDescriptor): Element {
+		return this.claimAt(tag, skipK, false, descriptor);
 	}
 
-	claimOnly(tag?: string, skipK = 0): Element {
-		return this.claimAt(tag, skipK, true);
+	claimOnly(tag?: string, skipK = 0, descriptor?: HydrateClaimDescriptor): Element {
+		return this.claimAt(tag, skipK, true, descriptor);
+	}
+
+	discardStructuralRegion(branches: StructuralRegionBranchDescriptor[], selected: number, skipK = 0): boolean {
+		if (!branches || branches.length === 0) return false;
+		let offset = skipK || 0;
+		if (!offset) offset = this.inheritOffset;
+		let target = this.advancePastSkippable(this.idx + offset);
+		if (target > this.els.length) target = this.idx;
+		target = this.advancePastSkippable(target);
+		while (target < this.els.length) {
+			const el = this.els[target];
+			if (this.adopted.has(el)) {
+				target = this.advancePastSkippable(target + 1);
+				continue;
+			}
+			let matchCount = 0;
+			let matchIdx = -1;
+			for (let i = 0; i < branches.length; i++) {
+				if (structuralBranchMatches(el, branches[i])) {
+					matchCount++;
+					matchIdx = i;
+				}
+			}
+			if (matchCount !== 1 || matchIdx === selected) return false;
+			const count = branches[matchIdx].count;
+			if (!count || count < 1) return false;
+			this.inheritOffset = 0;
+			let p = target;
+			let removed = 0;
+			while (removed < count && p < this.els.length) {
+				const candidate = this.els[p];
+				if (this.adopted.has(candidate)) {
+					p = this.advancePastSkippable(p + 1);
+					continue;
+				}
+				const actualTag = candidate.tagName.toLowerCase();
+				const ghost: ClaimRecord = {
+					state: 'ghost',
+					el: candidate,
+					owner: this.root,
+					expectedTag: branches[matchIdx].tag || actualTag,
+					actualTag,
+					detached: false,
+				};
+				recordClaim(this.root, ghost);
+				if (this.root && candidate.parentNode === this.root) {
+					try {
+						candidate.remove();
+						ghost.detached = true;
+					} catch {
+					}
+				}
+				p = this.advancePastSkippable(p + 1);
+				removed++;
+			}
+			this.idx = p;
+			reportMiss(
+				'descriptor-mismatch',
+				`structural region reconciliation removed SSR branch ${matchIdx}; the client selected branch ${selected}.`,
+				false,
+			);
+			return true;
+		}
+		return false;
 	}
 
 	subWalker(rootEl: HTMLElement): HydrateWalker {

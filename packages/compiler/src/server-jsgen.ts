@@ -5,6 +5,7 @@ import {
   TrackDecl, RuntimeStatement, ComponentRef, ComponentCall,
   BreakSignal,
   ServerBlock, ClientBlock, HeadBlock, SlotNode, PropSlot, PropSlotRender,
+  regionMarkerId,
 } from '@vesk/compiler/src/ir';
 import { isStaticIR, collectTrackedNames, transformTracked, transformTrackedInit, semicolonizeStatement, type TrackedInfo } from '@vesk/compiler/src/client-codegen';
 import { walk } from 'zimmerframe';
@@ -304,7 +305,14 @@ function dynamicBindingToJS(node: DynamicBinding, tracked?: Map<string, TrackedI
 function opaqueRegionToJS(node: OpaqueDynamicRegion, isAsync = false, tracked?: Map<string, TrackedInfo>): string {
   const lines: string[] = [];
   const cond = exprJSX(node.condition, tracked);
+  const rid = regionMarkerId(node);
+  // Marker-mode SSR records which branch the server actually rendered. Strict
+  // markerless SSR must remain ordinary HTML: no comments, no annotations. In
+  // markerless mode the client recovers a differing initial branch through the
+  // structural walker's descriptor validation instead.
+  const mark = __vskHydrate && !__vskMarkerless;
   lines.push(`if (${cond}) {`);
+  if (mark) lines.push(indent(`__out.push('<!--vesk-r:${rid}:0-->');`));
   // Static branch content still needs server claim markers: the client
   // re-branches an if/else-if region on every tracked change (OpaqueDynamicRegion
   // claimStatic codegen), so opposed to plain component bodies it must be able
@@ -316,8 +324,9 @@ function opaqueRegionToJS(node: OpaqueDynamicRegion, isAsync = false, tracked?: 
     if (code) lines.push(indent(code));
   }
   setVskForceClaim(false);
+  lines.push(`} else {`);
+  if (mark) lines.push(indent(`__out.push('<!--vesk-r:${rid}:1-->');`));
   if (node.alternateNodes.length > 0) {
-    lines.push(`} else {`);
     setVskForceClaim(true);
     for (const n of node.alternateNodes) {
       const code = irNodeToJS(n, null, isAsync, tracked);
@@ -326,6 +335,7 @@ function opaqueRegionToJS(node: OpaqueDynamicRegion, isAsync = false, tracked?: 
     setVskForceClaim(false);
   }
   lines.push(`}`);
+  if (mark) lines.push(`__out.push('<!--vesk-r-end:${rid}-->');`);
   return lines.join('\n');
 }
 

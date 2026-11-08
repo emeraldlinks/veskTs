@@ -503,7 +503,7 @@ export interface Tracked<T = unknown> {
 }
 /**
  * Reactive resource returned by `createResource` / `useFetch` and its
- * variants. It is *thenable* (`await resource` resolves to `data`) and
+ * variants. It is a real `Promise` (`await resource` resolves to `data`) and
  * exposes live `loading` / `error` / `data` state that the compiler can read
  * in `if (res.loading)` branches.
  *
@@ -520,11 +520,11 @@ export interface Tracked<T = unknown> {
  * if (posts.loading) return <p>Loading…</p>;
  * if (posts.error) return <p>{String(posts.error)}</p>;
  * return <ul>{posts.data!.map(p => <li>{p.title}</li>)}</ul>;
- * await posts; // also thenable
+ * await posts; // resolves to the payload
  * posts.refresh(); // revalidate all handles for the key
  * ```
  */
-export interface Resource<T> extends PromiseLike<T> {
+export interface Resource<T> extends Promise<T> {
     /** `true` while the fetcher (or a `refresh()`) is in flight. */
     loading: boolean;
     /** Last fetch error (an `HttpError`, `TimeoutError`, `AbortError`, or thrown value). */

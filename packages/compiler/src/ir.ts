@@ -169,6 +169,20 @@ export class OpaqueDynamicRegion {
   }
 }
 
+/**
+ * Stable identity for a conditional region across the SSR and client codegen
+ * passes. Both passes see the same source offsets, so the SSR region marker
+ * and the client's hydration reconciliation agree without sharing state.
+ */
+export function regionMarkerId(node: OpaqueDynamicRegion): string {
+  const ast = node.condition.ast as { start?: number; end?: number } | null;
+  if (ast && typeof ast.start === 'number') return `s${ast.start}`;
+  const raw = node.condition.raw;
+  let hash = 5381;
+  for (let i = 0; i < raw.length; i++) hash = ((hash << 5) + hash + raw.charCodeAt(i)) | 0;
+  return `h${(hash >>> 0).toString(36)}`;
+}
+
 export class MapRegion {
   expression: Expression;
   itemVariable: string;

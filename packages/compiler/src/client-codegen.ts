@@ -18,6 +18,7 @@ import {
   BreakSignal,
   ComponentRef,
   ComponentCall,
+  regionMarkerId,
   ServerBlock,
   ClientBlock,
   HeadBlock,
@@ -557,6 +558,10 @@ hydrate = false;
   markerless = true;
   inTryBody = false;
   claimStatic = false;
+  // Markerless only: the next real claim carries a compiler-generated static
+  // class descriptor so a same-tag but structurally different SSR slot is
+  // substituted instead of adopted (e.g. an empty-state <div> vs a list <div>).
+  descriptorClaim = false;
   // While set, the next StaticNode claimed in hydrate mode uses `__root` (the
   // item element already claimed by key) instead of walking for a new element.
   rootClaim = false;
@@ -743,6 +748,24 @@ const PROPERTY_ATTRS: Record<string, Set<string>> = {
   progress: new Set(['value']),
 };
 
+/**
+ * Build the markerless structural descriptor for a claimed element. Only a
+ * source-authored static class is included: dynamic classes are runtime values
+ * and must never be validated (SSR/client first paint may legitimately differ).
+ * The descriptor is a JS-only argument to the walker; it never reaches SSR HTML.
+ */
+function staticClassDescriptor(node: StaticNode): string | null {
+  const hasDynamicClass = node.children.some(
+    (child) => child instanceof DynamicBinding && child.kind === 'attribute' && child.target === 'class',
+  );
+  if (hasDynamicClass) return null;
+  const attr = node.attributes.find((a) => a.name === 'class');
+  if (!attr) return null;
+  const value = attr.value.trim();
+  if (!value) return null;
+  return JSON.stringify({ class: value });
+}
+
 function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo>, effectsVar: string | null, skipK = 0, regionBudget?: string): string | null {
   const el = ctx.n();
   if (ctx.hydrate) {
@@ -765,13 +788,21 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     // are claimed on their own sub-walker and carry their own residue math.
     const skipExpr = regionBudget && ctx.markerless ? markerlessSkipExpr(regionBudget, skipK) : skipK;
     const skipArg = ctx.markerless ? `, ${skipExpr}` : '';
+    // A component root or region branch root may be the slot where the client's
+    // initial branch differs from SSR. Validate its static class so a same-tag
+    // wrong branch is substituted, not adopted. One-shot: only the first real
+    // claim in that root/branch carries the descriptor.
+    const wantsDescriptor = ctx.markerless && ctx.descriptorClaim;
+    ctx.descriptorClaim = false;
+    const descriptor = wantsDescriptor && !rootClaim ? staticClassDescriptor(node) : null;
+    const descriptorArg = descriptor ? `, ${descriptor}` : '';
     // `rootClaim` marks the keyed renderItem root: claimed items supply the
     // SSR element as `__root`, fresh items must CREATE one. The walker is never
     // valid here as a fallback — its cursor doesn't advance past claimByKey, so
     // `nextElement` would steal a neighboring SSR node to render the new item.
     const claimedExpr = rootClaim
       ? `__root || document.createElement(${JSON.stringify(node.tag)})`
-      : `${ctx.walker}.nextElement(${JSON.stringify(node.tag)}${skipArg})`;
+      : `${ctx.walker}.nextElement(${JSON.stringify(node.tag)}${skipArg}${descriptorArg})`;
     ctx.push(`const ${el} = ${claimedExpr};`);
     if (regionBudget && ctx.markerless) ctx.push(`${regionBudget} = 0;`);
   } else {
@@ -1325,6 +1356,11 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     ? `reactiveProps({ ${propsEntries.join(', ')} })`
     : `{ ${propsEntries.join(', ')} }`);
   if (ctx.hydrate) {
+    // A component call is itself the root claim site. A compiled child carries
+    // its own root descriptor; a plain target has no IR root to describe. In
+    // either case the caller's pending branch descriptor must not leak to a
+    // following sibling.
+    ctx.descriptorClaim = false;
     const access = calleeExpr
       ?? (ctx.importedNames.has(node.componentName)
         ? node.componentName
@@ -1700,13 +1736,14 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   const hyd = ctx.hydrate;
   const parent = parentVar || '$root';
   const budget = hyd ? regionBudgetVar(ctx, skipK, regionBudget) : null;
+  const rid = regionMarkerId(node);
   const isOpaque = (n: unknown): n is OpaqueDynamicRegion => !!n && typeof (n as any).condition !== 'undefined';
   if (hyd && node.alternateNodes.length === 1 && isOpaque(node.alternateNodes[0])) {
-    const chain: { cond: string; nodes: IRNode[] }[] = [];
+    const chain: { cond: string; nodes: IRNode[]; id: string }[] = [];
     let cur: OpaqueDynamicRegion | null = node;
     let finalElse: IRNode[] | null = null;
     while (cur) {
-      chain.push({ cond: transformTracked(cur.condition as any, tracked), nodes: cur.consequentNodes });
+      chain.push({ cond: transformTracked(cur.condition as any, tracked), nodes: cur.consequentNodes, id: regionMarkerId(cur) });
       if (cur.alternateNodes.length === 1 && isOpaque(cur.alternateNodes[0])) {
         cur = cur.alternateNodes[0] as OpaqueDynamicRegion;
       } else {
@@ -1730,6 +1767,8 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       ctx.push(`const ${rn} = ${fnOpen}`);
       const cl = ctx.n();
       ctx.push(indent(`const ${cl} = [];`));
+      const savedDescriptor = ctx.descriptorClaim;
+      if (hyd && ctx.markerless) ctx.descriptorClaim = true;
       for (const n of chain[i].nodes) {
         const savedClaim = ctx.claimStatic;
         if (hyd) ctx.claimStatic = true;
@@ -1737,6 +1776,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
         ctx.claimStatic = savedClaim;
         if (v) ctx.push(indent(`${cl}.push(${v});`));
       }
+      ctx.descriptorClaim = savedDescriptor;
       ctx.push(indent(`__place(${anchor}, ${endAnchor}, ${cl}, ${parent});`));
       ctx.push(`};`);
     }
@@ -1746,6 +1786,8 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       ctx.push(`const ${finalRender} = ${fnOpen}`);
       const cl2 = ctx.n();
       ctx.push(indent(`const ${cl2} = [];`));
+      const savedDescriptor = ctx.descriptorClaim;
+      if (hyd && ctx.markerless) ctx.descriptorClaim = true;
       for (const n of finalElse) {
         const savedClaim = ctx.claimStatic;
         if (hyd) ctx.claimStatic = true;
@@ -1753,13 +1795,10 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
         ctx.claimStatic = savedClaim;
         if (v) ctx.push(indent(`${cl2}.push(${v});`));
       }
+      ctx.descriptorClaim = savedDescriptor;
       ctx.push(indent(`__place(${anchor}, ${endAnchor}, ${cl2}, ${parent});`));
       ctx.push(`};`);
     }
-    let init = `if (${chain[0].cond}) { ${asyncKw}${renderNames[0]}(); }`;
-    for (let i = 1; i < chain.length; i++) init += ` else if (${chain[i].cond}) { ${asyncKw}${renderNames[i]}(); }`;
-    if (finalRender) init += ` else { ${asyncKw}${finalRender}(); }`;
-    ctx.push(init);
     // Resolve which branch index the chain is in, for any chain depth. The last
     // fallback is `chain.length` when a final `else` exists, otherwise -1 (no
     // branch renders). Build the nested ternary from the innermost condition
@@ -1769,11 +1808,31 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       branchInitFallback = `(${chain[i].cond} ? ${i} : ${branchInitFallback})`;
     }
     const branchInit = `(${branchInitFallback})`;
+    // Snapshot the branch chosen by the INITIAL render before claiming it. The
+    // effect flush runs after the component body, so a tracked cell can change
+    // in between (bootstrap hydration, a child island's body, an inline
+    // statement). Initializing `__iv` at flush time would silently adopt the
+    // new branch while the DOM still held the old one; the first effect run
+    // must compare against the branch that actually rendered.
+    const branchSnapshot = ctx.n();
+    ctx.push(`const ${branchSnapshot} = ${branchInit};`);
+    if (!ctx.markerless) {
+      for (let i = 0; i < chain.length; i++) {
+        ctx.push(`if (__hydrate) __reconcileRegion(${parent}, '${chain[i].id}', ${branchSnapshot} === ${i} ? 0 : 1, ${ctx.walker});`);
+      }
+    } else {
+      const chainBranches = chain.map((c) => c.nodes);
+      if (finalElse) chainBranches.push(finalElse);
+      emitStructuralRegionDiscard(ctx, chainBranches, branchSnapshot, budget);
+    }
+    let init = `if (${branchSnapshot} === 0) { ${asyncKw}${renderNames[0]}(); }`;
+    for (let i = 1; i < chain.length; i++) init += ` else if (${branchSnapshot} === ${i}) { ${asyncKw}${renderNames[i]}(); }`;
+    if (finalRender) init += ` else { ${asyncKw}${finalRender}(); }`;
+    ctx.push(init);
     let effInner = `if (__new === 0) { ${asyncKw}${renderNames[0]}(); }`;
     for (let i = 1; i < chain.length; i++) effInner += ` else if (__new === ${i}) { ${asyncKw}${renderNames[i]}(); }`;
     if (finalRender) effInner += ` else { ${asyncKw}${finalRender}(); }`;
     const effBody = `effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
-        if (__first) { __first = false; __iv = ${branchInit}; return; }
         const __new = ${branchInit};
         if (__new !== __iv) {
           for (const e of ${effectsVar}) destroy_block(e);
@@ -1785,14 +1844,12 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       }, true);`;
     if (effTarget) {
       ctx.push(`${effTarget}.push((() => {
-      let __iv = ${branchInit};
-      let __first = true;
+      let __iv = ${branchSnapshot};
       return ${effBody}
     })());`);
     } else {
       ctx.effects.push(`{
-      let __iv = ${branchInit};
-      let __first = true;
+      let __iv = ${branchSnapshot};
       ${effBody}
     }`);
     }
@@ -1819,6 +1876,8 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
   const conFrag = ctx.n();
   if (!hyd) ctx.push(indent(`const ${conFrag} = document.createDocumentFragment();`));
   if (hyd) ctx.push(indent(`const __cl = [];`));
+  const savedConDescriptor = ctx.descriptorClaim;
+  if (hyd && ctx.markerless) ctx.descriptorClaim = true;
   for (const n of node.consequentNodes) {
     const savedClaim = ctx.claimStatic;
     if (hyd) ctx.claimStatic = true;
@@ -1829,6 +1888,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
       else ctx.push(indent(`${conFrag}.appendChild(${v});`));
     }
   }
+  ctx.descriptorClaim = savedConDescriptor;
   if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
   else ctx.push(indent(`__p.insertBefore(${conFrag}, ${endAnchor});`));
   ctx.push(`};`);
@@ -1841,6 +1901,8 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
     const altFrag = ctx.n();
     if (!hyd) ctx.push(indent(`const ${altFrag} = document.createDocumentFragment();`));
     if (hyd) ctx.push(indent(`const __cl = [];`));
+    const savedAltDescriptor = ctx.descriptorClaim;
+    if (hyd && ctx.markerless) ctx.descriptorClaim = true;
     for (const n of node.alternateNodes) {
       const savedAltClaim = ctx.claimStatic;
       if (hyd) ctx.claimStatic = true;
@@ -1851,6 +1913,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
         else ctx.push(indent(`${altFrag}.appendChild(${v});`));
       }
     }
+    ctx.descriptorClaim = savedAltDescriptor;
     if (hyd) ctx.push(indent(`__place(${anchor}, ${endAnchor}, __cl, ${parent});`));
     else ctx.push(indent(`__p.insertBefore(${altFrag}, ${endAnchor});`));
     ctx.push(`};`);
@@ -1858,11 +1921,18 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
 
   if (!hyd) ctx.push(`${parent}.appendChild(${endAnchor});`);
 
-  ctx.push(`if (${condExpr}) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : ''));
+  // Snapshot the condition used by the INITIAL render. Effect flush runs after
+  // the body, so tracked data can arrive in between; comparing the first effect
+  // run against a value read at flush time would adopt the new branch without
+  // replacing the DOM that the old branch already claimed.
+  const condSnapshot = ctx.n();
+  ctx.push(`const ${condSnapshot} = ${condExpr};`);
+  if (hyd && !ctx.markerless) ctx.push(`if (__hydrate) __reconcileRegion(${parent}, '${rid}', ${condSnapshot} ? 0 : 1, ${ctx.walker});`);
+  if (hyd && ctx.markerless) emitStructuralRegionDiscard(ctx, [node.consequentNodes, node.alternateNodes], hasElse ? `(${condSnapshot} ? 0 : 1)` : `(${condSnapshot} ? 0 : -1)`, budget);
+  ctx.push(`if (${condSnapshot}) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : ''));
 
   const renderBranch = `if (__nv) { ${asyncKw}${conRenderName}(); }` + (hasElse ? ` else { ${asyncKw}${altRenderName}(); }` : '');
   const effectBody = `effect(${ctx.isAsyncScope ? 'async () => {' : '() => {'}
-      if (__first) { __first = false; __iv = ${condExpr}; return; }
       const __nv = ${condExpr};
       if (__nv !== __iv) {
         for (const e of ${effectsVar}) destroy_block(e);
@@ -1880,14 +1950,12 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
 
   if (effTarget) {
     ctx.push(`${effTarget}.push((() => {
-    let __iv = ${condExpr};
-    let __first = true;
+    let __iv = ${condSnapshot};
     return ${effectBody}
   })());`);
   } else {
     ctx.effects.push(`{
-    let __iv = ${condExpr};
-    let __first = true;
+    let __iv = ${condSnapshot};
     ${effectBody}
   }`);
   }
@@ -2614,6 +2682,10 @@ function generateComponent(comp: ComponentIR, importedNames: Set<string> = new S
       }
     }
   }
+  // The first real claim is this component's root: let it validate the static
+  // class shape against the SSR slot. The flag is consumed by the first claim
+  // and never leaks to nested children.
+  if (ctx.hydrate && ctx.markerless) ctx.descriptorClaim = true;
   for (const node of comp.body) {
     // A TrackDecl that could not be hoisted (its init reads an earlier body
     // binding) is emitted here, in source order, so the binding it reads is
@@ -2752,6 +2824,33 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc, m
     mapLines.push(`${registry}[${JSON.stringify(comp.name)}] = ${code};`);
   }
 
+  if (hydrate && !markerless) {
+  mapLines.push(`function __reconcileRegion(parent, id, branch, walker) {`);
+  mapLines.push(`\tif (!parent) return;`);
+  mapLines.push(`\tlet start = null;`);
+  mapLines.push(`\tlet end = null;`);
+  mapLines.push(`\tfor (let n = parent.firstChild; n; n = n.nextSibling) {`);
+  mapLines.push(`\t\tif (n.nodeType !== 8) continue;`);
+  mapLines.push(`\t\tconst text = n.textContent || '';`);
+  mapLines.push(`\t\tif (text === 'vesk-r:' + id + ':0' || text === 'vesk-r:' + id + ':1') start = n;`);
+  mapLines.push(`\t\telse if (text === 'vesk-r-end:' + id) end = n;`);
+  mapLines.push(`\t\tif (start && end) break;`);
+  mapLines.push(`\t}`);
+  mapLines.push(`\tif (!start || !end) return;`);
+  mapLines.push(`\tconst ssrBranch = (start.textContent || '').slice(-2) === ':1' ? 1 : 0;`);
+  mapLines.push(`\tif (ssrBranch !== branch) {`);
+  mapLines.push(`\t\tlet n = start.nextSibling;`);
+  mapLines.push(`\t\twhile (n && n !== end) {`);
+  mapLines.push(`\t\t\tconst next = n.nextSibling;`);
+  mapLines.push(`\t\t\tn.remove();`);
+  mapLines.push(`\t\t\tn = next;`);
+  mapLines.push(`\t\t}`);
+  mapLines.push(`\t\tif (walker && walker.retireDetached) walker.retireDetached();`);
+  mapLines.push(`\t}`);
+  mapLines.push(`\tstart.remove();`);
+  mapLines.push(`\tend.remove();`);
+  mapLines.push(`}`);
+  }
   mapLines.push(`function __cleanup(start, end) {`);
   mapLines.push(`\tlet n = start.nextSibling;`);
   mapLines.push(`\twhile (n && n !== end) {`);
@@ -2813,6 +2912,46 @@ function ssrResidueEstimate(node: IRNode | IRNode[]): number {
   // TextNode, DynamicBinding, TrackDecl, RuntimeStatement, SlotNode,
   // ServerBlock, ClientBlock, HeadBlock emit no SSR element residue.
   return 0;
+}
+
+function firstBranchRoot(nodes: IRNode[]): { tag: string; descriptor: string | null } | null {
+  for (const n of nodes) {
+    if (n instanceof StaticNode) return { tag: n.tag, descriptor: staticClassDescriptor(n) };
+    if (n instanceof ComponentCall || n instanceof ComponentRef) return null;
+    if (n instanceof OpaqueDynamicRegion) return null;
+    if (n instanceof MapRegion || n instanceof ForLoop || n instanceof WhileLoop) {
+      const child = firstBranchRoot(n.bodyTemplate);
+      if (child) return child;
+    }
+    if (n instanceof SwitchBlock) {
+      for (const c of n.cases) {
+        const child = firstBranchRoot(c.body);
+        if (child) return child;
+      }
+    }
+    if (n instanceof TryCatch) {
+      const child = firstBranchRoot(n.bodyTemplate) || firstBranchRoot(n.catchBody);
+      if (child) return child;
+    }
+  }
+  return null;
+}
+
+function structuralRegionMetadata(branches: IRNode[][]): string {
+  const parts = branches.map((nodes) => {
+    const first = firstBranchRoot(nodes);
+    const tag = first ? JSON.stringify(first.tag) : 'undefined';
+    const descriptor = first && first.descriptor ? first.descriptor : 'null';
+    return `{ tag: ${tag}, descriptor: ${descriptor}, count: ${ssrResidueEstimate(nodes)} }`;
+  });
+  return `[${parts.join(', ')}]`;
+}
+
+function emitStructuralRegionDiscard(ctx: Ctx, branches: IRNode[][], selectedExpr: string, budget: string | null): void {
+  if (!ctx.hydrate || !ctx.markerless) return;
+  const offset = budget ? `, ${budget}` : '';
+  const consume = budget ? ` ${budget} = 0;` : '';
+  ctx.push(`if (${ctx.walker} && typeof ${ctx.walker}.discardStructuralRegion === 'function' && ${ctx.walker}.discardStructuralRegion(${structuralRegionMetadata(branches)}, ${selectedExpr}${offset})) {${consume}}`);
 }
 
 function isStaticIR(body: IRNode[]): boolean {

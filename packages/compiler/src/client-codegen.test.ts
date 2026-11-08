@@ -351,8 +351,9 @@ describe('Client Codegen — Reactivity', () => {
 		}
 	`, (code) => {
 		expect(code).toContain('derived(() => props.tabs[get(index)] ?? props.tabs[0])');
-		expect(code).toContain('if (get(current)) {');
-		expect(code).toContain('let __iv = get(current);');
+		expect(code).toMatch(/const \$\w+ = get\(current\);/);
+		expect(code).toMatch(/let __iv = \$\w+;/);
+		expect(code).not.toContain('__first');
 		expect(code).not.toContain('props.tabs[index]');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
@@ -489,6 +490,78 @@ describe('Client Codegen — Control Flow', () => {
 		}
 	});
 
+});
+
+describe('Client Codegen — markerless structural descriptors', () => {
+	it('[hydrate] component root carries its static class descriptor', () => {
+		const code = compileClient(`
+			component App client { const name = 'Hi'; <div class="grid gap-4"><p>{name}</p></div> }
+		`, 'App', { hydrate: true, forceClient: true });
+		expect(code).toContain('__hydrate.nextElement("div", ');
+		expect(code).toContain('{"class":"grid gap-4"})');
+	});
+
+	it('[hydrate] if/else branch roots each carry their own descriptor', () => {
+		const code = compileClient(`
+			component App client {
+				if (typeof window !== 'undefined') { <div class="grid gap-4">A</div> }
+				else { <div class="text-center py-12">B</div> }
+			}
+		`, 'App', { hydrate: true, forceClient: true });
+		expect(code).toContain('{"class":"grid gap-4"}');
+		expect(code).toContain('{"class":"text-center py-12"}');
+	});
+
+	it('[hydrate] dynamic class suppresses the descriptor', () => {
+		const code = compileClient(`
+			component App client { const cls = 'grid'; <div class={cls}>A</div> }
+		`, 'App', { hydrate: true, forceClient: true });
+		expect(code).not.toContain('{"class":');
+	});
+
+	it('[hydrate] statement-mode if/else emits structural region discard metadata', () => {
+		const code = compileClient(`
+			component App client {
+				if (typeof window !== 'undefined') { <div class="grid gap-4">A</div> }
+				else { <div class="text-center py-12">B</div> }
+			}
+		`, 'App', { hydrate: true, forceClient: true });
+		expect(code).toContain('.discardStructuralRegion([');
+		expect(code).toContain('{ tag: "div", descriptor: {"class":"grid gap-4"}, count: 1 }');
+		expect(code).toContain('{ tag: "div", descriptor: {"class":"text-center py-12"}, count: 1 }');
+	});
+
+	it('[hydrate] expression-mode ternary emits structural region discard metadata', () => {
+		const code = compileClient(`
+			component App client {
+				const showList = true;
+				return <div>{showList ? <div class="grid gap-4">A</div> : <div class="text-center py-12">B</div>}</div>
+			}
+		`, 'App', { hydrate: true, forceClient: true });
+		expect(code).toContain('.discardStructuralRegion([');
+		expect(code).toContain('{ tag: "div", descriptor: {"class":"grid gap-4"}, count: 1 }');
+		expect(code).toContain('{ tag: "div", descriptor: {"class":"text-center py-12"}, count: 1 }');
+	});
+
+	it('[hydrate] skipped statement-mode branch emits discard for its SSR residue', () => {
+		const code = compileClient(`
+			component App client {
+				const canManage = true;
+				if (!canManage) { <div class="px-4 py-2.5 rounded border">Read-only</div> }
+				<div class="text-center py-12">B</div>
+			}
+		`, 'App', { hydrate: true, forceClient: true });
+		expect(code).toContain('.discardStructuralRegion([');
+		expect(code).toContain('{ tag: "div", descriptor: {"class":"px-4 py-2.5 rounded border"}, count: 1 }');
+	});
+
+	it('[marker mode] never emits descriptors', () => {
+		const code = compileClient(`
+			component App client { <div class="grid gap-4"><p>Hi</p></div> }
+		`, 'App', { hydrate: true, forceClient: true, markerless: false });
+		expect(code).not.toContain('{"class":');
+		expect(code).not.toContain('.discardStructuralRegion([');
+	});
 });
 
 describe('Client Codegen — wipe-style component children (Link/NavLink)', () => {
@@ -1707,10 +1780,10 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	// compound condition (`props.x && props.x.length > 0`) does not throw when
 	// props.x is undefined.
 	// The if/else region must render its branch during body execution (so SSR
-	// claims happen in DOM order) and guard the mount-time effect with __first.
-	// The first (mount) run must still read the condition so the effect registers
-	// its dependencies — otherwise the region never re-renders on a tracked
-	// change (the `__first` guard previously returned before any tracked read).
+	// claims happen in DOM order). The initial condition is snapshotted before
+	// that first dispatch and reused by the mount-time effect: data can arrive
+	// between SSR and the first effect flush, and the effect must reconcile the
+	// DOM instead of assuming the snapshot still matches.
 	bothModes('if/else negated condition is parenthesized', `
 		component App(props: { posts?: { title: string }[] }) {
 			if (props.posts && props.posts.length > 0) {
@@ -1720,10 +1793,11 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 			}
 		}
 	`, (code, mode) => {
-		expect(code).toContain('if (props.posts && props.posts.length > 0) { ');
+		expect(code).toMatch(/const \$\w+ = props\.posts && props\.posts\.length > 0;/);
+		expect(code).toMatch(/if \(\$\w+\) \{ /);
 		expect(code).toContain('} else { ');
-		expect(code).toContain('let __first = true;');
-		expect(code).toContain('if (__first) { __first = false; __iv = props.posts && props.posts.length > 0; return; }');
+		expect(code).toMatch(/let __iv = \$\w+;/);
+		expect(code).not.toContain('__first');
 		expect(code).not.toContain('let __iv = !(props.posts && props.posts.length > 0);');
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 	});
@@ -1734,10 +1808,10 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	// index (not just the first two) so switching the tracked condition renders
 	// the matching branch — previously indices >= 2 fell to `-1` and the branch
 	// content vanished from the DOM.
-	// The mount-time `__first` effect guard must ALSO read the branch init on its
-	// first run so the region subscribes to the tracked condition; returning
-	// before any tracked read leaves the effect dependency-less and it never
-	// re-renders on a subsequent change (same rule as single `if/else`).
+	// The branch index is snapshotted before the first dispatch and reused as the
+	// effect's initial value so the mount run subscribes to the tracked condition
+	// and reconciles the DOM if it changed before the first flush (same rule as
+	// single `if/else`).
 	bothModes('if / else-if / else-if chain dispatches every branch index', `
 		component App {
 			let &[target] = track("ssr")
@@ -1752,14 +1826,16 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 	`, (code, mode) => {
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 		if (mode === 'hydrate') {
-			expect(code).toContain('(get(target) === "ssr" ? 0 : (get(target) === "web" ? 1 : (get(target) === "native" ? 2 : -1)))');
+			expect(code).toMatch(/const \$\w+ = \(\(get\(target\) === "ssr" \? 0 : \(get\(target\) === "web" \? 1 : \(get\(target\) === "native" \? 2 : -1\)\)\)\);/);
 			expect(code).toContain('else if (__new === 1)');
 			expect(code).toContain('else if (__new === 2)');
 			expect(code).not.toContain('else if (__new === 3)');
-			expect(code).toContain('if (__first) { __first = false; __iv = ((get(target) === "ssr" ? 0 : (get(target) === "web" ? 1 : (get(target) === "native" ? 2 : -1))));');
+			expect(code).toMatch(/let __iv = \$\w+;/);
+			expect(code).not.toContain('__first');
 		} else {
 			// normal mode: nested regions — the innermost else-if still dispatches.
-			expect(code).toContain('if (get(target) === "native") { ');
+			expect(code).toMatch(/const \$\w+ = get\(target\) === "native";/);
+			expect(code).toMatch(/if \(\$\w+\) \{ /);
 		}
 	});
 
@@ -1778,8 +1854,9 @@ describe('Client Codegen — While / Do-While / For / Switch Blocks', () => {
 		try { new Function('track, effect', stripModuleWrapper(code)); } catch (e) { throw new Error(`Syntax error: ${e.message}\n\n${code}`); }
 		if (mode === 'hydrate') {
 			// final `else` renders when no condition matches — index == chain.length
-			expect(code).toContain('(get(mode) === 0 ? 0 : (get(mode) === 1 ? 1 : 2))');
-			expect(code).toContain('if (__first) { __first = false; __iv = ((get(mode) === 0 ? 0 : (get(mode) === 1 ? 1 : 2)));');
+			expect(code).toMatch(/const \$\w+ = \(\(get\(mode\) === 0 \? 0 : \(get\(mode\) === 1 \? 1 : 2\)\)\);/);
+			expect(code).toMatch(/let __iv = \$\w+;/);
+			expect(code).not.toContain('__first');
 		}
 	});
 
@@ -2370,8 +2447,6 @@ component X {
 
 
 describe('OpaqueDynamicRegion guard scoping inside list items', () => {
-	const guardLine = 'let __iv = get(sel) === it.name;';
-
 	// Statement-mode `for...of` whose item markup contains a tracked conditional
 	// text expression. The conditional's reactivity guard effect must be collected
 	// by the item's `__e` bucket — not leaked to the component top level where the
@@ -2389,8 +2464,10 @@ describe('OpaqueDynamicRegion guard scoping inside list items', () => {
 	`, (code) => {
 		expect(code).toContain('for (const it of ITEMS) {');
 		expect(code).toContain('__e.push((() => {');
-		expect(code.split('\n').filter((l) => l.trim() === guardLine).length).toBe(1);
-		expect(code.indexOf(guardLine) > code.indexOf('__e.push((() => {')).toBe(true);
+		const snap = code.match(/const (\$\w+) = get\(sel\) === it\.name;/);
+		expect(snap !== null).toBe(true);
+		expect(code).toContain(`let __iv = ${snap[1]};`);
+		expect(code.indexOf(`let __iv = ${snap[1]};`) > code.indexOf('__e.push((() => {')).toBe(true);
 	});
 
 	// Expression mode: `{ARR.map((it) => ...)}` compiles to the same MapRegion,
@@ -2403,8 +2480,10 @@ describe('OpaqueDynamicRegion guard scoping inside list items', () => {
 		}
 	`, (code) => {
 		expect(code).toContain('__e.push((() => {');
-		expect(code.split('\n').filter((l) => l.trim() === guardLine).length).toBe(1);
-		expect(code.indexOf(guardLine) > code.indexOf('__e.push((() => {')).toBe(true);
+		const snap = code.match(/const (\$\w+) = get\(sel\) === it\.name;/);
+		expect(snap !== null).toBe(true);
+		expect(code).toContain(`let __iv = ${snap[1]};`);
+		expect(code.indexOf(`let __iv = ${snap[1]};`) > code.indexOf('__e.push((() => {')).toBe(true);
 	});
 });
 
@@ -2425,7 +2504,8 @@ describe('Statement-mode guard-clause early return', () => {
 			expect(code).toContain('found');
 		} else {
 			// hydrate claims the SSR-rendered branch; assert the dispatch
-			expect(code).toContain('if (!props.ok)');
+			expect(code).toMatch(/const \$\w+ = !props\.ok;/);
+			expect(code).toContain('} else {');
 		}
 	});
 	bothModes('lookup-pattern guard keeps post-guard statements', `
@@ -2438,7 +2518,10 @@ describe('Statement-mode guard-clause early return', () => {
 		}
 	`, (code, mode) => {
 		if (mode === 'normal') expect(code).toContain('404');
-		else expect(code).toContain('if (!doc)');
+		else {
+			expect(code).toMatch(/const \$\w+ = !doc;/);
+			expect(code).toContain('} else {');
+		}
 	});
 	bothModes('bare return guard folds rest into the alternate branch', `
 		component App(props: { show: boolean }) {
@@ -2450,7 +2533,9 @@ describe('Statement-mode guard-clause early return', () => {
 		// and emit later roots unconditionally. The fixed output dispatches the
 		// empty guard branch and the root from an if/else; the buggy output had
 		// no `else` at all (roots emitted unconditionally after the `if`).
-		const ifIdx = code.indexOf('if (!props.show) {');
+		const snap = code.match(/const (\$\w+) = !props\.show;/);
+		expect(snap !== null).toBe(true);
+		const ifIdx = code.indexOf(`if (${snap[1]}) {`);
 		const elseIdx = code.indexOf('} else {');
 		expect(ifIdx > -1).toBe(true);
 		expect(elseIdx > ifIdx).toBe(true);

@@ -173,7 +173,7 @@ function isAnyImport(node: CompiledNode): boolean {
  * map (registrations would land on a detached object).
  */
 function isRuntimePreamble(node: CompiledNode): boolean {
-  if (node.type === 'FunctionDeclaration' && (node.id?.name === '__cleanup' || node.id?.name === '__place')) {
+  if (node.type === 'FunctionDeclaration' && (node.id?.name === '__cleanup' || node.id?.name === '__place' || node.id?.name === '__reconcileRegion')) {
     return true;
   }
   if (node.type === 'VariableDeclaration') {
@@ -1938,6 +1938,32 @@ async function buildMainBundle(
     '\tfor (let i = 0; i < nodes.length; i++) fallback.insertBefore(nodes[i], end);\n' +
     '}\n';
 
+  const reconcileRegionFn = 'function __reconcileRegion(parent, id, branch, walker) {\n' +
+    '\tif (!parent) return;\n' +
+    '\tlet start = null;\n' +
+    '\tlet end = null;\n' +
+    '\tfor (let n = parent.firstChild; n; n = n.nextSibling) {\n' +
+    '\t\tif (n.nodeType !== 8) continue;\n' +
+    "\t\tconst text = n.textContent || '';\n" +
+    "\t\tif (text === 'vesk-r:' + id + ':0' || text === 'vesk-r:' + id + ':1') start = n;\n" +
+    "\t\telse if (text === 'vesk-r-end:' + id) end = n;\n" +
+    '\t\tif (start && end) break;\n' +
+    '\t}\n' +
+    '\tif (!start || !end) return;\n' +
+    "\tconst ssrBranch = (start.textContent || '').slice(-2) === ':1' ? 1 : 0;\n" +
+    '\tif (ssrBranch !== branch) {\n' +
+    '\t\tlet n = start.nextSibling;\n' +
+    '\t\twhile (n && n !== end) {\n' +
+    '\t\t\tconst next = n.nextSibling;\n' +
+    '\t\t\tn.remove();\n' +
+    '\t\t\tn = next;\n' +
+    '\t\t}\n' +
+    '\t\tif (walker && walker.retireDetached) walker.retireDetached();\n' +
+    '\t}\n' +
+    '\tstart.remove();\n' +
+    '\tend.remove();\n' +
+    '}\n';
+
   const updateComponentsFn = 'function __updateComponents(nodes) {\n' +
     '  for (const n of nodes) {\n' +
     "    if (n._pageName && __components[n._pageName]) n.page = __components[n._pageName];\n" +
@@ -2016,7 +2042,8 @@ async function buildMainBundle(
         .join('') +
       'globalThis.__runtime_comps = __runtime_comps;\n' +
       'globalThis.__cleanup = __cleanup;\n' +
-      'globalThis.__place = __place;\n\n';
+      'globalThis.__place = __place;\n' +
+      'globalThis.__reconcileRegion = __reconcileRegion;\n\n';
 
     const extraGlobals = [...(runtimeImportNames || [])]
       .filter(n => n && n !== 'default')
@@ -2035,6 +2062,7 @@ async function buildMainBundle(
       (sharedModuleBundle ? sharedModuleBundle + '\n' : '') +
       cleanupFn +
       placeFn +
+      reconcileRegionFn +
       'globalThis.__components = __components;\n' +
       resolveNamesFn +
       updateComponentsFn +
@@ -2065,10 +2093,12 @@ async function buildMainBundle(
     hydratorAliasCode +
     cleanupFn +
     placeFn +
+    reconcileRegionFn +
     'globalThis.__components = __components;\n' +
     'globalThis.__runtime_comps = __runtime_comps;\n' +
     'globalThis.__cleanup = __cleanup;\n' +
     'globalThis.__place = __place;\n' +
+    'globalThis.__reconcileRegion = __reconcileRegion;\n' +
     allRuntimeImports.map(n => `globalThis.${n} = ${n};\n`).join('') +
     'function __resolveNames(nodes) {\n' +
     '  for (const n of nodes) {\n' +

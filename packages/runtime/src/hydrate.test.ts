@@ -572,6 +572,93 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     cleanupDocument();
   });
 
+  it('descriptor claim adopts a same-tag element whose static class tokens match', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const target = document.createElement('div');
+    target.setAttribute('class', 'grid gap-4 extra-runtime-class');
+    parent.appendChild(target);
+    const walker = createHydrateWalker(parent);
+    // Descriptor is a subset: extra classes added at runtime are tolerated.
+    const claimed = walker.nextElement('div', 0, { class: 'grid gap-4' });
+    expect(claimed).toBe(target);
+    expect(claimed.getAttribute('data-vsk-claimed')).toBe(null);
+    cleanupDocument();
+  });
+
+  it('descriptor mismatch consumes one slot, detaches the wrong branch, and renders fresh', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const empty = document.createElement('div');
+    empty.setAttribute('class', 'text-center py-12 px-6');
+    const list = document.createElement('div');
+    list.setAttribute('class', 'grid gap-4');
+    parent.appendChild(empty);
+    parent.appendChild(list);
+    const walker = createHydrateWalker(parent);
+    const seen = [];
+    onHydrationMismatch((issue) => seen.push(issue));
+    const claimed = walker.nextElement('div', 0, { class: 'grid gap-4' });
+    expect(claimed.tagName).toBe('DIV');
+    expect(claimed === empty).toBe(false);
+    expect(claimed.parentNode).toBe(null);
+    // The stale empty-state slot is gone; the following real list slot remains
+    // available for the next claim.
+    expect(parent.contains(empty)).toBe(false);
+    expect(seen.some((i) => i.kind === 'descriptor-mismatch')).toBe(true);
+    expect(walker.nextElement('div', 0, { class: 'grid gap-4' })).toBe(list);
+    expect(walker.done()).toBe(true);
+    onHydrationMismatch(null);
+    cleanupDocument();
+  });
+
+  it('structural region discard removes a skipped SSR branch and keeps the walker aligned', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const readOnly = document.createElement('div');
+    readOnly.setAttribute('class', 'px-4 py-2.5 rounded border border-subtle bg-surface text-[11px] text-slate-500 font-sans');
+    const empty = document.createElement('div');
+    empty.setAttribute('class', 'text-center py-12 px-6');
+    parent.appendChild(readOnly);
+    parent.appendChild(empty);
+    const walker = createHydrateWalker(parent);
+    const seen = [];
+    onHydrationMismatch((issue) => seen.push(issue));
+    const discardedReadOnly = walker.discardStructuralRegion?.([
+      { tag: 'div', descriptor: { class: 'px-4 py-2.5 rounded border border-subtle bg-surface text-[11px] text-slate-500 font-sans' }, count: 1 },
+      { tag: 'div', descriptor: { class: 'text-center py-12 px-6' }, count: 1 },
+    ], -1);
+    expect(discardedReadOnly).toBe(true);
+    expect(parent.contains(readOnly)).toBe(false);
+    expect(parent.contains(empty)).toBe(true);
+    const claimed = walker.nextElement('div', 0, { class: 'text-center py-12 px-6' });
+    expect(claimed).toBe(empty);
+    expect(walker.done()).toBe(true);
+    expect(seen.some((i) => i.kind === 'descriptor-mismatch' && i.detail.includes('structural region reconciliation'))).toBe(true);
+    onHydrationMismatch(null);
+    cleanupDocument();
+  });
+
+  it('structural region discard removes the SSR empty branch when the client selects the list branch', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const empty = document.createElement('div');
+    empty.setAttribute('class', 'text-center py-12 px-6');
+    parent.appendChild(empty);
+    const walker = createHydrateWalker(parent);
+    const discarded = walker.discardStructuralRegion?.([
+      { tag: 'div', descriptor: { class: 'text-center py-12 px-6' }, count: 1 },
+      { tag: 'div', descriptor: { class: 'grid grid-cols-1 lg:grid-cols-2 gap-4' }, count: 1 },
+    ], 1);
+    expect(discarded).toBe(true);
+    expect(parent.contains(empty)).toBe(false);
+    const fresh = walker.nextElement('div', 0, { class: 'grid grid-cols-1 lg:grid-cols-2 gap-4' });
+    expect(fresh.tagName).toBe('DIV');
+    expect(fresh === empty).toBe(false);
+    expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
   // Phase 3.c value-thread offset: a caller deposits a residue count on the
   // exact walker reference a compiled child draws from, the child reads it
   // exactly once at its first claim, and the deposit never survives to

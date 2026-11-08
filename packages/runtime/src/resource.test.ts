@@ -681,6 +681,37 @@ it('await useFetch() resolves to the raw response data', async () => {
   mock.restore();
 });
 
+it('returns a real Promise with catch, finally, and Promise.all support', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({ real: true }));
+  const res = useFetch<{ real: boolean }>('/api/real-promise');
+  expect(res instanceof Promise).toBe(true);
+  const caught = await res.catch(() => null);
+  expect(caught).toEqual({ real: true });
+  let finalized = false;
+  const data = await res.finally(() => { finalized = true; });
+  expect(data).toEqual({ real: true });
+  expect(finalized).toBe(true);
+  const all = await Promise.all([res]);
+  expect(all).toEqual([{ real: true }]);
+  mock.restore();
+});
+
+it('rejects through the real Promise API on HTTP failure', async () => {
+  cleanupGlobals();
+  const mock = mockFetch(() => jsonResponse({}, 500));
+  const res = useFetch('/api/real-promise-500');
+  let thrown: unknown;
+  try {
+    await res.finally(() => {});
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown instanceof HttpError).toBe(true);
+  expect((thrown as HttpError).status).toBe(500);
+  mock.restore();
+});
+
 it('await useFetch() rejects with HttpError on HTTP failure', async () => {
   cleanupGlobals();
   const mock = mockFetch(() => jsonResponse({}, 500));

@@ -572,6 +572,21 @@ test('typecheck: useFetch into a tracked cell needs no await and stays clean', (
   }
 });
 
+test('typecheck: useFetch exposes the real Promise API', () => {
+  const f = fixture({
+    'app/page.vsk': `async component Page() {\n  const res = useFetch<{ ok: boolean }>('/api/status')\n  const data = await res.catch(() => ({ ok: false }))\n  const all = await Promise.all([res])\n  <p>{data.ok ? all.length : 0}</p>\n}\n`,
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') {
+      throw new Error(`expected clean typecheck for real-Promise useFetch, got:\n${msgs}`);
+    }
+  } finally {
+    f.cleanup();
+  }
+});
+
 test('typecheck: unknown useFetch option keys error (options are typed)', () => {
   const f = fixture({
     'app/page.vsk': `async component Page() {\n  const posts = await useFetch<{ id: number }[]>('/api/posts', { kye: 'posts' })\n  <p>{posts.length}</p>\n}\n`,

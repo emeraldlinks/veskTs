@@ -8,7 +8,7 @@ interface ResourceState<T> {
 	data: T | undefined;
 }
 
-export interface Resource<T> extends PromiseLike<T> {
+export interface Resource<T> extends Promise<T> {
 	loading: boolean;
 	error: unknown;
 	data: T | undefined;
@@ -640,9 +640,53 @@ export function mutate(key: string, data?: unknown): void {
 	}
 }
 
+class ResourcePromise<T> extends Promise<T> {
+	declare loading: boolean;
+	declare error: unknown;
+	declare data: T | undefined;
+	declare _state?: Tracked;
+	declare refresh: () => void;
+	declare abort: () => void;
+	private readonly read: () => Promise<T>;
+
+	constructor(read: () => Promise<T>) {
+		super(() => {});
+		this.read = read;
+	}
+
+	then<TResult1 = T, TResult2 = never>(
+		onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
+		onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | undefined | null,
+	): Promise<TResult1 | TResult2> {
+		return this.read().then(onfulfilled, onrejected);
+	}
+
+	catch<TResult = never>(
+		onrejected?: ((reason: unknown) => TResult | PromiseLike<TResult>) | undefined | null,
+	): Promise<T | TResult> {
+		return this.read().catch(onrejected);
+	}
+
+	finally(onfinally?: (() => void) | undefined | null): Promise<T> {
+		return this.read().finally(onfinally);
+	}
+}
+
 function createResourceAccessor<T>(handle: ResourceHandle<T>): Resource<T> {
 	const state = handle.state;
-	const accessor: Record<string, unknown> = {};
+
+	const read = async (): Promise<T> => {
+		for (;;) {
+			const s = get(state) as ResourceState<T>;
+			if (!s.loading) {
+				if (s.error) throw s.error;
+				return s.data as T;
+			}
+			await handle.settled;
+		}
+	};
+
+	const accessor = new ResourcePromise<T>(read);
 
 	Object.defineProperty(accessor, 'loading', {
 		get() { return (get(state) as ResourceState<T>).loading; },
@@ -654,31 +698,12 @@ function createResourceAccessor<T>(handle: ResourceHandle<T>): Resource<T> {
 		get() { return (get(state) as ResourceState<T>).data; },
 	});
 	accessor._state = state;
-
-	const toData = async (): Promise<T> => {
-		for (;;) {
-			const s = get(state) as ResourceState<T>;
-			if (!s.loading) {
-				if (s.error) throw s.error;
-				return s.data as T;
-			}
-			await handle.settled;
-		}
-	};
-
-	accessor.then = (onFulfilled?: ((v: T) => unknown) | null, onRejected?: ((r: unknown) => unknown) | null): Promise<unknown> =>
-		toData().then(onFulfilled, onRejected);
-	accessor.catch = (onRejected?: ((r: unknown) => unknown) | null): Promise<unknown> =>
-		toData().catch(onRejected);
-	accessor.finally = (onFinally?: (() => void) | null): Promise<unknown> =>
-		toData().finally(onFinally);
-
 	accessor.refresh = () => revalidate(handle);
 	accessor.abort = () => {
 		if (!isServer()) handle.controller?.abort();
 	};
 
-	return accessor as unknown as Resource<T>;
+	return accessor;
 }
 
 export function createResource<T>(

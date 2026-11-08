@@ -679,8 +679,13 @@ describe('Statement Mode Server Rendering', () => {
 				}
 			}
 		`, 'App', {}, new Map(), { hydrate: true, markerless: false });
-		// the initially-rendered static branch is claimable, not a bare element
-		expect(html).toBe('<!--vsk:t:p--><p>SSR</p>');
+		// the initially-rendered static branch is claimable, not a bare element,
+		// and the SSR branch index is recorded so hydration can drop it when the
+		// client's initial branch differs.
+		expect(html).toContain('<!--vsk:t:p--><p>SSR</p>');
+		expect(html).toContain('<!--vesk-r:');
+		expect(html).toContain(':0-->');
+		expect(html).toContain('<!--vesk-r-end:');
 	});
 	it('renders empty block for empty list', () => {
 		const html = render(`

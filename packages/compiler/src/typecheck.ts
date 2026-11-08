@@ -440,20 +440,16 @@ interface VeskLocals<T extends object> {
   all(): T;
 }
 declare function createLocals<T extends object = Record<string, unknown>>(): VeskLocals<T>;
-// useFetch returns a THENABLE resource, not the data itself. In async
-// components you must \`await\` it before reading/iterating the payload;
-// passing \`into: <tracked cell>\` writes the payload into the cell and makes
-// awaiting unnecessary (the return value can be ignored).
-interface VeskResource<T> {
+// useFetch returns a real Promise carrying resource state. In async components
+// you must \`await\` it before reading/iterating the payload; passing
+// \`into: <tracked cell>\` writes the payload into the cell and makes awaiting
+// unnecessary (the return value can be ignored).
+interface VeskResource<T> extends Promise<T> {
   loading: boolean;
   error: unknown;
   data: T | undefined;
   refresh(): void;
   abort(): void;
-  then<TResult1 = T, TResult2 = never>(
-    onfulfilled?: ((value: T) => TResult1 | PromiseLike<TResult1>) | undefined | null,
-    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | undefined | null,
-  ): PromiseLike<TResult1 | TResult2>;
 }
 interface VeskUseFetchOptions<T> {
   /** Cache/SSR key — defaults to the URL string. */
