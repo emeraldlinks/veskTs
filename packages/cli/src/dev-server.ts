@@ -1893,6 +1893,29 @@ function routeFullPathForChunk(chunkName: string): string | null {
       return;
     }
 
+    if (url.pathname === '/_vesk/middleware') {
+      const targetPath = url.searchParams.get('path') || '/';
+      const targetUrl = new URL(targetPath, 'http://localhost');
+      const targetChain = collectMiddlewareChain(routeTree, targetUrl.pathname, appDirPath);
+      const rawHeaders: Record<string, string> = {};
+      for (const [k, v] of Object.entries(req.headers)) {
+        rawHeaders[k] = Array.isArray(v) ? v.join(', ') : (v || '');
+      }
+      const mwReq = new Request(targetUrl.href, { headers: rawHeaders, method: 'GET' });
+      const mwResult = await executeMiddlewareChain(targetChain, mwReq, {}, {
+        plugins: getActiveDevPlugins() as VeskPlugin[],
+        onLast: async () => null,
+      });
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
+      if (mwResult.response) {
+        const location = mwResult.response.headers.get('location') || mwResult.response.headers.get('Location');
+        res.end(JSON.stringify(location ? { redirect: location } : { allow: true }));
+        return;
+      }
+      res.end(JSON.stringify(mwResult.rewriteUrl ? { rewrite: mwResult.rewriteUrl } : { allow: true }));
+      return;
+    }
+
     const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
 
     const apiDirPath = join(appDirPath, 'api');

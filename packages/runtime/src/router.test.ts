@@ -568,6 +568,45 @@ test('createFileRouter navigates to nested route', () => {
 	expect(container.children.length).toBeGreaterThanOrEqual(0);
 });
 
+testAsync('server middleware redirects an SPA navigation', async () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([
+		{ path: '/', page: () => document.createTextNode('Home') },
+		{ path: '/portal', page: () => document.createTextNode('Portal') },
+		{ path: '/auth/login', page: () => document.createTextNode('Login') },
+	]);
+	const previousFetch = globalThis.fetch;
+	const previousEndpoint = (globalThis as any).__veskServerMiddlewareEndpoint;
+	const requested: string[] = [];
+	globalThis.fetch = async (url: string) => {
+		requested.push(String(url));
+		const encodedPath = String(url).split('path=')[1] ?? '';
+		return {
+			ok: true,
+			status: 200,
+			headers: { get: () => 'application/json' },
+			json: async () => ({ redirect: encodedPath.includes('%2Fportal') ? '/auth/login' : null, allow: true }),
+		} as any;
+	};
+	try {
+		const router = createFileRouter(tree, { container, serverMiddleware: true } as any);
+		const navigated: string[] = [];
+		const originalNavigate = router.navigate;
+		router.navigate = ((path: string, opts?: any) => {
+			navigated.push(String(path));
+			return originalNavigate.call(router, path, opts);
+		}) as any;
+		await router.navigate('/portal', { replace: true });
+		await tick(10);
+		expect(requested.some((url) => url.includes('/_vesk/middleware?path=%2Fportal'))).toBeTruthy();
+		expect(navigated).toContain('/auth/login');
+	} finally {
+		globalThis.fetch = previousFetch;
+		if (previousEndpoint === undefined) delete (globalThis as any).__veskServerMiddlewareEndpoint;
+		else (globalThis as any).__veskServerMiddlewareEndpoint = previousEndpoint;
+	}
+});
+
 // ── Loading / Error / Prefetch / Scroll tests ──────────────────
 
 test('buildRouteTree preserves loading and error', () => {

@@ -1778,6 +1778,7 @@ export function createRouter(
 
 interface FileRouterOptions extends RouterOptions {
 	middleware?: Function | Function[];
+	serverMiddleware?: boolean;
 	render?: (router: RouterInstance, match: RouteMatch, container: HTMLElement) => void;
 }
 
@@ -1792,6 +1793,26 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 	const renderFn = options.render || renderMatch;
 	const hydrateStrategy = options.hydrate || 'full';
 	const hashMode = options.hash === true;
+
+	const runServerMiddleware = async (ctx: Record<string, unknown>, next: (rewrite?: string) => Promise<void>): Promise<void> => {
+		if (options.serverMiddleware !== true || typeof window === 'undefined') return next();
+		const endpoint = (globalThis as { __veskServerMiddlewareEndpoint?: string }).__veskServerMiddlewareEndpoint ?? '/_vesk/middleware';
+		try {
+			const res = await fetch(`${endpoint}?path=${encodeURIComponent(String(ctx.url || '/'))}`, {
+				credentials: 'include',
+				headers: { Accept: 'application/json' },
+			});
+			const body = await res.json().catch(() => null) as { redirect?: unknown; rewrite?: unknown } | null;
+			if (body && typeof body.redirect === 'string' && body.redirect) {
+				// Returning this object is honored by the router's middleware chain.
+				return { redirect: body.redirect } as unknown as void;
+			}
+			if (body && typeof body.rewrite === 'string' && body.rewrite) return next(body.rewrite);
+			return next();
+		} catch {
+			return next();
+		}
+	};
 
 	const router: FileRouterInstance = {
 		_hydrateStrategy: hydrateStrategy,
@@ -1991,7 +2012,10 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				const navToken = router._navToken;
 				loadingStart();
 
-				const middlewareFns: Function[] = Array.isArray(middleware) ? middleware : (middleware ? [middleware] : []);
+				const middlewareFns: Function[] = [
+					...(options.serverMiddleware === true ? [runServerMiddleware] : []),
+					...(Array.isArray(middleware) ? middleware : (middleware ? [middleware] : [])),
+				];
 
 				let firstRenderFailed = false;
 

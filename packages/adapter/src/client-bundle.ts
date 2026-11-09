@@ -63,10 +63,11 @@ function fileUnchanged(filePath: string, cached: { mtimeMs: number; size: number
 
 function buildRouterOpts(options?: ClientBundleOptions): string {
   const ttl = options?.routeDataCache;
+  const opts: string[] = ['serverMiddleware: true'];
   if (typeof ttl === 'number' && ttl > 0) {
-    return `, { routeDataCache: ${ttl} }`;
+    opts.push(`routeDataCache: ${ttl}`);
   }
-  return '';
+  return `, { ${opts.join(', ')} }`;
 }
 
 function findRuntimeSrc(appDir: string): string {

@@ -525,6 +525,38 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       }
     }
 
+    if (url.pathname === '/_vesk/middleware' && middlewareMod) {
+      const targetPath = url.searchParams.get('path') || '/';
+      const targetUrl = new URL(targetPath, url.origin);
+      const middlewareRequest = new Request(targetUrl.href, {
+        method: 'GET',
+        headers: req.headers as Record<string, string>,
+      });
+      const mwEndpointCtx = {
+        request: middlewareRequest,
+        params: {},
+        url: targetUrl,
+        locals: Object.assign({}, (globalThis as Record<string, unknown>).__vesk_server_ctx || {}),
+        cookies: {},
+        set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
+        get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
+      };
+      const mwResult = await middlewareMod.execute(mwEndpointCtx);
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+      });
+      if (mwResult.response) {
+        const location = mwResult.response.headers.get('location') || mwResult.response.headers.get('Location');
+        if (location) {
+          res.end(JSON.stringify({ redirect: location }));
+          return;
+        }
+      }
+      res.end(JSON.stringify(mwResult.rewriteUrl ? { rewrite: mwResult.rewriteUrl } : { allow: true }));
+      return;
+    }
+
     let mwCtx: Record<string, unknown>;
     const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
     if (middlewareMod) {
