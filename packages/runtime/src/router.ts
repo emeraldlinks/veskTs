@@ -1793,16 +1793,33 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 	const renderFn = options.render || renderMatch;
 	const hydrateStrategy = options.hydrate || 'full';
 	const hashMode = options.hash === true;
+	const serverMiddlewareCache = new Map<string, { at: number; body: { redirect?: unknown; rewrite?: unknown } | null }>();
+	let serverMiddlewareDisabled = false;
 
 	const runServerMiddleware = async (ctx: Record<string, unknown>, next: (rewrite?: string) => Promise<void>): Promise<void> => {
-		if (options.serverMiddleware !== true || typeof window === 'undefined') return next();
+		if (options.serverMiddleware !== true || typeof window === 'undefined' || serverMiddlewareDisabled) return next();
+		const path = String(ctx.url || '/');
+		const cached = serverMiddlewareCache.get(path);
+		if (cached && Date.now() - cached.at < 2500) {
+			if (cached.body && typeof cached.body.redirect === 'string' && cached.body.redirect) {
+				return { redirect: cached.body.redirect } as unknown as void;
+			}
+			if (cached.body && typeof cached.body.rewrite === 'string' && cached.body.rewrite) return next(cached.body.rewrite);
+			return next();
+		}
 		const endpoint = (globalThis as { __veskServerMiddlewareEndpoint?: string }).__veskServerMiddlewareEndpoint ?? '/_vesk/middleware';
 		try {
-			const res = await fetch(`${endpoint}?path=${encodeURIComponent(String(ctx.url || '/'))}`, {
+			const res = await fetch(`${endpoint}?path=${encodeURIComponent(path)}`, {
 				credentials: 'include',
 				headers: { Accept: 'application/json' },
+				cache: 'no-store',
 			});
+			if (res.status === 404) {
+				serverMiddlewareDisabled = true;
+				return next();
+			}
 			const body = await res.json().catch(() => null) as { redirect?: unknown; rewrite?: unknown } | null;
+			serverMiddlewareCache.set(path, { at: Date.now(), body });
 			if (body && typeof body.redirect === 'string' && body.redirect) {
 				// Returning this object is honored by the router's middleware chain.
 				return { redirect: body.redirect } as unknown as void;

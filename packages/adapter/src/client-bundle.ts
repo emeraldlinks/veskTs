@@ -61,13 +61,22 @@ function fileUnchanged(filePath: string, cached: { mtimeMs: number; size: number
   }
 }
 
-function buildRouterOpts(options?: ClientBundleOptions): string {
+function hasServerMiddleware(nodes: RouteNode[]): boolean {
+  for (const node of nodes) {
+    if (node.hasMiddleware) return true;
+    if (node.children?.length && hasServerMiddleware(node.children)) return true;
+  }
+  return false;
+}
+
+function buildRouterOpts(options?: ClientBundleOptions, serverMiddleware?: boolean): string {
   const ttl = options?.routeDataCache;
-  const opts: string[] = ['serverMiddleware: true'];
+  const opts: string[] = [];
+  if (serverMiddleware) opts.push('serverMiddleware: true');
   if (typeof ttl === 'number' && ttl > 0) {
     opts.push(`routeDataCache: ${ttl}`);
   }
-  return `, { ${opts.join(', ')} }`;
+  return opts.length ? `, { ${opts.join(', ')} }` : '';
 }
 
 function findRuntimeSrc(appDir: string): string {
@@ -2006,7 +2015,7 @@ async function buildMainBundle(
       '  }\n' +
       '}\n';
 
-    const routerOpts = buildRouterOpts({ routeDataCache });
+    const routerOpts = buildRouterOpts({ routeDataCache }, hasServerMiddleware(routeTree));
 
     const startRouterCode =
       'const __startRouter = function() {\n' +
@@ -2082,7 +2091,7 @@ async function buildMainBundle(
   const aliasCode = aliasLines.length > 0 ? aliasLines.join('\n') + '\n' : '';
   const hydratorAliasCode = hydratorAliasLines.length > 0 ? hydratorAliasLines.join('\n') + '\n' : '';
 
-  const routerOpts = buildRouterOpts({ routeDataCache });
+  const routerOpts = buildRouterOpts({ routeDataCache }, hasServerMiddleware(routeTree));
 
   const code = preamble +
     'const __components = {};\n' +
