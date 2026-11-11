@@ -27,6 +27,14 @@ Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
   `/verify/CF-COC-20261110-F3FA37E6` renders the VALID record only.
 - [x] `npm run typecheck` clean; resource/ssr-function/api-function/nested-
   boundaries tests green; `tests/hydration-test.mjs` 506/506.
+- [x] **CI unblock:** re-baselined `perf-budget.json` for the deliberate client
+  growth accumulated since the last baseline (QR encoder shipped to the client,
+  client-side middleware matching for SPA nav, hydration-ready flag); the
+  release commits carrying a skip token meant no run ever caught it.
+  `scripts/asset-budget.mjs` is OK again.
+- [x] **CI unblock:** stabilized hydration Test 5 — wait for the `/about` chunk
+  before `goBack()` and allow 15s for the URL to settle, so a back-nav fired
+  mid-navigation no longer times out the dev hydration gate.
 
 **This session (production hydration: admin shell preservation + managed
 control-flow effects):**
