@@ -317,10 +317,17 @@ async function main() {
 
     await clickNav(page, '/about', '/about');
 
+    // Wait for the destination chunk before going back: on a slow runner a
+    // goBack() fired mid-navigation can be swallowed and the URL never settles.
+    await page.waitForFunction(
+      () => document.querySelector('h1')?.textContent?.trim() === 'About Vesk',
+      { timeout: 15000 },
+    );
+
     await page.goBack();
     await page.waitForFunction(
       () => location.pathname === '/' || location.pathname === '',
-      { timeout: 5000 },
+      { timeout: 15000 },
     );
 
     const url = page.url();

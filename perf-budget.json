@@ -1,8 +1,8 @@
 {
   "note": "Client JavaScript emitted by a production build. Lower is better; this gate ratchets.",
-  "clientBytes": 293788,
-  "totalBytes": 1076340,
-  "largestChunkBytes": 287364,
-  "largestChunk": "page-qr-test.e10437682c.js",
+  "clientBytes": 301187,
+  "totalBytes": 1105614,
+  "largestChunkBytes": 287641,
+  "largestChunk": "page-qr-test.837307189a.js",
   "chunkCount": 31
 }
