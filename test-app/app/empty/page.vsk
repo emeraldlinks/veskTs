@@ -13,10 +13,21 @@ component EmptyDemo {
 		<title>Empty — keyed for-of with empty fallback</title>
 	</Head>
 	let &[todos] = track<Todo[]>(initialTodos)
+	// Starts EMPTY on both server and client — the SSR pass renders the
+	// `empty` fallback and hydration must adopt it without crashing (the
+	// keyed-map anchors are attached by the empty branch's `__place`, not by
+	// `reconcileHydrated`), then late data must render once it arrives.
+	let &[lateTodos] = track<Todo[]>([])
 
 	function clear(): void { todos = [] }
 	function restore(): void {
 		todos = [...initialTodos]
+	}
+	function fetchLate(): void {
+		lateTodos = [...initialTodos]
+	}
+	function clearLate(): void {
+		lateTodos = []
 	}
 
 	<h1 class="text-3xl font-bold mb-4">Empty-state Demo</h1>
@@ -43,6 +54,20 @@ component EmptyDemo {
 	empty {
 		<div class="bg-gray-100 rounded px-3 py-2 mb-2 text-gray-500">Statement-mode: list is empty.</div>
 	}
+
+	<h2 class="text-xl font-semibold mt-6 mb-2">Keyed list that starts empty at SSR (hydration)</h2>
+	<ul class="space-y-2" data-testid="late-list">
+		for (const todo of lateTodos; key todo.id) {
+			<li class="bg-gray-50 rounded px-3 py-2" data-testid="late-row"><b>{todo.text}</b> <span class="text-gray-400 text-sm">#{todo.id}</span></li>
+		}
+		empty {
+			<li class="bg-gray-100 rounded px-3 py-2 text-gray-500" data-testid="late-empty">Nothing loaded yet — click Fetch late items.</li>
+		}
+	</ul>
+	<div class="flex gap-2 mb-6">
+		<button onclick={fetchLate} class="bg-emerald-600 text-white text-sm px-3 py-1 rounded" data-testid="late-load">Fetch late items</button>
+		<button onclick={clearLate} class="bg-red-600 text-white text-sm px-3 py-1 rounded" data-testid="late-clear">Clear late items</button>
+	</div>
 
 	<p class="text-gray-500 text-sm mt-6">
 		The <code>empty</code> block renders when the list is empty. The

@@ -2410,30 +2410,31 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
   let emptyRenderName: string | null = null;
   if (node.alternateNodes.length > 0) {
     emptyRenderName = ctx.n();
-    const emptySig = !hyd
+    // Hydrated maps (keyed AND non-keyed) claim their #empty fallback
+    // positionally with descriptor checks: an SSR slot that rendered the same
+    // fallback is adopted in place (no duplicate), while an SSR item ghost in
+    // that slot is detached by the walker's mismatch recovery and the fallback
+    // renders fresh. Fresh (SPA) renders keep the fragment + direct-insert
+    // shape — there is no SSR DOM to claim.
+    const emptyClaims = ctx.hydrate;
+    const emptySig = !emptyClaims
       ? (ctx.isAsyncScope ? 'async () => {' : '() => {')
       : (ctx.isAsyncScope ? 'async (__cl) => {' : '(__cl) => {');
     ctx.push(`const ${emptyRenderName} = ${emptySig}`);
     ctx.push(indent(`const __p = ${anchor}.parentNode;`));
     const frag = ctx.n();
-    if (!hyd) ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
+    if (!emptyClaims) ctx.push(indent(`const ${frag} = document.createDocumentFragment();`));
     const savedClaim = ctx.claimStatic;
-    const savedHydrate = ctx.hydrate;
-    // A keyed map hydrating with no matching SSR items renders its empty
-    // fallback fresh — the SSR item ghosts get reported by the canary instead
-    // of being adopted positionally as the fallback (which would be wrong DOM).
-    if (hydKeyed) ctx.hydrate = false;
     for (const n of node.alternateNodes) {
       ctx.claimStatic = true;
-      const v = emitNode(ctx, n, tracked, effectsVar, hyd ? undefined : frag, '__components', 0, budget || undefined);
+      const v = emitNode(ctx, n, tracked, effectsVar, emptyClaims ? undefined : frag, '__components', 0, budget || undefined);
       if (v) {
-        if (hyd) ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, ${endAnchor});`));
+        if (emptyClaims) ctx.push(indent(`if (__cl) __cl.push(${v}); else __p.insertBefore(${v}, ${endAnchor});`));
         else ctx.push(indent(`${frag}.appendChild(${v});`));
       }
     }
     ctx.claimStatic = savedClaim;
-    ctx.hydrate = savedHydrate;
-    if (!hyd) ctx.push(indent(`if (${frag}.childNodes.length > 0) __p.insertBefore(${frag}, ${endAnchor});`));
+    if (!emptyClaims) ctx.push(indent(`if (${frag}.childNodes.length > 0) __p.insertBefore(${frag}, ${endAnchor});`));
     ctx.push(`};`);
   }
 
@@ -2467,8 +2468,17 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
 
     if (emptyRenderName) {
       const isEmptyVar = ctx.n();
+      // A hydrated keyed map attaches its region anchors through
+      // `reconcileHydrated` (items branch) or `__place` (empty branch) — the
+      // anchors are created detached and the empty-fallback builder reads
+      // `anchor.parentNode`, so the empty branch must place them too or the
+      // whole hydrator crashes ("insertBefore on null") and every later
+      // reactive update on the page is lost.
+      const collectVar = hydKeyed ? ctx.n() : null;
       ctx.push(`let ${isEmptyVar} = !${hasItems}();`);
-      ctx.push(`if (!${isEmptyVar}) { ${initList}(); } else { ${aw}${emptyRenderName}(); }`);
+      if (collectVar) ctx.push(`const ${collectVar} = [];`);
+      ctx.push(`if (!${isEmptyVar}) { ${initList}(); } else { ${aw}${emptyRenderName}(${collectVar || ''}); }`);
+      if (collectVar) ctx.push(`__place(${anchor}, ${endAnchor}, ${collectVar}, ${parent});`);
       if (!reactiveSource) return null;
       pushEffect(`let __first = true;`, `effect(${effOpen}
     const __new = ${hasItems}();
@@ -2540,7 +2550,7 @@ ${renderAllItems('        ', null)}
     __cleanup(${anchor}, ${endAnchor});
     if (__new) {
 ${renderAllItems('      ', null)}
-    } else { ${aw}${emptyRenderName}(${collectVar ? collectVar : ''}); }
+    } else { ${aw}${emptyRenderName}(); }
   }, true)`);
     } else {
       const collectVar = hyd ? ctx.n() : null;

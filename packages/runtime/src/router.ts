@@ -1132,6 +1132,25 @@ async function renderErrorPage(
 	}
 }
 
+/**
+ * Marks the initial-hydration lifecycle on `globalThis.__vesk_hydrated`.
+ * `window.__vesk_router` is assigned before the layout/page hydration runs, and
+ * claiming a large layout chain can take seconds on low-end devices — so tools
+ * (e2e harnesses, boot scripts) that need "handlers are attached and the SSR
+ * DOM is claimed" must wait for this flag, not the router. Set false while the
+ * hydration promise is in flight, true once it settles (resolved or rejected —
+ * the error path still renders an interactive error component).
+ */
+function trackHydration(promise: Promise<void>): Promise<void> {
+	const g = globalThis as { __vesk_hydrated?: boolean };
+	g.__vesk_hydrated = false;
+	promise.then(
+		() => { g.__vesk_hydrated = true; },
+		() => { g.__vesk_hydrated = true; },
+	);
+	return promise;
+}
+
 async function hydrateInitial(
 	router: RouterInstance,
 	match: RouteMatch,
@@ -1538,13 +1557,15 @@ export function createRouter(
 				const match = matchRoute(this.routeTree, url.pathname);
 				if (match) {
 					match.pathname = url.pathname;
-					hydrateInitial(this, match, container, hydrateStrategy);
+					trackHydration(hydrateInitial(this, match, container, hydrateStrategy));
 					this._currentMatch = match;
 				} else {
 					this.navigate(path, { replace: true });
+					(globalThis as { __vesk_hydrated?: boolean }).__vesk_hydrated = true;
 				}
 			} else {
 				this.navigate(path, { replace: true });
+				(globalThis as { __vesk_hydrated?: boolean }).__vesk_hydrated = true;
 			}
 
 			return this;
@@ -1957,13 +1978,15 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				const match = matchRoute(routeTree, path);
 				if (match) {
 					match.pathname = path;
-					hydrateInitial(router, match, container, hydrateStrategy);
+					trackHydration(hydrateInitial(router, match, container, hydrateStrategy));
 					router._currentMatch = match;
 				} else {
 					router.navigate(path, { replace: true });
+					(globalThis as { __vesk_hydrated?: boolean }).__vesk_hydrated = true;
 				}
 			} else {
 				router.navigate(path, { replace: true });
+				(globalThis as { __vesk_hydrated?: boolean }).__vesk_hydrated = true;
 			}
 			return router;
 		},

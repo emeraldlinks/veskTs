@@ -1968,6 +1968,75 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 23b: keyed for-of with empty fallback hydrating on an empty list ──
+  // Regression (academy portal): a keyed `for` + `empty` block whose list is
+  // EMPTY on both server and client crashed the whole hydrator with
+  // "Cannot read properties of null (reading 'insertBefore')" — the keyed
+  // region anchors are created detached and only `reconcileHydrated` (items
+  // branch) attached them, so the empty branch dereferenced a null parent.
+  // The crash aborted the rest of the page's hydrator, every later reactive
+  // update was lost, and the UI stayed frozen on the SSR empty state.
+  {
+    console.log('\n=== TEST 23b: keyed #empty hydration on an initially-empty list ===');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const read = () => page.evaluate(() => {
+      const rows = Array.from(document.querySelectorAll('[data-testid="late-row"]'));
+      const empties = Array.from(document.querySelectorAll('[data-testid="late-empty"]'));
+      return {
+        rowCount: rows.length,
+        rowTexts: rows.map(r => r.textContent.replace(/\s+/g, ' ').trim()),
+        emptyCount: empties.length,
+        emptyInDoc: empties.length > 0 && !!empties[0].isConnected,
+      };
+    });
+
+    console.log('  23b-a: full load — SSR empty fallback adopted, hydration does not crash');
+    await goto(page, BASE + '/empty', { waitUntil: 'networkidle0', timeout: 15000 });
+    {
+      const s = await read();
+      assert(!!s, '/empty: late-list read succeeded');
+      if (s) {
+        assert(s.rowCount === 0, 'no rows before late items load (got ' + s.rowCount + ')');
+        assert(s.emptyCount === 1 && s.emptyInDoc, 'exactly one empty fallback in the document (got count ' + s.emptyCount + ', inDoc ' + s.emptyInDoc + ')');
+      }
+      assert(errors.length === 0, 'full load zero pageerrors — the keyed-empty hydrator must not crash (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    }
+
+    console.log('  23b-b: late data renders after hydration (frozen-UI regression)');
+    await waitForHydration(page);
+    await clickEl(page, '[data-testid="late-load"]');
+    {
+      const s = await pollUntil(read, 5000, r => r && r.rowCount === 2);
+      assert(!!s, 'two rows render after fetching late items (got ' + JSON.stringify(s) + ')');
+      if (s) {
+        assert(/Buy milk/.test(s.rowTexts.join('|')) && /Write docs/.test(s.rowTexts.join('|')), 'late rows show real content');
+        assert(s.emptyCount === 0, 'empty fallback is gone once rows render');
+      }
+      assert(errors.length === 0, 'populate zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    }
+
+    console.log('  23b-c: back to empty — fallback re-renders exactly once');
+    await clickEl(page, '[data-testid="late-clear"]');
+    {
+      const s = await pollUntil(read, 5000, r => r && r.rowCount === 0 && r.emptyCount === 1);
+      assert(!!s, 'rows cleared and fallback re-rendered (got ' + JSON.stringify(s) + ')');
+      if (s) assert(s.emptyInDoc, 'the re-rendered fallback is connected to the document');
+      assert(errors.length === 0, 'clear zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    }
+
+    console.log('  23b-d: hard reload — SSR fallback claimed again, still no crash');
+    await page.reload({ waitUntil: 'networkidle0' });
+    {
+      const s = await read();
+      assert(!!s && s.rowCount === 0 && s.emptyCount === 1, 'reload: fallback back exactly once (got ' + JSON.stringify(s) + ')');
+      assert(errors.length === 0, 'reload zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+    }
+    await page.close();
+  }
+
   // ── Test 24: layout-slot integrity (async layout chain, id-paired boundaries) ──
   // Regression (layout-slot-contract work): async layout chains rendering
   // `{props.children}` through nested layouts hydrated by re-rendering the
