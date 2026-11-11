@@ -5,6 +5,29 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (SSR request-context isolation for self-fetching pages):**
+
+- [x] **BUG (adapter): a page that `fetch()`es its own API route lost its
+  `params` after the first SSR render pass.** `prod-server.ts` installed the
+  per-request middleware context on `globalThis.__vesk_request` and never
+  restored it. The SSR self-fetch re-enters the handler as a nested request,
+  whose `params: {}` context stayed installed; every later render pass read
+  empty params (a `/verify/:credentialId` page fetched `/api/verify/`, got 404,
+  and rendered "CREDENTIAL NOT FOUND" while valid data sat in `/ssr-data.js`).
+  The context is now saved and restored in a `finally` around the whole
+  dispatch.
+- [x] **BUG (runtime): `resolveFetchUrl` called `ctx.resolveUrl` unbound.** When
+  the server context is a `VeskRequest`, `resolveUrl` is a prototype method that
+  reads `this.origin`; the unbound call threw `Cannot read properties of
+  undefined (reading 'origin')`. Middleware apps masked it because their SSR
+  context uses a closure-based `resolveUrl`. Now bound with `.bind(ctx)`.
+- [x] Regression test `packages/adapter/src/ssr-self-fetch-params.test.ts`
+  (statement + expression mode) builds a fixture app, self-fetches a dynamic API
+  route, and asserts the fetched record renders. Real app verified:
+  `/verify/CF-COC-20261110-F3FA37E6` renders the VALID record only.
+- [x] `npm run typecheck` clean; resource/ssr-function/api-function/nested-
+  boundaries tests green; `tests/hydration-test.mjs` 506/506.
+
 **This session (production hydration: admin shell preservation + managed
 control-flow effects):**
 

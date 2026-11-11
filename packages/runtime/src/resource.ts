@@ -291,8 +291,11 @@ function buildRequestInit<T>(options: UseFetchOptions<T>): RequestInit {
 function resolveFetchUrl(url: string): string {
 	if (/^[a-z][a-z0-9+.-]*:/i.test(url) || url.startsWith('//')) return url;
 	const ctx = g().__vesk_request as Record<string, unknown> | undefined;
+	// Bind the resolver: on the server the request context is often a
+	// `VeskRequest`, whose `resolveUrl` is a prototype method that reads
+	// `this.origin`. Calling it unbound throws "reading 'origin' of undefined".
 	const resolver = ctx && typeof (ctx as { resolveUrl?: unknown }).resolveUrl === 'function'
-		? (ctx as { resolveUrl: (u: string) => string }).resolveUrl
+		? (ctx as { resolveUrl: (u: string) => string }).resolveUrl.bind(ctx)
 		: null;
 	if (resolver) return resolver(url);
 	const reqUrl = ctx?.url;

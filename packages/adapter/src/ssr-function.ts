@@ -451,7 +451,10 @@ let htmlFnCode: string;
   // its own request scope — otherwise its renderPage mints a token that is
   // still live when the full-page render starts and the two share a data slot.
   const dataNavWrap = (body: string[]) => [
-    '  return withSsrStore(async () => {',
+    // Awaited for the same reason as the main render below: the caller restores
+    // `__vesk_request` in a finally, and that must happen only after the async
+    // data render (which reads params through useParams) has fully resolved.
+    '  return await withSsrStore(async () => {',
     ...body.map((l) => (l ? '  ' + l : l)),
     '  });',
   ];
@@ -479,7 +482,13 @@ let htmlFnCode: string;
       ...dataNavCleanup,
       ]),
       '  }',
-      '  return __renderHtml(params, url.href);',
+      // Awaited so the surrounding try/finally keeps `__vesk_request` installed
+      // for the whole async render. Without the await the finally restores the
+      // previous context synchronously, while the async page body is still
+      // suspended on its SSR fetches; every render pass after the first `await`
+      // then reads an empty params object and `useParams()`-derived keys/URLs
+      // collapse (e.g. a verify page rendering its not-found branch).
+      '  return await __renderHtml(params, url.href);',
     ].join('\n');
   } else {
     dataCode = [
@@ -500,7 +509,13 @@ let htmlFnCode: string;
       ...dataNavCleanup,
       ]),
       '  }',
-      '  return __renderHtml(params, url.href);',
+      // Awaited so the surrounding try/finally keeps `__vesk_request` installed
+      // for the whole async render. Without the await the finally restores the
+      // previous context synchronously, while the async page body is still
+      // suspended on its SSR fetches; every render pass after the first `await`
+      // then reads an empty params object and `useParams()`-derived keys/URLs
+      // collapse (e.g. a verify page rendering its not-found branch).
+      '  return await __renderHtml(params, url.href);',
     ].join('\n');
   }
 

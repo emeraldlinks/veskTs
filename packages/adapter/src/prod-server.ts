@@ -601,7 +601,14 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     }
     // Expose root middleware locals to API/SSR handlers (which seed their own
     // ctx.locals from this before running route-level middleware).
+    //
+    // Scoped to this request: an SSR render can `fetch()` its own API route,
+    // which re-enters this handler. Without restoring, that nested request's
+    // context (params: {}) stays installed and every later pass of the outer
+    // render reads the wrong params.
+    const __outerRequest = (globalThis as Record<string, unknown>).__vesk_request;
     (globalThis as Record<string, unknown>).__vesk_request = mwCtx;
+    try {
 
     if (url.pathname.startsWith('/_vesk/action/')) {
       const actionId = url.pathname.replace('/_vesk/action/', '');
@@ -814,6 +821,9 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
 
     res.writeHead(404, { 'Content-Type': 'text/html' });
     res.end(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname, headExtra: bakedHeadExtra }));
+    } finally {
+      (globalThis as Record<string, unknown>).__vesk_request = __outerRequest;
+    }
   });
 
   try {
