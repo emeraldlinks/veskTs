@@ -176,6 +176,13 @@ try {
     assert(count === 1, 'injectDevScripts injects the hmr client exactly once per page');
     // devBootstrapScript guard makes it idempotent even when injected twice.
     assert(devBootstrapScript().includes('__vesk_hmr_bootstrap'), 'bootstrap script has a run-once guard flag');
+    // SSR HTML already carries the client script: a second copy would load the
+    // runtime module twice (two routers, duplicate listeners, duplicate history).
+    const ssrHtml = '<html><body><script type="module" src="/_vesk/static/client.js"></script></body></html>';
+    const ssrInjected = injectDevScripts(ssrHtml);
+    assert(!ssrInjected.includes('/_vesk/client.js'), 'injectDevScripts does not duplicate the client bundle when SSR already emitted one');
+    assert(ssrInjected.includes('/_vesk/hmr.js'), 'injectDevScripts still adds hmr when SSR emitted the client script');
+    assert(injectDevScripts('<html><body>hi</body></html>').includes('/_vesk/client.js'), 'injectDevScripts adds the client fallback when the page has none');
   }
   // no double-injection when HTML has no </body>
   {

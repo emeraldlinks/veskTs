@@ -207,8 +207,16 @@ export function devBootstrapScript(): string {
  */
 export function injectDevScripts(html: string): string {
   if (!html.includes('</body>')) return html;
+  // SSR already emits its own client script (hmr.ts bakes
+  // `clientScriptUrl: "/_vesk/static/client.js"`). Injecting a second copy at
+  // `/_vesk/client.js` loads the runtime module twice, giving the page two
+  // routers and two sets of event listeners — every SPA click then runs
+  // navigate() twice and pushes a duplicate history entry. Only add the
+  // fallback client script for HTML that has none.
+  const hasClientScript =
+    html.includes('/_vesk/static/client.js') || html.includes('/_vesk/client.js');
   const scripts =
-    '\t<script type="module" src="/_vesk/client.js"></script>\n' +
+    (hasClientScript ? '' : '\t<script type="module" src="/_vesk/client.js"></script>\n') +
     '\t<script type="module" src="/_vesk/hmr.js"></script>\n' +
     devBootstrapScript() +
     '\n';

@@ -607,8 +607,39 @@ testAsync('server middleware redirects an SPA navigation', async () => {
 	}
 });
 
-// ── Loading / Error / Prefetch / Scroll tests ──────────────────
+testAsync('async server middleware does not duplicate history on concurrent same-URL nav', async () => {
+	const container = document.createElement('div');
+	container.innerHTML = '<div>home</div>';
+	const tree = buildRouteTree([
+		{ path: '/', page: () => document.createTextNode('Home') },
+		{ path: '/about', page: () => document.createTextNode('About') },
+	]);
+	const previousFetch = globalThis.fetch;
+	// Delay the middleware response so both navigations pass the synchronous
+	// same-URL check before either one reaches updateUrl().
+	globalThis.fetch = async () => {
+		await tick(5);
+		return { ok: true, status: 200, headers: { get: () => 'application/json' }, json: async () => ({}) } as any;
+	};
+	const w = global.window as any;
+	const prevLoc = { pathname: w.location.pathname, search: w.location.search, hash: w.location.hash, href: w.location.href };
+	const prevStack = w.history._stack.slice();
+	w.location.pathname = '/'; w.location.search = ''; w.location.hash = ''; w.location.href = 'http://localhost/';
+	w.history._stack.length = 0; w.history._stack.push('http://localhost/');
+	try {
+		const router = createFileRouter(tree, { container, serverMiddleware: true } as any);
+		router.navigate('/about');
+		router.navigate('/about');
+		await tick(40);
+		expect(w.history.length).toBe(2);
+	} finally {
+		globalThis.fetch = previousFetch;
+		w.location.pathname = prevLoc.pathname; w.location.search = prevLoc.search; w.location.hash = prevLoc.hash; w.location.href = prevLoc.href;
+		w.history._stack.length = 0; w.history._stack.push(...prevStack);
+	}
+});
 
+// ── Loading / Error / Prefetch / Scroll tests ──────────────────
 test('buildRouteTree preserves loading and error', () => {
 	const loadingFn = () => document.createTextNode('Loading');
 	const errorFn = () => document.createTextNode('Error');

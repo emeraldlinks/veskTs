@@ -35,6 +35,17 @@ Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 - [x] **CI unblock:** stabilized hydration Test 5 — wait for the `/about` chunk
   before `goBack()` and allow 15s for the URL to settle, so a back-nav fired
   mid-navigation no longer times out the dev hydration gate.
+- [x] **BUG (adapter): dev pages loaded the client runtime twice.** SSR emits
+  `/_vesk/static/client.js` while `injectDevScripts` also appended
+  `/_vesk/client.js`; two module instances meant two routers and duplicate
+  click listeners. The fallback script is now only injected when the page has
+  no client script. **BUG (runtime):** the same-URL dedupe ran before the async
+  server-middleware chain, so both navigations passed it and each pushed
+  `/about` — back navigation then landed on the duplicate and Test 5 timed out.
+  `updateUrl()` now re-checks the live location immediately before pushing.
+  Regression tests: `dev-server.test.ts` (no duplicate client tag) and
+  `router.test.ts` (concurrent same-URL nav with async middleware pushes once);
+  hydration suite 506/506 against the e2e dev server on :3002.
 
 **This session (production hydration: admin shell preservation + managed
 control-flow effects):**

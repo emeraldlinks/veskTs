@@ -1617,7 +1617,14 @@ export function createRouter(
 				const updateUrl = () => {
 					const fullPath = url.pathname + url.search;
 					const target = mode ? (fullPath.startsWith('/') ? '#' + fullPath : '#' + fullPath) : fullPath;
-					if (!opts.replace) {
+					// Re-check the live location here, not just at navigate()
+					// entry: an async middleware/guard chain defers this push, so
+					// a second navigation started before the first one lands
+					// would otherwise push the same URL twice.
+					const liveFull = window.location.pathname + window.location.search + window.location.hash;
+					if (!opts.replace && target === liveFull) {
+						// already current — do not duplicate the history entry
+					} else if (!opts.replace) {
 						window.history.pushState({ path: url.pathname }, '', target);
 					} else {
 						window.history.replaceState({ path: url.pathname }, '', target);
@@ -2062,7 +2069,14 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 				const updateUrl = () => {
 					const fullUrl = url.pathname + url.search;
 					const target = mode ? (fullUrl.startsWith('/') ? '#' + fullUrl : '#' + fullUrl) : fullUrl;
-					if (!opts.replace) {
+					// Re-check the live location here, not just at navigate()
+					// entry: an async middleware/guard chain defers this push, so
+					// a second navigation started before the first one lands
+					// would otherwise push the same URL twice.
+					const liveFull = window.location.pathname + window.location.search + window.location.hash;
+					if (!opts.replace && target === liveFull) {
+						// already current — do not duplicate the history entry
+					} else if (!opts.replace) {
 						window.history.pushState({ path: fullUrl }, '', target);
 					} else {
 						window.history.replaceState({ path: fullUrl }, '', target);
