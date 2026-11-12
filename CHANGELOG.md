@@ -2,6 +2,34 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.95 — 2026-11-12
+
+_No breaking changes._
+
+### Features
+
+- **middleware:** run server middleware on SPA navigation
+
+### Fixes
+
+- **adapter,runtime:** stop loading the dev client twice and duplicating history
+- **adapter,runtime:** isolate the SSR request context across self-fetch
+- **hydration:** claim keyed #empty branches and expose a hydration-ready flag
+- **hydration:** preserve middleware imports
+- **hydration:** discard skipped markerless SSR branches
+
+### Performance
+
+- **router:** gate server middleware matching and cache SPA checks
+
+### Tests
+
+- **hydration:** stabilize back-nav wait; re-baseline client budget
+
+### Docs
+
+- **todo:** record the CI unblock for the SSR isolation session
+
 ## 0.2.94 — 2026-11-06
 
 _No breaking changes._
