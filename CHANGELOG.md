@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.96 — 2026-11-12
+
+_No breaking changes._
+
+### Fixes
+
+- **runtime:** match static siblings before dynamic segments
+
 ## 0.2.95 — 2026-11-12
 
 _No breaking changes._
