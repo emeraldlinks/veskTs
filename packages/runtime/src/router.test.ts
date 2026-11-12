@@ -354,6 +354,41 @@ test('NavLink creates anchor with active state', () => {
 	expect(a.classList.contains('is-active')).toBe(true);
 });
 
+test('Link forwards data and aria attributes to the DOM anchor', () => {
+	const a = Link({
+		href: '/tasks?new=1',
+		class: 'cta',
+		'data-testid': 'new-task',
+		'aria-current': 'page',
+		role: 'link',
+		title: 'Create task',
+		unknown: 'dropped',
+	} as any);
+	expect(a.getAttribute('data-testid')).toBe('new-task');
+	expect(a.getAttribute('aria-current')).toBe('page');
+	expect(a.getAttribute('role')).toBe('link');
+	expect(a.getAttribute('title')).toBe('Create task');
+	expect(a.getAttribute('unknown')).toBe(null);
+});
+
+test('Link SSR emits forwarded data and aria attributes', () => {
+	const saved = globalThis.document;
+	try {
+		delete globalThis.document;
+		const out = Link({
+			href: '/tasks?new=1',
+			class: 'cta',
+			'data-testid': 'new-task',
+			'aria-current': 'page',
+		} as any);
+		expect(out).toBe(
+			'<!--vsk:c:Link--><a href="/tasks?new=1" class="cta" data-testid="new-task" aria-current="page"></a>',
+		);
+	} finally {
+		globalThis.document = saved;
+	}
+});
+
 test('Link SSR emits a claim marker before the anchor', () => {
 	const saved = globalThis.document;
 	try {
@@ -2259,6 +2294,55 @@ test('matchRoute keeps the full ancestor chain for non-standalone routes', () =>
 	expect(match.matchChain.includes(root)).toBe(true);
 	const layouts = match.matchChain.filter(n => n.layout);
 	expect(layouts.length).toBe(2);
+});
+
+// ── Sibling dynamic vs static precedence ───────────────────────
+// A dynamic node matches ANY segment, so a sibling declared earlier can steal a
+// segment that belongs to a static route. The matcher must backtrack when the
+// dynamic node cannot consume the rest of the path; otherwise `/verify/shared/:token`
+// resolves through `/verify/:credentialId` with `params.credentialId = 'shared'`
+// and no `params.token`, and the client refetches the wrong URL on hydration.
+function siblingTree(dynamicChildren = []) {
+	const node = (o) => ({ path: '', fullPath: '/', isGroup: false, isDynamic: false, isCatchAll: false, page: null, layout: null, children: [], segmentCount: 1, ...o });
+	return [node({
+		fullPath: '/', segmentCount: 0,
+		children: [node({
+			path: 'verify', fullPath: '/verify', segmentCount: 1,
+			children: [
+				node({
+					path: ':credentialId', fullPath: '/verify/:credentialId', isDynamic: true,
+					page: 'PAGE_VERIFY', segmentCount: 1, children: dynamicChildren,
+				}),
+				node({
+					path: 'shared', fullPath: '/verify/shared', segmentCount: 1,
+					children: [node({ path: ':token', fullPath: '/verify/shared/:token', isDynamic: true, page: 'PAGE_SHARED', segmentCount: 1 })],
+				}),
+			],
+		})],
+	})];
+}
+
+test('a static sibling wins over an earlier dynamic sibling', () => {
+	const match = matchRoute(siblingTree(), '/verify/shared/TOK');
+	expect(match).not.toBeNull();
+	expect(match.params).toEqual({ token: 'TOK' });
+	const pages = match.matchChain.filter(n => n.page).map(n => n.page);
+	expect(pages).toEqual(['PAGE_SHARED']);
+});
+
+test('the dynamic sibling still matches a single segment', () => {
+	const match = matchRoute(siblingTree(), '/verify/ABC');
+	expect(match).not.toBeNull();
+	expect(match.params).toEqual({ credentialId: 'ABC' });
+	expect(match.matchChain.filter(n => n.page).map(n => n.page)).toEqual(['PAGE_VERIFY']);
+});
+
+test('a dynamic sibling with non-matching children backtracks to the static route', () => {
+	const edit = { path: 'edit', fullPath: '/verify/:credentialId/edit', segmentCount: 1, page: 'PAGE_EDIT', isDynamic: false, isCatchAll: false, isGroup: false, children: [] };
+	const match = matchRoute(siblingTree([edit]), '/verify/shared/TOK');
+	expect(match).not.toBeNull();
+	expect(match.params).toEqual({ token: 'TOK' });
+	expect(match.matchChain.filter(n => n.page).map(n => n.page)).toEqual(['PAGE_SHARED']);
 });
 
 test('createRouter renders a standalone route without the root layout', () => {

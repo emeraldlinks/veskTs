@@ -391,6 +391,7 @@ export function Link(
 		props.style ? `style="${String(props.style).replace(/"/g, '&quot;')}"` : '',
 		props.target ? `target="${String(props.target).replace(/"/g, '&quot;')}"` : '',
 		props.rel ? `rel="${String(props.rel).replace(/"/g, '&quot;')}"` : '',
+		...passThroughAttrs(props).map(([key, value]) => `${key}="${value.replace(/"/g, '&quot;')}"`),
 	].filter(Boolean).join(' ');
 	let childStr = '';
 	if (props.children != null) {
@@ -438,6 +439,30 @@ interface NavLinkProps extends LinkProps {
 	ariaCurrent?: boolean | string;
 }
 
+/** Attributes `<Link>`/`<NavLink>` forward verbatim so consumers can attach
+ *  test hooks (`data-testid`), accessibility state (`aria-current`) and other
+ *  standard anchor attributes without wrapping the link in an extra element. */
+function passThroughAttrs(props: LinkProps): [string, string][] {
+	const out: [string, string][] = [];
+	for (const [key, value] of Object.entries(props)) {
+		if (value == null || value === false) continue;
+		const lower = key.toLowerCase();
+		const allowed =
+			lower.startsWith('data-') ||
+			lower.startsWith('aria-') ||
+			lower === 'role' ||
+			lower === 'id' ||
+			lower === 'title' ||
+			lower === 'tabindex' ||
+			lower === 'download' ||
+			lower === 'hreflang' ||
+			lower === 'referrerpolicy';
+		if (!allowed) continue;
+		out.push([key, value === true ? '' : String(value)]);
+	}
+	return out;
+}
+
 function applyLinkDom(a: HTMLAnchorElement, props: LinkProps, href: string): void {
 	const displayHref = routerMode() && !href.startsWith('#') ? '#' + href : href;
 	a.href = displayHref;
@@ -445,6 +470,7 @@ function applyLinkDom(a: HTMLAnchorElement, props: LinkProps, href: string): voi
 	if (props.style) a.setAttribute('style', props.style);
 	if (props.target) a.target = props.target;
 	if (props.rel) a.rel = props.rel;
+	for (const [key, value] of passThroughAttrs(props)) a.setAttribute(key, value);
 }
 
 export function NavLink(

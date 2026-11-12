@@ -174,6 +174,7 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 			const remaining = pathParts.slice(consumeCount);
 			const isLeaf = remaining.length === 0 || remaining.every(p => p === '');
 			if ((node as any).standalone) result.length = 0;
+			const marker = result.length;
 			result.push(node);
 			if (isLeaf) {
 				// A container node at a terminal position must still let a deeper
@@ -192,8 +193,26 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 				}
 				break;
 			} else if ((node.children || []).length > 0) {
+				const before = result.length;
 				flattenLayoutChain(node.children || [], remaining, result);
+				if (result.length > before) break;
+				// A dynamic node matches ANY segment, so it can consume a segment
+				// that actually belongs to a static sibling. When no descendant
+				// extends the match, the node is not on this URL: drop it and keep
+				// searching siblings. Without this, `/verify/shared/:token` matched
+				// through the sibling `/verify/:credentialId` first, producing
+				// `params.credentialId = 'shared'`, no `params.token`, and a
+				// hydration-time refetch to `/api/verify/shared/`.
+				if (node.isDynamic) {
+					result.length = marker;
+					continue;
+				}
 				break;
+			} else if (node.isDynamic) {
+				// Dynamic node with no children matched a segment but the path
+				// continues: it cannot be the route, so backtrack to siblings.
+				result.length = marker;
+				continue;
 			}
 		}
 	}
