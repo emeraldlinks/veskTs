@@ -75,6 +75,7 @@ function offsetToLineCol(source: string, offset: number): { line: number; column
 export function preprocessForClauses(
   source: string,
   delimiters?: Set<number> | null,
+  filename = '',
 ): { code: string; annotations: VeskAnnotation[] } {
   const annotations: VeskAnnotation[] = [];
   const chars: string[] = source.split('');
@@ -222,9 +223,11 @@ export function preprocessForClauses(
                   throw new VeskError(
                     `Invalid \`; key\` clause — write the key expression after \`key\` without a colon: \`key ${expr.slice(1).trim()}\`.`,
                     {
+                      file: filename || '',
                       line,
                       column,
-                      code: codeFrame(source, line, column),
+                      code: 'V0411',
+                      frame: codeFrame(source, line, column),
                       nextSteps: [
                         'Use `; key <expr>` (no colon), e.g. `for (const item of items; key item.id)`.',
                         'For the iteration index use `; index <name>`, e.g. `for (const item of items; key item.id; index i)`.',
@@ -484,7 +487,8 @@ export function parse(source: string, options: ParseOptions = {}): Program {
   const delimiters = sourceTokens === null
     ? null
     : collectStringDelimiters(source, sourceTokens);
-  const { code, annotations } = preprocessForClauses(blankGenericArrowTypeParams(blankComments(source)), delimiters);
+  const filename = (options.filename as string) || '';
+  const { code, annotations } = preprocessForClauses(blankGenericArrowTypeParams(blankComments(source)), delimiters, filename);
   // Acorn validates that every `export { X }` names a real top-level binding.
   // A `.vsk` component is a registry entry, not a binding, so acorn rejects
   // `export { MyComponent }`. Remove only those specifier lists — one whose
@@ -545,7 +549,6 @@ export function parse(source: string, options: ParseOptions = {}): Program {
         }
       }
     }
-    const filename = (options.filename as string) || '';
     // Strip the trailing "(line:column)" acorn appends, without regex.
     let cleanMessage = err.message;
     const lastParen = cleanMessage.lastIndexOf('(');

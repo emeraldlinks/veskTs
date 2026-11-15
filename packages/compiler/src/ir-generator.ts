@@ -689,7 +689,7 @@ function assertNoVskNamespaceValue(source: string, expr: { start?: number } | nu
   const hit = findNamespaceValueUse(expr, currentVskNamespaceLocals);
   if (!hit) return;
   const { line, column } = offsetToLineCol(source, hit.start ?? 0);
-  throw VeskError.vskNamespaceMember({ file: currentSourceFile, line, column, code: codeFrame(source, line, column), form: 'value' });
+  throw VeskError.vskNamespaceMember({ file: currentSourceFile, line, column, frame: codeFrame(source, line, column), form: 'value' });
 }
 
 function findNamespaceValueUse(node: any, locals: Set<string>): any | null {
@@ -1478,7 +1478,7 @@ function processJSXElement(source: string, element: any): IRNode[] {
       // A `.vsk` module's exports are flat component names, so there is no
       // nested namespace object to walk into.
       const { line, column } = offsetToLineCol(source, (nameNode as unknown as { start: number }).start ?? 0);
-      throw VeskError.vskNamespaceMember({ file: currentSourceFile, line, column, code: codeFrame(source, line, column), form: 'nested' });
+      throw VeskError.vskNamespaceMember({ file: currentSourceFile, line, column, frame: codeFrame(source, line, column), form: 'nested' });
     }
     const { props, spreadProps, slots } = extractProps(source, element);
     const children = selfClosing ? [] : processJSXChildren(source, element.children || []);
@@ -1886,7 +1886,7 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
           file: filename || '',
           line,
           column,
-          code: codeFrame(source, line, column),
+          frame: codeFrame(source, line, column),
         });
       }
       // Pure JSX block: unwrap the children directly.
@@ -1969,7 +1969,7 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
       }
     } else if (stmt.type === 'ClassDeclaration') {
       const { line, column } = offsetToLineCol(source, (stmt as unknown as { start: number }).start ?? 0);
-      throw VeskError.classDecl({ file: filename || '', line, column, code: codeFrame(source, line, column) });
+      throw VeskError.classDecl({ file: filename || '', line, column, frame: codeFrame(source, line, column) });
     } else if (stmt.type === 'ContinueStatement') {
       // An unconditional `continue` at the top level of a loop body: everything
       // after it is dead code. Drop the remainder of the body.
@@ -2426,7 +2426,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       // handled below
     } else if (inner.type === 'ClassDeclaration') {
       const { line, column } = offsetToLineCol(source, (inner as unknown as { start: number }).start ?? 0);
-      throw VeskError.classDecl({ file, line, column, code: codeFrame(source, line, column) });
+      throw VeskError.classDecl({ file, line, column, frame: codeFrame(source, line, column) });
     } else if (inner.type === 'TSEnumDeclaration') {
       const code = processEnum(inner, source, exported);
       topLevelCode.push(code);
@@ -2495,7 +2495,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
           guardClauses.push(stmt);
         } else if (stmt.type === 'ClassDeclaration') {
           const { line, column } = offsetToLineCol(source, (stmt as unknown as { start: number }).start ?? 0);
-          throw VeskError.classDecl({ file, line, column, code: codeFrame(source, line, column) });
+          throw VeskError.classDecl({ file, line, column, frame: codeFrame(source, line, column) });
         } else {
           const raw = getSource(source, stmt);
           if (raw) preamble.push(new RuntimeStatement(raw, stmt, source));
@@ -2523,7 +2523,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     for (const [childName, start] of called) {
       if (!asyncNames.has(childName)) continue;
       const { line, column } = offsetToLineCol(source, start >= 0 ? start : 0);
-      throw VeskError.asyncChildInSyncParent(comp.name, childName, { file, line, column, code: codeFrame(source, line, column) });
+      throw VeskError.asyncChildInSyncParent(comp.name, childName, { file, line, column, frame: codeFrame(source, line, column) });
     }
   }
 
