@@ -795,6 +795,45 @@ export function removeCompiledNodes(code: string, isTarget: (node: CompiledNode)
 export const SHARED_CHUNK_NAME = 'shared.js';
 
 /**
+ * esbuild stamps every bundled module with a `// <path>` banner. The shared,
+ * per-chunk and mono passes write their entries into `mkdtemp` scratch dirs, so
+ * that random suffix lands in the chunk BYTES — and because production chunk
+ * names are content hashes, it changes the hash on every build even when the
+ * source is byte-identical. (The shared scratch dir is the worst offender: its
+ * shim modules are imported by every route chunk, so its name leaks into all of
+ * them AND the entry bundle.) Strip the random suffix so the banner, and
+ * therefore the hash, is stable across builds. Without this, every rebuild
+ * emits a fresh copy of every chunk instead of overwriting in place.
+ */
+const SCRATCH_PREFIXES = ['tmp-vesk-chunk-', 'tmp-vesk-shared-', 'tmp-vesk-mono-'] as const;
+
+/**
+ * Normalizes scratch paths by scanning characters — no regex (AGENTS: codegen
+ * text is never regex-rewritten). A match is a literal scratch prefix followed
+ * by the random alphanumeric suffix `mkdtemp` appended.
+ */
+export function stabilizeScratchPaths(code: string): string {
+  let out = '';
+  let i = 0;
+  while (i < code.length) {
+    let prefix: string | null = null;
+    for (const candidate of SCRATCH_PREFIXES) {
+      if (code.startsWith(candidate, i)) { prefix = candidate; break; }
+    }
+    if (!prefix) { out += code[i]; i++; continue; }
+    out += prefix;
+    i += prefix.length;
+    while (i < code.length) {
+      const c = code.charCodeAt(i);
+      const alnum = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
+      if (!alnum) break;
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
  * The chunk file stem for a route: its directory under `app/`, with dynamic
  * segment brackets neutralised. Exported so the dev server can map an incoming
  * chunk request back to its route (see routeFullPathForChunk) without
@@ -1257,7 +1296,7 @@ export async function generateClientBundle(
           plugins: [sharedRuntimeResolver(runtimeShim)],
           ...(appTsconfig ? { tsconfig: appTsconfig } : {}),
         });
-        sharedBundleCode = result.outputFiles[0].text;
+        sharedBundleCode = stabilizeScratchPaths(result.outputFiles[0].text);
         // Per-chunk shims: `export const login = __veskShared['…'].login`.
         // esbuild inlines these tiny stubs instead of the real module. A
         // package can be imported by its bare specifier in one chunk and by
@@ -1358,6 +1397,14 @@ export async function generateClientBundle(
           const result = await Promise.race([
             build({
               entryPoints: [tmpFile],
+              // The temp dir name is random per build, and esbuild bakes the
+              // entry path into the output as a `// <path>` banner. Left as
+              // cwd-relative, that random string lands in the chunk bytes, so
+              // the content hash changes on every build even when the source is
+              // identical — every rebuild then emits a fresh `page-X.<hash>.js`
+              // and never overwrites the old one. Anchoring the working dir to
+              // the temp dir makes the banner the stable `// entry.js`.
+              absWorkingDir: tmpBase,
               bundle: true,
               format: 'iife',
               platform: 'browser',
@@ -1385,7 +1432,7 @@ export async function generateClientBundle(
             }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('chunk esbuild timeout')), 60000)),
           ]);
-          finalCode = result.outputFiles[0].text;
+          finalCode = stabilizeScratchPaths(result.outputFiles[0].text);
         } catch (e) {
           const err = e as { errors?: Array<{ text: string; location?: { file?: string; line?: number; column?: number } }>; message?: string };
           const detail = err?.errors?.map((x) => {
@@ -1521,7 +1568,7 @@ export async function generateClientBundle(
     }
     componentOwners.report('client bundle');
     if (process.env.VESK_BUILD_PROFILE) console.error(`  [client] chunks=${chunks.length} compiled=${__stats.compiled} distinct=${__stats.distinct.size} parseMs=${__stats.parseMs.toFixed(0)}`);
-    return { main: await applyTransformPlugins(main, 'client.js'), chunks: transformedChunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
+    return { main: await applyTransformPlugins(stabilizeScratchPaths(main), 'client.js'), chunks: transformedChunks, cachedFileHits, compiledFiles, mainFromCache, editedSources, editedNames };
   } else {
     let componentLines: string[] = [];
     let hydratorLines: string[] = [];
@@ -1660,7 +1707,7 @@ export async function generateClientBundle(
           },
         ],
       });
-      main = result.outputFiles[0].text;
+      main = stabilizeScratchPaths(result.outputFiles[0].text);
     } catch (e) {
       const detail = (e as { errors?: Array<{ text: string }> })?.errors?.map((x) => x.text).join(' | ') || (e as Error).message || String(e);
       console.error('[vesk] client bundle failed', detail);
@@ -1670,7 +1717,7 @@ export async function generateClientBundle(
     }
     // Mono (non-codeSplit) builds are the production path — no incremental cache.
     componentOwners.report('client bundle');
-    return { main: await applyTransformPlugins(main, 'client.js'), chunks: [] };
+    return { main: await applyTransformPlugins(stabilizeScratchPaths(main), 'client.js'), chunks: [] };
   }
 }
 

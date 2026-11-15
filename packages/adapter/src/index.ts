@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync, readdirSync, rmSync } from 'node:fs';
 import { resolve, dirname, relative, basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
@@ -252,6 +252,31 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   if (isSocketlessTarget(options?.platform, options?.target)) {
     const driverHits = tcpDriverViolations(appDir);
     if (driverHits.length > 0) throw edgeDriverBuildError(driverHits);
+  }
+
+  // A production build is a full replacement, not an incremental one. Chunk
+  // filenames are content-hashed and the emitted set can shrink between builds,
+  // so leaving the previous output in place orphans every file the new build
+  // does not rewrite — `static/` alone grows without bound across rebuilds.
+  // Wipe the generated trees before emitting. Plugin activation state
+  // (`plugins.json`, read above) lives at the outDir root and is preserved.
+  for (const stale of ['static', 'server', 'prerendered']) {
+    rmSync(resolve(outDir, stale), { recursive: true, force: true });
+  }
+  rmSync(resolve(outDir, 'config.json'), { force: true });
+
+  // Chunk scratch dirs are removed in a per-chunk `finally`, but a build killed
+  // mid-bundle skips it and leaks `tmp-vesk-chunk-*` next to the app dir. They
+  // are gitignored and never reused, so sweep them up front.
+  try {
+    const scratchRoot = resolve(appDir, '..');
+    for (const name of readdirSync(scratchRoot)) {
+      if (name.startsWith('tmp-vesk-chunk-') || name.startsWith('tmp-vesk-shared-')) {
+        rmSync(resolve(scratchRoot, name), { recursive: true, force: true });
+      }
+    }
+  } catch {
+    // A missing/uncataloguable scratch root must never fail a build.
   }
 
   const dirs = [
