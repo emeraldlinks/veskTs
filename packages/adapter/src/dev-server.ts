@@ -850,7 +850,7 @@ let finalBody = body;
   // anything else (non-API helpers, root scripts) falls through to a full
   // rebuild + reload.
   const adapterSkipDirs = new Set(['node_modules', '.vesk', 'tarballs', '.git']);
-  const adapterSkipMarkers = ['node_modules/', '.vesk/', 'tmp-vesk-chunk-'];
+  const adapterSkipMarkers = ['node_modules/', '.vesk/', 'tmp-vesk-chunk-', 'tmp-vesk-shared-', 'tmp-vesk-mono-'];
   const adapterScriptExts = ['.mts', '.ts', '.tsx', '.mjs', '.js', '.cjs'];
   const adapterConfigNames = new Set([
     'vesk.config.ts', 'vesk.config.js', 'vesk.config.mjs', 'vesk.config.mts',
@@ -862,7 +862,7 @@ let finalBody = body;
   let pendingFiles = new Set<string>();
 
   try {
-    watch(projectDir, { recursive: true }, (_eventType: string, filename: string | null) => {
+    const projectWatcher = watch(projectDir, { recursive: true }, (_eventType: string, filename: string | null) => {
       if (!filename) return;
       if (adapterSkipDirs.has(filename.split('/')[0]) || adapterSkipMarkers.some((m) => filename.includes(m))) return;
       const name = filename.slice(filename.lastIndexOf('/') + 1);
@@ -914,6 +914,15 @@ let finalBody = body;
           hmr.handleFileChange(toAppRelative(files[0]), doBuild, routeTree);
         }
       }, 40);
+    });
+    // A recursive watch keeps a handle per descendant; deleting the build tree
+    // (e2e teardown, `rm -rf .vesk`) makes Node re-scan a vanished directory
+    // and emit an unhandled ENOENT that kills the process after the suite has
+    // already reported. Teardown is not a build trigger — ignore it.
+    projectWatcher.on('error', (err) => {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' || code === 'EPERM' || code === 'EINVAL') return;
+      console.error('vesk dev: file watcher error:', err instanceof Error ? err.message : err);
     });
   } catch (e) {
     console.error('vesk dev: file watching unavailable');

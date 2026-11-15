@@ -9,11 +9,11 @@
  * (real `.vesk/plugins.json` reads/writes) and asserts `injectDevScripts`
  * output for every SSR shape.
  */
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { routeDevPanel, injectDevScripts, injectSsrErrorMarker, DEV_SCRIPTS, buildDevErrorPayload, resolveDevErrorReport, devErrorContextForMatch } from './dev-server.js';
+import { routeDevPanel, injectDevScripts, injectSsrErrorMarker, DEV_SCRIPTS, buildDevErrorPayload, resolveDevErrorReport, devErrorContextForMatch, resolveRuntimeDir } from './dev-server.js';
 
 let passed = 0;
 let failed = 0;
@@ -374,6 +374,17 @@ async function main() {
     assert(!src.includes("'Transfer-Encoding': 'chunked'"), 'dev SSR no longer chunk-streams a 200 before the render settles');
     assert(src.includes('chunks.join('), 'dev SSR buffers stream chunks before writeHead');
     assert(src.includes('res.headersSent || res.writableEnded'), 'SSR 500 branch guards against double-writeHead so a late throw cannot kill the dev server');
+  }
+
+  // ---- the served runtime follows the running CLI build, not a stale
+  // app-pinned tarball (a new runtime export must reach the dev bundle) ----
+  {
+    const appRuntime = join(tmpProject, 'node_modules', '@vesk', 'runtime');
+    mkdirSync(appRuntime, { recursive: true });
+    writeFileSync(join(appRuntime, 'ripple-runtime.js'), '// stale pinned runtime\n', 'utf-8');
+    const resolved = resolveRuntimeDir(tmpProject);
+    assert(!!resolved && !resolved.startsWith(appRuntime), 'runtime dir ignores the app-pinned runtime copy');
+    assert(!!resolved && existsSync(join(resolved, 'ripple-runtime.js')), 'runtime dir resolves a real runtime build');
   }
 
   rmSync(tmpProject, { recursive: true, force: true });

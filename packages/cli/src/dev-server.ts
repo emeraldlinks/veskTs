@@ -213,12 +213,17 @@ export function devErrorContextForMatch(
   return { appDir, projectDir, routeFiles, componentMap, routeSources };
 }
 
-function resolveRuntimeDir(projectDir: string): string | null {
+export function resolveRuntimeDir(projectDir: string): string | null {
   const candidates = [
-    // installed app layout
-    resolve(projectDir, 'node_modules', '@vesk', 'runtime'),
-    // monorepo checkout (tests/probes run from the repo root)
+    // Runtime shipped next to the running CLI. In a monorepo checkout that is
+    // `packages/runtime/dist` (the same build the compiler imports); for an
+    // installed CLI it is `node_modules/@vesk/runtime`. This wins over the
+    // app's own copy so the served runtime always matches the CLI that
+    // compiled the page — a pinned app tarball must not shadow new exports.
     resolve(import.meta.dirname ?? '.', '..', '..', 'runtime', 'dist'),
+    // installed app layout (fallback when the CLI is installed without a
+    // sibling runtime, e.g. a global npm install with a separate app)
+    resolve(projectDir, 'node_modules', '@vesk', 'runtime'),
   ];
   for (const dir of candidates) {
     if (existsSync(join(dir, 'ripple-runtime.js'))) return dir;
@@ -527,7 +532,7 @@ const HMR_SKIP_DIRS = new Set([
 // `packages/foo/dist/index.js` is the same hazard, so the directory names are
 // also matched as path segments.
 const HMR_SKIP_MARKERS = [
-  'node_modules/', '.vesk/', 'tmp-vesk-chunk-', 'tmp-vesk-shared-',
+  'node_modules/', '.vesk/', 'tmp-vesk-chunk-', 'tmp-vesk-shared-', 'tmp-vesk-mono-',
   '/dist/', '/build/', '/coverage/', '/out/', '/.next/', '/.nuxt/', '/.output/',
   '/.svelte-kit/', '/.turbo/', '/.cache/', '/.vercel/', '/.netlify/',
 ];
@@ -1404,7 +1409,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
       }
       for (const entry of entries) {
         if (!entry.isDirectory()) continue;
-        if (HMR_SKIP_DIRS.has(entry.name)) continue;
+        if (HMR_SKIP_DIRS.has(entry.name) || entry.name.startsWith('tmp-vesk-')) continue;
         watchDirTree(join(dir, entry.name));
       }
     };

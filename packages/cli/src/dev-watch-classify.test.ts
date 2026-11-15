@@ -27,6 +27,8 @@ const ignored: string[] = [
   '.git/HEAD',
   'tarballs/pkg.tgz',
   'tmp-vesk-chunk-abc.js',
+  'tmp-vesk-mono-Abc123/entry.js',
+  'tmp-vesk-shared-Abc123/entry.mjs',
   'node_modules/.pnpm/idx',
   // Generated output: a `.js`/`.ts` file here classifies as `script`, so a
   // `vesk build` running alongside `vesk dev` would write dist/server.js and
