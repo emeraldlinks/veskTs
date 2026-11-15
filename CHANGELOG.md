@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.100 — 2026-11-15
+
+_No breaking changes._
+
+### Fixes
+
+- **runtime:** keep failed prefetch work from surfacing as unhandled rejections
+
+### Refactors
+
+- **runtime:** use explicit .js specifiers in relative imports
+
 ## 0.2.99 — 2026-11-15
 
 _No breaking changes._
