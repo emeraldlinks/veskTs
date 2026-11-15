@@ -5,6 +5,44 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (reactive collections port):**
+
+- [x] Ported Ripple's four reactive collections as public runtime API:
+  `TrackedArray`, `TrackedObject`, `TrackedMap`, `TrackedSet`, plus
+  `snapshot()`.
+  - Client (`tracked-proxy.ts`, `tracked-array.ts`, `tracked-object.ts`,
+    `tracked-map.ts`, `tracked-set.ts`): Proxy-backed arrays/objects with
+    per-key `Tracked` cells; `size`/`length`, `has`, `get`, iteration and
+    `Array`/`Map`/`Set` prototype methods subscribe; `set`/`add`/`delete`/
+    `clear`/`push`/`splice` schedule.
+  - Map/Set override methods directly instead of Ripple's one-time prototype
+    patching. ES2025 set algebra (`union`/`intersection`/`difference`/
+    `symmetricDifference`/`isSubsetOf`/`isSupersetOf`/`isDisjointFrom`) is
+    implemented locally with reactive reads on both operands, so it works on
+    Node 20 too.
+  - Server (`tracked-collections-server.ts`): aliases native `Array`/`Object`/
+    `Map`/`Set`; `snapshot` is a plain shallow copy.
+  - Types are canonical in `packages/types/src/index.ts`
+    (`TrackedArrayConstructor`, etc.); runtime re-exports aliases.
+- [x] `tracked-collections.test.ts` — 25 cases: per-element/per-key
+  subscriptions, push/splice/length, iteration, `from`/`of`/`fromAsync`,
+  object delete/key tracking, Map size/forEach/has, Set algebra, orphan scope,
+  server aliases, `snapshot` detachment.
+- [x] Statement- and expression-mode compiler coverage:
+  `statement-mode.test.ts` + `expression-mode.test.ts` render all four
+  collections from a component body through the server aliases.
+- [x] `test-app/app/collections/page.vsk` + hydration Test 26: SSR aliases,
+  hydrated Proxy mutation of all four collections, effect-driven TrackDecl
+  cells, detached `snapshot`, zero markers/pageerrors.
+- [ ] Follow-up (deliberately deferred): compiler lowering of
+  `new TrackedArray(...)` to the block-taking helper form
+  (`tracked_array(block, ...)`) so construction is not limited to
+  `scope()`/active-block detection. Statement-mode bodies stay raw per AGENTS
+  until that lowering exists.
+- Note: `Object.keys()`/spread of a tracked object subscribes to descriptors it
+  reads but cannot subscribe to keys that do not exist yet (Ripple parity).
+  `JSON.stringify` does subscribe because it reads each value.
+
 **This session (SSR request-context isolation for self-fetching pages):**
 
 - [x] **BUG (adapter): a page that `fetch()`es its own API route lost its

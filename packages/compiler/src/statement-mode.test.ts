@@ -419,5 +419,27 @@ test('stmt a URL in JSX text is not treated as a comment', () => {
   expect(html).toEqual('<p>see https://vesk.dev/a//b now</p>');
 });
 
+test('stmt reactive collections render through the server aliases', () => {
+  const html = render(`import { TrackedArray, TrackedMap, TrackedObject, TrackedSet, snapshot } from '@vesk/runtime';
+component App {
+  const notes = new TrackedArray('a', 'b');
+  const prefs = new TrackedObject({ visits: 0 });
+  const counts = new TrackedMap([['k', 1]]);
+  const badges = new TrackedSet(['new']);
+  <div>
+    <p>{notes.join(',')}</p>
+    <p>{prefs.visits}</p>
+    <p>{counts.get('k')}</p>
+    <p>{[...badges].join(',')}</p>
+    <p>{JSON.stringify(snapshot(notes))}</p>
+  </div>
+}`, 'App');
+  expect(html).toContain('<p>a,b</p>');
+  expect(html).toContain('<p>0</p>');
+  expect(html).toContain('<p>1</p>');
+  expect(html).toContain('<p>new</p>');
+  expect(html).toContain('[&quot;a&quot;,&quot;b&quot;]');
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 if (failed > 0) process.exit(1);

@@ -961,6 +961,106 @@ export interface Tracked<T = unknown> {
   __v?: T;
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Reactive collections — TrackedArray / TrackedObject / TrackedMap / TrackedSet
+// ────────────────────────────────────────────────────────────────────────────
+//
+// Drop-in replacements for the built-ins whose reads subscribe the surrounding
+// reactive context and whose writes schedule its update. On the client they are
+// Proxy-backed (`tracked-array.ts` / `tracked-object.ts` / `tracked-map.ts` /
+// `tracked-set.ts`); on the server the barrels alias the native constructors,
+// so the same component code renders without reactive bookkeeping.
+//
+// Construction must happen inside a component, effect, or other reactive
+// context — that context is the update target. Outside one, mutations fall
+// back to the shared orphan root (same rule as `track()`).
+
+/**
+ * Reactive array. Behaves like `Array<T>`: every element read (including
+ * `length`, iteration and `Array.prototype` methods) subscribes, every
+ * indexed write, `push`/`splice`/`length` change schedules.
+ *
+ * @example
+ * ```ts
+ * const items = new TrackedArray('a', 'b');
+ * items.push('c');           // schedules
+ * items.map((x) => x);       // subscribes to each element + length
+ * ```
+ */
+export interface TrackedArray<T = unknown> extends Array<T> {}
+
+/**
+ * Constructor shape of {@link TrackedArray}, mirroring `Array`'s statics.
+ * `fromAsync` exists even where the native `Array.fromAsync` does not.
+ */
+export interface TrackedArrayConstructor {
+  new <T = unknown>(...elements: T[]): TrackedArray<T>;
+  from<U>(
+    arrayLike: ArrayLike<U> | Iterable<U>,
+    mapFn?: (v: U, k: number) => unknown,
+    thisArg?: unknown
+  ): TrackedArray<U>;
+  of<U>(...items: U[]): TrackedArray<U>;
+  fromAsync<U>(
+    arrayLike: ArrayLike<U> | Iterable<U> | AsyncIterable<U>,
+    mapFn?: (v: U, k: number) => unknown,
+    thisArg?: unknown
+  ): Promise<TrackedArray<U>>;
+}
+
+/**
+ * Reactive plain object. Property reads subscribe, property writes and
+ * `delete` schedule. Arrays/objects with non-standard prototypes pass through
+ * unproxied.
+ */
+export type TrackedObject<T extends object = Record<PropertyKey, unknown>> = T;
+
+/** Constructor shape of {@link TrackedObject}. */
+export interface TrackedObjectConstructor {
+  new <T extends object>(obj: T): TrackedObject<T>;
+}
+
+/**
+ * Reactive `Map`. `size`, `get`/`has` and any iteration subscribe; `set`,
+ * `delete` and `clear` schedule. `toJSON()` returns a plain array of entries.
+ */
+export interface TrackedMap<K, V> extends Map<K, V> {
+  toJSON(): Array<[K, V]>;
+}
+
+/** Constructor shape of {@link TrackedMap}. */
+export interface TrackedMapConstructor {
+  new <K, V>(iterable?: Iterable<readonly [K, V]>): TrackedMap<K, V>;
+}
+
+/**
+ * Reactive `Set`. `size`, `has` and iteration subscribe; `add`, `delete` and
+ * `clear` schedule. Includes the ES2025 set-algebra methods on every runtime,
+ * with the same reactivity (comparisons read both operands).
+ */
+export interface TrackedSet<T> extends Set<T> {
+  union<U>(other: ReadonlySet<U>): TrackedSet<T | U>;
+  intersection<U>(other: ReadonlySet<U>): TrackedSet<T & U>;
+  difference<U>(other: ReadonlySet<U>): TrackedSet<T>;
+  symmetricDifference<U>(other: ReadonlySet<U>): TrackedSet<T | U>;
+  isSubsetOf(other: ReadonlySet<unknown>): boolean;
+  isSupersetOf(other: ReadonlySet<unknown>): boolean;
+  isDisjointFrom(other: ReadonlySet<unknown>): boolean;
+  toJSON(): T[];
+}
+
+/** Constructor shape of {@link TrackedSet}. */
+export interface TrackedSetConstructor {
+  new <T>(iterable?: Iterable<T>): TrackedSet<T>;
+}
+
+/**
+ * Shallow, detached plain copy of a tracked array or object. Reads do not
+ * subscribe, so it is safe to hand to logging, `JSON.stringify`, or an
+ * untracked snapshot comparison.
+ */
+export declare function snapshot<T>(value: T): T;
+
 /**
  * Reactive resource returned by `createResource` / `useFetch` and its
  * variants. It is a real `Promise` (`await resource` resolves to `data`) and

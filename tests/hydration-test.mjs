@@ -2311,6 +2311,75 @@ async function main() {
     await page.close();
   }
 
+  // ── 26: reactive collections hydrate, mutate and stay subscribed ─────────
+  // TrackedArray/TrackedObject/TrackedMap/TrackedSet are Proxy-backed on the
+  // client and native aliases on the server. This checks both halves: the SSR
+  // HTML uses native constructors, then the hydrated client serves live
+  // mutation through the proxies. `effect()` reads all four collections and
+  // writes the TrackDecl cells the markup interpolates, so their update proves
+  // the subscriptions; `tick` separately proves the handler ran.
+  {
+    console.log('  26: reactive collections — SSR aliases + client proxies + effect');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const resp = await goto(page, BASE + '/collections', { waitUntil: 'networkidle0', timeout: 30000 });
+    assert(resp && resp.status() === 200, `26 /collections is HTTP 200 (got ${resp?.status()})`);
+    assert((resp?.headers()['content-type'] || '').includes('text/html'), '26 /collections serves HTML');
+
+    const served = resp ? await resp.text() : '';
+    assert(served.includes('Reactive Collections'), '26 SSR renders the heading');
+    assert(served.includes('SSR notes: alpha, beta'), '26 SSR renders the page shell');
+    assert(served.includes('Notes: alpha, beta'), '26 SSR TrackedArray aliases Array');
+    assert(served.includes('Theme: dark / visits: 0'), '26 SSR TrackedObject aliases Object');
+    assert(served.includes('A: 1'), '26 SSR TrackedMap aliases Map');
+    assert(served.includes('Badges: new'), '26 SSR TrackedSet aliases Set');
+    assert(served.includes('Sizes: 2/0/1/1'), '26 SSR reads length/size from the native aliases');
+    assert(served.includes('Snapshot: [&quot;alpha&quot;,&quot;beta&quot;]') || served.includes('Snapshot: ["alpha","beta"]'), '26 SSR snapshot() copies the array');
+
+    await waitForHydration(page);
+
+    const read = () => page.evaluate(() => ({
+      notes: document.querySelector('.collections-notes')?.textContent?.trim(),
+      prefs: document.querySelector('.collections-prefs')?.textContent?.trim(),
+      counts: document.querySelector('.collections-counts')?.textContent?.trim(),
+      badges: document.querySelector('.collections-badges')?.textContent?.trim(),
+      sizes: document.querySelector('.collections-sizes')?.textContent?.trim(),
+      snapshot: document.querySelector('.collections-snapshot')?.textContent?.trim(),
+      tick: document.querySelector('.collections-tick')?.textContent?.trim(),
+    }));
+
+    const before = await read();
+    assert(before.notes === 'Notes: alpha, beta', `26 hydrated array keeps SSR text (got "${before.notes}")`);
+    assert(before.prefs === 'Theme: dark / visits: 0', `26 effect ran after hydration (got "${before.prefs}")`);
+    assert(before.sizes === 'Sizes: 2/0/1/1', `26 hydrated sizes match SSR (got "${before.sizes}")`);
+    assert(before.tick === 'Tick: 0', `26 tick starts at 0 (got "${before.tick}")`);
+
+    await clickEl(page, '.collections-bump');
+    await page.waitForFunction(
+      () => document.querySelector('.collections-prefs')?.textContent?.trim() === 'Theme: dark / visits: 1',
+      { timeout: 15000 },
+    ).catch(() => {});
+
+    const after = await read();
+    assert(after.notes === 'Notes: alpha, beta, note-3', `26 array push re-renders (got "${after.notes}")`);
+    assert(after.prefs === 'Theme: dark / visits: 1', `26 object write re-renders (got "${after.prefs}")`);
+    assert(after.counts === 'A: 2', `26 map set re-renders (got "${after.counts}")`);
+    assert(after.badges === 'Badges: new, v2', `26 set add re-renders (got "${after.badges}")`);
+    assert(after.sizes === 'Sizes: 3/1/1/2', `26 length/size track mutations (got "${after.sizes}")`);
+    assert(after.snapshot === 'Snapshot: ["alpha","beta"]', `26 snapshot stayed detached (got "${after.snapshot}")`);
+    assert(after.tick === 'Tick: 1', `26 tick handler ran (got "${after.tick}")`);
+
+    const markers = await page.evaluate(() => {
+      const html = document.documentElement.innerHTML;
+      return (html.match(/<!--vsk/g) || []).length;
+    });
+    assert(markers === 0, `26 all hydration markers claimed (got ${markers})`);
+    assert(errors.length === 0, `26 zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${passed + failed + skipped} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

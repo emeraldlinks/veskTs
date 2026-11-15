@@ -1,4 +1,9 @@
 export { track, get, set, untrack, peek_tracked as peek, derived, flush_sync as flushSync, tick, schedule_update, queue_microtask, active_block, set_active_block, set_active_component, is_mutating_allowed, tracking, teardown, run_block, run_teardown, create_component_ctx, push_component, pop_component, with_block, with_scope, scope, safe_scope, set_tracking, set_active_reaction, is_block_dirty, destroy_non_branch_children, disable_scoped_flush, on_destroy } from '@vesk/runtime/src/ripple-runtime';
+export { TrackedArray, tracked_array, tracked_array_from, tracked_array_of, tracked_array_from_async } from '@vesk/runtime/src/tracked-array';
+export { TrackedObject, tracked_object } from '@vesk/runtime/src/tracked-object';
+export { TrackedMap, tracked_map } from '@vesk/runtime/src/tracked-map';
+export { TrackedSet, tracked_set } from '@vesk/runtime/src/tracked-set';
+export { snapshot } from '@vesk/runtime/src/tracked-proxy';
 export { effect, user_effect, block, branch, root, render, pre_effect, destroy_block, destroy_block_children, pause_block, resume_block, is_destroyed, unlink_block, create_try_block, boundary_fn_running_block } from '@vesk/runtime/src/ripple-blocks';
 export { hydrate, hydrateViewport, hydrateIdle, hydrateOnInteraction, needsHydration, hydrationCount, createHydrateWalker, collectVskMarkers, reactiveProps, hydrateInitial, assertFullyHydrated, auditHydration, setHydrateDevMode, setHydrateStrict, isHydrateStrict, onHydrationMismatch, reportHydrationIssue, bumpNavEpoch, isVskMarkerText, parseVskMarker } from '@vesk/runtime/src/hydrate';
 export { createLayoutSlot, trackSlotContent, auditLayoutSlots, LAYOUT_SLOT_OPEN, LAYOUT_SLOT_CLOSE } from '@vesk/runtime/src/layout';

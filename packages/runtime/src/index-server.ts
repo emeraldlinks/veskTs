@@ -1,4 +1,5 @@
 export { track, get, set, untrack, peek_tracked as peek, derived, flush_sync as flushSync, tick, active_block, set_active_block, set_active_component, create_component_ctx, push_component, pop_component, with_block, with_scope, scope, safe_scope, on_destroy } from '@vesk/runtime/src/ripple-runtime';
+export { TrackedArray, TrackedObject, TrackedMap, TrackedSet, snapshot } from '@vesk/runtime/src/tracked-collections-server';
 export { effect, user_effect, block, branch, root, render, pre_effect, destroy_block, destroy_block_children, pause_block, resume_block, is_destroyed, unlink_block, create_try_block, boundary_fn_running_block } from '@vesk/runtime/src/ripple-blocks';
 export { createContext, createLocals, Context, getActiveComponent, setActiveComponent, type Locals } from '@vesk/runtime/src/context';
 export { serverLocals, getServerContext, setServerContext, clearServerContext, server_locals, get_server_context, set_server_context, clear_server_context } from '@vesk/runtime/src/server-events';

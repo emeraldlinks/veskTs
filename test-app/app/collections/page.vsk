@@ -1,0 +1,62 @@
+import { effect, snapshot, track, TrackedArray, TrackedMap, TrackedObject, TrackedSet } from '@vesk/runtime'
+
+// Regression fixture for the reactive collections port. Every read below goes
+// through the client Proxy implementations after hydration; on the server the
+// same names alias the native constructors. `effect()` reads all four
+// collections and writes the TrackDecl cells the markup interpolates, so the
+// text updates prove the collection subscriptions, not just that the handler
+// ran. A `tick` cell is incremented too, so a handler-regression is separable
+// from a subscription-regression.
+component CollectionsIsland {
+	const &[tick] = track(0)
+
+	const notes = new TrackedArray('alpha', 'beta')
+	const prefs = new TrackedObject({ theme: 'dark', visits: 0 })
+	const counts = new TrackedMap<string, number>([['a', 1]])
+	const badges = new TrackedSet<string>(['new'])
+
+	const initial = JSON.stringify(snapshot(notes))
+
+	const &[notesText] = track('Notes: alpha, beta')
+	const &[prefsText] = track('Theme: dark / visits: 0')
+	const &[countsText] = track('A: 1')
+	const &[badgesText] = track('Badges: new')
+	const &[sizesText] = track('Sizes: 2/0/1/1')
+
+	effect(() => {
+		notesText = `Notes: ${notes.join(', ')}`
+		prefsText = `Theme: ${prefs.theme} / visits: ${prefs.visits}`
+		countsText = `A: ${counts.get('a')}`
+		badgesText = `Badges: ${[...badges].join(', ')}`
+		sizesText = `Sizes: ${notes.length}/${prefs.visits}/${counts.size}/${badges.size}`
+	})
+
+	const bump = () => {
+		notes.push(`note-${notes.length + 1}`)
+		prefs.visits = prefs.visits + 1
+		counts.set('a', (counts.get('a') || 0) + 1)
+		badges.add(`v${badges.size + 1}`)
+		tick++
+	}
+
+	<div class="collections-box">
+		<p class="collections-notes">{notesText}</p>
+		<p class="collections-prefs">{prefsText}</p>
+		<p class="collections-counts">{countsText}</p>
+		<p class="collections-badges">{badgesText}</p>
+		<p class="collections-sizes">{sizesText}</p>
+		<p class="collections-snapshot">Snapshot: {initial}</p>
+		<p class="collections-tick">Tick: {tick}</p>
+		<button class="collections-bump" onClick={bump}>bump</button>
+	</div>
+}
+
+export default component CollectionsPage {
+	<Head>
+		<title>Reactive Collections</title>
+	</Head>
+
+	<h1 class="text-3xl font-bold mb-4">Reactive Collections</h1>
+	<p class="collections-ssr">SSR notes: {['alpha', 'beta'].join(', ')}</p>
+	<CollectionsIsland />
+}
