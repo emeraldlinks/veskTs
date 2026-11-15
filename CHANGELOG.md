@@ -2,6 +2,15 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.97 — 2026-11-15
+
+_No breaking changes._
+
+### Fixes
+
+- **runtime:** create SVG-namespaced elements in hydration fallbacks
+- **compiler:** report key-clause diagnostics with V0411 code frames
+
 ## 0.2.96 — 2026-11-12
 
 _No breaking changes._
