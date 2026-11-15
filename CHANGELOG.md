@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.98 — 2026-11-15
+
+_No breaking changes._
+
+### Features
+
+- **runtime:** add reactive TrackedArray/Object/Map/Set collections
+
+### Fixes
+
+- **cli,adapter:** serve the CLI-matched runtime in dev and survive build-tree teardown
+
 ## 0.2.97 — 2026-11-15
 
 _No breaking changes._

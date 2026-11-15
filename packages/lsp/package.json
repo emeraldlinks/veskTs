@@ -1,6 +1,6 @@
 {
   "name": "@vesk/lsp",
-  "version": "0.2.97",
+  "version": "0.2.98",
   "type": "module",
   "description": "Vesk Language Server Protocol server for .vsk files",
   "main": "./dist/server.js",
@@ -25,8 +25,8 @@
     "@volar/language-server": "~2.4.28",
     "@volar/language-service": "~2.4.28",
     "@volar/typescript": "~2.4.28",
-    "@vesk/compiler": "^0.2.97",
-    "@vesk/prettier-plugin": "^0.2.97",
+    "@vesk/compiler": "^0.2.98",
+    "@vesk/prettier-plugin": "^0.2.98",
     "prettier": "^3.0.0",
     "typescript": "^5.8.0",
     "volar-service-css": "0.0.71",
