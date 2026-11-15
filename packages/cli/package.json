@@ -1,6 +1,6 @@
 {
   "name": "@vesk/vesk-cli",
-  "version": "0.2.98",
+  "version": "0.2.99",
   "type": "module",
   "description": "Vesk — compiler-first framework for the post-VDOM web. vesk dev, vesk build.",
   "bin": {
@@ -8,10 +8,10 @@
   },
   "main": "./dist/cli.js",
   "dependencies": {
-    "@vesk/adapter": "^0.2.98",
-    "@vesk/compiler": "^0.2.98",
-    "@vesk/plugin-tailwind": "^0.2.98",
-    "@vesk/runtime": "^0.2.98",
+    "@vesk/adapter": "^0.2.99",
+    "@vesk/compiler": "^0.2.99",
+    "@vesk/plugin-tailwind": "^0.2.99",
+    "@vesk/runtime": "^0.2.99",
     "esrap": "^2.3.0",
     "typescript": "^5.8.0",
     "ws": "^8.18.0",

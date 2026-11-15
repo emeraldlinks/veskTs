@@ -2,6 +2,15 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.99 — 2026-11-15
+
+_No breaking changes._
+
+### Fixes
+
+- **lucide-vesk:** accept scratch-relative esbuild banners in tree-shake test
+- **adapter:** make client chunk hashes deterministic across rebuilds
+
 ## 0.2.98 — 2026-11-15
 
 _No breaking changes._
