@@ -8,7 +8,7 @@ import {
 	type Block,
 	type Tracked,
 } from '@vesk/runtime/src/ripple-runtime';
-import { collection_scope } from './tracked-proxy';
+import { collection_scope } from './tracked-proxy.js';
 
 class TrackedSetImpl<T> extends Set<T> {
 	#tracked_size: Tracked;

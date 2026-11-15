@@ -8,7 +8,7 @@ import {
 	type Block,
 	type Tracked,
 } from '@vesk/runtime/src/ripple-runtime';
-import { collection_scope } from './tracked-proxy';
+import { collection_scope } from './tracked-proxy.js';
 
 class TrackedMapImpl<K, V> extends Map<K, V> {
 	#tracked_size: Tracked;

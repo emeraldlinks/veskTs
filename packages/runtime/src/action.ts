@@ -1,4 +1,4 @@
-import type { ValidationRule } from './form';
+import type { ValidationRule } from './form.js';
 
 export interface ActionIssue {
 	field: string;

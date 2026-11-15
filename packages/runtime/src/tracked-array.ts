@@ -1,6 +1,6 @@
 import type { TrackedArray as TrackedArrayShape, TrackedArrayConstructor } from '@vesk/types';
 import type { Block } from '@vesk/runtime/src/ripple-runtime';
-import { array_proxy, collection_scope } from './tracked-proxy';
+import { array_proxy, collection_scope } from './tracked-proxy.js';
 
 export function tracked_array<T>(block: Block | undefined, ...elements: T[]): TrackedArrayShape<T> {
 	return array_proxy({ elements, block });

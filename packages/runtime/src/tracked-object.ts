@@ -1,6 +1,6 @@
 import type { TrackedObject as TrackedObjectShape, TrackedObjectConstructor } from '@vesk/types';
 import type { Block } from '@vesk/runtime/src/ripple-runtime';
-import { collection_scope, object_proxy } from './tracked-proxy';
+import { collection_scope, object_proxy } from './tracked-proxy.js';
 
 export function tracked_object<T extends object>(
 	block: Block | undefined,
