@@ -70,11 +70,16 @@ async function buildChunk(pageSource: string, _componentName?: string): Promise<
   }
 }
 
-/** Icon modules esbuild actually pulled into a chunk, by its banner comment. */
+/**
+ * Icon modules esbuild actually pulled into a chunk, by its banner comment.
+ * The bundler anchors esbuild at its scratch dir (`absWorkingDir`), so module
+ * banners are relative to it (`// ../../../packages/lucide-vesk/...`) instead
+ * of repo-root-relative. Accept any number of `../` hops.
+ */
 function iconModulesIn(chunk: string): string[] {
   const out: string[] = [];
   for (const line of chunk.split('\n')) {
-    const m = /^\s*\/\/ packages\/lucide-vesk\/dist\/icons\/([A-Za-z0-9]+)\.js\s*$/.exec(line);
+    const m = /^\s*\/\/ (?:\.\.\/)*packages\/lucide-vesk\/dist\/icons\/([A-Za-z0-9]+)\.js\s*$/.exec(line);
     if (m) out.push(m[1]);
   }
   return out;
