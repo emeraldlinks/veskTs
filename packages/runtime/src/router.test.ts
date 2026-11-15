@@ -1527,6 +1527,81 @@ testAsync('hover warmup appends one chunk script per unique link', async () => {
 	}
 });
 
+// A warm/prefetch chunk is best-effort: a chunk that errors or times out must
+// never escape as an unhandled promise rejection, because the browser surfaces
+// that as a page error and the route itself still renders. Both warm paths
+// (hover `warmRouteChunks` and `router.prefetch`) must swallow the rejection.
+function captureUnhandled(): { unhandled: unknown[]; stop: () => void } {
+	const unhandled: unknown[] = [];
+	const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+	process.on('unhandledRejection', onUnhandled);
+	return { unhandled, stop: () => process.off('unhandledRejection', onUnhandled) };
+}
+
+function failingScriptHead(): { head: any; restore: () => void } {
+	const head = document.head as any;
+	const savedAppend = head.appendChild.bind(head);
+	head.appendChild = (c: any) => {
+		savedAppend(c);
+		if (c && c.tagName === 'SCRIPT' && typeof c.onerror === 'function') {
+			setTimeout(() => c.onerror(), 0);
+		}
+	};
+	return { head, restore: () => { head.appendChild = savedAppend; } };
+}
+
+testAsync('a hover-warmed chunk that fails does not surface as an unhandled rejection', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	globalThis.fetch = async () => mockFetchResponse({ props: {}, head: '' });
+	const { unhandled, stop } = captureUnhandled();
+	const { restore } = failingScriptHead();
+	const mark = (globalThis._mark = (globalThis._mark || 0) + 1);
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/warmfail', page: () => document.createTextNode('Warm') },
+		]);
+		tree[1]._chunk = `/_vesk/static/page-warmfail-${mark}.js`;
+		const router = createFileRouter(tree, { container });
+		router.start();
+		const overFns = (document as any)._listeners['pointerover'];
+		const overFn = overFns[overFns.length - 1];
+		overFn({ target: { nodeType: 1, closest: () => ({ getAttribute: (k: string) => (k === 'href' ? '/warmfail' : null) }) } });
+		await tick(30);
+		expect(unhandled.length).toBe(0);
+	} finally {
+		restore();
+		globalThis.fetch = origFetch;
+		stop();
+	}
+});
+
+testAsync('a route prefetch whose chunk and data both fail does not surface as an unhandled rejection', async () => {
+	const container = document.createElement('div');
+	const origFetch = globalThis.fetch;
+	// Route data fetch rejects outright, and every chunk script errors.
+	globalThis.fetch = async () => { throw new Error('network down'); };
+	const { unhandled, stop } = captureUnhandled();
+	const { restore } = failingScriptHead();
+	const mark = (globalThis._mark = (globalThis._mark || 0) + 1);
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/prefetchfail', page: () => document.createTextNode('Prefetch') },
+		]);
+		tree[1]._chunk = `/_vesk/static/page-prefetchfail-${mark}.js`;
+		const router = createRouter(tree, { container });
+		router.prefetch('/prefetchfail');
+		await tick(30);
+		expect(unhandled.length).toBe(0);
+	} finally {
+		restore();
+		globalThis.fetch = origFetch;
+		stop();
+	}
+});
+
 testAsync('routeDataCache default 0 refetches data on every visit', async () => {
 	const container = document.createElement('div');
 	let fetchCount = 0;

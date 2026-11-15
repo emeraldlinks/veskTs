@@ -276,7 +276,7 @@ function warmRouteChunks(routeTree: RouteNode[], href: string): void {
 	if (!match) return;
 	const urls = hasPendingChunks(match.matchChain);
 	if (urls.length === 0) return;
-	for (const u of urls) ensureChunk(u);
+	for (const u of urls) ensureChunk(u).catch(() => {});
 }
 
 interface RouteDataResult {
@@ -1730,7 +1730,7 @@ export function createRouter(
 			if (typeof document === 'undefined') return;
 			getRouteData(url.pathname + url.search, 'prefetch').then((data) => {
 				if (data) storePrefetchedData(match!, data);
-			});
+			}).catch(() => {});
 		},
 
 		get currentPath() {
@@ -2271,11 +2271,11 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			router._prefetched = router._prefetched || new Map();
 			router._prefetched.set(url.pathname, match);
 			const preloadUrls = hasPendingChunks(match.matchChain);
-			preloadUrls.forEach(ensureChunk);
+			preloadUrls.forEach((u) => ensureChunk(u).catch(() => {}));
 			if (typeof document === 'undefined') return;
 			getRouteData(url.pathname + url.search, 'prefetch').then((data) => {
 				if (data) storePrefetchedData(match!, data);
-			});
+			}).catch(() => {});
 		},
 
 		get currentPath() {
