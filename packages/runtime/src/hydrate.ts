@@ -1,6 +1,42 @@
 import { get, scope, set_active_block } from '@vesk/runtime/src/ripple-runtime';
 import { root } from '@vesk/runtime/src/ripple-blocks';
 
+const SVG_NAMESPACE = 'http://www.w3.org/2000/svg';
+
+// Tags that only exist in the SVG namespace. Names shared with HTML (`a`,
+// `title`, `style`, `script`) are intentionally absent: the walker has no
+// parent context at a fallback claim, so the HTML meaning wins.
+const SVG_ONLY_TAGS = new Set(
+	[
+		'svg', 'animate', 'animateMotion', 'animateTransform', 'circle', 'clipPath',
+		'defs', 'desc', 'ellipse', 'feBlend', 'feColorMatrix', 'feComponentTransfer',
+		'feComposite', 'feConvolveMatrix', 'feDiffuseLighting', 'feDisplacementMap',
+		'feDistantLight', 'feDropShadow', 'feFlood', 'feFuncA', 'feFuncB', 'feFuncG',
+		'feFuncR', 'feGaussianBlur', 'feImage', 'feMerge', 'feMergeNode', 'feMorphology',
+		'feOffset', 'fePointLight', 'feSpecularLighting', 'feSpotLight', 'feTile',
+		'feTurbulence', 'filter', 'foreignObject', 'g', 'line', 'linearGradient',
+		'marker', 'mask', 'metadata', 'mpath', 'path', 'pattern', 'polygon',
+		'polyline', 'radialGradient', 'rect', 'set', 'stop', 'switch', 'symbol',
+		'text', 'textPath', 'tspan', 'use', 'view',
+	].map((tag) => tag.toLowerCase()),
+);
+
+/**
+ * Build a fresh element for a claim that could not adopt an SSR node.
+ *
+ * `document.createElement('svg')` creates an HTML-namespaced element: it
+ * serializes as `<svg>` but lays out at 0×0, so a plain-JS icon component
+ * (lucide-vesk) that claims `<svg>` after the walker is exhausted renders an
+ * invisible icon — the mobile menu button collapsed to its padding on the
+ * first toggle and only recovered after an SPA navigation.
+ */
+function createFreshElement(tag: string): Element {
+	if (SVG_ONLY_TAGS.has(tag.toLowerCase())) {
+		return document.createElementNS(SVG_NAMESPACE, tag);
+	}
+	return document.createElement(tag);
+}
+
 
 
 // Hydrators invoke user component functions outside the router. componentFn
@@ -847,7 +883,7 @@ class WalkerEngine implements HydrateWalker {
 				(this.root && this.root.outerHTML ? ` Fragment:\n${String(this.root.outerHTML).slice(0, 800)}` : ''),
 			hasUnconsumed && __hydrateDevMode
 		);
-		return document.createElement(tag || 'div');
+		return createFreshElement(tag || 'div');
 	}
 
 	claimOnly(tag?: string): Element {
@@ -901,7 +937,7 @@ class WalkerEngine implements HydrateWalker {
 			} markers unconsumed); the client rendered more or different content than SSR.`,
 			hasUnconsumed && __hydrateDevMode
 		);
-		return document.createElement(tag || 'div');
+		return createFreshElement(tag || 'div');
 	}
 
 	retireDetached(): void {
@@ -1320,7 +1356,7 @@ class StructuralWalker implements HydrateWalker {
 						// The final sweep will report/repair a still-owned ghost.
 					}
 				}
-				const fresh = document.createElement(expectedTag);
+				const fresh = createFreshElement(expectedTag);
 				recordClaim(this.root, {
 					state: 'fresh',
 					el: fresh,
@@ -1350,7 +1386,7 @@ class StructuralWalker implements HydrateWalker {
 			return el;
 		}
 		this.idx = this.els.length;
-		const fresh = document.createElement(tag || 'div');
+		const fresh = createFreshElement(tag || 'div');
 		recordClaim(this.root, {
 			state: 'fresh',
 			el: fresh,

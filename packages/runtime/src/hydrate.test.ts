@@ -166,7 +166,8 @@ function mockDocument() {
   const doc = {
     cookie: '',
     head: { appendChild() {} },
-    createElement(tag) { return makeNode(1, tag); },
+    createElement(tag) { const n = makeNode(1, tag); n.namespaceURI = 'http://www.w3.org/1999/xhtml'; return n; },
+    createElementNS(ns, tag) { const n = makeNode(1, tag); n.namespaceURI = ns; return n; },
     createDocumentFragment() { return makeNode(11, '#document-fragment'); },
     createComment(text) { const c = makeNode(8); c.data = text; return c; },
     createTextNode(text) { const t = makeNode(3); t.data = text; return t; },
@@ -516,6 +517,45 @@ describe('markerless structural walker (plain SSR HTML)', () => {
     expect(target.hasAttribute('data-vsk-claimed')).toBe(false);
     expect(walker.nextElement('span')).toBe(tail);
     expect(walker.done()).toBe(true);
+    cleanupDocument();
+  });
+
+  it('exhausted svg claims build an SVG-namespaced element (mobile menu icon)', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    parent.appendChild(svg);
+    const walker = createHydrateWalker(parent);
+    expect(walker.nextElement('svg')).toBe(svg);
+    // Post-hydration re-render: the walker is exhausted, so a plain-JS icon
+    // component builds a fresh <svg>. An HTML-namespaced one serializes fine
+    // but lays out at 0x0 — the mobile menu icon vanished on first toggle.
+    const fresh = walker.nextElement('svg');
+    expect(fresh.tagName).toBe('SVG');
+    expect(fresh.namespaceURI).toBe('http://www.w3.org/2000/svg');
+    cleanupDocument();
+  });
+
+  it('tag-mismatch fallback keeps the SVG namespace for svg claims', () => {
+    mockDocument();
+    const parent = document.createElement('div');
+    parent.appendChild(document.createElement('span'));
+    const walker = createHydrateWalker(parent);
+    const fresh = walker.nextElement('svg');
+    expect(fresh.namespaceURI).toBe('http://www.w3.org/2000/svg');
+    cleanupDocument();
+  });
+
+  it('marker-engine exhausted svg claims keep the SVG namespace', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const m1 = document.createComment('vsk:t:svg');
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    root.appendChild(m1); root.appendChild(svg);
+    const walker = createHydrateWalker(root, [m1]);
+    expect(walker.nextElement('svg')).toBe(svg);
+    const fresh = walker.nextElement('svg');
+    expect(fresh.namespaceURI).toBe('http://www.w3.org/2000/svg');
     cleanupDocument();
   });
 
