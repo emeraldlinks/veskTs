@@ -1,23 +1,20 @@
-import { ServerResponse, ServerRequest, VeskRequest, VeskResponse, applyRequestSecurity, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook } from '@vesk/runtime/src/request';
+import { ServerResponse, ServerRequest, VeskRequest, VeskResponse, toVeskResponse, DEFAULT_MAX_BODY_BYTES, PayloadTooLargeError, applyRequestSecurity, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook } from '@vesk/runtime/src/request';
 
 let passed = 0;
 let failed = 0;
+const suites: Array<{ name: string; tests: Array<{ name: string; fn: () => unknown }> }> = [];
+let currentSuite: { name: string; tests: Array<{ name: string; fn: () => unknown }> } | null = null;
 
 function describe(name, fn) {
-	console.log(`\n${name}`);
+	currentSuite = { name, tests: [] };
+	suites.push(currentSuite);
 	fn();
+	currentSuite = null;
 }
 
 function it(name, fn) {
-	try {
-		fn();
-		passed++;
-		console.log(`  ✓ ${name}`);
-	} catch (e) {
-		failed++;
-		console.log(`  ✗ ${name}`);
-		console.log(`    ${e.message}`);
-	}
+	if (!currentSuite) throw new Error(`it(${JSON.stringify(name)}) called outside describe()`);
+	currentSuite.tests.push({ name, fn });
 }
 
 function expect(actual) {
@@ -32,6 +29,21 @@ function expect(actual) {
 		},
 		toBeNull() {
 			if (actual !== null) throw new Error(`Expected null, got ${JSON.stringify(actual)}`);
+		},
+		toBeUndefined() {
+			if (actual !== undefined) throw new Error(`Expected undefined, got ${JSON.stringify(actual)}`);
+		},
+		toThrow(expected?: string) {
+			if (typeof actual !== 'function') throw new Error('toThrow() expects a function');
+			try {
+				actual();
+			} catch (e) {
+				if (expected && !String((e as Error).message).includes(expected)) {
+					throw new Error(`Expected error containing "${expected}", got "${(e as Error).message}"`);
+				}
+				return;
+			}
+			throw new Error('Expected function to throw');
 		},
 		toBeInstanceOf(cls) {
 			if (!(actual instanceof cls)) throw new Error(`Expected instance of ${cls.name}`);
@@ -612,6 +624,176 @@ describe('VeskRequest', () => {
 		expect(req.params.id).toBe('42');
 		expect(req.locals.user).toBe('admin');
 	});
+
+	it('host and origin use the Host header', () => {
+		const req = new VeskRequest('http://internal:8080/path', { headers: { host: 'example.com:443' } });
+		expect(req.host).toBe('example.com:443');
+		expect(req.origin).toBe('http://example.com:443');
+	});
+
+	it('host honors x-forwarded-host only after setTrustProxy', () => {
+		const req = new VeskRequest('http://internal/path', {
+			headers: { host: 'internal', 'x-forwarded-host': 'public.example.com' },
+		});
+		expect(req.host).toBe('internal');
+		req.setTrustProxy(true);
+		expect(req.host).toBe('public.example.com');
+		expect(req.origin).toBe('http://public.example.com');
+	});
+
+	it('host and origin fall back to the parsed URL', () => {
+		const req = new VeskRequest('https://fallback.test/path');
+		expect(req.host).toBe('fallback.test');
+		expect(req.origin).toBe('https://fallback.test');
+	});
+
+	it('hostname strips the port and supports a setter', () => {
+		const req = new VeskRequest('http://test/', { headers: { host: 'example.com:8080' } });
+		expect(req.hostname).toBe('example.com');
+		req.hostname = 'override.test';
+		expect(req.hostname).toBe('override.test');
+	});
+
+	it('protocol supports a setter', () => {
+		const req = new VeskRequest('http://test/');
+		expect(req.protocol).toBe('http');
+		req.protocol = 'https';
+		expect(req.protocol).toBe('https');
+	});
+
+	it('ip uses x-real-ip when trusted and supports a setter', () => {
+		const req = new VeskRequest('http://test/', { headers: { 'x-real-ip': '198.51.100.7' } });
+		req.setTrustProxy(true);
+		expect(req.ip).toBe('198.51.100.7');
+		req.ip = '203.0.113.9';
+		expect(req.ip).toBe('203.0.113.9');
+	});
+
+	it('resolveUrl resolves relative paths and passes absolute URLs through', () => {
+		const req = new VeskRequest('https://example.com/dir/page');
+		expect(req.resolveUrl('/api/self')).toBe('https://example.com/api/self');
+		expect(req.resolveUrl('child')).toBe('https://example.com/child');
+		expect(req.resolveUrl('https://other.test/x')).toBe('https://other.test/x');
+		expect(req.resolveUrl('//cdn.test/x')).toBe('//cdn.test/x');
+	});
+
+	it('set/get expose the locals map', () => {
+		const req = new VeskRequest('http://test/');
+		expect(req.get('missing')).toBeUndefined();
+		req.set('user', { id: 7 });
+		expect(req.get('user').id).toBe(7);
+		expect(req.locals.user.id).toBe(7);
+	});
+
+	it('parses and decodes cookies from the Cookie header', () => {
+		const req = new VeskRequest('http://test/', {
+			headers: { cookie: 'session=abc%20123; theme=dark; empty=' },
+		});
+		expect(req.cookie('session')).toBe('abc 123');
+		expect(req.cookie('theme')).toBe('dark');
+		expect(req.cookie('empty')).toBe('');
+		expect(req.cookie('missing')).toBeUndefined();
+	});
+
+	it('shouldBindQuery returns raw query and validates with safeParse', () => {
+		const req = new VeskRequest('http://test/?page=2&limit=10');
+		expect(req.shouldBindQuery().data.page).toBe('2');
+		const ok = req.shouldBindQuery({ safeParse: (d) => ({ success: true, data: { page: Number(d.page) } }) });
+		expect(ok.data.page).toBe(2);
+		const bad = req.shouldBindQuery({ safeParse: () => ({ success: false, error: { issues: [] } }) });
+		expect(bad.error.issues.length).toBe(0);
+	});
+
+	it('bindQuery returns data and throws validation errors', () => {
+		const req = new VeskRequest('http://test/?page=2');
+		expect(req.bindQuery().page).toBe('2');
+		expect(() => req.bindQuery({ safeParse: () => ({ success: false, error: new Error('bad query') }) })).toThrow('bad query');
+	});
+
+	it('shouldBindJSON reads a clone so the body stays available', async () => {
+		const req = new VeskRequest('http://test/', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ ok: true, name: 'vesk' }),
+		});
+		const bound = await req.shouldBindJSON();
+		expect(bound.data.ok).toBe(true);
+		const body = await req.body;
+		expect(body.name).toBe('vesk');
+	});
+
+	it('shouldBindJSON and bindJSON apply schema validation', async () => {
+		const makeReq = () => new VeskRequest('http://test/', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ count: '3' }),
+		});
+		const ok = await makeReq().shouldBindJSON({ safeParse: (d) => ({ success: true, data: { count: Number(d.count) } }) });
+		expect(ok.data.count).toBe(3);
+
+		const cachedReq = makeReq();
+		expect(await cachedReq.body).toEqual({ count: '3' });
+		expect((await cachedReq.shouldBindJSON()).data).toEqual({ count: '3' });
+		expect((await cachedReq.bindJSON()).count).toBe('3');
+
+		const bad = await makeReq().shouldBindJSON({ safeParse: () => ({ success: false, error: new Error('invalid json body') }) });
+		expect(bad.error.message).toBe('invalid json body');
+		let threw = false;
+		try {
+			await makeReq().bindJSON({ safeParse: () => ({ success: false, error: new Error('invalid json body') }) });
+		} catch (e) {
+			threw = String((e as Error).message).includes('invalid json body');
+		}
+		expect(threw).toBe(true);
+	});
+
+	it('getBody() aliases the cached parsed body', async () => {
+		const req = new VeskRequest('http://test/', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ n: 1 }),
+		});
+		const first = await req.getBody();
+		const second = await req.getBody();
+		const body = await req.body;
+		expect(first.n).toBe(1);
+		expect(second).toBe(first);
+		expect(body).toBe(first);
+	});
+
+	it('body falls back to text when the content type is not JSON or form', async () => {
+		const req = new VeskRequest('http://test/', {
+			method: 'POST',
+			headers: { 'Content-Type': 'text/plain' },
+			body: 'hello',
+		});
+		expect(await req.body).toBe('hello');
+	});
+
+	it('query and parsedUrl setters update the parsed view', () => {
+		const req = new VeskRequest('http://test/first?a=1');
+		expect(req.query.a).toBe('1');
+		req.query = { b: '2' };
+		expect(req.query.b).toBe('2');
+		req.parsedUrl = new URL('http://test/second?c=3');
+		expect(req.parsedUrl.pathname).toBe('/second');
+		expect(req.query.c).toBe('3');
+		expect(req.query.b).toBeUndefined();
+	});
+
+	it('VeskRequest.from copies method/headers/cookies and seeds params/locals', () => {
+		const platform = new Request('http://test/items/7', {
+			method: 'POST',
+			headers: { cookie: 'session=xyz', 'x-test': 'yes' },
+		});
+		const req = VeskRequest.from(platform, { params: { id: '7' }, locals: { user: 'admin' } });
+		expect(req.method).toBe('POST');
+		expect(req.headers.get('x-test')).toBe('yes');
+		expect(req.cookies.session).toBe('xyz');
+		expect(req.params.id).toBe('7');
+		expect(req.locals.user).toBe('admin');
+		expect(req.get('user')).toBe('admin');
+	});
 });
 
 // ── VeskResponse tests ───────────────────────────────────────────
@@ -776,6 +958,121 @@ describe('VeskResponse', () => {
 		const cookie = res.headers.get('Set-Cookie');
 		expect(cookie).toContain('a=1');
 		expect(cookie).toContain('b=2');
+	});
+
+	it('is callable without new', async () => {
+		const res = VeskResponse('plain body', { status: 202, headers: { 'x-test': '1' } });
+		expect(res).toBeInstanceOf(VeskResponse);
+		expect(res.status).toBe(202);
+		expect(res.getHeader('x-test')).toBe('1');
+		expect(res.statusCode).toBe(202);
+		expect(await res.text()).toBe('plain body');
+	});
+
+	it('stream() preserves the ReadableStream body and init headers', async () => {
+		const stream = new ReadableStream({
+			start(controller) {
+				controller.enqueue(new TextEncoder().encode('chunked'));
+				controller.close();
+			},
+		});
+		const res = VeskResponse.stream(stream, { status: 201, headers: { 'Content-Type': 'text/plain' } });
+		expect(res.body).toBe(stream);
+		expect(res.status).toBe(201);
+		expect(res.headers.get('Content-Type')).toBe('text/plain');
+		expect(await res.text()).toBe('chunked');
+	});
+
+	it('instance redirect preserves body, cookies and security headers', async () => {
+		const res = VeskResponse.json({ ok: true })
+			.setCookie('session', 'abc')
+			.setCsp("default-src 'none'")
+			.redirect('/login', 303)
+			.build();
+		expect(res.status).toBe(303);
+		expect(res.headers.get('Location')).toBe('/login');
+		expect(res.headers.get('Content-Security-Policy')).toBe("default-src 'none'");
+		expect(res.headers.get('Set-Cookie')).toContain('session=abc');
+		expect(await res.json()).toEqual({ ok: true });
+	});
+
+	it('clearCookie(name) expires one cookie and preserves the others', () => {
+		const res = VeskResponse.json({})
+			.setCookie('a', '1')
+			.setCookie('b', '2')
+			.clearCookie('a', { path: '/app', domain: 'example.com' });
+		res.build();
+		const cookie = res.headers.get('Set-Cookie');
+		expect(cookie).toContain('a=;');
+		expect(cookie).toContain('Max-Age=0');
+		expect(cookie).toContain('Path=/app');
+		expect(cookie).toContain('Domain=example.com');
+		expect(cookie).toContain('b=2');
+		expect(cookie).not.toContain('a=1');
+	});
+
+	it('clearCookie() expires every queued cookie', () => {
+		const res = VeskResponse.json({})
+			.setCookie('a', '1')
+			.setCookie('b', '2')
+			.clearCookie();
+		res.build();
+		const cookie = res.headers.get('Set-Cookie');
+		expect(cookie).toContain('a=;');
+		expect(cookie).toContain('b=;');
+		expect(cookie).not.toContain('a=1');
+		expect(cookie).not.toContain('b=2');
+	});
+
+	it('formData() parses a form-encoded body', async () => {
+		const res = VeskResponse(new URLSearchParams({ name: 'vesk', role: 'admin' }));
+		const data = await res.formData();
+		expect(data.get('name')).toBe('vesk');
+		expect(data.get('role')).toBe('admin');
+	});
+
+	it('text/json/formData enforce the response body cap', async () => {
+		for (const method of ['text', 'json', 'formData']) {
+			const res = VeskResponse(new URLSearchParams({ a: '1' }), {
+				headers: { 'content-length': String(DEFAULT_MAX_BODY_BYTES + 1) },
+			});
+			let error = null;
+			try {
+				await (res as any)[method]();
+			} catch (e) {
+				error = e;
+			}
+			expect(error instanceof PayloadTooLargeError).toBe(true);
+			expect(error.status).toBe(413);
+		}
+	});
+
+	it('cors({ credentials: false }) omits only the credentials header', () => {
+		const res = VeskResponse.json({}).cors({ credentials: false });
+		expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+		expect(res.headers.get('Access-Control-Allow-Credentials')).toBeNull();
+	});
+
+	it('static json/html/rewrite/next/redirect report their documented status/headers', () => {
+		expect(VeskResponse.json({}, { status: 201 }).status).toBe(201);
+		expect(VeskResponse.html('<b>x</b>').headers.get('Content-Type')).toBe('text/html; charset=utf-8');
+		expect(VeskResponse.rewrite('/internal').headers.get('x-vesk-rewrite')).toBe('/internal');
+		expect(VeskResponse.next().headers.get('x-vesk-next')).toBe('1');
+		expect(VeskResponse.redirect('/old', 308).status).toBe(308);
+	});
+
+	it('toVeskResponse upgrades a plain Response and passes through VeskResponse/null', async () => {
+		expect(toVeskResponse(null)).toBeNull();
+		expect(toVeskResponse(undefined)).toBeUndefined();
+		const original = VeskResponse.json({ ok: true });
+		expect(toVeskResponse(original)).toBe(original);
+
+		const plain = new Response('plain', { status: 418, headers: { 'x-tea': 'yes' } });
+		const upgraded = toVeskResponse(plain);
+		expect(upgraded).toBeInstanceOf(VeskResponse);
+		expect(upgraded.status).toBe(418);
+		expect(upgraded.getHeader('x-tea')).toBe('yes');
+		expect(await upgraded.text()).toBe('plain');
 	});
 });
 
@@ -950,6 +1247,21 @@ describe('VeskResponse static factories return VeskResponse', () => {
 		expect(VeskResponse.next()).toBeInstanceOf(VeskResponse);
 	});
 });
+
+for (const suite of suites) {
+	console.log(`\n${suite.name}`);
+	for (const test of suite.tests) {
+		try {
+			await test.fn();
+			passed++;
+			console.log(`  ✓ ${test.name}`);
+		} catch (e) {
+			failed++;
+			console.log(`  ✗ ${test.name}`);
+			console.log(`    ${(e as Error).message}`);
+		}
+	}
+}
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 process.exit(failed > 0 ? 1 : 0);

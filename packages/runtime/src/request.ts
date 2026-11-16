@@ -486,15 +486,23 @@ export class VeskRequest extends ServerRequest {
 			}
 		}
 		Object.defineProperty(this, 'body', {
-			get: () => {
-				if (!this._bodyPromise) {
-					this._bodyPromise = this._parseBody();
-				}
-				return this._bodyPromise;
-			},
+			get: () => this._parseBodyOnce(),
 			configurable: true,
 			enumerable: true,
 		});
+	}
+
+	/** Parsed body, cached across `req.body`, `getBody()` and repeated awaits. */
+	_parseBodyOnce(): Promise<unknown> {
+		if (!this._bodyPromise) {
+			this._bodyPromise = this._parseBody();
+		}
+		return this._bodyPromise;
+	}
+
+	/** Explicit accessor for the cached parsed body (types expose this name). */
+	async getBody(): Promise<unknown> {
+		return this._parseBodyOnce();
 	}
 
 	/**
@@ -562,7 +570,11 @@ export class VeskRequest extends ServerRequest {
 
 	async shouldBindJSON<T = unknown>(schema?: any): Promise<{ data?: T; error?: any }> {
 		try {
-			const data = await (this as any).json();
+			// Reuse the cached body when it was already parsed; otherwise read a
+			// clone so the downstream handler can still consume the request.
+			const data = this._bodyPromise
+				? await this._bodyPromise
+				: await (typeof this.clone === 'function' ? this.clone() : this).json();
 			if (!schema) return { data: data as T };
 			if (typeof schema.safeParse === 'function') {
 				const r = schema.safeParse(data);
@@ -601,6 +613,10 @@ export class VeskRequest extends ServerRequest {
 			this._parsedUrl = new URL(this.url);
 		}
 		return this._parsedUrl;
+	}
+	set parsedUrl(v: URL) {
+		this._parsedUrl = v;
+		this._query = null;
 	}
 
 	get query(): Record<string, string> {

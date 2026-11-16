@@ -882,18 +882,43 @@ export interface ServerRequest extends Request {
 }
 
 export interface VeskRequest extends ServerRequest {
-  readonly query: Record<string, string>;
+  query: Record<string, string>;
   ip: string;
   protocol: string;
   hostname: string;
   parsedUrl: URL;
+  /** Host header (honors `x-forwarded-host` only when `trustProxy` is set). */
+  readonly host: string;
+  /** `protocol://host` — the base for resolving relative URLs. */
+  readonly origin: string;
+  /** Resolve a relative URL against {@link origin}; absolute URLs pass through. */
+  resolveUrl(url: string): string;
+  /** Cached parsed body (`json`/`form`/`text`, selected by content type). */
   getBody(): Promise<unknown>;
+  /** locals map accessors — `VeskRequest` doubles as the middleware ctx. */
+  set(key: string, value: unknown): void;
+  get(key: string): unknown;
   /** Additive helpers. */
   cookie?: (name: string) => string | undefined;
   shouldBindQuery?: <T = Record<string, string>>(schema?: unknown) => { data?: T; error?: unknown };
   bindQuery?: <T = Record<string, string>>(schema?: unknown) => T;
   shouldBindJSON?: <T = unknown>(schema?: unknown) => Promise<{ data?: T; error?: unknown }>;
   bindJSON?: <T = unknown>(schema?: unknown) => Promise<T>;
+  /** Per-request security overrides. */
+  setCsp(policy: string | false): void;
+  setRateLimit(options: { windowMs?: number; max?: number } | false): void;
+  setCsrf(enable: boolean): void;
+  setSecurityHeader(name: string, value: string | false): void;
+  setTrustProxy(enable: boolean | string): void;
+  getSecurityOverrides(): Record<string, unknown>;
+}
+
+export declare namespace VeskRequest {
+  /** Wrap an inbound platform `Request`, optionally seeding params/locals. */
+  export function from(
+    request: Request,
+    init?: { params?: Record<string, string>; locals?: Record<string, unknown> },
+  ): VeskRequest;
 }
 
 export interface SetCookieOptions {
@@ -929,7 +954,18 @@ export interface VeskResponse extends Response {
   getHeader?(name: string): string | null;
 }
 
+/** Callable form of {@link VeskResponse}; `new VeskResponse(...)` also works at runtime. */
+export declare function VeskResponse(body?: BodyInit | null, init?: ResponseInit): VeskResponse;
+
 export declare namespace VeskResponse {
+  /** Create a JSON response with `Content-Type: application/json`. */
+  export function json(body: unknown, init?: ResponseInit): VeskResponse;
+  /** Create an HTML response with `Content-Type: text/html; charset=utf-8`. */
+  export function html(html: string, init?: ResponseInit): VeskResponse;
+  /** Create an internal rewrite response (`x-vesk-rewrite`). */
+  export function rewrite(url: string): VeskResponse;
+  /** Create a pass-through response (`x-vesk-next`). */
+  export function next(): VeskResponse;
   /**
    * Create a redirect response with an empty body.
    *
