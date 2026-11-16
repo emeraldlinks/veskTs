@@ -547,7 +547,18 @@ let htmlFnCode: string;
       '      const url = __ctx.url;',
       indentedRunRoute,
       '    };',
-      '    const __mwResult = await __executeMw(__ctx, __runRoute);',
+      // See api-function.ts: the host dispatcher marks a rewritten request so
+      // root/source middleware is not run a second time while the target page
+      // is rendered.
+      '    if (request && request.__veskSkipMiddleware) return await __runRoute();',
+      '    const __runRewrite = async (rewrite) => {',
+      '      const dispatch = globalThis.__vesk_dispatch_rewrite;',
+      '      if (typeof dispatch !== "function") {',
+      '        return new Response("Rewrite target unavailable", { status: 500, headers: { "Content-Type": "text/plain" } });',
+      '      }',
+      '      return await dispatch(String(rewrite), request);',
+      '    };',
+      '    const __mwResult = await __executeMw(__ctx, (rewrite) => rewrite ? __runRewrite(rewrite) : __runRoute());',
       '    if (__mwResult.response) return __mwResult.response;',
       '    if (__mwResult.lastRan) return new Response(null, { status: 204 });',
       '    return await __runRoute();',

@@ -300,6 +300,17 @@ test('matches catch-all', () => {
 	cleanup(tmp);
 });
 
+test('middleware-only catch-all does not match a page route', () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/api/[...path]/middleware.ts': 'export async function middleware(ctx, next) { return next(); }',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const match = matchUrl(tree, '/unknown');
+	expect(match).toBeNull();
+	cleanup(tmp);
+});
+
 console.log('\nRoute manifest generation\n');
 
 test('generates import statements for all components', () => {

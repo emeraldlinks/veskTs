@@ -5,6 +5,29 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (redirect APIs + middleware rewrites):**
+
+- [x] Added mutating `VeskResponse.redirect(url, status = 302)` alongside the
+  static `VeskResponse.redirect(url, status = 307)`. The instance form sets the
+  status + `Location`, preserves the body, queued cookies and security headers,
+  and returns the same response. Typed in `@vesk/types` and runtime tests added.
+- [x] **BUG (dev-server): API middleware `next('/target')` dispatched the
+  original `apiMatch`**, so the source route's response won. `onLast` now
+  re-matches the rewritten target; API→API dispatches the target, API→page
+  falls through to the page renderer, and page→page re-matches before SSR.
+- [x] Live fixtures in `test-app` + `tests/api-parity-test.mjs` cover instance
+  redirect with cookie preservation and API→API / API→page / page→API / page→page
+  rewrites; 19/19 pass on both dev and production.
+- [x] **Page→API rewrites** dispatch the matched API target from inside the page
+  middleware `onLast`, so source middleware still wraps the target response.
+- [x] **Production route-level API rewrites:** build now collects the API chain
+  with the real `/api` request path, and the generated API wrapper re-dispatches
+  rewritten targets while marking the target request to skip its inline chain.
+- [x] **Route scanner now retains middleware-only nodes** (`hasMiddleware`), so
+  `app/api/<dir>/middleware.ts` is discoverable even when the directory has no
+  page/layout. Regression: `middleware.test.ts` route-local API chain.
+- [x] Docs/skills/llms updated for instance redirects and rewrite semantics.
+
 **This session (reactive collections port):**
 
 - [x] Ported Ripple's four reactive collections as public runtime API:

@@ -241,7 +241,19 @@ export function generateApiFunction(
       '    const __runRoute = async () => {',
       indentedDispatch,
       '    };',
-      '    const __mwResult = await __executeMw(__ctx, __runRoute);',
+      // A rewritten request is dispatched by the production host without
+      // re-running middleware: root middleware already wrapped this call, and
+      // route-level middleware belongs to the source route. The internal
+      // request flag is set by the host dispatcher, never by the wire.
+      '    if (request && request.__veskSkipMiddleware) return await __runRoute();',
+      '    const __runRewrite = async (rewrite) => {',
+      '      const dispatch = globalThis.__vesk_dispatch_rewrite;',
+      '      if (typeof dispatch !== "function") {',
+      '        return new Response(JSON.stringify({ error: "Rewrite target unavailable" }), { status: 500, headers: { "Content-Type": "application/json" } });',
+      '      }',
+      '      return await dispatch(String(rewrite), request);',
+      '    };',
+      '    const __mwResult = await __executeMw(__ctx, (rewrite) => rewrite ? __runRewrite(rewrite) : __runRoute());',
       '    if (__mwResult.response) return __mwResult.response;',
       '    if (__mwResult.lastRan) return new Response(null, { status: 204 });',
       '    return await __runRoute();',

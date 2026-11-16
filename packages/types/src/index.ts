@@ -910,6 +910,15 @@ export interface VeskResponse extends Response {
   build(): VeskResponse;
   setCookie(name: string, value: string, opts?: SetCookieOptions): VeskResponse;
   clearCookie(name?: string, opts?: { path?: string; domain?: string }): VeskResponse;
+  /**
+   * Mutate this response into a redirect by setting its status and `Location`
+   * header. Unlike the static `VeskResponse.redirect()`, this keeps the body
+   * and any queued cookies/security headers already attached to the response.
+   *
+   * @param url - Absolute or relative redirect target.
+   * @param status - Redirect status. Defaults to `302`.
+   */
+  redirect(url: string, status?: number): VeskResponse;
   setCsp(policy: string | false): VeskResponse;
   setSecurityHeader(name: string, value: string | false): VeskResponse;
   cache(ttlSeconds: number): VeskResponse;
@@ -921,6 +930,14 @@ export interface VeskResponse extends Response {
 }
 
 export declare namespace VeskResponse {
+  /**
+   * Create a redirect response with an empty body.
+   *
+   * @param url - Absolute or relative redirect target.
+   * @param status - Redirect status. Defaults to `307` (preserve method/body).
+   */
+  export function redirect(url: string, status?: number): VeskResponse;
+
   /**
    * Create a chunked streaming response from a `ReadableStream` body.
    *

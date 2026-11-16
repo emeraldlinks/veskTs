@@ -334,6 +334,61 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     return null;
   }
 
+  /**
+   * Dispatch a middleware rewrite from inside a generated API/SSR function.
+   *
+   * Route-level middleware runs *inside* the generated function, after the
+   * server already picked the source route. Returning the source response
+   * (the old behaviour) silently ignored `next("/target")`; this re-enters the
+   * route table for the rewrite target. The target request carries an internal
+   * marker so its generated wrapper skips middleware — root middleware has
+   * already wrapped this request, and the source route's middleware owns the
+   * onion.
+   */
+  async function dispatchRewrite(rewrite: string, request: Request): Promise<Response> {
+    const target = new URL(rewrite, request.url);
+    const method = (request.method || 'GET').toUpperCase();
+    const hasBody = method !== 'GET' && method !== 'HEAD';
+    const targetRequest = new Request(target.href, hasBody
+      ? ({ method, headers: request.headers, body: request.body, duplex: 'half' } as RequestInit & { duplex: 'half' })
+      : { method, headers: request.headers });
+    Object.defineProperty(targetRequest, '__veskSkipMiddleware', { value: true });
+
+    const notFound = new Response(JSON.stringify({ error: 'Rewrite target not found' }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+
+    if (target.pathname === '/api' || target.pathname.startsWith('/api/')) {
+      for (const route of buildConfig.routes) {
+        if (route.type !== 'api') continue;
+        if (!matchPath(route.path, target.pathname)) continue;
+        const mod = await loadFunction(route.function);
+        if (!mod) {
+          return functionFailure(route.function)
+            ? new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500, headers: { 'Content-Type': 'application/json' } })
+            : notFound;
+        }
+        return await mod.handle(targetRequest);
+      }
+      return notFound;
+    }
+
+    for (const route of buildConfig.routes) {
+      if (route.type !== 'ssr') continue;
+      if (!matchPath(route.path, target.pathname)) continue;
+      const mod = await loadFunction(route.function);
+      if (!mod) {
+        return functionFailure(route.function)
+          ? new Response('Internal Server Error', { status: 500, headers: { 'Content-Type': 'text/plain' } })
+          : notFound;
+      }
+      return await mod.handle(targetRequest);
+    }
+    return notFound;
+  }
+  (globalThis as Record<string, unknown>).__vesk_dispatch_rewrite = dispatchRewrite;
+
   function getClientIpFromReq(req: IncomingMessage): string {
     if (!securityConfig?.trustProxy) return req.socket?.remoteAddress || 'unknown';
     const forwarded = req.headers['x-forwarded-for'];

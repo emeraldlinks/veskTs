@@ -319,7 +319,7 @@ export async function PUT() {
       { kind: "h2", text: "VeskResponse (fluent)" },
       {
         kind: "p",
-        text: "`VeskResponse` is a Proxy over a `ServerResponse` subclass, so it can be called with or without `new`. Every chainable method returns the same instance. Static constructors: `json`, `redirect`, `rewrite`, `next`, `html` and `stream`. The returned instance also has `text()` / `json()` for reading the body and a `status` getter that reflects `setStatus`. `build()` (also `text()` and `json()`) flushes queued security headers and cookies into real header values.",
+        text: "`VeskResponse` is a Proxy over a `ServerResponse` subclass, so it can be called with or without `new`. Every chainable method returns the same instance. Static constructors: `json`, `redirect`, `rewrite`, `next`, `html` and `stream`. The returned instance also has `text()` / `json()` for reading the body, an instance `redirect(url, status = 302)` that mutates status and `Location` while preserving queued cookies and headers, and a `status` getter that reflects `setStatus`. `build()` (also `text()` and `json()`) flushes queued security headers and cookies into real header values.",
       },
       {
         kind: "code",
@@ -351,6 +351,7 @@ export async function POST(req: VeskRequest) {
           ["`static html(html, init?)`", "Response with `Content-Type: text/html; charset=utf-8`."],
           ["`static stream(readable, init?)`", "Chunked response over a `ReadableStream` body (SSE, file streams)."],
           ["`setStatus(code)`", "Final status; the `status` getter returns it even if the initial `ResponseInit` differs."],
+          ["`redirect(url, status = 302)`", "Mutates status and `Location`; keeps the body, queued cookies and security headers."],
           ["`setCookie(name, value, opts?)`", "Queues a `Set-Cookie` header. `HttpOnly` and `Secure` are on by default, `SameSite=Lax`, `Path=/`. Options: `httpOnly`, `secure`, `sameSite` (`'Lax' | 'Strict' | 'None'`), `maxAge`, `path`, `domain`."],
           ["`clearCookie(name, opts?)`", "Queues an expiring (`Max-Age=0`) cookie. Options: `path`, `domain`."],
           ["`setCsp(policy | false)`", "Sets `Content-Security-Policy` with a raw CSP string; `false` removes it."],

@@ -1927,10 +1927,67 @@ function routeFullPathForChunk(chunkName: string): string | null {
     }
 
     const mwChain = collectMiddlewareChain(routeTree, url.pathname, appDirPath);
+    // A rewrite from middleware on an API path can target a page. The API
+    // branch runs first, so record that middleware already ran and hand the
+    // rewritten request to the page renderer below instead of re-running the
+    // chain (and instead of returning the original API route's response).
+    let mwRanForRewrite = false;
+    let mwRewriteCtx: any = null;
 
     const apiDirPath = join(appDirPath, 'api');
-    if (url.pathname.startsWith('/api') && existsSync(apiDirPath)) {
-      const apiRoutes = await scanApiRoutes(apiDirPath);
+    let devApiRoutes: ReturnType<typeof scanApiRoutes> | null = null;
+    const getDevApiRoutes = (): ReturnType<typeof scanApiRoutes> => {
+      if (!devApiRoutes) devApiRoutes = scanApiRoutes(apiDirPath);
+      return devApiRoutes;
+    };
+    const isApiPathname = (pathname: string): boolean =>
+      pathname === '/api' || pathname.startsWith('/api/');
+
+    // Read a request body once for an API rewrite. The page renderer never
+    // touches the socket first, so a page middleware that rewrites to an API
+    // route still has to hand the target the original bytes.
+    async function readDevApiBody(): Promise<{ buffer: Buffer | null; tooLarge: boolean }> {
+      if (req.method === 'GET' || req.method === 'HEAD') return { buffer: null, tooLarge: false };
+      const chunks: Buffer[] = [];
+      let total = 0;
+      for await (const chunk of req) {
+        total += (chunk as Buffer).byteLength;
+        if (total > maxBodyBytes) return { buffer: null, tooLarge: true };
+        chunks.push(chunk as Buffer);
+      }
+      return { buffer: chunks.length > 0 ? Buffer.concat(chunks) : null, tooLarge: false };
+    }
+
+    async function dispatchDevApi(
+      target: NonNullable<ReturnType<typeof matchApiUrl>>,
+      locals: Record<string, unknown>,
+      bodyBuffer?: Buffer | null,
+    ): Promise<Response | null> {
+      let body = bodyBuffer;
+      if (body === undefined) {
+        const read = await readDevApiBody();
+        if (read.tooLarge) {
+          return new Response(JSON.stringify({ error: `Request body exceeds limit (${maxBodyBytes} bytes)` }), {
+            status: 413,
+            headers: { 'Content-Type': 'application/json' },
+          });
+        }
+        body = read.buffer;
+      }
+      const targetUrl = `${url.origin}${url.pathname}${url.search}`;
+      const webRequest = buildWebRequest(req, targetUrl, body && body.length ? new Uint8Array(body) : null);
+      return await executeApiRoute(
+        target.node.filePath!,
+        (req.method || 'GET').toUpperCase(),
+        webRequest,
+        target.params,
+        locals,
+        apiWatchCache,
+      );
+    }
+
+    if (isApiPathname(url.pathname) && existsSync(apiDirPath)) {
+      const apiRoutes = getDevApiRoutes();
       const apiMatch = matchApiUrl(apiRoutes, req.url || url.pathname);
       if (apiMatch) {
         const bodyChunks: Buffer[] = [];
@@ -1955,17 +2012,39 @@ function routeFullPathForChunk(chunkName: string): string | null {
         }
 
         let apiLocals: Record<string, unknown> = Object.assign({}, eventsCtx?.locals || (globalThis as Record<string, unknown>).__vesk_server_ctx || {});
-        const dispatchApi = async (locals: Record<string, unknown>): Promise<Response | null> => {
-          const webRequest = buildWebRequest(req, req.url || url.pathname, bodyBuffer.length ? bodyBuffer : null);
-          return await executeApiRoute(apiMatch.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, locals, apiWatchCache);
+        const dispatchApi = async (
+          locals: Record<string, unknown>,
+          target: { node: { filePath: string | null }; params: Record<string, string> } = apiMatch
+        ): Promise<Response | null> => {
+          const targetUrl = `${url.origin}${url.pathname}${url.search}`;
+          const webRequest = buildWebRequest(req, targetUrl, bodyBuffer.length ? bodyBuffer : null);
+          return await executeApiRoute(target.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, target.params, locals, apiWatchCache);
         };
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
           try {
             const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
               plugins: getActiveDevPlugins() as VeskPlugin[],
-              onLast: async (_rewrite, mwCtx) => {
+              onLast: async (rewrite, mwCtx) => {
                 const locals = Object.assign({}, apiLocals, mwCtx?.locals || {});
+                if (rewrite) {
+                  // Re-match against the rewritten URL: the original apiMatch
+                  // was computed before middleware ran, so dispatching it here
+                  // made next('/target') return the source route's response.
+                  const targetUrl = new URL(rewrite, requestUrl);
+                  url.pathname = targetUrl.pathname;
+                  url.search = targetUrl.search;
+                  const isApiTarget = isApiPathname(targetUrl.pathname);
+                  const targetMatch = isApiTarget ? matchApiUrl(apiRoutes, targetUrl.pathname + targetUrl.search) : null;
+                  if (targetMatch) {
+                    return (await dispatchApi(locals, targetMatch)) ?? new Response(null, { status: 500 });
+                  }
+                  // Target is a page: leave response null so the API branch
+                  // falls through to the page renderer below.
+                  mwRanForRewrite = true;
+                  mwRewriteCtx = mwCtx;
+                  return null;
+                }
                 return (await dispatchApi(locals)) ?? new Response(null, { status: 500 });
               },
             });
@@ -1979,9 +2058,12 @@ function routeFullPathForChunk(chunkName: string): string | null {
               return;
             }
             apiLocals = mwResult.locals || apiLocals;
-            // Propagate rewrite if any
+            // Propagate rewrite if any. The page renderer matches routes from
+            // `url`, so this must happen before falling through.
             if (mwResult.rewriteUrl) {
-              url.pathname = mwResult.rewriteUrl;
+              const targetUrl = new URL(mwResult.rewriteUrl, requestUrl);
+              url.pathname = targetUrl.pathname;
+              url.search = targetUrl.search;
             }
           } catch (e) {
             const err = e as Error & { name: string };
@@ -1994,17 +2076,20 @@ function routeFullPathForChunk(chunkName: string): string | null {
           }
         }
 
-        const response = mwChain.length > 0 ? null : await dispatchApi(apiLocals);
-        if (!response) {
-          res.writeHead(500, { 'Content-Type': 'text/plain' });
-          res.end('API route returned no response');
+        if (!mwRanForRewrite) {
+          const response = mwChain.length > 0 ? null : await dispatchApi(apiLocals);
+          if (!response) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('API route returned no response');
+            return;
+          }
+          logRequest(response.status);
+          const body = await response.text();
+          res.writeHead(response.status, toNodeHeaders(response));
+          res.end(body);
           return;
         }
-        logRequest(response.status);
-        const body = await response.text();
-        res.writeHead(response.status, toNodeHeaders(response));
-        res.end(body);
-        return;
+        // Fall through: the rewrite target is a page.
       }
     }
 
@@ -2056,6 +2141,36 @@ function routeFullPathForChunk(chunkName: string): string | null {
     }
     const matched = match;
     const forData = req.headers['x-vesk-data'] === '1';
+
+    // Recompute the matched page chain after `next('/target')`. Middleware
+    // runs after the original match was computed, so without this the renderer
+    // kept serving the source page while the browser URL (and ctx.url) moved.
+    function applyPageRewrite(rewrite: string): boolean {
+      if (!match) return false;
+      const target = new URL(rewrite, `http://localhost${url.pathname}${url.search}`);
+      url.pathname = target.pathname;
+      url.search = target.search;
+      const nextMatch = matchUrl(routeTree, url.pathname);
+      if (!nextMatch) return false;
+      match.nodes = nextMatch.nodes;
+      match.params = nextMatch.params;
+      const parts = url.pathname.split('/').filter(Boolean);
+      cleanChain.length = 0;
+      let nextSeg = 0;
+      for (const node of match.nodes) {
+        if (node.fullPath === '/') {
+          cleanChain.push(node);
+        } else if (!node.isGroup && (node.segmentCount as number) > 0) {
+          if (nextSeg < parts.length) {
+            cleanChain.push(node);
+            nextSeg++;
+          }
+        } else {
+          cleanChain.push(node);
+        }
+      }
+      return true;
+    }
 
     // Route chunks are built on demand (see ensureRouteChunk) — but NOT here.
     // The chunk URL is published up front by the route tree, so the HTML can
@@ -2303,7 +2418,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
 
     let mwLocals: Record<string, unknown> = {};
     try {
-      if (mwChain.length > 0) {
+      if (mwChain.length > 0 && !mwRanForRewrite) {
         const mwReq = new Request(`http://localhost${url.pathname}${url.search}`, {
           headers: req.headers as Record<string, string>,
           method: req.method || 'GET',
@@ -2311,7 +2426,31 @@ function routeFullPathForChunk(chunkName: string): string | null {
         const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
           plugins: getActiveDevPlugins() as VeskPlugin[],
           onLast: async (rewrite: string | null, mwCtx: any) => {
-            if (rewrite) url.pathname = rewrite;
+            if (rewrite) {
+              const target = new URL(rewrite, `http://localhost${url.pathname}${url.search}`);
+              url.pathname = target.pathname;
+              url.search = target.search;
+              // A page middleware can rewrite into the API namespace. The page
+              // renderer has no API branch, so dispatch the target handler here
+              // instead of turning a valid rewrite into a 404.
+              if (isApiPathname(target.pathname)) {
+                const targetMatch = matchApiUrl(getDevApiRoutes(), target.pathname + target.search);
+                if (!targetMatch) {
+                  return new VeskResponse(renderDefaultNotFoundPage({ url: url.pathname }), {
+                    status: 404,
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                  });
+                }
+                const locals = Object.assign({}, eventsCtx?.locals || {}, mwCtx?.locals || {});
+                return (await dispatchDevApi(targetMatch, locals)) ?? new Response(null, { status: 500 });
+              }
+              if (!applyPageRewrite(rewrite)) {
+                return new VeskResponse(renderDefaultNotFoundPage({ url: url.pathname }), {
+                  status: 404,
+                  headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+              }
+            }
             // mwCtx is the middleware context with correct locals/cookies/url.
             // executeMiddlewareChain already sets globalThis.__vesk_request to mwCtx
             // during the call, so we just render without overriding it.
@@ -2353,7 +2492,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         }
       } else {
         const prev = (globalThis as Record<string, unknown>).__vesk_request;
-        (globalThis as Record<string, unknown>).__vesk_request = ctx;
+        (globalThis as Record<string, unknown>).__vesk_request = mwRewriteCtx || ctx;
         try {
           const secHeaders = security ? securityHeaders({ security }) : {};
           if (forData) {

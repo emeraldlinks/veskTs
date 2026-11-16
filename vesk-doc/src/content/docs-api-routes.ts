@@ -101,6 +101,7 @@ export async function DELETE(request: Request, ctx: { params: Promise<{ id: stri
           ["new Response(body, { status, headers })", "Arbitrary body (text, html, stream, null for 204)"],
           ["VeskResponse.json(...).setStatus(201).setCookie(...).build()", "Fluent response builder"],
           ["VeskResponse.redirect(url, 307) / VeskResponse.next()", "Redirect / pass-through responses"],
+          ["VeskResponse.json(...).redirect(url, 302)", "Mutate the response into a redirect, preserving queued cookies and headers"],
           ["any non-Response value", "Auto-serialized to JSON, status 200"],
         ],
       },
@@ -121,7 +122,7 @@ export async function GET(request: Request) {
       {
         kind: "list",
         items: [
-          "`VeskResponse` is a fluent `Response` subclass (exported from `@vesk/runtime`). Chain `.setStatus(code)`, `.setCookie(name, value, opts)`, `.clearCookie(name)`, `.cache(ttlSeconds)`, `.noCache()`, `.cors(...)`, `.setCsp(policy)`, `.setSecurityHeader(name, value)` and end with `.build()`. Statics: `json`, `html`, `stream`, `redirect` (default 307), `rewrite`, `next`.",
+          "`VeskResponse` is a fluent `Response` subclass (exported from `@vesk/runtime`). Chain `.setStatus(code)`, `.setCookie(name, value, opts)`, `.clearCookie(name)`, `.redirect(url, status?)`, `.cache(ttlSeconds)`, `.noCache()`, `.cors(...)`, `.setCsp(policy)`, `.setSecurityHeader(name, value)` and end with `.build()`. Statics: `json`, `html`, `stream`, `redirect` (default 307), `rewrite`, `next`. The instance `redirect()` defaults to 302 and preserves body, queued cookies and security headers.",
           "Cookie options: `httpOnly` (default true), `secure` (default true), `sameSite` (default 'Lax'), `maxAge`, `path`, `domain`.",
           "Security headers set via `setCsp`/`setSecurityHeader` are flushed by `.build()` (or lazily on `.text()`/`.json()`).",
           "A thrown `Redirect` error (status + url) or `NotFoundError` is turned into a 30x/404 response by the runtime.",

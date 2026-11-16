@@ -932,9 +932,11 @@ trustProxy), `protocol`, `hostname`, `await req.body` (lazy parse),
 ### VeskResponse builders
 
 `VeskResponse.json/html/redirect(url, status=307)/rewrite(url)/next()`.
-Chain: `.setStatus(n).setCookie(name,val,opts).clearCookie(name).setCsp(policy|false)
-.setSecurityHeader(name,val|false).cache(ttlSeconds).noCache()
-.cors({origin,methods,headers,credentials}).build()`.
+Chain: `.setStatus(n).setCookie(name,val,opts).clearCookie(name).redirect(url, status=302)
+.setCsp(policy|false).setSecurityHeader(name,val|false).cache(ttlSeconds).noCache()
+.cors({origin,methods,headers,credentials}).build()`. The instance `redirect()`
+mutates status + `Location` and preserves the body, queued cookies and security
+headers; the static default stays 307.
 `await res.text()/json()` flush pending headers. Cookie defaults are
 safe-by-default: **httpOnly + secure ON** unless explicit `false`,
 `sameSite='Lax'`, `path='/'`.
@@ -1034,61 +1036,135 @@ object as the framework request locals returned by `locals()`.
 ## Middleware (onion model)
 
 `app/middleware.ts` applies globally; a `middleware.ts` in any route dir
-applies to that subtree; files chain root → leaf.
+applies to that subtree and to API routes below it; files chain root → leaf.
+Middleware runs for SSR pages and API handlers in dev, Node production and
+inline platform/serverless builds. Static assets and prerendered output are
+served before it.
 
 ```ts
-import type { MiddlewareContext } from '@vesk/compiler';
-export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {
-	ctx.set('startTime', Date.now());
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types';
+
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	const start = Date.now();
 	const res = await next();
-	console.log('took', Date.now() - ctx.get('startTime'), 'ms');
+
+	if (res) {
+		res.headers.set('server-timing', 'app;dur=' + (Date.now() - start));
+	}
+
 	return res;
 }
 ```
 
 Rules:
-- `return await next()` (or its response) when middleware needs to
-  post-process or return the downstream response. The framework also preserves
-  the response when middleware does `await next()` without returning it.
-- A middleware that neither calls `next()` nor returns a response short-circuits
-  the chain.
-- Return a `Response` to short-circuit (never reaches page).
-- `next('/new-path')` rewrites the URL for the rest of the chain.
-- Locals set via `ctx.set()` visible during SSR (`locals()`) and API routes.
+- `MiddlewareNext` is `(rewrite?: string) => Promise<VeskResponse | null>`.
+  Return the downstream response when post-processing it. The framework also
+  preserves the response when middleware does `await next()` without returning
+  it.
+- A middleware that neither calls `next()` nor returns a response **continues**
+  to the next middleware/route. Return `ctx.status(...)`, `ctx.json(...)`,
+  `ctx.abortWithStatus(...)`, or another `Response` to stop.
+- Returning a `Response` without `next()` short-circuits; the page/API handler
+  never runs.
+- `next('/new-path')` rewrites the URL for the rest of the chain and re-matches
+  it: API→API, API→page, page→page and page→API rewrites are supported, in dev
+  and production. The target's own middleware does not run twice; the source
+  chain owns the onion and post-processes the response. Return `next(target)` or
+  its downstream response. The browser URL stays unchanged; use `ctx.redirect()`
+  to change it.
+- Locals set via `ctx.set()` are visible during SSR (`locals()`) and in API
+  handlers.
+- Helpers are optional in the public type for backward compatibility but are
+  always installed at runtime. Under strict TS, guard them or use a non-null
+  assertion (`ctx.json!(...)`).
 
 ### MiddlewareContext
 
-`{ request, params, url, locals, cookies, set(key,v), get(key), [key]: any }`
-(`ctx.user === ctx.locals.user`).
+`MiddlewareContext<L>` has `request`, `params`, `url`, `locals`, `cookies`
+(request cookie record), `set`/`get`, and an optional property fallback into
+locals (`ctx.user === ctx.locals.user`). Typed helpers:
 
-### Redirects / rewrites / client middleware
+| Member | Behavior |
+|---|---|
+| `cookie(name)` | Read one request cookie (`ctx.cookies[name]`). |
+| `getHeader(name)` | Read a request header. |
+| `header(name, value)` | Queue a header on the final response; applies to SSR, API and short-circuit responses. |
+| `status(code)` / `json(body)` / `text(body)` / `html(body)` | Build a response. |
+| `redirect(url, status?)` | Build a redirect response (`302` default). |
+| `shouldBindQuery(schema?)` / `bindQuery(schema?)` | Parse/validate `ctx.url.searchParams`; schema uses `safeParse`; `bind*` throws. |
+| `shouldBindJSON(schema?)` / `bindJSON(schema?)` | Parse/validate a clone of the JSON body; `bind*` throws. |
+| `abort()` / `isAborted()` | Mark/check the chain aborted. `abort()` alone creates no response. |
+| `abortWithStatus(code)` / `abortWithStatusJSON(code, body)` | Abort and build the response. |
+| `errors` / `error(err)` | Collected `{ error }` records; `error()` records without throwing. |
+
+`VeskResponse` from `next()` extends `Response` with `setCookie`, `clearCookie`,
+`setStatus`, `statusCode`, `getHeader`, `setCsp`, `setSecurityHeader`, `cache`,
+`noCache`, `cors`, and `build`. `next()` results are normalized for both SSR
+and API responses, so this works across dev/prod/edge:
 
 ```ts
-export async function middleware(ctx, next) {
-	if (!ctx.cookies.get('session')) {
-		return Response.redirect(new URL('/login', ctx.url), 302);
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types';
+
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	const res = await next();
+
+	if (res) {
+		res.setCookie('visited', '1', { path: '/', httpOnly: false, secure: false });
+		res.headers.set('x-request-id', crypto.randomUUID());
 	}
+
+	return res;
+}
+```
+
+Cookie helpers queue values and flush on `build()` (the executor calls it).
+Return the same response; rebuilding it with `new Response(...)` loses queued
+cookies. Upgrade a plain `Response` with `toVeskResponse()` from
+`@vesk/runtime/server` before calling cookie helpers. `clearCookie(name, opts?)`
+expires a cookie; no name clears every queued cookie on that response.
+
+### Redirects / rewrites / short-circuits
+
+```ts
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	if (!ctx.cookie!('session')) {
+		return ctx.abortWithStatusJSON!(401, { error: 'Unauthorized' });
+	}
+
+	if (ctx.url.pathname === '/health') {
+		return ctx.json!({ ok: true });
+	}
+
 	if (ctx.url.pathname.startsWith('/old')) {
-		const res = await next('/new');       // internal rewrite
-		res.headers.set('x-rewritten', '1');
-		return res;
+		return next('/new');
 	}
+
+	if (ctx.url.hostname === 'www.example.com') {
+		return ctx.redirect!('https://example.com' + ctx.url.pathname, 308);
+	}
+
 	return next();
 }
 ```
+
+Bare `ctx.abort()` only sets the flag; use `abortWithStatus*` (or return a
+response) for deterministic early exits. Thrown `redirect()` errors and
+`Response.redirect()` relative URLs are normalized. `TypeError` from middleware
+becomes a 500 rather than crashing a serverless/edge invocation.
 
 `createFileRouter(tree, { middleware: [async (ctx, next) => …] })` — client
 ctx `{ url, params, router, locals }`; throwing `redirect()`/`notFound()` →
 replace-nav / not-found UI.
 
-Middleware edits hot-reload in dev. Middleware responses honored on API
-routes in dev exactly as production.
+Middleware edits hot-reload in dev. Middleware responses are honored on API
+routes in dev exactly as production. Keep middleware edge-portable: use Web
+APIs (`Request`, `Response`, `Headers`, `URL`, `crypto`), not `fs`/`path`/`http`.
 
 ## Cookies
 
 - Read: `cookies()` (CookieStore → `get/getAll/toString`). Server reads
   `Cookie` header via ambient context; browser falls back to `document.cookie`.
-  Middleware: `ctx.cookies.get('sid')`.
+  Middleware: `ctx.cookies` is a plain record — use `ctx.cookie('sid')`.
 - Write: `VeskResponse.setCookie(name, value, opts)` — defaults httpOnly+secure
   ON, sameSite Lax, path `/`. `.clearCookie(name)` → maxAge 0.
 - Signed: HMAC-SHA256 helpers above.
@@ -1307,9 +1383,10 @@ import { Show, For, Switch, Match } from '@vesk/runtime';
 - **Form values are property bindings**, not attributes.
 - **No `<slot/>`** — only `{props.children}`.
 - **Search params are not props** — use `useSearchParams()`/`useRouter().search`.
-- **Middleware:** return `await next()` when post-processing the response;
-  `await next()` without returning is also supported. Calling neither
-  `next()` nor returning a response short-circuits the chain.
+- **Middleware:** `next()` resolves to `VeskResponse | null`; return it when
+  post-processing. `await next()` without returning is also supported. Calling
+  neither `next()` nor returning a response continues to the route; return a
+  response or `abortWithStatus*` to short-circuit.
 - **Islands capture browser-only APIs** (`window`/`document`) inside
   `client` components or effects/`{#client}` blocks — never at top level of a
   server-rendered body.

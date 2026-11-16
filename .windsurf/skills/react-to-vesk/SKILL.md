@@ -91,8 +91,9 @@ rework.
    `getStaticProps` (same name) or static module data, (d) `getStaticPaths`.
 5. **Map server code**: Next API routes → `app/api/**/route.ts` with
    `VeskRequest`/`VeskResponse`; `'use server'` actions → `defineAction`;
-   `middleware.ts` → Vesk middleware (onion model, **always `return await
-   next()`**).
+   `middleware.ts` → Vesk `middleware.ts` (onion model; import
+   `MiddlewareContext`/`MiddlewareNext` from `@vesk/types`; return the
+   `next()` response when post-processing).
 6. **Produce a conversion manifest** — a table of source file → target file →
    key transformations — and show it before writing any code. This makes
    every mapping auditable and reduces drift.
@@ -277,13 +278,16 @@ Mirror the Next `app/` directory 1:1. Same names, `.vsk` extension.
 `{children}`. Nested layouts compose the same file tree. Route groups
 `(marketing)/` keep their meaning (nesting without URL impact).
 
-**Middleware conversion** requires preserving the onion chain. Return
-`await next()` (or its response) when middleware needs to post-process or
-return the downstream response. The framework also preserves the response when
-middleware does `await next()` without returning it. A middleware that calls
-neither `next()` nor returns a response short-circuits the chain. Keep the
-same augmentation logic but restructure the tail. `ctx.set`/`ctx.get`/`ctx.locals`
-map onto Next's request context.
+**Middleware conversion** requires preserving the onion chain. `next()` is
+typed `MiddlewareNext` (`(rewrite?: string) => Promise<VeskResponse | null>`) and
+returns a `VeskResponse` with cookie/header helpers. Return it when
+post-processing; the framework also preserves the response when middleware does
+`await next()` without returning it. A middleware that calls neither `next()`
+nor returns a response **continues** to the route; return a `Response` or use
+`ctx.abortWithStatus*` to short-circuit. Keep the same augmentation logic but
+restructure the tail. `ctx.set`/`ctx.get`/`ctx.locals` map onto Next's request
+context. `ctx.cookies` is a plain record — use `ctx.cookie(name)`; response
+cookies go through `res.setCookie`/`res.clearCookie` after `next()`.
 
 **API routes**: Next `export async function GET(req: NextRequest)` →
 Vesk `export async function GET(req: VeskRequest)`. Always import them
@@ -301,8 +305,9 @@ export async function GET(req: VeskRequest) {
 `VeskRequest` extends `ServerRequest`; `VeskResponse` extends
 `ServerResponse` (both available from `@vesk/runtime/server` too).
 `VeskResponse` is fluent: `.setStatus(n).setCookie(n,v,o).setCsp(p).cache(s)
-.noCache().cors(o)`. NextResponse.redirect(url) →
-`VeskResponse.redirect(url)`. `cookies()`/`headers()` ambient helpers exist on
+.noCache().cors(o).redirect(url, status=302)`. NextResponse.redirect(url) →
+`VeskResponse.redirect(url)` (static default 307) or `res.redirect(url)` on an
+existing response (default 302, preserves queued cookies). `cookies()`/`headers()` ambient helpers exist on
 the request or via `@vesk/runtime/server`. Note `params` in Vesk API routes is
 a **Promise** — `const { id } = await params`. Search params: `req.parsedUrl`
 + `req.query` (flattened), equivalent of `req.nextUrl.searchParams`.
@@ -613,11 +618,14 @@ export async function middleware(req) {
 
 ```ts
 // Vesk middleware.ts
-export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {
-	if (!ctx.cookies.get('session')) {
-		return Response.redirect(new URL('/login', ctx.url), 302)
-	}
-	return next()
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types'
+
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	if (!ctx.cookie!('session')) return ctx.redirect!('/login')
+
+	const res = await next()
+	if (res) res.setCookie('visited', '1', { path: '/', httpOnly: false, secure: false })
+	return res
 }
 ```
 
@@ -662,7 +670,7 @@ substitutions and flag them in the manifest as "decision":
 | `next/image` | `<Image>` (Vesk's) |
 | `next/head` / metadata | `<Head>` |
 | Next API route (`route.ts` handlers) | `export async function GET(req: VeskRequest)` + `VeskResponse.json/…` from `@vesk/runtime/server` |
-| `NextResponse.json/redirect/next` | `VeskResponse.json/redirect(url, 307)/next()` |
+| `NextResponse.json/redirect/next` | `VeskResponse.json/redirect(url, 307)/next()` or `res.redirect(url)` (302, keeps queued cookies) |
 | `next/link` | `<Link href=…>` (`@vesk/runtime/router`) |
 | `next/script` | `<Head>`-managed `<script>` or plain element |
 | `next/dynamic` | unnecessary — code-splitting is automatic per route |
@@ -689,9 +697,10 @@ substitutions and flag them in the manifest as "decision":
    dead on SSR hydration.
 8. **Passing the unwrapped value to `bindValue`** — `bindValue(name)` throws;
    pass `nameCell`.
-9. **Middleware** — return `await next()` when post-processing the response;
-   `await next()` without returning is supported, but calling neither `next()`
-   nor returning a response short-circuits the chain.
+9. **Middleware** — return the `next()` response when post-processing;
+   `await next()` without returning is supported. Calling neither `next()` nor
+   returning a response continues to the route — return a response or
+   `ctx.abortWithStatus*` to short-circuit.
 10. **Assuming `useParams` in a server-only module** — the server re-exports
     it as `routerParams`; request-side `useParams()` exists too. Match the
     import point to the context.

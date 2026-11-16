@@ -463,7 +463,10 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   function walkApi(nodes: ApiRouteNode[]): void {
     for (const node of nodes) {
       if (node.filePath) {
-        const mwChain = collectMiddlewareChain(routeTree, node.fullPath, appDir);
+        // API node.fullPath is mount-relative (`/admin`), while middleware
+        // lives under `app/api/admin`. Collect with the real request path so
+        // route-local API middleware is not silently dropped from the build.
+        const mwChain = collectMiddlewareChain(routeTree, `/api${node.fullPath}`, appDir);
         let mwCode: string | null = null;
         if (mwChain.length > 0) {
           const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));

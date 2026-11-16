@@ -129,9 +129,11 @@ Follow this exact order. It detects collisions early and prevents rework.
    with `export async function GET(req: VeskRequest)`; `server/api/foo.get.ts`
    suffix methods → the matching `VeskRequest.method` branch or separate
    exported `GET`/`POST`/… handlers; `server/middleware/` → Vesk
-   `middleware.ts` (onion). Return `await next()` when post-processing the
-     response; `await next()` without returning is also supported. Calling
-     neither `next()` nor returning a response short-circuits the chain.
+   `middleware.ts` (onion). `next()` is `MiddlewareNext` and resolves to a
+   `VeskResponse | null`; return it when post-processing. Awaiting without
+   returning is supported. Calling neither `next()` nor returning a response
+   continues to the route — return a response or `ctx.abortWithStatus*` to
+   short-circuit.
 5. **Produce a conversion manifest** — a table of source file → target file →
    key transformations — and show it before writing any code. This makes
    every mapping auditable and reduces drift.
@@ -276,7 +278,7 @@ component bodies; the rest import explicitly. Convert:
 | `useRoute()` `.params` | page `props.params` | destructure: `const { slug } = props.params` |
 | `useRoute()` `.query` | `const [params] = useSearchParams()` | read `.get('q')` |
 | `useRouter()` `.push/.replace/.back` | `useRouter()` → `{ push, replace, back }` (auto-imported) | takes string hrefs |
-| `navigateTo(url, { replace })` | `useNavigate()(url, { replace })` or `redirect(url, 307)` on the server | server redirect must go through `VeskResponse.redirect`/`redirect()` |
+| `navigateTo(url, { replace })` | `useNavigate()(url, { replace })` or `redirect(url, 307)` on the server | server redirect must go through `VeskResponse.redirect`/`redirect()`; an existing response can use `res.redirect(url)` (302, keeps queued cookies) |
 | `useHead` / `useServerSeoMeta` | `<Head>…</Head>` in the root layout or page body | `<Head>` understands `<title>`, `<meta>`, `<link>`, `<script>`, `<style>`, `<html>`/`<body>` attrs |
 | `useSeoMeta({ title: html, ogTitle: … })` | `JsonLd` + `meta` tags inside `<Head>` — plus SEO schema helpers from the runtime | no Vue reactive head extension |
 | `useError()` | the nearest `error.vsk` receives `{ error, retry, params, statusCode, stack, url }`; a page that needs to fail calls `throw new NotFoundError()` | see Step 10 |
@@ -294,7 +296,7 @@ component bodies; the rest import explicitly. Convert:
 | `defineNuxtRouteMiddleware(name)` | [`router.beforeEach` guard in client] or `middleware.ts` for the server side | see Step 11 |
 | `defineNuxtPlugin(nuxtApp => …)` | `_events.ts` (`onStart`, `onStop`) in the route directory | see Step 12 |
 | `defineNuxtConfig` | `vesk.config.ts` `defineConfig` | see Step 13 |
-| `useRoute().name` / `params` in middleware | guards receive params via closure; server middleware via `ctx.request.params` | |
+| `useRoute().name` / `params` in middleware | guards receive params via closure; server middleware via `ctx.params` | |
 
 ### Step 6 — Pages and routing
 
@@ -454,15 +456,16 @@ to two different Vesk concepts.
 | --- | --- |
 | `defineNuxtRouteMiddleware((to) => …)` in `app/middleware/` | client-side guard registered at app bootstrap: `router.beforeEach((to, from) => { … })` — return `true`/a path/`false` |
 | `definePageMeta({ middleware: ['auth'] })` per page | apply the guard in `beforeEach` by route matcher, or keep it page-local as a guard-clause `if (…) { return redirect('/login') }` |
-| Nitro `server/middleware/*.ts` | `app/middleware.ts` (server onion) — return `await next()` when post-processing; `await next()` without returning is also supported |
-| Nitro middleware mutating `event.context` | set `locals` / fields on the request context between `next()` calls |
-| `setResponseHeader`/auth header in Nitro middleware | `VeskResponse` `setSecurityHeader`/`setCookie` on the way back down the onion |
+| Nitro `server/middleware/*.ts` | `app/middleware.ts` (server onion) — `next()` is `MiddlewareNext`, returns `VeskResponse \| null`; return it when post-processing |
+| Nitro middleware mutating `event.context` | `ctx.set`/`ctx.get`/`ctx.locals`; `ctx.params` and `ctx.cookie(name)` are available |
+| `setResponseHeader`/auth header in Nitro middleware | mutate `res.headers` or `ctx.header(name, value)`; cookies via `res.setCookie`/`clearCookie` on the way back down the onion |
 | per-page auth for API (Nitro route with `getUserFromSession`) | the `/api` route handler does the same check directly from `req.headers` before responding |
 
-**Never** forget the onion rule: call `next()` exactly once. Return
-`await next()` when post-processing the response; `await next()` without
-returning is also supported. Calling neither `next()` nor returning a response
-short-circuits the chain.
+**Never** forget the onion rule: call `next()` exactly once. Return the
+`next()` response when post-processing; awaiting without returning is also
+supported. Calling neither `next()` nor returning a response continues to the
+route — return a response or `ctx.abortWithStatus*` to short-circuit. Use
+`ctx.cookie(name)` to read request cookies; `ctx.cookies` is a plain record.
 
 ### Step 12 — Nitro server code
 
@@ -480,7 +483,7 @@ and returning `VeskResponse`.
 | `getQuery(event)` | `req.query` (flattened searchParams) or `req.parsedUrl.searchParams` |
 | `readBody(event)` | `await req.body` / `await req.json()` (lazy parse; objects auto-typed by what you sent) |
 | `getCookie(event, 'name')` / `setCookie` | `cookies().get('name')` (from `@vesk/runtime/server`); `VeskResponse.setCookie(name, value, opts)` for outbound |
-| `sendRedirect(event, url, code=302)` | `VeskResponse.redirect(url, status=307)` or `return redirect(url)` |
+| `sendRedirect(event, url, code=302)` | `VeskResponse.redirect(url, status=307)`, `return redirect(url)`, or `res.redirect(url, 302)` on an existing response |
 | `setResponseStatus(event, 201)` | `VeskResponse.setStatus(201)` / `.json(…, { status })` |
 | `createError({ statusCode, statusMessage, cause })` | `HttpError` (has `status`) / `new NotFoundError()` / throw an `Error` — 500 default |
 | `event.context` / `definePlugin` | `locals()` / `ctx.set(key, value)` + explicit argument passing |
@@ -720,13 +723,14 @@ router.beforeEach((to, from) => {
 Server-side equivalent (authed page shells) goes in `app/middleware.ts`:
 
 ```ts
-import type { MiddlewareContext } from '@vesk/compiler'
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types'
 
-export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {
-	if (!ctx.cookies.get('session')) {
-		return Response.redirect(new URL('/login', ctx.url), 302)
-	}
-	return await next()
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	if (!ctx.cookie!('session')) return ctx.redirect!('/login')
+
+	const res = await next()
+	if (res) res.setCookie('visited', '1', { path: '/', httpOnly: false, secure: false })
+	return res
 }
 ```
 
@@ -856,9 +860,10 @@ substitutions and flag them in the manifest as "decision":
     `…Cell`.
 13. **`bindValue` on a `derived`** — derived cells are read-only; write into a
     `track` cell pair.
-14. **Middleware** — return `await next()` when post-processing; `await next()`
-    without returning is supported, but calling neither `next()` nor returning
-    a response short-circuits the chain.
+14. **Middleware** — return the `next()` response when post-processing;
+    awaiting without returning is supported. Calling neither `next()` nor
+    returning a response continues to the route — return a response or
+    `ctx.abortWithStatus*` to short-circuit.
 15. **`getQuery`/`readBody`/`defineEventHandler` in Vesk server files** — use
     `req.query` / `req.parsedUrl.searchParams`, `await req.json()` (or
     `await req.body`), and the named-method handlers of `app/api/**/route.ts`.

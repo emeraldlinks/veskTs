@@ -121,5 +121,47 @@ console.log(`\n=== API route parity [${TARGET}] ${BASE} ===`);
   chk('GET /api/hello unaffected', r.status === 201, `got ${r.status}`);
 }
 
+// instance redirect mutates the API response and preserves its queued cookie
+{
+  const r = await fetch(`${BASE}/api/mw-redirect`, { redirect: 'manual' });
+  chk('VeskResponse.redirect instance -> 302 + Location', r.status === 302 && r.headers.get('location') === '/about', `got ${r.status} ${r.headers.get('location')}`);
+  chk('VeskResponse.redirect instance preserves cookies', (r.headers.get('set-cookie') || '').includes('redirect_seen=1'), `got ${r.headers.get('set-cookie')}`);
+}
+
+// middleware rewrite replaces the matched API route (not just ctx.url)
+{
+  const r = await fetch(`${BASE}/api/mw-rewrite`);
+  const t = await r.text();
+  chk('middleware next(rewrite) targets another API route', r.status === 200 && t.includes('"target":"mw-rewrite-target"'), `got ${r.status} ${t.slice(0, 90)}`);
+}
+
+// API route can be rewritten to a page target
+{
+  const r = await fetch(`${BASE}/api/mw-rewrite?to=/mw-rewrite-target`);
+  const t = await r.text();
+  chk('middleware next(rewrite) targets a page', r.status === 200 && t.includes('Middleware rewrite target'), `got ${r.status} ${t.slice(0, 90)}`);
+}
+
+// page route can be rewritten before rendering
+{
+  const r = await fetch(`${BASE}/mw-rewrite`);
+  const t = await r.text();
+  chk('middleware next(rewrite) targets another page', r.status === 200 && t.includes('Middleware rewrite target') && !t.includes('Middleware rewrite source'), `got ${r.status} ${t.slice(0, 90)}`);
+}
+
+// page middleware can rewrite into the API namespace
+{
+  const r = await fetch(`${BASE}/mw-page-to-api`);
+  const t = await r.text();
+  chk('middleware next(rewrite) targets an API route from a page', r.status === 200 && t.includes('"target":"mw-rewrite-target"'), `got ${r.status} ${t.slice(0, 90)}`);
+}
+
+// route-local API middleware rewrite (not just root app/middleware.ts)
+{
+  const r = await fetch(`${BASE}/api/mw-scope/source`);
+  const t = await r.text();
+  chk('route middleware next(rewrite) targets a sibling API route', r.status === 200 && t.includes('"target":"mw-scope-target"'), `got ${r.status} ${t.slice(0, 90)}`);
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);

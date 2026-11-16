@@ -53,6 +53,9 @@ Layouts: `app/layout.vsk` (root — NOT applied to standalone routes), `app/stan
 Server events file: `app/_events.ts` (writes `serverLocals()`/`setServerContext` store).
 
 Middleware: `app/middleware.ts` (root), `app/admin/middleware.ts`, `app/blog/middleware.ts`.
+The root middleware uses typed `MiddlewareContext`/`MiddlewareNext` from `@vesk/types`
+and mutates the downstream `VeskResponse`; `/mw-cookie` and `/api/mw-cookie`
+exercise pass-through `setCookie`/`clearCookie`/header mutation on SSR and API responses.
 
 ## Config (from `vesk.config.ts`)
 

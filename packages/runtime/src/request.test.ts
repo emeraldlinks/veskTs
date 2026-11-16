@@ -634,6 +634,22 @@ describe('VeskResponse', () => {
 		expect(res.headers.get('Location')).toBe('/login');
 	});
 
+	it('VeskResponse.redirect instance mutates status and Location', () => {
+		const res = VeskResponse.json({ ok: true }).setCookie('session', 'abc');
+		const returned = res.redirect('/login');
+		expect(returned).toBe(res);
+		expect(res.status).toBe(302);
+		expect(res.headers.get('Location')).toBe('/login');
+		res.build();
+		expect(res.headers.get('Set-Cookie')).toContain('session=abc');
+	});
+
+	it('VeskResponse.redirect instance accepts a custom status', () => {
+		const res = VeskResponse.json({ ok: true }).redirect('/moved', 308);
+		expect(res.status).toBe(308);
+		expect(res.headers.get('Location')).toBe('/moved');
+	});
+
 	it('VeskResponse.html creates HTML VeskResponse', async () => {
 		const res = VeskResponse.html('<h1>Hello</h1>');
 		expect(res).toBeInstanceOf(VeskResponse);

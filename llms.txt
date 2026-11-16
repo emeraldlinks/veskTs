@@ -1,8 +1,8 @@
 # llms.txt — Vesk framework
 
 > Machine-oriented reference for LLM agents. Covers the whole framework;
-> per-package detail lives in each package's `llms.txt`. Verified against
-> source at commit 2a5b19d.
+> per-package detail lives in each package's `llms.txt`. Middleware sections
+> verified against source at commit 33df6aa1.
 
 ## What Vesk is
 
@@ -17,7 +17,6 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
   page verified against source with a "Verified against:" footer.
 - `packages/cli/llms.txt` — CLI reference (commands, config loading,
   dev-server flow).
-- `docs/haul.md` — the native Go haul engine.
 - `AGENTS.md` (root + per-package) — conventions and hard rules.
 
 ## Key facts
@@ -57,7 +56,6 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
 | `packages/runtime` | `@vesk/runtime` — client barrel `index-client`, server barrel `index-server` (split: hydrators/bindings client-only; request/ISR server-only). Subpath exports: `@vesk/runtime/router` (full routing surface + LoadingIndicator), `@vesk/runtime/server` (request/response primitives) |
 | `packages/adapter` | build output (platforms: node/vercel/netlify/cloudflare/deno/aws/edge/coxmos), dev server, prod server, SSR function, SEO audit |
 | `packages/cli` | `vesk` binary — dev/build/start/typecheck/seo |
-| `packages/haul` + `@vesk/haul-<os>-<cpu>` | native Go engine: build/dev/start/seo; typecheck via Node sidecar (JSON-RPC to `@vesk/compiler`) |
 | `packages/lsp`, `prettier-plugin`, `plugin-tailwind`, `create-vesk` | tooling |
 
 ## Router surface (`@vesk/runtime/router`)
@@ -73,12 +71,42 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
   when a guard returns a Promise.
 - `scrollToHash()` called after every render for anchor restoration.
 
+## Middleware (`app/middleware.ts`)
+
+- `fn(ctx, next)` onion. Root and route-directory `middleware.ts` files apply
+  to SSR pages and API routes below them; root runs first.
+- `MiddlewareNext = (rewrite?: string) => Promise<VeskResponse | null>`.
+  Return the downstream response when post-processing; `await next()` without
+  returning is preserved. No `next()` and no returned response **continues** to
+  the route. Return a `Response` or `ctx.abortWithStatus*` to short-circuit.
+- `MiddlewareContext<L = VeskLocals>`: `request`, `params`, `url`, `locals`,
+  `cookies` (plain record), `set/get`, `cookie(name)`, `getHeader(name)`,
+  `header(name,value)`, `status/json/text/html/redirect`,
+  `shouldBindQuery/bindQuery`, `shouldBindJSON/bindJSON`, `errors/error`,
+  `abort/isAborted`, `abortWithStatus`, `abortWithStatusJSON`.
+- Helpers are optional in the public type for compatibility but installed at
+  runtime; guard or use non-null assertions in strict TS.
+- `next()` resolves to a normalized `VeskResponse` with `setCookie`,
+  `clearCookie`, `setStatus`, `statusCode`, `getHeader`, `setCsp`,
+  `setSecurityHeader`, `cache`, `noCache`, `cors`, and `build`. Mutate and
+  return the same response; `toVeskResponse()` upgrades a plain `Response`.
+  This works in dev, Node production and inline edge/serverless executors.
+- `ctx.header` queues a header on the final response (including short-circuits).
+  `next('/path')` rewrites internally; API→API, API→page, page→page and
+  page→API targets are re-matched in dev and production. The target's own
+  middleware does not run twice. Return `next(target)` for it to take effect.
+  Use `ctx.redirect()` to change the URL. Instance `res.redirect(url, 302)` mutates
+  status + `Location` while preserving queued cookies/headers; static
+  `VeskResponse.redirect(url, 307)` keeps its 307 default.
+- Augment `VeskLocals` in `@vesk/types` for global typed locals; middleware and
+  page/API locals share the same store.
+
 ## Rules for agents
 
 - Every compiler source edit needs a rebuild:
   `npx tsx packages/cli/src/build-packages.ts`.
 - Tests: `npx tsx packages/compiler/src/<file>.test.ts`; full suite
-  `node scripts/test.js`; hydration paths: `node hydration-test.mjs`.
+  `node scripts/test.js`; hydration paths: `node tests/hydration-test.mjs`.
 - No regex for source parsing anywhere in compiler/haul (AST/tokenizer
   only). No `batch` imports.
 - Docs edits: follow `docu/` conventions (verify against source, both

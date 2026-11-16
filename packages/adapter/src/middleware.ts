@@ -130,7 +130,7 @@ ${exportExecutor ? 'export ' : ''}async function ${executorName}(ctx, onLast) {
   async function run(index) {
     if (__aborted) return __abortResponse;
     if (index >= ${chainVar}.length) {
-      if (typeof onLast === "function") { __lastRan = true; return __mwCloneResponse(await onLast()); }
+      if (typeof onLast === "function") { __lastRan = true; return __mwCloneResponse(await onLast(rewriteUrl, ctx)); }
       return null;
     }
     const fn = ${chainVar}[index];

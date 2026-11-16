@@ -56,6 +56,7 @@ vesk typecheck [--no-strict]      # tsc-in-.vsk, strict by default
 vesk start [-p 3000]              # production server; needs a build
 vesk dev [-p 3000] [-H 127.0.0.1]
 vesk init                         # create src/global.css if missing
+vesk migrate [--dry-run] [--list] [--from <v>] [--to <v>] [--<codemod-id>]
 ```
 
 - `dev`: loads `.env` then `.env.local`; serves SSR pages, `/api/*`, server
@@ -71,6 +72,30 @@ vesk init                         # create src/global.css if missing
   Platforms: `node` \| `vercel` \| `netlify` \| `cloudflare` \| `deno` \|
   `aws` \| `edge` \| `coxmos` (auto-detected from CI, else `node`).
   `--target edge` promotes node build to generic edge.
+  **Production assets are content-hashed** (`client.2ed3cbebcc.js`) and served
+  `immutable`; the same bytes' sha384 rides on the tag as `integrity` **with
+  `crossorigin="anonymous"`** (without it a browser silently skips the check).
+  Dev keeps the stable names — HMR rewrites them. `config.json` carries an
+  `assets` map (`file`, `url`, `hash`, `bytes`, `integrity` per chunk) plus a
+  `buildId`; never hardcode `client.js`, resolve names from the manifest.
+  `/_vesk/runtime.js` stays a stable alias for the runtime.
+- `migrate`: applies the codemods a project needs, resolved from the
+  **project's installed `@vesk/*`** (not the running CLI); `--from`/`--to`
+  override so a migration can be rehearsed. Codemods are AST transforms
+  through the compiler's own parser — offsets are edited in place, so the diff
+  shows only the migration. Two ship:
+  - `track-destructuring` — rewrites `const [c, setC] = track(0)` (which
+    parses but is **not reactive** — no TrackDecl, so the binding is not a
+    cell and `<b>{c}</b>` compiles to a one-time read) into the documented
+    `const &[c, setC] = track(0)`.
+  - `import-type-source` — repoints app-facing type imports at `@vesk/types`,
+    **gated on the name actually being exported** by the installed
+    `@vesk/types`; anything unprovable is reported, never guessed.
+
+  Scans `.vsk/.ts/.tsx/.mjs/.js`, skipping `node_modules`, `.vesk`, `dist`,
+  `build`, `.git`, `.next`, `coverage`. Unparsable files are reported, not
+  rewritten. Always prints a report: what would change, what changed, and what
+  a human still has to do.
 - `start`: request pipeline = static files → hydration-data → runtime →
   static assets → prerendered pages → middleware chain → server actions →
   API routes → SSR pages (with ISR) → custom 404. Sets `NODE_ENV=production`.
@@ -99,6 +124,36 @@ component List<T>(…) { … }              // generic type params supported
   `component Card({ title, body = '', featured }: { title: string; body?: string; featured?: boolean })`.
 - `{props.children}` is the ONLY children channel — **no `<slot/>`**.
 - Layouts receive `{ children, params }`.
+- The props parameter may have **any name** (`component Card(p)`, `(props)`,
+  `(ctx)`, or a destructuring pattern) — a single identifier is bound to the
+  whole props object, a pattern destructures it.
+
+### Cross-file components & namespaces
+
+```vsk
+import { Card } from './card.vsk'
+import { Card as Post } from './card.vsk'
+import * as UI from './card.vsk'
+
+<Card /><Post /><UI.Card />
+```
+
+- Components resolve through **one global registry keyed by declared name**,
+  not per-module bindings — a component is importable whether or not its file
+  writes `export`. `export` matters for renaming (`export { A as B }`) and
+  barrels (`export * from './x.vsk'`), not for hiding.
+- A namespace import is a **compile-time shorthand only** — `<UI.Card />` looks
+  `Card` up in the same registry as `<Card />`; no module object is built.
+  Two forms are `V0410`: a nested tag `<UI.Sub.Card />` (a `.vsk` namespace is
+  flat) and reading a namespace member as a **value** (`{UI.max}`) — import
+  values by name, or keep them in a `.ts` module. A namespace import from a
+  `.ts`/`.js` module is a real module object, so `<NS.Icon />` there is an
+  ordinary member expression.
+- **Duplicate component names across files are legal but warn.** The client
+  registry keeps the *last* registration while SSR keeps the *first*, so a
+  collision can render a different component in the browser than in the SSR
+  HTML — rename one of them. The warning fires identically on client and SSR so
+  hydration can never disagree with the server.
 
 ### Attributes / events
 
@@ -483,9 +538,23 @@ setSearch/route/canGoBack), `useNavigate()`, `useParams()`, `usePathname()`,
 - Streaming: `renderPageStream()` AsyncGenerator (prod server pipes chunks).
 - Per-request SSR state isolated via `AsyncLocalStorage` — concurrent
   requests never mix data.
-- **Hydration markers**: server emits `<!--vsk-->` before each non-static
-  subtree. Fully static trees have zero markers → **no hydration runtime, no
-  JS shipped**. Pages without interactivity ship no JS.
+- **SSR HTML is plain HTML — hydration is markerless (the default).** The
+  server emits **no** `<!--vsk:…-->` comments, no generated ids/classes, and no
+  `data-*` hydration attributes (including `data-vsk-key`) — not even in dev.
+  User-authored attributes are untouched. All hydration information lives in
+  the compiler-generated client program (JS), and the client claims the server
+  DOM **structurally** with a tree of per-parent walkers:
+  `nextElement(tag, skipK)` walks the element children of an adopted parent,
+  resolving each claim positionally (with static residue skipped).
+  - Fully static trees ship **no hydration runtime and no JS** at all; pages
+    without interactivity ship no JS.
+  - Region fences (`if`/`for`/`map`/keyed lists) are runtime-created
+    `document.createComment(...)` nodes only; SSR regions are inline.
+  - Keyed lists carry identity in JS only.
+  - Pass `markerless: false` to `renderPage`/`render()`/`compileClient` to get
+    the legacy marker mode back (it is still supported and tested, but it is
+    NOT what a normal build emits — do not assert on `<!--vsk-->` in output, and
+    do not assert on `data-vsk-key` in SSR HTML).
 - Strategies (router `hydrate` option or direct fns):
   - `'full'` (default) — hydrate immediately.
   - `'viewport'` — in-viewport now, rest via IntersectionObserver (rootMargin
@@ -863,9 +932,11 @@ trustProxy), `protocol`, `hostname`, `await req.body` (lazy parse),
 ### VeskResponse builders
 
 `VeskResponse.json/html/redirect(url, status=307)/rewrite(url)/next()`.
-Chain: `.setStatus(n).setCookie(name,val,opts).clearCookie(name).setCsp(policy|false)
-.setSecurityHeader(name,val|false).cache(ttlSeconds).noCache()
-.cors({origin,methods,headers,credentials}).build()`.
+Chain: `.setStatus(n).setCookie(name,val,opts).clearCookie(name).redirect(url, status=302)
+.setCsp(policy|false).setSecurityHeader(name,val|false).cache(ttlSeconds).noCache()
+.cors({origin,methods,headers,credentials}).build()`. The instance `redirect()`
+mutates status + `Location` and preserves the body, queued cookies and security
+headers; the static default stays 307.
 `await res.text()/json()` flush pending headers. Cookie defaults are
 safe-by-default: **httpOnly + secure ON** unless explicit `false`,
 `sameSite='Lax'`, `path='/'`.
@@ -965,64 +1036,200 @@ object as the framework request locals returned by `locals()`.
 ## Middleware (onion model)
 
 `app/middleware.ts` applies globally; a `middleware.ts` in any route dir
-applies to that subtree; files chain root → leaf.
+applies to that subtree and to API routes below it; files chain root → leaf.
+Middleware runs for SSR pages and API handlers in dev, Node production and
+inline platform/serverless builds. Static assets and prerendered output are
+served before it.
 
 ```ts
-import type { MiddlewareContext } from '@vesk/compiler';
-export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {
-	ctx.set('startTime', Date.now());
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types';
+
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	const start = Date.now();
 	const res = await next();
-	console.log('took', Date.now() - ctx.get('startTime'), 'ms');
+
+	if (res) {
+		res.headers.set('server-timing', 'app;dur=' + (Date.now() - start));
+	}
+
 	return res;
 }
 ```
 
 Rules:
-- `return await next()` (or its response) when middleware needs to
-  post-process or return the downstream response. The framework also preserves
-  the response when middleware does `await next()` without returning it.
-- A middleware that neither calls `next()` nor returns a response short-circuits
-  the chain.
-- Return a `Response` to short-circuit (never reaches page).
-- `next('/new-path')` rewrites the URL for the rest of the chain.
-- Locals set via `ctx.set()` visible during SSR (`locals()`) and API routes.
+- `MiddlewareNext` is `(rewrite?: string) => Promise<VeskResponse | null>`.
+  Return the downstream response when post-processing it. The framework also
+  preserves the response when middleware does `await next()` without returning
+  it.
+- A middleware that neither calls `next()` nor returns a response **continues**
+  to the next middleware/route. Return `ctx.status(...)`, `ctx.json(...)`,
+  `ctx.abortWithStatus(...)`, or another `Response` to stop.
+- Returning a `Response` without `next()` short-circuits; the page/API handler
+  never runs.
+- `next('/new-path')` rewrites the URL for the rest of the chain and re-matches
+  it: API→API, API→page and page→page rewrites are supported. Return
+  `next(target)` or its downstream response. The browser URL stays unchanged;
+  use `ctx.redirect()` to change it.
+- Locals set via `ctx.set()` are visible during SSR (`locals()`) and in API
+  handlers.
+- Helpers are optional in the public type for backward compatibility but are
+  always installed at runtime. Under strict TS, guard them or use a non-null
+  assertion (`ctx.json!(...)`).
 
 ### MiddlewareContext
 
-`{ request, params, url, locals, cookies, set(key,v), get(key), [key]: any }`
-(`ctx.user === ctx.locals.user`).
+`MiddlewareContext<L>` has `request`, `params`, `url`, `locals`, `cookies`
+(request cookie record), `set`/`get`, and an optional property fallback into
+locals (`ctx.user === ctx.locals.user`). Typed helpers:
 
-### Redirects / rewrites / client middleware
+| Member | Behavior |
+|---|---|
+| `cookie(name)` | Read one request cookie (`ctx.cookies[name]`). |
+| `getHeader(name)` | Read a request header. |
+| `header(name, value)` | Queue a header on the final response; applies to SSR, API and short-circuit responses. |
+| `status(code)` / `json(body)` / `text(body)` / `html(body)` | Build a response. |
+| `redirect(url, status?)` | Build a redirect response (`302` default). |
+| `shouldBindQuery(schema?)` / `bindQuery(schema?)` | Parse/validate `ctx.url.searchParams`; schema uses `safeParse`; `bind*` throws. |
+| `shouldBindJSON(schema?)` / `bindJSON(schema?)` | Parse/validate a clone of the JSON body; `bind*` throws. |
+| `abort()` / `isAborted()` | Mark/check the chain aborted. `abort()` alone creates no response. |
+| `abortWithStatus(code)` / `abortWithStatusJSON(code, body)` | Abort and build the response. |
+| `errors` / `error(err)` | Collected `{ error }` records; `error()` records without throwing. |
+
+`VeskResponse` from `next()` extends `Response` with `setCookie`, `clearCookie`,
+`setStatus`, `statusCode`, `getHeader`, `setCsp`, `setSecurityHeader`, `cache`,
+`noCache`, `cors`, and `build`. `next()` results are normalized for both SSR
+and API responses, so this works across dev/prod/edge:
 
 ```ts
-export async function middleware(ctx, next) {
-	if (!ctx.cookies.get('session')) {
-		return Response.redirect(new URL('/login', ctx.url), 302);
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types';
+
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	const res = await next();
+
+	if (res) {
+		res.setCookie('visited', '1', { path: '/', httpOnly: false, secure: false });
+		res.headers.set('x-request-id', crypto.randomUUID());
 	}
+
+	return res;
+}
+```
+
+Cookie helpers queue values and flush on `build()` (the executor calls it).
+Return the same response; rebuilding it with `new Response(...)` loses queued
+cookies. Upgrade a plain `Response` with `toVeskResponse()` from
+`@vesk/runtime/server` before calling cookie helpers. `clearCookie(name, opts?)`
+expires a cookie; no name clears every queued cookie on that response.
+
+### Redirects / rewrites / short-circuits
+
+```ts
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
+	if (!ctx.cookie!('session')) {
+		return ctx.abortWithStatusJSON!(401, { error: 'Unauthorized' });
+	}
+
+	if (ctx.url.pathname === '/health') {
+		return ctx.json!({ ok: true });
+	}
+
 	if (ctx.url.pathname.startsWith('/old')) {
-		const res = await next('/new');       // internal rewrite
-		res.headers.set('x-rewritten', '1');
-		return res;
+		return next('/new');
 	}
+
+	if (ctx.url.hostname === 'www.example.com') {
+		return ctx.redirect!('https://example.com' + ctx.url.pathname, 308);
+	}
+
 	return next();
 }
 ```
+
+Bare `ctx.abort()` only sets the flag; use `abortWithStatus*` (or return a
+response) for deterministic early exits. Thrown `redirect()` errors and
+`Response.redirect()` relative URLs are normalized. `TypeError` from middleware
+becomes a 500 rather than crashing a serverless/edge invocation.
 
 `createFileRouter(tree, { middleware: [async (ctx, next) => …] })` — client
 ctx `{ url, params, router, locals }`; throwing `redirect()`/`notFound()` →
 replace-nav / not-found UI.
 
-Middleware edits hot-reload in dev. Middleware responses honored on API
-routes in dev exactly as production.
+Middleware edits hot-reload in dev. Middleware responses are honored on API
+routes in dev exactly as production. Keep middleware edge-portable: use Web
+APIs (`Request`, `Response`, `Headers`, `URL`, `crypto`), not `fs`/`path`/`http`.
 
 ## Cookies
 
 - Read: `cookies()` (CookieStore → `get/getAll/toString`). Server reads
   `Cookie` header via ambient context; browser falls back to `document.cookie`.
-  Middleware: `ctx.cookies.get('sid')`.
+  Middleware: `ctx.cookies` is a plain record — use `ctx.cookie('sid')`.
 - Write: `VeskResponse.setCookie(name, value, opts)` — defaults httpOnly+secure
   ON, sameSite Lax, path `/`. `.clearCookie(name)` → maxAge 0.
 - Signed: HMAC-SHA256 helpers above.
+
+## Server Events & Error Reporting (`app/_events.ts`)
+
+```ts
+import type { ServerEventContext } from '@vesk/types'
+
+export async function onStart(ctx: ServerEventContext) { ctx.set('booted', true) }
+export async function onRequest(ctx: ServerEventContext) { /* per request */ }
+export async function onError(err: unknown, ctx: ServerErrorContext) { /* report */ }
+export async function onStop(ctx: ServerEventContext) { /* shutdown / HMR */ }
+```
+
+`ServerEventContext` is a superset of `MiddlewareContext` (`set`/`get`/`locals`
+plus the Node `http.Server`, `null` on serverless/edge). Lifecycle timing:
+`onStart` once at boot (or lazily once per isolate on serverless/edge),
+`onRequest` per request, `onStop` on graceful shutdown (Node servers only).
+Values `set()` during `onStart` land in the **server-wide** context and are
+pre-seeded into every request's `locals`.
+
+- **`onError` is the production error-reporting seam.** Production never leaks
+  a stack trace to the client (the right default), which otherwise left an
+  adopter two bad options. `ServerErrorContext` carries `url`, `routePath`,
+  `target` (`'node' | 'edge' | 'dev'`), `status`, `durationMs`, and `version` +
+  **`buildId`** from the build manifest, so a report can be tied to a deploy.
+- Two registration paths, deliberately: a **plugin's** `onError(err, ctx)` and
+  `_events.ts`'s. The `_events.ts` one is the one that matters in production —
+  production has no plugin objects — while a plugin's hook is available in dev.
+- A hook that throws is caught and logged, never escalated into a second
+  failure (a reporting outage must not take down a page that was already
+  failing); one failing hook does not stop the others; and one request is
+  never reported twice.
+
+## Testing components (`@vesk/testing`)
+
+```bash
+npm i -D @vesk/testing
+```
+
+```ts
+import { mount, renderComponent } from '@vesk/testing'
+
+const { html, head, props } = renderComponent(source, 'Counter', { start: 1 })
+const view = mount(source, 'Counter', { start: 1 })
+view.text('.label'); view.attr('button', 'class'); view.has('.bump')
+await view.click('.bump'); view.input('.field', 'hi')
+view.flush(); await view.waitFor(() => …); view.unmount()
+```
+
+- `renderComponent(source, name?, props?, opts?)` compiles + SSRs a `.vsk`
+  source in-process. It throws the compiler's own code-frame diagnostic when the
+  source does not compile, so a broken fixture reads like a compile error
+  rather than an empty string (a test helper that silently returns `''` is
+  worse than none). `opts.hydrate: false` renders the non-hydrate emitter,
+  which is a different assertion.
+- `mount(...)` puts that output in a real DOM (linkedom) and returns a driver:
+  `text`, `attr`, `has`, `all`, `click`, `input`, `flush`, `waitFor`, `unmount`.
+  Ambient `document`/`window`/`Event`/`Node` are installed for the mount and
+  **restored on `unmount()`**, so mounts do not leak into each other.
+- `attrOf(html, selector, attribute)` reads a head/attribute out of a fragment,
+  decoded the way a browser would.
+- Deliberately **not a browser**: no layout, no network, no service worker.
+  Anything that needs a real one (hydration against a live page, click-through
+  navigation, viewport behaviour) still belongs in `tests/hydration-test.mjs`
+  against a running server.
 
 ## Configuration (`vesk.config.ts` / `.js`)
 
@@ -1068,7 +1275,8 @@ Compose: `preset('production', { trustProxy: true })`.
 
 Normalization: unknown preset names throw; `md.html` ∈
 escape|allow|allowlist; plugins must have name + ≥1 hook (`onCSS`,
-`onFileWatch`, `onTransformJS`, `onBuildStart`, `onBuildEnd`, `onRequest`) or
+`onFileWatch`, `onTransformJS`, `onBuildStart`, `onBuildEnd`, `onRequest`,
+`onStart`, `onStop`, `onError`) or
 a non-empty `provides` record. A broken prod config **fails closed** (secure
 defaults + loud warning). Config load order: `.env` → `.env.local` →
 `vesk.config.js` (preferred over `.ts`, transpiled, `@vesk/compiler` globals
@@ -1173,9 +1381,10 @@ import { Show, For, Switch, Match } from '@vesk/runtime';
 - **Form values are property bindings**, not attributes.
 - **No `<slot/>`** — only `{props.children}`.
 - **Search params are not props** — use `useSearchParams()`/`useRouter().search`.
-- **Middleware:** return `await next()` when post-processing the response;
-  `await next()` without returning is also supported. Calling neither
-  `next()` nor returning a response short-circuits the chain.
+- **Middleware:** `next()` resolves to `VeskResponse | null`; return it when
+  post-processing. `await next()` without returning is also supported. Calling
+  neither `next()` nor returning a response continues to the route; return a
+  response or `abortWithStatus*` to short-circuit.
 - **Islands capture browser-only APIs** (`window`/`document`) inside
   `client` components or effects/`{#client}` blocks — never at top level of a
   server-rendered body.
@@ -1185,5 +1394,14 @@ import { Show, For, Switch, Match } from '@vesk/runtime';
 - **Tailwind doesn't scan dynamic class bindings** — keep classes static.
 - **Island/`#server`/`#client` validation** is enforced by the compiler —
   server components can't use `{#client}`, islands can't use `{#server}`.
+- **SSR HTML carries no hydration markers and no `data-vsk-*`.** Markerless is
+  the default. Never assert on `<!--vsk-->`/`data-vsk-key` in server output,
+  and never hand-write one to "fix" a mismatch.
+- **Never hardcode `client.js`** in a production context — assets are
+  content-hashed; read the name from the build manifest (`config.json` `assets`).
+- **Two components with the same name in different files silently diverge**
+  (client keeps the last, SSR keeps the first) — the build warns; rename one.
+- **Namespace member-expressions are not values.** `{UI.max}` and
+  `<UI.Sub.Card />` are `V0410`; only `<UI.Card />` resolves.
 - After editing `packages/compiler/src`, run
   `npx tsx packages/cli/src/build-packages.ts` before probing.

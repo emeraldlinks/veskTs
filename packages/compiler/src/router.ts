@@ -351,7 +351,7 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
     }
   }
 
-  if (node.page || node.layout || node.children.length > 0) {
+  if (node.page || node.layout || node.hasMiddleware || node.children.length > 0) {
     nodes.push(node);
   }
 
@@ -550,6 +550,7 @@ export function matchUrl(tree: RouteNode[], pathname: string): MatchResult | nul
       const part = parts[partIndex];
 
       if (node.isCatchAll) {
+        if (!node.page) continue;
         const paramName = node.path.startsWith(':') ? node.path.slice(1) : node.path;
         params[paramName] = parts.slice(partIndex).map(decodeURIComponent).join('/');
         pushWithStandalone(node);

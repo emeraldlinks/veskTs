@@ -39,7 +39,7 @@
 | `compileFile` | fn | `(source, options?: { sourcePath?: string }) => CompileFileResult` (`{ ir, componentMap, __vesk }`). |
 | `compileClient`, `compile` | fn | `(source, _componentName: string\|null, { forceClient?, hydrate?, includeTopLevel? }) => string`. |
 | IR classes | class | `IRRoot, ComponentIR, StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion, MapRegion, ComponentCall, Expression`; `type IRNode`. |
-| types | type | `VeskPlugin, MiddlewareContext, VeskConfig, VeskSecurity, VeskCors, VeskRateLimit`. |
+| types | type | `VeskPlugin, MiddlewareContext, MiddlewareNext, VeskLocals, Locals, MiddlewareError, VeskConfig, VeskSecurity, VeskCors, VeskRateLimit`. |
 | config | fn | `defineConfig, validateConfig, preset, definePlugin` (see config.ts section). |
 | router | fn | `scanRoutes(appDir, options?), scanComponents(dir), collectSources(tree), matchUrl(tree, pathname)`. |
 
@@ -136,7 +136,8 @@ client replaces call with `{ __veskAction:true, id, url }` stub (execute handler
 - `api-routes.ts`: `scanApiRoutes(apiDir)`, `matchApiUrl(tree, pathname)`, `parseCookies(str)`,
   `buildWebRequest(...)`, `executeApiRoute(...)`.
 - `middleware.ts`: `collectMiddlewareChain(tree, url, appDir)`, `loadMiddleware(sourcePath)`,
-  `executeMiddlewareChain(...)` (onion model).
+  `executeMiddlewareChain(...)` (onion model; installs typed ctx helpers, queued
+  headers, normalized `next()` `VeskResponse`, abort/error handling).
 
 ## config (config.ts)
 

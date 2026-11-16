@@ -1,0 +1,3 @@
+component MwRewriteTarget {
+	<h1>Middleware rewrite target</h1>
+}

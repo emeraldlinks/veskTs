@@ -166,6 +166,18 @@ test('no-return middleware falls through to next link in chain', async () => {
 	cleanup(tmp);
 });
 
+test('collects route-local API middleware', () => {
+	const tmp = createFixture({
+		'app/api/x/route.ts': 'export async function GET() { return new Response("ok"); }',
+		'app/api/x/middleware.ts': 'export async function middleware(ctx, next) { return next(); }',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/api/x', tmp);
+	expect(chain.length).toBe(1);
+	expect(chain[0].sourcePath.endsWith('api/x/middleware.ts')).toBe(true);
+	cleanup(tmp);
+});
+
 test('returned Response short-circuits the chain', async () => {
 	const tmp = createFixture({
 		'app/page.vsk': '',

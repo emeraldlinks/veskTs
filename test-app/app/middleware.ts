@@ -6,6 +6,17 @@ export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
   ctx.set('startTime', Date.now());
   console.log("user: ", ctx.get("user"));
 
+  // rewrite fixtures: API -> API, API -> page, page -> page
+  if (ctx.url.pathname === '/api/mw-rewrite') {
+    return next(ctx.url.searchParams.get('to') || '/api/mw-rewrite-target');
+  }
+  if (ctx.url.pathname === '/mw-rewrite') {
+    return next('/mw-rewrite-target');
+  }
+  if (ctx.url.pathname === '/mw-page-to-api') {
+    return next('/api/mw-rewrite-target');
+  }
+
   // typed pass-through cookie manipulation on downstream VeskResponse
   if (ctx.url.pathname === '/mw-cookie' || ctx.url.pathname === '/api/mw-cookie') {
     const res = await next();

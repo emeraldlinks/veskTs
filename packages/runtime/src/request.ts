@@ -397,6 +397,7 @@ interface VeskResponseInstance extends Response {
 		sameSite?: 'Lax' | 'Strict' | 'None'; path?: string; domain?: string;
 	}): VeskResponseInstance;
 	clearCookie(name?: string, opts?: { path?: string; domain?: string }): VeskResponseInstance;
+	redirect(url: string, status?: number): VeskResponseInstance;
 	setCsp(policy: string | false): VeskResponseInstance;
 	setSecurityHeader(name: string, value: string | false): VeskResponseInstance;
 	cache(ttlSeconds: number): VeskResponseInstance;
@@ -794,6 +795,12 @@ class _VeskResponse extends ServerResponse {
 		}
 		this._cookieHeaders = this._cookieHeaders.filter((h) => h.split('=', 1)[0] !== name);
 		return this.setCookie(name, '', { ...opts, maxAge: 0 });
+	}
+
+	redirect(url: string, status = 302): _VeskResponse {
+		this._finalStatus = status;
+		this.headers?.set('Location', url);
+		return this;
 	}
 
 	setCsp(policy: string | false): _VeskResponse {

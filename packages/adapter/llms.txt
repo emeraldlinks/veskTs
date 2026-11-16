@@ -85,6 +85,14 @@ VeskPlugin { name; onBuildStart?; onBuildEnd?; onCSS?; [key: string]: unknown }
   — emits a standalone chain exporting `execute(ctx)`.
 - `compileMiddlewareCode(mwSourceTexts: string[]): string | null` — INLINE
   variant (`__mwChain` + `__executeMw`) used inside SSR/API functions.
+- Both executors install the additive context helpers (`cookie`, `getHeader`,
+  `header`, `status`, `json`, `text`, `html`, `redirect`, `shouldBind*`,
+  `bind*`, `error`, `errors`, `abort*`), queue `ctx.header` onto the final
+  response, and normalize `next()` results to `VeskResponse` so cookie/header
+  mutation works for SSR and API responses in dev/prod/edge.
+- `next()` without a returned response preserves the downstream response; no
+  `next()` and no response continues to the route. Aborts return the abort
+  response (bare `abort()` has none); `TypeError` becomes 500.
 - internal: `extractMiddlewareBody` (wraps compiler `extractMiddlewareParts`).
 
 ### `src/static.ts`
@@ -200,6 +208,8 @@ Call: `build(appDir, options)`. Returns `BuildResult | undefined`.
      `export const isrTags = [...]` → `node._isrTags`.
    - push node to `ssrRoutes`.
 10. **API pass** — `walkApi`: for each node with `filePath`,
+    `collectMiddlewareChain(routeTree, '/api' + node.fullPath, appDir)` →
+    chain; inline route-local API middleware, then
     `generateApiFunction(node, apiDir, outDir)` → `server/api/<name>.js`.
 11. **Root middleware** — `collectMiddlewareChain(routeTree,'/')` → if any,
     `compileMiddleware(chain, appDir)` writes `server/middleware.js`;

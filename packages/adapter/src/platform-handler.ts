@@ -183,6 +183,28 @@ function __matchPath(pattern, pathname) {
   return null;
 }
 
+async function __dispatchRewrite(rewrite, request) {
+  const target = new URL(rewrite, request.url);
+  const method = (request.method || 'GET').toUpperCase();
+  const hasBody = method !== 'GET' && method !== 'HEAD';
+  const targetRequest = new Request(target.href, hasBody
+    ? { method, headers: request.headers, body: request.body, duplex: 'half' }
+    : { method, headers: request.headers });
+  // The generated API/SSR wrapper skips its inline middleware for a rewrite:
+  // root middleware already ran, and the source route owns the onion.
+  Object.defineProperty(targetRequest, '__veskSkipMiddleware', { value: true });
+
+  for (const route of __routes) {
+    if (!__matchPath(route.path, target.pathname)) continue;
+    return await __invokeRoute(route, targetRequest);
+  }
+  return new Response(JSON.stringify({ error: 'Rewrite target not found' }), {
+    status: 404,
+    headers: { 'Content-Type': 'application/json' },
+  });
+}
+globalThis.__vesk_dispatch_rewrite = __dispatchRewrite;
+
 export async function handleRequest(request) {
   try {
     const url = new URL(request.url);

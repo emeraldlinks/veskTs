@@ -249,10 +249,13 @@ with these **differences**:
 cookies(): CookieStore           // Proxy over a cookie jar; .get(name), .getAll(), .toString()
 headers(): Record<string, string | Function | undefined>   // Proxy; .get(name), .has(name), .entries()
 locals<L extends object = VeskLocals>(): L   // VeskLocals is augmentable from @vesk/types
+MiddlewareNext = (rewrite?: string) => Promise<VeskResponse | null>   // @vesk/types
+MiddlewareContext<L = VeskLocals>   // @vesk/types: request, params, url, locals, cookies, set/get, cookie, getHeader, header, status/json/text/html/redirect, shouldBindQuery/bindQuery, shouldBindJSON/bindJSON, errors/error, abort/isAborted, abortWithStatus/abortWithStatusJSON
 class ServerRequest extends Request { get/set cookies: CookieStore; get/set params: Record<string,string>; get/set locals: VeskLocals }
 class ServerResponse extends Response { static json(body, init?); static redirect(url, status=307); static rewrite(url); static next() }
 class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown>; resolveUrl(url: string): string; static from(request: Request, init?: { params?: Record<string,string>; locals?: Record<string,unknown> }): VeskRequest; get host(): string; get origin(): string; get/set query, ip, protocol, hostname, parsedUrl }
 VeskResponse  // Proxy over an internal _VeskResponse Response subclass; static stream(readable: ReadableStream, init?: ResponseInit): VeskResponse — chunked streaming (Transfer-Encoding: chunked, delivered via deliverResponse getReader loop; readable as unknown as BodyInit)
+toVeskResponse(res: Response | VeskResponseInstance | null | undefined): VeskResponseInstance | null | undefined  // upgrade a plain Response for setCookie/clearCookie/build; preserves queued cookies/security headers
 PayloadTooLargeError extends Error { readonly status: 413 }   // thrown when a body exceeds DEFAULT_MAX_BODY_BYTES
 DEFAULT_MAX_BODY_BYTES: 1048576                                 // 1 MiB request-body cap
 withValidation(request: Request, schema: { safeParse: (data) => { success: boolean; error?: { issues: {path:(string|number)[];message:string}[] }; data?: unknown } }, opts?: { jsonOnly?: boolean }): Promise<unknown | Response>
@@ -295,9 +298,13 @@ All four address `globalThis.__vesk_server_ctx`, the same store the app
 store is pre-seeded into each request's middleware `locals`.
 
 - `VeskResponseInstance` (interface, in request.ts) exposes:
-`setStatus(code)`, `build()`, `text()`, `json()`, `setCookie(name, value, opts?)`,
-`clearCookie(name, opts?)`, `setCsp(policy)`, `setSecurityHeader(name, value)`,
-`cache(ttlSeconds)`, `noCache()`, `cors(opts?)`, `_flushSecurityHeaders()`, `readonly status`.
+`setStatus(code)`, `build()`, `text()`, `json()`, `redirect(url, status=302)`,
+`setCookie(name, value, opts?)`, `clearCookie(name, opts?)`, `setCsp(policy)`,
+`setSecurityHeader(name, value)`,
+`cache(ttlSeconds)`, `noCache()`, `cors(opts?)`, `_flushSecurityHeaders()`,
+`readonly status`, `statusCode?`, `getHeader?(name)`. Cookie/security builders
+queue until `build()`; return the same response after middleware mutation rather
+than reconstructing it.
 
 ---
 
@@ -530,7 +537,9 @@ removal; never import/emit `batch` (matches repo AGENTS.md rule).
 - `VeskResponse` is a Proxy over an internal class — `new VeskResponse(...)`
   works like a `Response`; fluent builders return the instance.
 - CORS `cors()` returns a middleware that can preflight (returns Response) or
-  apply headers to an existing response (`applyCors`).
+  apply headers to an existing response (`applyCors`). `applyCors` returns a
+  plain `Response`; call `res.build()` first if cookies/security headers are
+  queued, or use `res.cors(opts)` to stay on the `VeskResponse`.
 - `Experiment` on SSR seeds by name; on client includes a `sessionStorage`
   user id and (sticky) a cookie; writes to `window.__vsk_experiments` when
   `track` is true.
