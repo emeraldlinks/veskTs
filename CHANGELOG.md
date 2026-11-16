@@ -2,6 +2,22 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.102 — 2026-11-16
+
+_No breaking changes._
+
+### Features
+
+- **middleware:** complete rewrite matrix and add VeskResponse.redirect
+
+### Fixes
+
+- **runtime:** align VeskRequest and VeskResponse helpers with public types
+
+### Tests
+
+- **adapter:** update middleware assertions for rewrite-aware onLast
+
 ## 0.2.101 — 2026-11-16
 
 _No breaking changes._
