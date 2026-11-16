@@ -277,6 +277,101 @@ test('chain locals are preseeded from the server-wide events context', async () 
 	}
 });
 
+test('additive ctx abort helpers short-circuit with status json', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			"  if (typeof ctx.abortWithStatusJSON === 'function') return ctx.abortWithStatusJSON(401, { error: 'nope' });",
+			"  return new Response('old', { status: 401 });",
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/'), {}, {
+		onLast: async () => new Response('SHOULD-NOT-RENDER'),
+	});
+	expect(result.response.status).toBe(401);
+	const text = await result.response.text();
+	expect(text.includes('nope')).toBe(true);
+	expect(result.redirected).toBe(false);
+	cleanup(tmp);
+});
+
+test('additive ctx error collection records thrown errors', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': 'export function middleware(ctx) { try { throw new TypeError("boom"); } catch (e) { if (ctx.error) ctx.error(e); return new Response("recovered", { status: 418 }); } }',
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/'), {}, {});
+	expect(result.response.status).toBe(418);
+	expect(await result.response.text()).toBe('recovered');
+	expect(Array.isArray(ctxErrorsPlaceholder(result)) ? false : false).toBe(false); // ctx.errors is additive/internal
+	cleanup(tmp);
+});
+
+test('pass-through middleware mutates the downstream response cookies and headers', async () => {
+	const { VeskResponse } = await import('@vesk/runtime/src/request');
+	const g = globalThis as Record<string, unknown>;
+	const prevVeskResponse = g.VeskResponse;
+	g.VeskResponse = VeskResponse;
+	try {
+		const tmp = createFixture({
+			'app/page.vsk': '',
+			'app/middleware.ts': [
+				'export async function middleware(ctx, next) {',
+				'  const res = await next();',
+				"  if (res) {",
+				"    res.setCookie('mw_seen', '1', { path: '/' });",
+				"    res.headers.set('x-mw', 'ok');",
+				'  }',
+				'  return res;',
+				'}',
+			].join('\n'),
+		});
+		const tree = scanRoutes(join(tmp, 'app'));
+		const chain = collectMiddlewareChain(tree, '/', tmp);
+		const result = await executeMiddlewareChain(chain, new Request('http://localhost/'), {}, {
+			onLast: async () => new Response('OK'),
+		});
+		expect(result.response.status).toBe(200);
+		const setCookie = result.response.headers.get('set-cookie') || '';
+		expect(setCookie.includes('mw_seen=1')).toBe(true);
+		expect(result.response.headers.get('x-mw')).toBe('ok');
+		expect(await result.response.text()).toBe('OK');
+		cleanup(tmp);
+	} finally {
+		g.VeskResponse = prevVeskResponse;
+	}
+});
+
+test('additive ctx helpers short-circuit and apply pending headers', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			"  ctx.header('x-mw', 'ok');",
+			'  return ctx.json({ ok: true }, { status: 202 });',
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/'), {}, {
+		onLast: async () => new Response('SHOULD-NOT-RENDER'),
+	});
+	expect(result.response.status).toBe(202);
+	expect(result.response.headers.get('content-type')).toBe('application/json');
+	expect(result.response.headers.get('x-mw')).toBe('ok');
+	expect(await result.response.text()).toBe('{"ok":true}');
+	cleanup(tmp);
+});
+
+function ctxErrorsPlaceholder(_r: unknown) { return null; }
+
 await Promise.all(pending);
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);

@@ -742,8 +742,8 @@ it('load function merged with existing props', async () => {
 it('useFetch with into renders fetched data in SSR body', async () => {
   const source = `import { track } from '@vesk/runtime'
   component App {
-    let &[posts] = track<{ title: string }[]>([])
-    const postsResource = useFetch('/api/posts', { into: posts })
+    let &[posts, postsCell] = track<{ title: string }[]>([])
+    const postsResource = useFetch('/api/posts', { into: postsCell })
     <h1>{postsResource.loading ? 'Loading...' : 'Loaded'}</h1>
     for (const post in posts) {
       <div>{post.title}</div>
@@ -766,8 +766,8 @@ it('useFetch with into renders fetched data in SSR body', async () => {
 it('useFetch into tracked cell hydrates from serialized data without re-fetch', async () => {
   const source = `import { track } from '@vesk/runtime'
   component App {
-    let &[posts] = track<{ title: string }[]>([])
-    const postsResource = useFetch('/api/posts', { into: posts })
+    let &[posts, postsCell] = track<{ title: string }[]>([])
+    const postsResource = useFetch('/api/posts', { into: postsCell })
     for (const post in posts) {
       <div>{post.title}</div>
     }

@@ -1,0 +1,3 @@
+component MwCookie() {
+	<h1 id="mw">middleware-cookie</h1>
+}

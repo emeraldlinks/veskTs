@@ -13,6 +13,11 @@ import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-code
 import { scanRoutes, matchUrl, collectSources, scanComponents } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
+import { VeskResponse, toVeskResponse } from '@vesk/runtime/src/request';
+
+// Compiler middleware helpers resolve the response class through this global so
+// cookie/header helpers work for dev-compiled chains without importing runtime.
+(globalThis as Record<string, unknown>).VeskResponse = VeskResponse;
 import { collectEventsFile, loadEvents, runEventHandlers } from '@vesk/compiler/src/events';
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet, buildChunkName, SHARED_CHUNK_NAME } from '@vesk/adapter/src/client-bundle';
@@ -1950,20 +1955,30 @@ function routeFullPathForChunk(chunkName: string): string | null {
         }
 
         let apiLocals: Record<string, unknown> = Object.assign({}, eventsCtx?.locals || (globalThis as Record<string, unknown>).__vesk_server_ctx || {});
+        const dispatchApi = async (locals: Record<string, unknown>): Promise<Response | null> => {
+          const webRequest = buildWebRequest(req, req.url || url.pathname, bodyBuffer.length ? bodyBuffer : null);
+          return await executeApiRoute(apiMatch.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, locals, apiWatchCache);
+        };
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
           try {
             const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
               plugins: getActiveDevPlugins() as VeskPlugin[],
-              onLast: async () => null,
+              onLast: async (_rewrite, mwCtx) => {
+                const locals = Object.assign({}, apiLocals, mwCtx?.locals || {});
+                return (await dispatchApi(locals)) ?? new Response(null, { status: 500 });
+              },
             });
             if (mwResult.response) {
-              logRequest(mwResult.response.status);
-              res.writeHead(mwResult.response.status, toNodeHeaders(mwResult.response));
-              res.end(await mwResult.response.text());
+              const mwResp = (toVeskResponse(mwResult.response as any) || mwResult.response) as Response;
+              const respRecord = mwResp as unknown as Record<string, unknown>;
+              if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
+              logRequest(mwResp.status);
+              res.writeHead(mwResp.status, toNodeHeaders(mwResp));
+              res.end(await mwResp.text());
               return;
             }
-            apiLocals = mwResult.locals || {};
+            apiLocals = mwResult.locals || apiLocals;
             // Propagate rewrite if any
             if (mwResult.rewriteUrl) {
               url.pathname = mwResult.rewriteUrl;
@@ -1979,8 +1994,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
           }
         }
 
-        const webRequest = buildWebRequest(req, req.url || url.pathname, bodyBuffer.length ? bodyBuffer : null);
-        const response = await executeApiRoute(apiMatch.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, apiMatch.params, apiLocals, apiWatchCache);
+        const response = mwChain.length > 0 ? null : await dispatchApi(apiLocals);
         if (!response) {
           res.writeHead(500, { 'Content-Type': 'text/plain' });
           res.end('API route returned no response');
@@ -2311,14 +2325,14 @@ function routeFullPathForChunk(chunkName: string): string | null {
                 const rendered = await renderSSR();
                 const secHeaders = security ? securityHeaders({ security }) : {};
                 if (forData) {
-                  return new Response(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data', ...secHeaders } });
+                  return new VeskResponse(JSON.stringify({ path: url.pathname, params: match.params, props: rendered.props, head: rendered.head }), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data', ...secHeaders } });
                 }
-                return new Response(rendered.html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
+                return new VeskResponse(rendered.html, { headers: { 'Content-Type': 'text/html', ...secHeaders } });
               } catch (e) {
                 const msg = e instanceof Error ? e.message : String(e);
                 if (forData) {
                   const code = errorStatusCode(e);
-                  return new Response(JSON.stringify({ error: msg, statusCode: code }), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });
+                  return new VeskResponse(JSON.stringify({ error: msg, statusCode: code }), { status: code, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'x-vesk-data' } });
                 }
                 throw e;
               }
@@ -2329,11 +2343,12 @@ function routeFullPathForChunk(chunkName: string): string | null {
         });
         mwLocals = mwResult.locals;
         if (mwResult.response) {
-          const respRecord = mwResult.response as unknown as Record<string, unknown>;
+          const mwResp = (toVeskResponse(mwResult.response as any) || mwResult.response) as Response;
+          const respRecord = mwResp as unknown as Record<string, unknown>;
           if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
-          logRequest(mwResult.response.status);
-          res.writeHead(mwResult.response.status, toNodeHeaders(mwResult.response));
-          res.end(await mwResult.response.text());
+          logRequest(mwResp.status);
+          res.writeHead(mwResp.status, toNodeHeaders(mwResp));
+          res.end(await mwResp.text());
           return;
         }
       } else {

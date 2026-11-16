@@ -88,15 +88,25 @@ export interface Locals<T extends object> {
   all(): T;
 }
 
+/** Middleware `next()` — call downstream; optionally rewrite the URL. Resolves to the downstream response (or `null`). Typed as `VeskResponse` so cookie/header helpers like `setCookie`/`clearCookie` are available. */
+export type MiddlewareNext = (rewrite?: string) => Promise<VeskResponse | null>;
+
+export interface MiddlewareError {
+  error: unknown;
+  [key: string]: unknown;
+}
+
 /**
  * Middleware context. Parameterize it with your locals shape to get end-to-end
  * typing across the chain:
  *
  * ```ts
  * type AppLocals = { user: User; requestId: string };
- * export async function middleware(ctx: MiddlewareContext<AppLocals>, next: () => Promise<void>) {
+ * export async function middleware(ctx: MiddlewareContext<AppLocals>, next: MiddlewareNext) {
  *   ctx.set('user', await findUser(ctx));   // typed
- *   const user = ctx.get('user');           // User, not unknown
+ *   const res = await next();
+ *   if (res) res.setCookie('seen', '1', { path: '/' });
+ *   return res;
  * }
  * ```
  */
@@ -105,11 +115,32 @@ export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocal
   params: Record<string, string>;
   url: URL;
   locals: L;
-  cookies: Record<string, string>;
+  cookies: Record<string, string | undefined>;
   /** Explicit per-call shape escape hatch: ctx.set<MyLocals>('user', value). */
   set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void;
   set<K extends keyof L & string>(key: K, value: L[K]): void;
   get<K extends keyof L & string>(key: K): L[K];
+  /** Additive (opt-in): collected middleware/handler errors. */
+  errors?: MiddlewareError[];
+  error?: (err: unknown) => unknown;
+  /** Additive (opt-in): chain control helpers. */
+  abort?: () => void;
+  isAborted?: () => boolean;
+  abortWithStatus?: (status: number) => VeskResponse | Response;
+  abortWithStatusJSON?: (status: number, body: unknown) => VeskResponse | Response;
+  /** Additive (opt-in): convenience helpers. */
+  cookie?: (name: string) => string | undefined;
+  status?: (code: number) => VeskResponse | Response;
+  json?: (body: unknown, init?: ResponseInit) => VeskResponse | Response;
+  text?: (body: string, init?: ResponseInit) => VeskResponse | Response;
+  html?: (body: string, init?: ResponseInit) => VeskResponse | Response;
+  redirect?: (url: string, status?: number) => VeskResponse | Response;
+  header?: (name: string, value: string) => void;
+  getHeader?: (name: string) => string | null | undefined;
+  shouldBindJSON?: <T = unknown>(schema?: unknown) => Promise<{ data?: T; error?: unknown }>;
+  bindJSON?: <T = unknown>(schema?: unknown) => Promise<T>;
+  shouldBindQuery?: <T = Record<string, string>>(schema?: unknown) => { data?: T; error?: unknown };
+  bindQuery?: <T = Record<string, string>>(schema?: unknown) => T;
   [key: string]: unknown;
 }
 
@@ -119,7 +150,7 @@ export interface MiddlewareEntry {
 }
 
 export interface MiddlewareChainOptions {
-  onLast?: (rewriteUrl: string | null, ctx?: MiddlewareContext) => Response | Promise<Response | null> | null;
+  onLast?: (rewriteUrl: string | null, ctx?: MiddlewareContext) => VeskResponse | Response | Promise<VeskResponse | Response | null> | null;
   plugins?: VeskPlugin[];
 }
 
@@ -857,6 +888,12 @@ export interface VeskRequest extends ServerRequest {
   hostname: string;
   parsedUrl: URL;
   getBody(): Promise<unknown>;
+  /** Additive helpers. */
+  cookie?: (name: string) => string | undefined;
+  shouldBindQuery?: <T = Record<string, string>>(schema?: unknown) => { data?: T; error?: unknown };
+  bindQuery?: <T = Record<string, string>>(schema?: unknown) => T;
+  shouldBindJSON?: <T = unknown>(schema?: unknown) => Promise<{ data?: T; error?: unknown }>;
+  bindJSON?: <T = unknown>(schema?: unknown) => Promise<T>;
 }
 
 export interface SetCookieOptions {
@@ -872,12 +909,15 @@ export interface VeskResponse extends Response {
   setStatus(code: number): VeskResponse;
   build(): VeskResponse;
   setCookie(name: string, value: string, opts?: SetCookieOptions): VeskResponse;
-  clearCookie(name: string, opts?: { path?: string; domain?: string }): VeskResponse;
+  clearCookie(name?: string, opts?: { path?: string; domain?: string }): VeskResponse;
   setCsp(policy: string | false): VeskResponse;
   setSecurityHeader(name: string, value: string | false): VeskResponse;
   cache(ttlSeconds: number): VeskResponse;
   noCache(): VeskResponse;
   cors(opts?: { origin?: string; methods?: string; headers?: string; credentials?: boolean }): VeskResponse;
+  /** Additive introspection helpers. */
+  statusCode?: number;
+  getHeader?(name: string): string | null;
 }
 
 export declare namespace VeskResponse {

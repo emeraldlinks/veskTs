@@ -41,7 +41,11 @@ export class Context<T> {
 	/** Sets the value for this component and its descendants. Typed as `T`. */
 	set(value: T): void {
 		const component = getActiveComponent();
-		if (component === null) throw new Error('No active component found, cannot set context');
+		if (component === null) {
+			const err = new Error('Context.set() must be called during component setup/render within an active component (no active component found)');
+			err.name = 'ContextScopeError';
+			throw err;
+		}
 		let map = component.c;
 		if (map === null) map = component.c = new Map();
 		map.set(this, value);

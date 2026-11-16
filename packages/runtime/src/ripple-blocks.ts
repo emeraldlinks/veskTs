@@ -33,9 +33,11 @@ import { is_ripple_object } from '@vesk/runtime/src/ripple-utils';
 
 export function user_effect(fn: () => void): Block | void {
 	if (active_block === null) {
-		throw new Error(
-			'effect() must be called within an active context, such as a component or effect',
+		const err = new Error(
+			'effect() must be called within an active reactive context (component setup, render, or another effect)',
 		);
+		err.name = 'EffectContextError';
+		throw err;
 	}
 
 	const component = active_component;

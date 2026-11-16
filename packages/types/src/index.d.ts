@@ -41,14 +41,37 @@ export interface ApiRouteNode {
     filePath: string | null;
     children: ApiRouteNode[];
 }
+export type MiddlewareNext = (rewrite?: string) => Promise<VeskResponse | null>;
+export interface MiddlewareError {
+    error: unknown;
+    [key: string]: unknown;
+}
 export interface MiddlewareContext {
     request: Request;
     params: Record<string, string>;
     url: URL;
     locals: Record<string, unknown>;
-    cookies: Record<string, string>;
+    cookies: Record<string, string | undefined>;
     set(key: string, value: unknown): void;
     get(key: string): unknown;
+    errors?: MiddlewareError[];
+    error?: (err: unknown) => unknown;
+    abort?: () => void;
+    isAborted?: () => boolean;
+    abortWithStatus?: (status: number) => VeskResponse | Response;
+    abortWithStatusJSON?: (status: number, body: unknown) => VeskResponse | Response;
+    cookie?: (name: string) => string | undefined;
+    status?: (code: number) => VeskResponse | Response;
+    json?: (body: unknown, init?: ResponseInit) => VeskResponse | Response;
+    text?: (body: string, init?: ResponseInit) => VeskResponse | Response;
+    html?: (body: string, init?: ResponseInit) => VeskResponse | Response;
+    redirect?: (url: string, status?: number) => VeskResponse | Response;
+    header?: (name: string, value: string) => void;
+    getHeader?: (name: string) => string | null | undefined;
+    shouldBindJSON?: <T = unknown>(schema?: unknown) => Promise<{ data?: T; error?: unknown }>;
+    bindJSON?: <T = unknown>(schema?: unknown) => Promise<T>;
+    shouldBindQuery?: <T = Record<string, string>>(schema?: unknown) => { data?: T; error?: unknown };
+    bindQuery?: <T = Record<string, string>>(schema?: unknown) => T;
     [key: string]: unknown;
 }
 export interface MiddlewareEntry {
@@ -56,7 +79,7 @@ export interface MiddlewareEntry {
     node: RouteNode;
 }
 export interface MiddlewareChainOptions {
-    onLast?: (rewriteUrl: string | null, ctx?: MiddlewareContext) => Response | Promise<Response | null> | null;
+    onLast?: (rewriteUrl: string | null, ctx?: MiddlewareContext) => VeskResponse | Response | Promise<VeskResponse | Response | null> | null;
     plugins?: VeskPlugin[];
 }
 export interface MiddlewareChainItem {
@@ -398,6 +421,11 @@ export interface VeskRequest extends ServerRequest {
     hostname: string;
     parsedUrl: URL;
     getBody(): Promise<unknown>;
+    cookie?: (name: string) => string | undefined;
+    shouldBindQuery?: <T = Record<string, string>>(schema?: unknown) => { data?: T; error?: unknown };
+    bindQuery?: <T = Record<string, string>>(schema?: unknown) => T;
+    shouldBindJSON?: <T = unknown>(schema?: unknown) => Promise<{ data?: T; error?: unknown }>;
+    bindJSON?: <T = unknown>(schema?: unknown) => Promise<T>;
 }
 export interface SetCookieOptions {
     maxAge?: number;
@@ -411,7 +439,7 @@ export interface VeskResponse extends Response {
     setStatus(code: number): VeskResponse;
     build(): VeskResponse;
     setCookie(name: string, value: string, opts?: SetCookieOptions): VeskResponse;
-    clearCookie(name: string, opts?: {
+    clearCookie(name?: string, opts?: {
         path?: string;
         domain?: string;
     }): VeskResponse;
@@ -425,6 +453,8 @@ export interface VeskResponse extends Response {
         headers?: string;
         credentials?: boolean;
     }): VeskResponse;
+    statusCode?: number;
+    getHeader?(name: string): string | null;
 }
 export declare namespace VeskResponse {
     /**

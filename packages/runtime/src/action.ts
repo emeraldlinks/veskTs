@@ -77,7 +77,9 @@ export function defineAction(config: ActionConfig | string, config2?: ActionConf
 		def = config;
 	}
 	if (!def || typeof def.execute !== 'function') {
-		throw new Error('defineAction requires an object with an `execute` function');
+		const received = def === null ? 'null' : Array.isArray(def) ? 'array' : typeof def;
+		const executeType = def && typeof (def as ActionConfig).execute !== 'undefined' ? typeof (def as ActionConfig).execute : 'missing';
+		throw new TypeError(`defineAction(config) requires an object with an \`execute\` function (received config: ${received}, execute: ${executeType})`);
 	}
 	if (!id) id = computeActionId(def);
 	const registry = getActionRegistry();

@@ -523,7 +523,7 @@ let htmlFnCode: string;
 
   let bodyCode: string;
   if (hasMiddleware) {
-    const indentedRender = dataCode.split('\n').map(l => l ? `  ${l}` : '').join('\n');
+    const indentedRunRoute = dataCode.split('\n').map(l => l ? `    ${l}` : '').join('\n');
     bodyCode = [
       '  // ── Middleware context ──',
       "  const __rootLocals = (globalThis.__vesk_request && globalThis.__vesk_request.locals) || {};",
@@ -537,13 +537,20 @@ let htmlFnCode: string;
       '    set(key, value) { this.locals[key] = value; },',
       '    get(key) { return this.locals[key]; },',
       '  };',
-      '  const __mwResult = await __executeMw(__ctx);',
-      '  if (__mwResult.response) return __mwResult.response;',
-      "  if (__mwResult.rewriteUrl) url.pathname = __mwResult.rewriteUrl;",
       '  const prev = globalThis.__vesk_request;',
       '  globalThis.__vesk_request = __ctx;',
       '  try {',
-      indentedRender,
+      // The downstream route runs *inside* the middleware onion via onLast, so
+      // `const res = await next(); res.setCookie(...); res.headers.set(...)`
+      // mutations in pass-through middleware land on the real response.
+      '    const __runRoute = async () => {',
+      '      const url = __ctx.url;',
+      indentedRunRoute,
+      '    };',
+      '    const __mwResult = await __executeMw(__ctx, __runRoute);',
+      '    if (__mwResult.response) return __mwResult.response;',
+      '    if (__mwResult.lastRan) return new Response(null, { status: 204 });',
+      '    return await __runRoute();',
       '  } finally {',
       '    globalThis.__vesk_request = prev;',
       '  }',
@@ -660,7 +667,7 @@ let htmlFnCode: string;
 
   const funcCode = [
     "import { __veskModules } from '../__vesk-modules.mjs';",
-    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, VeskResponse, toVeskResponse, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

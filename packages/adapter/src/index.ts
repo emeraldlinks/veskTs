@@ -463,10 +463,16 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   function walkApi(nodes: ApiRouteNode[]): void {
     for (const node of nodes) {
       if (node.filePath) {
-        const { funcPath, funcCode, name } = generateApiFunction(node, apiDir, outDir);
+        const mwChain = collectMiddlewareChain(routeTree, node.fullPath, appDir);
+        let mwCode: string | null = null;
+        if (mwChain.length > 0) {
+          const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));
+          mwCode = compileMiddlewareCode(mwSources);
+        }
+        const { funcPath, funcCode, name } = generateApiFunction(node, apiDir, outDir, { middlewareCode: mwCode });
         writeFileSync(funcPath, funcCode, 'utf-8');
         apiRoutes.push(node);
-        console.error(`vesk build: api  → server/api/${name}.js  (${node.fullPath})`);
+        console.error(`vesk build: api  → server/api/${name}.js  (${node.fullPath})${mwCode ? ' [mw]' : ''}`);
       }
       walkApi(node.children || []);
     }

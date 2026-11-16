@@ -101,6 +101,67 @@ export async function loadMiddleware(sourcePath: string): Promise<((ctx: any, ne
   return null;
 }
 
+function __mwCloneResponse(res: any): any {
+  if (!res || !(res instanceof Response)) return res;
+  const r = res as any;
+  const VeskRes = (globalThis as any).VeskResponse;
+  const init: ResponseInit = { status: r.status, statusText: r.statusText, headers: new Headers(r.headers) };
+  let out: any;
+  try {
+    out = VeskRes ? new VeskRes(r.body, init) : new Response(r.body, init);
+  } catch {
+    out = new Response(r.body, init);
+  }
+  try {
+    if (Array.isArray(r._cookieHeaders)) {
+      if (Array.isArray(out._cookieHeaders)) out._cookieHeaders.push(...r._cookieHeaders);
+      else out._cookieHeaders = [...r._cookieHeaders];
+    }
+    if (r._secHeaders && typeof r._secHeaders === 'object') {
+      out._secHeaders = { ...(out._secHeaders && typeof out._secHeaders === 'object' ? out._secHeaders : {}), ...r._secHeaders };
+    }
+    if (r._finalStatus != null && out._finalStatus == null) out._finalStatus = r._finalStatus;
+  } catch {}
+  // Flush queued cookies/security headers onto the outgoing Headers so pass-through mutations are visible.
+  if (typeof out.build === 'function') try { out.build(); } catch {}
+  return out;
+}
+
+function __mwMakeResponse(body: unknown, init?: ResponseInit): Response {
+  const VeskRes = (globalThis as any).VeskResponse;
+  try {
+    if (VeskRes) return new VeskRes(body, init);
+  } catch {}
+  return new Response(body as BodyInit, init);
+}
+
+function __mwBindResult(data: unknown, schema: unknown): { data?: unknown; error?: unknown } {
+  if (schema && typeof (schema as { safeParse?: unknown }).safeParse === 'function') {
+    try {
+      const parsed = (schema as { safeParse: (d: unknown) => { success: boolean; data?: unknown; error?: unknown } }).safeParse(data);
+      if (parsed && typeof parsed === 'object' && 'success' in parsed) {
+        return parsed.success ? { data: parsed.data } : { error: parsed.error };
+      }
+    } catch (e) {
+      return { error: e };
+    }
+  }
+  return { data };
+}
+
+function __mwApplyPending(ctx: Record<string, unknown>, res: unknown): any {
+  if (!res || !(res instanceof Response)) return res;
+  const pending = ctx.__pendingHeaders as Record<string, string> | undefined;
+  if (!pending) return res;
+  const keys = Object.keys(pending);
+  if (!keys.length) return res;
+  const out = __mwCloneResponse(res);
+  try {
+    for (const key of keys) out.headers.set(key, pending[key]);
+  } catch {}
+  return out;
+}
+
 export async function executeMiddlewareChain(
   chain: MiddlewareEntry[],
   request: Request,
@@ -113,17 +174,108 @@ export async function executeMiddlewareChain(
   const locals: Record<string, unknown> = Object.assign({}, serverStore || {});
   const cookies = parseCookies(request.headers?.get('cookie') || '') || {};
 
+  let __aborted = false;
+  let __abortResponse: Response | null = null;
+  const __errors: Array<{ error: unknown }> = [];
+
   const ctx = new Proxy({
     request,
     params,
     url,
     locals,
     cookies,
+    errors: __errors,
     set(key: string, value: unknown) {
       locals[key] = value;
     },
     get(key: string) {
       return locals[key];
+    },
+    __pendingHeaders: {} as Record<string, string>,
+    cookie(name: string) {
+      return cookies[name];
+    },
+    getHeader(name: string) {
+      return request.headers.get(name);
+    },
+    header(name: string, value: string | null | undefined) {
+      const key = String(name).toLowerCase();
+      const pending = (this as Record<string, unknown>).__pendingHeaders as Record<string, string>;
+      if (value == null) delete pending[key];
+      else pending[key] = String(value);
+    },
+    status(code: number) {
+      return __mwCloneResponse(__mwMakeResponse(null, { status: code }));
+    },
+    json(body: unknown, init?: ResponseInit) {
+      const headers = Object.assign({ 'Content-Type': 'application/json' }, init?.headers || {});
+      const VeskRes = (globalThis as any).VeskResponse;
+      try {
+        if (VeskRes && typeof VeskRes.json === 'function') {
+          return __mwCloneResponse(VeskRes.json(body, { ...init, headers }));
+        }
+      } catch {}
+      return __mwCloneResponse(new Response(JSON.stringify(body), { ...init, headers }));
+    },
+    text(body: string, init?: ResponseInit) {
+      return __mwCloneResponse(__mwMakeResponse(body, init));
+    },
+    html(body: string, init?: ResponseInit) {
+      const headers = Object.assign({ 'Content-Type': 'text/html; charset=utf-8' }, init?.headers || {});
+      return __mwCloneResponse(__mwMakeResponse(body, { ...init, headers }));
+    },
+    redirect(target: string, status = 302) {
+      return __mwCloneResponse(__mwMakeResponse(null, { status, headers: { Location: target } }));
+    },
+    shouldBindQuery(schema?: unknown) {
+      try {
+        const queryUrl = new URL(request.url, 'http://localhost');
+        const data = Object.fromEntries(queryUrl.searchParams.entries());
+        return __mwBindResult(data, schema);
+      } catch (e) {
+        return { error: e };
+      }
+    },
+    bindQuery(schema?: unknown) {
+      const result = (this as any).shouldBindQuery(schema) as { data?: Record<string, string>; error?: unknown };
+      if (result.error) throw result.error;
+      return result.data;
+    },
+    async shouldBindJSON(schema?: unknown) {
+      try {
+        const clone = typeof request.clone === 'function' ? request.clone() : request;
+        const data = await clone.json();
+        return __mwBindResult(data, schema);
+      } catch (e) {
+        return { error: e };
+      }
+    },
+    async bindJSON(schema?: unknown) {
+      const result = await (this as any).shouldBindJSON(schema) as { data?: unknown; error?: unknown };
+      if (result.error) throw result.error;
+      return result.data;
+    },
+    error(err: unknown) {
+      __errors.push({ error: err });
+      return err;
+    },
+    abort() {
+      __aborted = true;
+    },
+    isAborted() {
+      return __aborted;
+    },
+    abortWithStatus(status: number) {
+      __aborted = true;
+      const VeskRes = (globalThis as any).VeskResponse;
+      __abortResponse = __mwCloneResponse(VeskRes ? new VeskRes(null, { status }) : new Response(null, { status }));
+      return __abortResponse;
+    },
+    abortWithStatusJSON(status: number, body: unknown) {
+      __aborted = true;
+      const VeskRes = (globalThis as any).VeskResponse;
+      __abortResponse = __mwCloneResponse(VeskRes && typeof VeskRes.json === 'function' ? VeskRes.json(body, { status }) : new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+      return __abortResponse;
     },
   } as Record<string, unknown>, {
     get(target: Record<string, unknown>, prop: string | symbol): unknown {
@@ -161,7 +313,8 @@ export async function executeMiddlewareChain(
       (globalThis as Record<string, unknown>).__vesk_request = ctx as unknown as Record<string, unknown>;
       try {
         const loneResponse = await onLast(rewriteUrl, ctx as MiddlewareContext);
-        return { response: loneResponse ?? null, redirected: !!loneResponse && loneResponse.status >= 300 && loneResponse.status < 400, locals, rewriteUrl };
+        const normalized = __mwApplyPending(ctx as any, __mwCloneResponse(loneResponse as any)) as Response | null;
+        return { response: normalized ?? null, redirected: !!normalized && normalized.status >= 300 && normalized.status < 400, locals, rewriteUrl };
       } finally {
         (globalThis as Record<string, unknown>).__vesk_request = prev;
       }
@@ -170,9 +323,11 @@ export async function executeMiddlewareChain(
   }
 
   async function runMiddleware(index: number): Promise<Response | null> {
+    if (__aborted) return __abortResponse;
     if (index >= chain.length) {
       if (onLast) {
-        return onLast(rewriteUrl, ctx as MiddlewareContext);
+        const out = await onLast(rewriteUrl, ctx as MiddlewareContext);
+        return __mwCloneResponse(out as any) as Response | null;
       }
       return null;
     }
@@ -186,6 +341,7 @@ export async function executeMiddlewareChain(
     let nextCalled = false;
     let nextResult: Response | null = null;
     async function next(rewrite?: string): Promise<Response> {
+      if (__aborted) return (__abortResponse as Response) ?? (null as unknown as Response);
       if (nextCalled) return null as unknown as Response;
       nextCalled = true;
       if (rewrite) {
@@ -204,23 +360,25 @@ export async function executeMiddlewareChain(
 
     try {
       const result = await fn(ctx, next);
+      if (__aborted) return __abortResponse || __mwCloneResponse(nextResult as any) || __mwCloneResponse(result as any) as any;
       if (result instanceof Response) {
-        return result;
+        return __mwCloneResponse(result) as Response;
       }
       if (nextResult !== null && (nextResult as unknown) instanceof Response) {
-        return nextResult;
+        return __mwCloneResponse(nextResult) as Response;
       }
       if (!nextCalled) {
         return runMiddleware(index + 1);
       }
       return null;
     } catch (e: unknown) {
+      __errors.push({ error: e });
       const err = e as Error & { name: string; status?: number; url?: string };
       if (err.name === 'Redirect') {
-        return new Response(null, {
+        return __mwCloneResponse(new Response(null, {
           status: err.status || 302,
           headers: { Location: err.url || '' },
-        });
+        })) as Response;
       }
       // undici's `Response.redirect()` rejects *relative* URLs with a
       // TypeError ("Failed to parse URL from /login"). A middleware returning
@@ -229,7 +387,7 @@ export async function executeMiddlewareChain(
       // response instead of surfacing a 500.
       if (e instanceof TypeError && /Failed to parse URL from/.test(String(e.message))) {
         const target = /Failed to parse URL from (\S+)/.exec(String(e.message))?.[1] ?? '';
-        return new Response(null, { status: 302, headers: { Location: target } });
+        return __mwCloneResponse(new Response(null, { status: 302, headers: { Location: target } })) as Response;
       }
       // Any other TypeError from the middleware (e.g. reading a property of
       // `undefined` like `ctx.cookies[SESSION_COOKIE]` when `ctx.cookies` is
@@ -238,7 +396,7 @@ export async function executeMiddlewareChain(
       // FUNCTION_INVOCATION_FAILED — Next.js avoids this by wrapping entry
       // points the same way. Return a 500 instead.
       if (e instanceof TypeError) {
-        return new Response(null, { status: 500 });
+        return __mwCloneResponse(new Response(null, { status: 500 })) as Response;
       }
       throw e;
     }
@@ -254,5 +412,6 @@ export async function executeMiddlewareChain(
   } finally {
     (globalThis as Record<string, unknown>).__vesk_request = prevOuter;
   }
-  return { response, redirected: !!response && response.status >= 300 && response.status < 400, locals, rewriteUrl };
+  const finalResponse = __mwApplyPending(ctx as any, __mwCloneResponse(response as any)) as Response | null;
+  return { response: finalResponse, redirected: !!finalResponse && finalResponse.status >= 300 && finalResponse.status < 400, locals, rewriteUrl };
 }

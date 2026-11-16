@@ -50,7 +50,11 @@ export function useRequest(): RequestContext | null {
 
 export async function useBody(): Promise<unknown> {
 	const ctx = getRequest();
-	if (!ctx) throw new Error('useBody() called outside request context');
+	if (!ctx) {
+		const err = new Error('useBody() called outside of a request context (available only in route handlers, middleware, or server actions during a Vesk request)');
+		err.name = 'RequestContextError';
+		throw err;
+	}
 	if (ctx._parsedBody !== undefined) return ctx._parsedBody;
 
 	const req = ctx._request;
@@ -180,8 +184,8 @@ export function webhook<T = unknown>(options: WebhookOptions<T>): (request: Requ
 		signedPayload,
 	} = options;
 
-	if (!secret) throw new Error('webhook() requires a secret');
-	if (!handler) throw new Error('webhook() requires a handler function');
+	if (!secret) throw new TypeError('webhook(options) requires a `secret` (string or CryptoKey)');
+	if (typeof handler !== 'function') throw new TypeError('webhook(options) requires a `handler` function');
 
 	async function computeSignature(payload: string): Promise<string> {
 		const key = typeof secret === 'string' ? new TextEncoder().encode(secret) as BufferSource : secret as BufferSource;
@@ -189,7 +193,9 @@ export function webhook<T = unknown>(options: WebhookOptions<T>): (request: Requ
 
 		const crypto = globalThis.crypto;
 		if (!crypto?.subtle) {
-			throw new Error('Web Crypto API not available (required for webhook signature verification)');
+			const err = new Error('Web Crypto API (crypto.subtle) is not available; webhook signature verification requires a runtime with Web Crypto support');
+			err.name = 'UnsupportedRuntimeError';
+			throw err;
 		}
 		return crypto.subtle.importKey('raw', key, { name: 'HMAC', hash: algorithm }, false, ['sign'])
 			.then(k => crypto.subtle.sign('HMAC', k, data))
@@ -390,13 +396,15 @@ interface VeskResponseInstance extends Response {
 		maxAge?: number; httpOnly?: boolean; secure?: boolean;
 		sameSite?: 'Lax' | 'Strict' | 'None'; path?: string; domain?: string;
 	}): VeskResponseInstance;
-	clearCookie(name: string, opts?: { path?: string; domain?: string }): VeskResponseInstance;
+	clearCookie(name?: string, opts?: { path?: string; domain?: string }): VeskResponseInstance;
 	setCsp(policy: string | false): VeskResponseInstance;
 	setSecurityHeader(name: string, value: string | false): VeskResponseInstance;
 	cache(ttlSeconds: number): VeskResponseInstance;
 	noCache(): VeskResponseInstance;
 	cors(opts?: { origin?: string; methods?: string; headers?: string; credentials?: boolean }): VeskResponseInstance;
 	_flushSecurityHeaders(): void;
+	getHeader?(name: string): string | null;
+	statusCode?: number;
 	readonly status: number;
 }
 
@@ -522,6 +530,54 @@ export class VeskRequest extends ServerRequest {
 	}
 	get(key: string): unknown {
 		return this._locals[key];
+	}
+
+	/** Read a single cookie by name (additive helper). */
+	cookie(name: string): string | undefined {
+		return (this._cookies as Record<string, string>)[name];
+	}
+
+	/** Schema-agnostic query binding (additive). Supports plain parse or {safeParse/parse}. */
+	shouldBindQuery<T = Record<string, string>>(schema?: any): { data?: T; error?: any } {
+		try {
+			const data = this.query as Record<string, string>;
+			if (!schema) return { data: data as T };
+			if (typeof schema.safeParse === 'function') {
+				const r = schema.safeParse(data);
+				return r && r.success ? { data: r.data as T } : { error: r?.error ?? r };
+			}
+			if (typeof schema.parse === 'function') return { data: schema.parse(data) as T };
+			return { data: data as T };
+		} catch (error) {
+			return { error };
+		}
+	}
+
+	bindQuery<T = Record<string, string>>(schema?: any): T {
+		const r = this.shouldBindQuery<T>(schema);
+		if (r.error) throw r.error;
+		return r.data as T;
+	}
+
+	async shouldBindJSON<T = unknown>(schema?: any): Promise<{ data?: T; error?: any }> {
+		try {
+			const data = await (this as any).json();
+			if (!schema) return { data: data as T };
+			if (typeof schema.safeParse === 'function') {
+				const r = schema.safeParse(data);
+				return r && r.success ? { data: r.data as T } : { error: r?.error ?? r };
+			}
+			if (typeof schema.parse === 'function') return { data: schema.parse(data) as T };
+			return { data: data as T };
+		} catch (error) {
+			return { error };
+		}
+	}
+
+	async bindJSON<T = unknown>(schema?: any): Promise<T> {
+		const r = await this.shouldBindJSON<T>(schema);
+		if (r.error) throw r.error;
+		return r.data as T;
 	}
 
 	/**
@@ -666,6 +722,16 @@ class _VeskResponse extends ServerResponse {
 		return this._finalStatus !== null ? this._finalStatus : super.status;
 	}
 
+	/** Additive introspection alias. */
+	get statusCode(): number {
+		return this.status;
+	}
+
+	/** Additive header getter. */
+	getHeader(name: string): string | null {
+		return this.headers?.get(name) ?? null;
+	}
+
 	build(): _VeskResponse {
 		this._flushSecurityHeaders();
 		return this;
@@ -719,7 +785,14 @@ class _VeskResponse extends ServerResponse {
 		return this;
 	}
 
-	clearCookie(name: string, opts: { path?: string; domain?: string } = {}): _VeskResponse {
+	clearCookie(name?: string, opts: { path?: string; domain?: string } = {}): _VeskResponse {
+		if (name == null || name === '') {
+			const names = Array.from(new Set(this._cookieHeaders.map((h) => h.split('=', 1)[0]).filter(Boolean)));
+			this._cookieHeaders = [];
+			for (const n of names) this.setCookie(n, '', { maxAge: 0 });
+			return this;
+		}
+		this._cookieHeaders = this._cookieHeaders.filter((h) => h.split('=', 1)[0] !== name);
 		return this.setCookie(name, '', { ...opts, maxAge: 0 });
 	}
 
@@ -809,6 +882,24 @@ export const VeskResponse = new Proxy(_VeskResponse, {
 	}
 }) as typeof _VeskResponse & ((body?: unknown, init?: ResponseInit) => VeskResponseInstance);
 
+/** Normalize any Response into a VeskResponse instance (additive, non-breaking). */
+export function toVeskResponse(res: Response | VeskResponseInstance | null | undefined): VeskResponseInstance | null | undefined {
+	if (res == null) return res as null | undefined;
+	if (res instanceof _VeskResponse) return res as unknown as VeskResponseInstance;
+	const init: ResponseInit = { status: res.status, statusText: res.statusText, headers: res.headers };
+	const out = new _VeskResponse(res.body, init) as unknown as VeskResponseInstance;
+	try {
+		const anyRes = res as any;
+		if (Array.isArray(anyRes._cookieHeaders)) {
+			(out as any)._cookieHeaders = [...anyRes._cookieHeaders, ...((out as any)._cookieHeaders || [])];
+		}
+		if (anyRes._secHeaders && typeof anyRes._secHeaders === 'object') {
+			(out as any)._secHeaders = { ...anyRes._secHeaders, ...((out as any)._secHeaders || {}) };
+		}
+	} catch {}
+	return out;
+}
+
 export function applyRequestSecurity(request: VeskRequest, response: VeskResponseInstance): void {
 	if (!request || !response) return;
 	// Prefer the per-request channel the servers read from; fall back to the
@@ -886,23 +977,31 @@ async function _getImpl(): Promise<Record<string, Function | null>> {
 export async function signCookie(name: string, value: string, host?: string): Promise<string> {
 	const impl = await _getImpl();
 	if (impl.signCookie) return impl.signCookie(name, value, host) as string;
-	throw new Error('signCookie: @vesk/compiler not available');
+	const err = new Error('signCookie() is unavailable because @vesk/compiler secure cookie utilities could not be loaded in this runtime');
+	err.name = 'MissingDependencyError';
+	throw err;
 }
 
 export async function unsignCookie(name: string, signedValue: string, host?: string): Promise<string | null> {
 	const impl = await _getImpl();
 	if (impl.unsignCookie) return impl.unsignCookie(name, signedValue, host) as string | null;
-	throw new Error('unsignCookie: @vesk/compiler not available');
+	const err = new Error('unsignCookie() is unavailable because @vesk/compiler secure cookie utilities could not be loaded in this runtime');
+	err.name = 'MissingDependencyError';
+	throw err;
 }
 
 export async function setSignedCookie(name: string, value: string, options: Record<string, unknown> = {}, host?: string): Promise<string> {
 	const impl = await _getImpl();
 	if (impl.setSignedCookie) return impl.setSignedCookie(name, value, options, host) as string;
-	throw new Error('setSignedCookie: @vesk/compiler not available');
+	const err = new Error('setSignedCookie() is unavailable because @vesk/compiler secure cookie utilities could not be loaded in this runtime');
+	err.name = 'MissingDependencyError';
+	throw err;
 }
 
 export async function readSignedCookie(name: string, cookieString: string, host?: string): Promise<string | null> {
 	const impl = await _getImpl();
 	if (impl.readSignedCookie) return impl.readSignedCookie(name, cookieString, host) as string | null;
-	throw new Error('readSignedCookie: @vesk/compiler not available');
+	const err = new Error('readSignedCookie() is unavailable because @vesk/compiler secure cookie utilities could not be loaded in this runtime');
+	err.name = 'MissingDependencyError';
+	throw err;
 }

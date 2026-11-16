@@ -151,6 +151,7 @@ export async function bundleRuntime(appDir: string, outDir: string): Promise<str
     'export const PayloadTooLargeError = __veskRuntime.PayloadTooLargeError;',
     'export const DEFAULT_MAX_BODY_BYTES = __veskRuntime.DEFAULT_MAX_BODY_BYTES;',
     'export const VeskResponse = __veskRuntime.VeskResponse;',
+    'export const toVeskResponse = __veskRuntime.toVeskResponse;',
     '',
     '// Server actions',
     'export const defineAction = __veskRuntime.defineAction;',

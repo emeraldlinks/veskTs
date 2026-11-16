@@ -733,9 +733,11 @@ function flush_microtasks(): void {
 
 	flush_count++;
 	if (flush_count > 1001) {
-		throw new Error(
-			'Maximum update depth exceeded. This typically indicates that an effect reads and writes the same piece of state.',
+		const err = new Error(
+			'Maximum update depth exceeded (>1001 flush cycles). This typically indicates an effect that reads and writes the same tracked state, or a reactive loop between effects/derived values.',
 		);
+		err.name = 'MaximumUpdateDepthExceededError';
+		throw err;
 	}
 	const previous_queued_root_blocks = queued_root_blocks;
 	queued_root_blocks = [];
@@ -959,9 +961,11 @@ export function peek_tracked(tracked: unknown): unknown {
 
 export function set(tracked: Tracked | Derived, value: unknown): void {
 	if (!is_mutating_allowed) {
-		throw new Error(
-			'Assignments or updates to tracked values are not allowed during computed "track(() => ...)" evaluation',
+		const err = new Error(
+			'Tracked state mutation is not allowed during derived/computed evaluation (track(() => ...) / derived(() => ...)). Derivations must be pure; move writes into an effect or event handler.',
 		);
+		err.name = 'TrackedMutationInDerivedError';
+		throw err;
 	}
 
 	const old_value = tracked.__v;
@@ -1231,7 +1235,9 @@ export function scope(): Block | null {
 
 export function safe_scope(err = 'Cannot access outside of a component context'): Block {
 	if (active_scope === null) {
-		throw new Error(err);
+		const error = new Error(err);
+		error.name = 'ComponentScopeError';
+		throw error;
 	}
 
 	return active_scope;

@@ -1,6 +1,6 @@
-import type { MiddlewareContext } from '@vesk/types';
+import type { MiddlewareContext, MiddlewareNext } from '@vesk/types';
 
-export async function middleware(ctx: MiddlewareContext, next: () => Promise<void>) {
+export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
   // Verify root middleware already injected user
   ctx.set('role', ctx.user ? 'admin' : 'anonymous');
   ctx.set('route', 'admin');
