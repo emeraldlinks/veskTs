@@ -28,7 +28,7 @@ function main(): void {
   assert(code !== null, 'compiles a middleware chain');
   assert(code?.includes("import { VeskResponse } from '@vesk/runtime/server';") === true, 'preserves bare package imports');
   assert(code?.includes("return VeskResponse.redirect('/auth/login', 302);") === true, 'keeps VeskResponse call in the emitted middleware');
-  assert(code?.includes('__mwCloneResponse(await onLast())') === true, 'normalizes the downstream response before pass-through mutation');
+  assert(code?.includes('__mwCloneResponse(await onLast(rewriteUrl, ctx))') === true, 'normalizes the downstream response before pass-through mutation');
   assert(code?.includes('__mwAttachCtx(ctx)') === true, 'attaches additive ctx helpers');
 
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
