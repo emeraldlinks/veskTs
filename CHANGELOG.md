@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.101 — 2026-11-16
+
+_No breaking changes._
+
+### Features
+
+- **adapter:** support middleware response mutation on SSR and API routes
+
 ## 0.2.100 — 2026-11-15
 
 _No breaking changes._
