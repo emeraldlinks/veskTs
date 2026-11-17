@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.105 — 2026-11-17
+
+_No breaking changes._
+
+### Fixes
+
+- **server:** canonical cookies.get and typed header maps
+
+### Tests
+
+- await guard icon repaint and stub toHeadersMap
+
 ## 0.2.104 — 2026-11-17
 
 _No breaking changes._
