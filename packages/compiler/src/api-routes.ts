@@ -3,6 +3,11 @@ import { join, extname } from 'path';
 import type { ApiRouteNode } from '@vesk/compiler/src/types';
 import { collapseSlashes } from '@vesk/compiler/src/router';
 import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
+import { parseCookies } from '@vesk/compiler/src/server-cookies';
+import { toHeadersMap } from '@vesk/runtime/src/request';
+import type { MiddlewareCookies } from '@vesk/compiler/src/types';
+
+export { parseCookies };
 
 function basename(p: string): string {
   const idx = p.lastIndexOf('/');
@@ -200,19 +205,6 @@ export function matchApiUrl(tree: ApiRouteNode[], pathname: string): { node: Api
   return { node: matched, params: { ...params } };
 }
 
-export function parseCookies(str: string): Record<string, string> {
-  const obj: Record<string, string> = {};
-  if (!str) return obj;
-  for (const pair of str.split(';')) {
-    const eq = pair.indexOf('=');
-    if (eq === -1) continue;
-    const k = pair.slice(0, eq).trim();
-    const v = pair.slice(eq + 1).trim();
-    if (k) obj[k] = v;
-  }
-  return obj;
-}
-
 export interface DevCache extends Map<string, number> {}
 
 export type BuildWebRequestInput = {
@@ -227,14 +219,14 @@ export type BuildWebRequestInput = {
  *
  * When `body` is omitted, the body is read lazily from the Node stream and
  * `json()`/`text()` are patched accordingly. A `cookies` getter is attached
- * (NextRequest-compatible).
+ * with both direct record access and `cookies.get(name)`.
  */
 export function buildWebRequest(
   nodeReq: BuildWebRequestInput,
   url: string,
   body?: BodyInit | null,
   options?: { maxBodyBytes?: number }
-): Request & { cookies: Record<string, string>; query: Record<string, string> } {
+): Request & { cookies: MiddlewareCookies; query: Record<string, string> } {
   const parsedUrl = new URL(url, `http://${nodeReq.headers?.host || 'localhost'}`);
   const method = nodeReq.method || 'GET';
   const headers: Record<string, string> = {};
@@ -277,7 +269,7 @@ export function buildWebRequest(
   for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
   Object.defineProperty(webRequest, 'query', { get: () => query, enumerable: true });
 
-  return webRequest as Request & { cookies: Record<string, string>; query: Record<string, string> };
+  return webRequest as Request & { cookies: MiddlewareCookies; query: Record<string, string> };
 }
 
 export function tooLargeError(max: number): Error & { status: number } {
@@ -350,9 +342,7 @@ export async function executeApiRoute(
   }
 
   const ctx: Record<string, unknown> = {
-    headers: Object.fromEntries(
-      [...request.headers.entries()].map(([k, v]) => [k, Array.isArray(v) ? v.join(', ') : v]),
-    ),
+    headers: toHeadersMap(request.headers),
     url: request.url,
     method: request.method,
     cookies: parseCookies(request.headers.get('cookie') || ''),

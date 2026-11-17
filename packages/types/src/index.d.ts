@@ -49,11 +49,13 @@ export interface MiddlewareError {
 export type MiddlewareCookies = Record<string, string | undefined> & {
     get(name: string): string | undefined;
 };
+export type VeskHeaders = Map<string, string>;
 export interface MiddlewareContext {
     request: Request;
     params: Record<string, string>;
     url: URL;
     locals: Record<string, unknown>;
+    headers: VeskHeaders;
     cookies: MiddlewareCookies;
     set(key: string, value: unknown): void;
     get(key: string): unknown;

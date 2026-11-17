@@ -12,8 +12,10 @@ import { withSsrStore, withSsrStoreOf, createSsrStore, resetSsrToken, dropSsrSlo
 import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-codegen';
 import { scanRoutes, matchUrl, collectSources, scanComponents } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
+import { parseCookies } from '@vesk/compiler/src/server-cookies';
+import type { MiddlewareCookies } from '@vesk/compiler/src/types';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
-import { VeskResponse, toVeskResponse } from '@vesk/runtime/src/request';
+import { VeskResponse, toHeadersMap, toVeskResponse } from '@vesk/runtime/src/request';
 
 // Compiler middleware helpers resolve the response class through this global so
 // cookie/header helpers work for dev-compiled chains without importing runtime.
@@ -758,12 +760,14 @@ export async function startDevServer(port: number, projectDir: string, config: R
   }
   function makeEventCtx(overrides: Record<string, unknown>): ServerEventContext {
     const store = eventsStore();
+    const request = overrides.request as Request | undefined;
     return {
       server: null,
       port,
       host: bindHost,
       locals: { ...store },
       serverLocals: store,
+      headers: toHeadersMap(request?.headers),
       set(key: string, value: unknown) { store[key] = value; return value; },
       get(key: string) { return store[key]; },
       ...overrides,
@@ -2862,7 +2866,7 @@ function buildRequestContext(req: IncomingMessage): {
   headers: Record<string, string>;
   url: string | undefined;
   method: string;
-  cookies: Record<string, string>;
+  cookies: MiddlewareCookies;
   locals: Record<string, unknown>;
   ip?: string;
 } {
@@ -2870,14 +2874,6 @@ function buildRequestContext(req: IncomingMessage): {
   for (const [k, v] of Object.entries(req.headers)) {
     headers[k] = Array.isArray(v) ? v.join(', ') : (v || '');
   }
-  const cookies: Record<string, string> = {};
-  const raw = req.headers.cookie || '';
-  for (const pair of raw.split(';')) {
-    const eq = pair.indexOf('=');
-    if (eq === -1) continue;
-    const k = pair.slice(0, eq).trim();
-    const v = pair.slice(eq + 1).trim();
-    if (k) cookies[k] = v;
-  }
+  const cookies = parseCookies(req.headers.cookie || '');
   return { headers, url: req.url, method: req.method || 'GET', cookies, locals: {}, ip: undefined };
 }

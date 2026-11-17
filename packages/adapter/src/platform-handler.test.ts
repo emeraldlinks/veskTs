@@ -42,6 +42,7 @@ interface TestInput {
   apiRoutes: Array<{ fullPath: string }>;
   prerenderedPaths: string[];
   hasMiddleware: boolean;
+  hasEvents?: boolean;
   appDir: string;
 }
 
@@ -120,6 +121,24 @@ async function main() {
       });
       assert(src.includes('__executeMw'), 'expected middleware executor in handler source');
       assert(src.includes('server-cookies.js'), 'expected parseCookies import for middleware');
+    });
+
+    await it('parses cookies for onRequest events even without middleware', async () => {
+      rmSync(join(tmpRoot, 'node_modules'), { recursive: true, force: true });
+      stageAdapter();
+      stageCompiler();
+      const { generatePlatformHandlerSource } = await importStaged();
+      const src = generatePlatformHandlerSource({
+        ssrRoutes: [],
+        apiRoutes: [],
+        prerenderedPaths: [],
+        hasMiddleware: false,
+        hasEvents: true,
+        appDir: tmpRoot,
+      });
+      assert(src.includes('server-cookies.js'), 'expected parseCookies import for events');
+      assert(src.includes("cookies: parseCookies(request.headers.get('cookie') || '')"), 'event context should expose a cookie jar');
+      assert(!src.includes('cookies: {},'), 'event context should not start with an empty cookie object');
     });
   });
 

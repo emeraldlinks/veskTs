@@ -44,7 +44,7 @@ export const pages: DocPage[] = [
           "`useRequest(): RequestContext | null` — the live request context, or `null` outside a request. Carries `url`, `method`, `params`, `cookies`, `locals` and the underlying `_request`.",
           "`useBody(): Promise<unknown>` — the parsed request body: JSON for `content-type: application/json`, an object for `x-www-form-urlencoded`, otherwise text (with a JSON.parse fallback). Cached per request; returns `null` when there is no underlying request and throws if called outside a request context.",
           "`cookies(): CookieStore` — the current request's cookies.",
-          "`headers(): Record<string, string | Function | undefined>` — the current request's normalized headers.",
+          "`headers(): Map<string, string>` — the current request's normalized (lower-case) headers.",
           "`locals(): Record<string, unknown>` — per-request data shared between middleware, handlers and renders (empty object outside a request).",
         ],
       },
@@ -137,15 +137,14 @@ component Dashboard() {
       { kind: "h2", text: "headers()" },
       {
         kind: "p",
-        text: "`headers()` normalizes the request headers to lowercase names and supports both method and property access — `headers().get('accept')` and `headers()['accept']` are equivalent. Values from multi-valued headers are joined with `', '`.",
+        text: "`headers()` returns a real `Map<string, string>` with normalized lower-case names. Use `.get(name)` for a typed lookup; multi-valued headers are joined with `', '`.",
       },
       {
         kind: "list",
         items: [
-          "`get(name)` → `string | null` (case-insensitive)",
+          "`get(name)` → `string | undefined` (case-insensitive)",
           "`has(name)` → `boolean` (case-insensitive)",
-          "`entries()` → `MapIterator` of `[name, value]` pairs",
-          "Direct reads: `headers().accept`, `headers()['accept-language']`, …",
+          "`entries()`, `keys()`, `values()`, `forEach()` and `size` — the standard `Map` surface",
         ],
       },
       { kind: "h2", text: "locals()" },

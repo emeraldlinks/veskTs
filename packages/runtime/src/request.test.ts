@@ -1,4 +1,4 @@
-import { ServerResponse, ServerRequest, VeskRequest, VeskResponse, toVeskResponse, DEFAULT_MAX_BODY_BYTES, PayloadTooLargeError, applyRequestSecurity, withValidation, useBody, useParams, useRequest, cors, defineHook, removeHook, runHooks, webhook } from '@vesk/runtime/src/request';
+import { ServerResponse, ServerRequest, VeskRequest, VeskResponse, toVeskResponse, DEFAULT_MAX_BODY_BYTES, PayloadTooLargeError, applyRequestSecurity, withValidation, useBody, useParams, useRequest, headers, toHeadersMap, cors, defineHook, removeHook, runHooks, webhook } from '@vesk/runtime/src/request';
 
 let passed = 0;
 let failed = 0;
@@ -213,6 +213,50 @@ describe('API Hooks', () => {
 	it('useRequest returns null outside request context', () => {
 		globalThis.__vesk_request = null;
 		expect(useRequest()).toBeNull();
+	});
+});
+
+describe('headers()', () => {
+	it('returns a real Map with lower-cased header names', () => {
+		globalThis.__vesk_request = {
+			headers: new Map([['X-Test', 'yes'], ['Accept', 'text/html']]),
+		};
+		const h = headers();
+		expect(h).toBeInstanceOf(Map);
+		expect(h.size).toBe(2);
+		expect(h.get('x-test')).toBe('yes');
+		expect(h.get('accept')).toBe('text/html');
+		expect(h.has('X-Test')).toBe(true);
+		expect([...h.keys()].includes('x-test')).toBe(true);
+		expect((h as unknown as Record<string, string>)['x-test']).toBe('yes');
+		delete globalThis.__vesk_request;
+	});
+
+	it('normalizes Headers, Maps, and plain Node header records', () => {
+		const fromHeaders = toHeadersMap(new Headers({ 'X-Test': 'yes' }));
+		expect(fromHeaders.get('x-test')).toBe('yes');
+
+		const fromMap = toHeadersMap(new Map([['X-Test', 'yes']]));
+		expect(fromMap.get('x-test')).toBe('yes');
+
+		const fromRecord = toHeadersMap({ 'X-Test': ['a', 'b'], ignore: undefined });
+		expect(fromRecord.get('x-test')).toBe('a, b');
+		expect(fromRecord.has('ignore')).toBe(false);
+	});
+
+	it('keeps legacy record contexts readable through the Map API', () => {
+		globalThis.__vesk_request = { headers: { 'X-Legacy': '1' } };
+		const h = headers();
+		expect(h).toBeInstanceOf(Map);
+		expect(h.get('x-legacy')).toBe('1');
+		delete globalThis.__vesk_request;
+	});
+
+	it('returns an empty Map outside a request', () => {
+		globalThis.__vesk_request = null;
+		const h = headers();
+		expect(h).toBeInstanceOf(Map);
+		expect(h.size).toBe(0);
 	});
 });
 

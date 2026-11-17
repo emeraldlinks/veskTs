@@ -120,9 +120,13 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
   const localsSeed = hasEvents ? 'Object.assign({}, __serverStore)' : '{}';
 
   const compilerSrc = findCompilerSrc(appDir);
-  const parseCookiesImport = hasMiddleware
+  const needsParseCookies = hasMiddleware || hasEvents;
+  const parseCookiesImport = needsParseCookies
     ? `import { parseCookies } from ${JSON.stringify(resolve(compilerSrc, 'server-cookies.js'))};`
     : '';
+  const cookiesSeed = needsParseCookies
+    ? "parseCookies(request.headers.get('cookie') || '')"
+    : '{}';
 
   return `
 ${imports}
@@ -262,14 +266,15 @@ ${serverStoreLine}
   }
 
 ${eventsStartLine}
-  let mwCtx = { params: {}, url, locals: ${localsSeed}, cookies: {}, request, resolveUrl(u) { return new URL(u, request.url).href; }, set() {}, get() { return undefined; } };
+  let mwCtx = { params: {}, url, locals: ${localsSeed}, headers: new Map(request.headers.entries()), cookies: ${cookiesSeed}, request, resolveUrl(u) { return new URL(u, request.url).href; }, set() {}, get() { return undefined; } };
   if (${hasMwLiteral}) {
     mwCtx = {
       request,
       params: {},
       url,
       locals: ${localsSeed},
-      cookies: typeof parseCookies !== 'undefined' ? parseCookies(request.headers.get('cookie') || '') : {},
+      headers: new Map(request.headers.entries()),
+      cookies: ${cookiesSeed},
       resolveUrl(u) { return new URL(u, request.url).href; },
       set(key, value) { this.locals[key] = value; },
       get(key) { return this.locals[key]; },

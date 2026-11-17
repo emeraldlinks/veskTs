@@ -54,6 +54,25 @@ function __mwBindResult(data, schema) {
 
 function __mwAttachCtx(ctx) {
   let __mwCookieValues = null;
+  if (!(ctx.headers instanceof Map)) {
+    const __hSource = ctx.headers || (ctx.request && ctx.request.headers);
+    const __hMap = new Map();
+    if (__hSource) {
+      try {
+        if (typeof __hSource.forEach === "function" && typeof __hSource.get === "function") {
+          __hSource.forEach((value, name) => __hMap.set(String(name).toLowerCase(), String(value)));
+        } else if (typeof __hSource.entries === "function") {
+          for (const [name, value] of __hSource.entries()) __hMap.set(String(name).toLowerCase(), Array.isArray(value) ? value.join(", ") : String(value));
+        } else {
+          for (const name of Object.keys(__hSource)) {
+            const value = __hSource[name];
+            if (value !== undefined && value !== null) __hMap.set(name.toLowerCase(), Array.isArray(value) ? value.join(", ") : String(value));
+          }
+        }
+      } catch {}
+    }
+    ctx.headers = __hMap;
+  }
   if (!Array.isArray(ctx.errors)) ctx.errors = [];
   if (typeof ctx.error !== "function") ctx.error = (err) => { ctx.errors.push({ error: err }); return err; };
   if (!ctx.__pendingHeaders) ctx.__pendingHeaders = {};
@@ -67,6 +86,7 @@ function __mwAttachCtx(ctx) {
     } catch {}
   }
   if (typeof ctx.cookie !== "function") ctx.cookie = (name) => {
+    if (ctx.cookies && typeof ctx.cookies.get === "function") return ctx.cookies.get(name);
     const value = ctx.cookies ? ctx.cookies[name] : undefined;
     return __mwCookieValues && typeof value === "function" && Object.prototype.hasOwnProperty.call(__mwCookieValues, name) ? __mwCookieValues[name] : value;
   };

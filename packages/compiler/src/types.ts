@@ -6,6 +6,7 @@ export type {
   RouteNode,
   ApiRouteNode,
   MiddlewareContext,
+  MiddlewareCookies,
   ServerEventContext,
   VeskEventHandlers,
   VeskPlugin,

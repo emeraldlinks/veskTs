@@ -2,6 +2,7 @@ import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import { extractMiddleware } from '@vesk/compiler/src/router';
 import { parseCookies } from '@vesk/compiler/src/api-routes';
+import { toHeadersMap } from '@vesk/runtime/src/request';
 import type { RouteNode } from '@vesk/compiler/src/types';
 import type { VeskPlugin, MiddlewareContext, MiddlewareChainOptions } from '@vesk/compiler/src/types';
 import { isWhitespaceChar } from '@vesk/compiler/src/scan';
@@ -173,20 +174,7 @@ export async function executeMiddlewareChain(
   const url = new URL(request.url, 'http://localhost');
   const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
   const locals: Record<string, unknown> = Object.assign({}, serverStore || {});
-  const cookies = parseCookies(request.headers?.get('cookie') || '') || {};
-  const cookieValues = { ...cookies } as Record<string, string>;
-  if (typeof (cookies as Record<string, unknown>).get !== 'function') {
-    Object.defineProperty(cookies, 'get', {
-      value: (name: string) => {
-        const value = cookies[name];
-        return typeof value === 'function' && Object.prototype.hasOwnProperty.call(cookieValues, name)
-          ? cookieValues[name]
-          : value;
-      },
-      enumerable: false,
-      configurable: true,
-    });
-  }
+  const cookies = parseCookies(request.headers?.get('cookie') || '');
 
   let __aborted = false;
   let __abortResponse: Response | null = null;
@@ -197,6 +185,7 @@ export async function executeMiddlewareChain(
     params,
     url,
     locals,
+    headers: toHeadersMap(request.headers),
     cookies,
     errors: __errors,
     set(key: string, value: unknown) {
@@ -207,10 +196,7 @@ export async function executeMiddlewareChain(
     },
     __pendingHeaders: {} as Record<string, string>,
     cookie(name: string) {
-      const value = cookies[name];
-      return typeof value === 'function' && Object.prototype.hasOwnProperty.call(cookieValues, name)
-        ? cookieValues[name]
-        : value;
+      return cookies.get(name);
     },
     getHeader(name: string) {
       return request.headers.get(name);

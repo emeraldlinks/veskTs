@@ -379,6 +379,30 @@ test('pass-through middleware mutates the downstream response cookies and header
 	}
 });
 
+test('middleware ctx.headers is a typed Map and sees every request header', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			'  if (!(ctx.headers instanceof Map)) return ctx.json({ map: false }, { status: 500 });',
+			"  ctx.set('headerCount', ctx.headers.size);",
+			"  return ctx.json({ test: ctx.headers.get('x-test'), legacy: ctx.headers.get('x-legacy') });",
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/', tmp);
+	const result = await executeMiddlewareChain(
+		chain,
+		new Request('http://localhost/', { headers: { 'x-test': 'yes', 'x-legacy': 'one' } }),
+		{},
+	);
+	expect(result.response.status).toBe(200);
+	expect(await result.response.text()).toBe('{"test":"yes","legacy":"one"}');
+	expect(result.locals.headerCount).toBe(2);
+	cleanup(tmp);
+});
+
 test('additive ctx helpers short-circuit and apply pending headers', async () => {
 	const tmp = createFixture({
 		'app/page.vsk': '',

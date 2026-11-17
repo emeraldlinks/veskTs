@@ -1081,12 +1081,14 @@ Rules:
 ### MiddlewareContext
 
 `MiddlewareContext<L>` has `request`, `params`, `url`, `locals`, `cookies`
-(request cookie record), `set`/`get`, and an optional property fallback into
-locals (`ctx.user === ctx.locals.user`). Typed helpers:
+(cookie jar; read with `cookies.get(name)` or direct record access),
+`set`/`get`, and an optional property fallback into locals
+(`ctx.user === ctx.locals.user`). Typed helpers:
 
 | Member | Behavior |
 |---|---|
-| `cookie(name)` | Read one request cookie (`ctx.cookies[name]`). |
+| `cookies.get(name)` | Read one request cookie (canonical; `ctx.cookies[name]` is also supported). |
+| `cookie(name)` | Legacy alias for `cookies.get(name)`. |
 | `getHeader(name)` | Read a request header. |
 | `header(name, value)` | Queue a header on the final response; applies to SSR, API and short-circuit responses. |
 | `status(code)` / `json(body)` / `text(body)` / `html(body)` | Build a response. |
@@ -1164,7 +1166,8 @@ APIs (`Request`, `Response`, `Headers`, `URL`, `crypto`), not `fs`/`path`/`http`
 
 - Read: `cookies()` (CookieStore → `get/getAll/toString`). Server reads
   `Cookie` header via ambient context; browser falls back to `document.cookie`.
-  Middleware: `ctx.cookies` is a plain record — use `ctx.cookie('sid')`.
+  Middleware: use `ctx.cookies.get('sid')`; direct `ctx.cookies['sid']` and
+  the legacy `ctx.cookie('sid')` alias also work.
 - Write: `VeskResponse.setCookie(name, value, opts)` — defaults httpOnly+secure
   ON, sameSite Lax, path `/`. `.clearCookie(name)` → maxAge 0.
 - Signed: HMAC-SHA256 helpers above.

@@ -457,15 +457,16 @@ to two different Vesk concepts.
 | `defineNuxtRouteMiddleware((to) => …)` in `app/middleware/` | client-side guard registered at app bootstrap: `router.beforeEach((to, from) => { … })` — return `true`/a path/`false` |
 | `definePageMeta({ middleware: ['auth'] })` per page | apply the guard in `beforeEach` by route matcher, or keep it page-local as a guard-clause `if (…) { return redirect('/login') }` |
 | Nitro `server/middleware/*.ts` | `app/middleware.ts` (server onion) — `next()` is `MiddlewareNext`, returns `VeskResponse \| null`; return it when post-processing |
-| Nitro middleware mutating `event.context` | `ctx.set`/`ctx.get`/`ctx.locals`; `ctx.params` and `ctx.cookie(name)` are available |
+| Nitro middleware mutating `event.context` | `ctx.set`/`ctx.get`/`ctx.locals`; `ctx.params` and `ctx.cookies.get(name)` are available |
 | `setResponseHeader`/auth header in Nitro middleware | mutate `res.headers` or `ctx.header(name, value)`; cookies via `res.setCookie`/`clearCookie` on the way back down the onion |
 | per-page auth for API (Nitro route with `getUserFromSession`) | the `/api` route handler does the same check directly from `req.headers` before responding |
 
 **Never** forget the onion rule: call `next()` exactly once. Return the
 `next()` response when post-processing; awaiting without returning is also
 supported. Calling neither `next()` nor returning a response continues to the
-route — return a response or `ctx.abortWithStatus*` to short-circuit. Use
-`ctx.cookie(name)` to read request cookies; `ctx.cookies` is a plain record.
+route — return a response or `ctx.abortWithStatus*` to short-circuit. Read
+request cookies with `ctx.cookies.get(name)`; direct `ctx.cookies[name]` still
+works, and `ctx.cookie(name)` is a legacy alias.
 
 ### Step 12 — Nitro server code
 

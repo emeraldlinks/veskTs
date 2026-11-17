@@ -10,6 +10,17 @@ export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
     ? ctx.cookies.get('session')
     : ctx.cookie?.('session');
   if (session) ctx.header('x-session-seen', session);
+  const eventSession = ctx.get('eventSession');
+  if (eventSession) ctx.header('x-event-session-seen', String(eventSession));
+  const eventSessionDirect = ctx.get('eventSessionDirect');
+  if (eventSessionDirect) ctx.header('x-event-session-direct', String(eventSessionDirect));
+  ctx.header('x-header-map', ctx.headers instanceof Map ? '1' : '0');
+  ctx.header('x-header-size', String(ctx.headers.size));
+  const probeHeader = ctx.headers.get('x-probe');
+  if (probeHeader) ctx.header('x-header-probe', probeHeader);
+  const eventHeader = ctx.get('eventHeader');
+  if (eventHeader) ctx.header('x-event-header-seen', String(eventHeader));
+  ctx.header('x-event-header-map', ctx.get('eventHeaderIsMap') ? '1' : '0');
 
   // rewrite fixtures: API -> API, API -> page, page -> page
   if (ctx.url.pathname === '/api/mw-rewrite') {

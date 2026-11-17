@@ -5,6 +5,37 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (typed request headers + event locals):**
+
+- [x] `headers()` and every server `ctx.headers` are now the shared
+  `VeskHeaders = Map<string, string>` type. Values are lower-cased, array
+  headers join with `', '`, and legacy `headers()['x-name']` access still works
+  through non-enumerable properties.
+- [x] Normalized headers through compiler middleware/API contexts, adapter
+  dev/prod/platform contexts, API/SSR/action generated contexts, CLI dev
+  actions/events, and the production runtime bundle (`toHeadersMap`).
+- [x] Fixed production `onRequest` locals: `ctx.set()` now writes the request
+  locals view as well as the global store, so middleware and route handlers see
+  event state in prod, not only dev.
+- [x] Regressions: runtime `headers()` suite, compiler middleware, adapter
+  events (headers + locals sync), production hydration, dev E2E, and live
+  prod/dev cookie+header probes.
+
+**This session (cookie `.get` across every context):**
+
+- [x] `parseCookies()` now returns a cookie jar with non-enumerable
+  `cookies.get(name)`; direct `ctx.cookies[name]` and the legacy
+  `ctx.cookie(name)` alias still work. A cookie literally named `get` remains
+  readable through `.get('get')`.
+- [x] Wired the jar through middleware chains, `onRequest` events (dev, prod,
+  edge), dev/prod middleware contexts, platform handlers, API/SSR/action
+  contexts, and `makeWebRequest`/`buildWebRequest` (`request.cookies.get`).
+- [x] `ServerEventContext.cookies` and action cookies are typed as
+  `MiddlewareCookies`; docs/skills/llms now document `.get(name)` as canonical.
+- [x] Regressions: `server-cookies.test.ts`, `web-request.test.ts`,
+  `events.test.ts`, `platform-handler.test.ts`, `api-routes.test.ts`,
+  compiler/adapter middleware tests.
+
 **This session (compiler audit fixes):**
 
 - [x] `blankGenericArrowTypeParams` now skips regex literals (char-scanned, not
@@ -13,10 +44,11 @@ Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 - [x] `generateVskDts` keeps `export { … }`, `export type { … }`, aliased
   specifiers, and `export *`, while suppressing a local component's duplicate
   self re-export. `vsk-tsx.test.ts` regressions for each form.
-- [x] Cookie named `get` no longer becomes unreadable: compiler and adapter
-  middleware snapshot the plain cookie record before installing
-  `cookies.get(name)`; `ctx.cookie('get')` and `ctx.cookies.get('get')` both
-  return the value. Regression in `middleware.test.ts`.
+- [x] Cookie named `get` no longer becomes unreadable: the shared cookie jar
+  snapshots values before shadowing the `get` property, and adapter helper
+  attachment keeps the same fallback; `ctx.cookie('get')` and
+  `ctx.cookies.get('get')` both return the value. Regression in
+  `middleware.test.ts`.
 - [x] `parseJsonc` strips trailing commas with an in-string-aware scan, so a
   tsconfig path target containing `,]` resolves. `module-imports.test.ts`
   regression with `"./weird,]"`.

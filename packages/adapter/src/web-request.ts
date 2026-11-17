@@ -31,7 +31,7 @@
  *   json(): Promise<unknown>;
  *   formData(): Promise<FormData>;
  *   clone(): ExtendedRequest;                  // same object — one socket, one read
- *   cookies: Record<string, string>;
+ *   cookies: MiddlewareCookies;
  *   query: Record<string, string>;
  * }
  *
@@ -45,13 +45,15 @@
 import type { IncomingMessage } from 'node:http';
 import { Buffer } from 'node:buffer';
 import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
+import { attachCookieGet } from '@vesk/compiler/src/server-cookies';
+import type { MiddlewareCookies } from '@vesk/types';
 
 export interface ExtendedRequest extends Request {
   json(): Promise<unknown>;
   text(): Promise<string>;
   formData(): Promise<FormData>;
   clone(): ExtendedRequest;
-  cookies: Record<string, string>;
+  cookies: MiddlewareCookies;
   query: Record<string, string>;
 }
 
@@ -174,7 +176,7 @@ export function makeWebRequest(
   };
   webRequest.clone = () => webRequest;
 
-  const cookies: Record<string, string> = {};
+  const cookieValues: Record<string, string> = {};
   // Iterate the pieces, do NOT destructure them. `cookie.split(';')` yields an
   // array of STRINGS, and a string is iterable, so `for (const [k, v] of …)`
   // bound `k` to the first CHARACTER of the pair ('s' of "session=…"),
@@ -190,13 +192,13 @@ export function makeWebRequest(
     if (!name) continue;
     const raw = part.slice(eq + 1).trim();
     try {
-      cookies[name] = decodeURIComponent(raw);
+      cookieValues[name] = decodeURIComponent(raw);
     } catch {
       // A malformed percent-escape must not lose the whole cookie jar.
-      cookies[name] = raw;
+      cookieValues[name] = raw;
     }
   }
-  webRequest.cookies = cookies;
+  webRequest.cookies = attachCookieGet(cookieValues);
   const query: Record<string, string> = {};
   for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
   webRequest.query = query;

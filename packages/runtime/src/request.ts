@@ -1,4 +1,4 @@
-import type { VeskLocals } from '@vesk/types';
+import type { VeskHeaders, VeskLocals } from '@vesk/types';
 import { setSecurityOverride, getSecurityOverrides } from './security-overrides.js';
 
 interface RequestContext {
@@ -327,31 +327,66 @@ export function locals<L extends object = VeskLocals>(): L {
 	return {} as L;
 }
 
-export function headers(): Record<string, string | Function | undefined> {
-	const req = getRequest();
-	const map = new Map<string, string>();
+class VeskHeaderMap extends Map<string, string> {
+	get(name: string): string | undefined {
+		return super.get(String(name).toLowerCase());
+	}
+	has(name: string): boolean {
+		return super.has(String(name).toLowerCase());
+	}
+	delete(name: string): boolean {
+		return super.delete(String(name).toLowerCase());
+	}
+	set(name: string, value: string): this {
+		return super.set(String(name).toLowerCase(), String(value));
+	}
+}
 
-	if (req && req.headers) {
-		for (const [k, v] of Object.entries(req.headers)) {
-			map.set(k.toLowerCase(), Array.isArray(v) ? v.join(', ') : String(v));
+function setHeader(map: VeskHeaders, name: unknown, value: unknown): void {
+	const key = String(name).toLowerCase();
+	const text = Array.isArray(value) ? value.join(', ') : String(value);
+	map.set(key, text);
+	// Keep the historical `headers()['x-name']` access working without
+	// shadowing Map members such as `get`, `has`, or `size`.
+	if (!(key in map)) {
+		try {
+			Object.defineProperty(map, key, { value: text, enumerable: false, configurable: true });
+		} catch {
+			// A header name that cannot be defined as a property is still
+			// available through `map.get(name)`.
 		}
 	}
+}
 
-	return new Proxy({} as Record<string, string | Function | undefined>, {
-		get(_target: Record<string, string | Function | undefined>, prop: string | symbol) {
-			if (prop === 'get') return (name: string) => map.get(name.toLowerCase()) || null;
-			if (prop === 'has') return (name: string) => map.has(name.toLowerCase());
-			if (prop === 'entries') return () => map.entries();
-			if (typeof prop === 'string') return map.get(prop.toLowerCase()) ?? undefined;
-			return undefined;
-		},
-		ownKeys() {
-			return [...map.keys()];
-		},
-		getOwnPropertyDescriptor() {
-			return { enumerable: true, configurable: true };
-		},
-	}) as Record<string, string | Function | undefined>;
+/**
+ * Normalize a `Headers` instance, a `Map`, or a plain Node-style header record
+ * into the framework's canonical lower-cased header map.
+ */
+export function toHeadersMap(
+	source: Headers | Map<string, string> | Record<string, unknown> | null | undefined,
+): VeskHeaders {
+	const map: VeskHeaders = new VeskHeaderMap();
+	if (!source) return map;
+	if (source instanceof Map) {
+		for (const [k, v] of source) setHeader(map, k, v);
+		return map;
+	}
+	if (typeof Headers !== 'undefined' && source instanceof Headers) {
+		source.forEach((v, k) => setHeader(map, k, v));
+		return map;
+	}
+	for (const [k, v] of Object.entries(source as Record<string, unknown>)) {
+		if (v === undefined || v === null) continue;
+		setHeader(map, k, v);
+	}
+	return map;
+}
+
+export function headers(): VeskHeaders {
+	const req = getRequest();
+	return toHeadersMap(
+		(req?.headers as Headers | Map<string, string> | Record<string, unknown> | undefined) ?? null,
+	);
 }
 
 export class ServerRequest extends Request {

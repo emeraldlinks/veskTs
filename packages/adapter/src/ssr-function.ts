@@ -532,6 +532,7 @@ let htmlFnCode: string;
       '    params,',
       '    url,',
       "    locals: Object.assign({}, __rootLocals),",
+      '    headers: toHeadersMap(request.headers),',
       "    cookies: parseCookies(request.headers.get('cookie') || ''),",
       '    resolveUrl(u) { return new URL(u, request.url).href; },',
       '    set(key, value) { this.locals[key] = value; },',
@@ -642,6 +643,7 @@ let htmlFnCode: string;
     '    params,',
     '    url: pageUrl,',
     '    locals: {},',
+    '    headers: toHeadersMap(request.headers),',
     "    cookies: parseCookies(request.headers.get('cookie') || ''),",
     '    resolveUrl(u) { return new URL(u, pageUrl.href).href; },',
     '  };',
@@ -650,7 +652,7 @@ let htmlFnCode: string;
     '      request,',
     '      params,',
     '      url: pageUrl.href,',
-    '      headers: () => { const m = new Map(); for (const [k, v] of request.headers.entries()) m.set(k.toLowerCase(), String(v)); return m; },',
+    '      headers: () => toHeadersMap(request.headers),',
     "      cookies: () => parseCookies(request.headers.get('cookie') || ''),",
     "      locals: () => (globalThis.__vesk_request ? globalThis.__vesk_request.locals : {}),",
     "      redirect: (u, status) => new Response(null, { status: status || 303, headers: { Location: u } }),",
@@ -678,7 +680,7 @@ let htmlFnCode: string;
 
   const funcCode = [
     "import { __veskModules } from '../__vesk-modules.mjs';",
-    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, VeskResponse, toVeskResponse, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, toHeadersMap, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, VeskResponse, toVeskResponse, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

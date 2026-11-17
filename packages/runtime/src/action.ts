@@ -1,3 +1,4 @@
+import type { MiddlewareCookies, VeskHeaders } from '@vesk/types';
 import type { ValidationRule } from './form.js';
 
 export interface ActionIssue {
@@ -11,8 +12,8 @@ export interface ActionContext {
 	request: Request;
 	params: Record<string, string>;
 	url: string;
-	headers: () => Map<string, string>;
-	cookies: () => Record<string, string>;
+	headers: () => VeskHeaders;
+	cookies: () => MiddlewareCookies;
 	locals: () => Record<string, unknown>;
 	redirect: (url: string, status?: number) => Response;
 }

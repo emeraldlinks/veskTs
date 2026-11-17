@@ -180,7 +180,7 @@ export async function GET() {
       },
       {
         kind: "p",
-        text: "`cookies()` returns a CookieStore with `get(name)`, `getAll()` and `toString()`; `headers()` a case-insensitive read proxy (`get`/`has`/`entries`); `locals()` the per-request store shared with middleware and the render. `useRequest()` returns the full request context and `useParams()` the current params.",
+        text: "`cookies()` returns a CookieStore with `get(name)`, `getAll()` and `toString()`; `headers()` a case-insensitive `Map<string, string>` with the full `Map` surface; `locals()` the per-request store shared with middleware and the render. `useRequest()` returns the full request context and `useParams()` the current params.",
       },
       { kind: "h2", text: "Route config & hooks" },
       {

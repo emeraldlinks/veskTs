@@ -7,6 +7,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, rmSync, existsSync, statSync } f
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { compileEvents } from './events.js';
 
 let passed = 0, failed = 0;
@@ -51,6 +52,7 @@ async function main() {
         '}',
         'export async function onRequest(ctx: ServerEventContext) {',
         "  ctx.set('lastPath', ctx.url?.pathname ?? '');",
+        "  ctx.set('session', ctx.cookies.get('session'));",
         '}',
         'export function onStop() {',
         '  return;',
@@ -78,9 +80,13 @@ async function main() {
     assert((g.__vesk_server_ctx as Record<string, unknown>)?.greet === 'hi', 'relative import bundled into events.js');
     assert(typeof mod.onStart === 'function', 'onStart export present');
 
-    const reqCtx = { url: new URL('http://localhost/blog'), params: {}, locals: {} };
+    const reqHeaders = new Map([['x-test', 'yes']]);
+    const reqCtx = { url: new URL('http://localhost/blog'), params: {}, locals: {}, headers: reqHeaders, cookies: parseCookies('session=abc') };
     await mod.executeRequest(reqCtx);
     assert((g.__vesk_server_ctx as Record<string, unknown>)?.lastPath === '/blog', 'onRequest set() lands in server ctx');
+    assert((g.__vesk_server_ctx as Record<string, unknown>)?.session === 'abc', 'onRequest context keeps cookies.get(name)');
+    assert((reqCtx.locals as Record<string, unknown>).lastPath === '/blog', 'onRequest set() syncs the request locals view');
+    assert(reqCtx.headers === reqHeaders, 'onRequest keeps the request header Map');
 
     // guard: second executeStart must not re-run onStart
     (g.__vesk_events_started) = true;

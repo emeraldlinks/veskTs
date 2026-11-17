@@ -904,24 +904,31 @@ export function createRateLimiter(options: RateLimitOptions = {}): {
  * only honored when `trustProxy` is explicitly enabled — otherwise any
  * client could spoof its identity (and defeat rate limiting) with a header.
  */
+function readRequestHeader(headers: unknown, name: string): unknown {
+  if (!headers) return undefined;
+  if (headers instanceof Map) return headers.get(name);
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) return headers.get(name) ?? undefined;
+  return (headers as Record<string, unknown>)[name];
+}
+
 export function getClientIp(request: Record<string, unknown> | undefined, trustProxy: boolean | string = false): string {
   if (!trustProxy) return 'unknown';
-  const headers = (request?.headers || {}) as Record<string, unknown>;
-  const forwarded = headers['x-forwarded-for'];
+  const headers = request?.headers;
+  const forwarded = readRequestHeader(headers, 'x-forwarded-for');
   if (forwarded) {
     const ips = (typeof forwarded === 'string' ? forwarded : String(forwarded)).split(',').map(s => s.trim());
     if (ips[0]) return ips[0];
   }
-  const realIp = headers['x-real-ip'];
+  const realIp = readRequestHeader(headers, 'x-real-ip');
   if (realIp) return typeof realIp === 'string' ? realIp : String(realIp);
-  const cfIp = headers['cf-connecting-ip'];
+  const cfIp = readRequestHeader(headers, 'cf-connecting-ip');
   if (cfIp) return typeof cfIp === 'string' ? cfIp : String(cfIp);
   return 'unknown';
 }
 
 export function getClientProtocol(request: Record<string, unknown> | undefined, trustProxy: boolean | string = false): string {
   if (trustProxy) {
-    const proto = (request?.headers as Record<string, string> | undefined)?.['x-forwarded-proto'];
+    const proto = readRequestHeader(request?.headers, 'x-forwarded-proto');
     if (proto) return (typeof proto === 'string' ? proto.split(',')[0] : String(proto)).trim();
   }
   return 'http';
@@ -931,7 +938,7 @@ export function applyTrustProxy(ctx: Record<string, unknown>, trustProxy: boolea
   if (!ctx || !trustProxy) return;
   ctx.ip = getClientIp(ctx as Record<string, unknown>, trustProxy);
   ctx.protocol = getClientProtocol(ctx as Record<string, unknown>, trustProxy);
-  ctx.host = ((ctx.headers as Record<string, string>)?.['x-forwarded-host']) || ctx.host;
+  ctx.host = (readRequestHeader(ctx.headers, 'x-forwarded-host') as string | undefined) || ctx.host;
 }
 
 export function exprJS(raw: string): string {

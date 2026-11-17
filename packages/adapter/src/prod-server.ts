@@ -4,6 +4,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
+import { toHeadersMap } from '@vesk/runtime/src/request';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { reportServerError } from '@vesk/adapter/src/error-report';
@@ -594,7 +595,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         params: {},
         url: targetUrl,
         locals: Object.assign({}, (globalThis as Record<string, unknown>).__vesk_server_ctx || {}),
-        cookies: { ...requestCookies },
+        headers: toHeadersMap(req.headers),
+        cookies: requestCookies,
         set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
         get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
       };
@@ -622,7 +624,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         params: {},
         url,
         locals: Object.assign({}, serverStore || {}),
-        cookies: { ...requestCookies },
+        headers: toHeadersMap(req.headers),
+        cookies: requestCookies,
         set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
         get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
       };
@@ -631,7 +634,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         params: {},
         url,
         locals: Object.assign({}, serverStore || {}),
-        cookies: { ...requestCookies },
+        headers: toHeadersMap(req.headers),
+        cookies: requestCookies,
         request: null,
         set() {},
         get() { return undefined; },

@@ -286,8 +286,9 @@ post-processing; the framework also preserves the response when middleware does
 nor returns a response **continues** to the route; return a `Response` or use
 `ctx.abortWithStatus*` to short-circuit. Keep the same augmentation logic but
 restructure the tail. `ctx.set`/`ctx.get`/`ctx.locals` map onto Next's request
-context. `ctx.cookies` is a plain record — use `ctx.cookie(name)`; response
-cookies go through `res.setCookie`/`res.clearCookie` after `next()`.
+context. Read request cookies with `ctx.cookies.get(name)` (direct
+`ctx.cookies[name]` is supported; `ctx.cookie(name)` is a legacy alias).
+Response cookies go through `res.setCookie`/`res.clearCookie` after `next()`.
 
 **API routes**: Next `export async function GET(req: NextRequest)` →
 Vesk `export async function GET(req: VeskRequest)`. Always import them

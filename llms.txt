@@ -80,7 +80,8 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
   returning is preserved. No `next()` and no returned response **continues** to
   the route. Return a `Response` or `ctx.abortWithStatus*` to short-circuit.
 - `MiddlewareContext<L = VeskLocals>`: `request`, `params`, `url`, `locals`,
-  `cookies` (plain record), `set/get`, `cookie(name)`, `getHeader(name)`,
+  `cookies` (`get(name)` plus direct record access; `cookie(name)` alias),
+  `set/get`, `getHeader(name)`,
   `header(name,value)`, `status/json/text/html/redirect`,
   `shouldBindQuery/bindQuery`, `shouldBindJSON/bindJSON`, `errors/error`,
   `abort/isAborted`, `abortWithStatus`, `abortWithStatusJSON`.

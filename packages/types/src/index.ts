@@ -114,11 +114,19 @@ export type MiddlewareCookies = Record<string, string | undefined> & {
   get(name: string): string | undefined;
 };
 
+/**
+ * Request headers as a real `Map<string, string>`. Header names are
+ * lower-cased. Use `.get(name)` for a typed lookup, and the standard `Map`
+ * surface (`has`, `entries`, `keys`, `values`, `forEach`, `size`) for the rest.
+ */
+export type VeskHeaders = Map<string, string>;
+
 export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocals> {
   request: Request;
   params: Record<string, string>;
   url: URL;
   locals: L;
+  headers: VeskHeaders;
   cookies: MiddlewareCookies;
   /** Explicit per-call shape escape hatch: ctx.set<MyLocals>('user', value). */
   set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void;
@@ -194,7 +202,8 @@ export interface ServerEventContext<L extends Record<string, unknown> = VeskLoca
   params?: Record<string, string>;
   url?: URL;
   locals: L;
-  cookies: Record<string, string>;
+  headers: VeskHeaders;
+  cookies: MiddlewareCookies;
   /**
    * Process/isolate-wide context shared across every request. Sets performed
    * here are visible via `locals()` on every subsequent request.

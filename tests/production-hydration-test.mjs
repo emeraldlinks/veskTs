@@ -39,8 +39,29 @@ async function main() {
   // Middleware contexts must see request cookies in production, both as the
   // plain record and through the documented ctx.cookies.get(name) helper.
   {
-    const res = await fetch(BASE + '/', { headers: { cookie: 'session=prod-cookie' } });
-    assert(res.headers.get('x-session-seen') === 'prod-cookie', 'prod middleware reads ctx.cookies');
+    const res = await fetch(BASE + '/', {
+      headers: { cookie: 'session=prod-cookie', 'x-probe': 'prod-page-header' },
+    });
+    assert(res.headers.get('x-session-seen') === 'prod-cookie', 'prod middleware reads ctx.cookies.get');
+    assert(res.headers.get('x-event-session-seen') === 'prod-cookie', 'prod onRequest reads ctx.cookies.get');
+    assert(res.headers.get('x-event-session-direct') === 'prod-cookie', 'prod onRequest reads ctx.cookies record');
+    assert(res.headers.get('x-header-map') === '1', 'prod middleware ctx.headers is a Map');
+    assert(res.headers.get('x-header-probe') === 'prod-page-header', 'prod middleware ctx.headers.get');
+    assert(res.headers.get('x-event-header-map') === '1', 'prod onRequest ctx.headers is a Map');
+    assert(res.headers.get('x-event-header-seen') === 'prod-page-header', 'prod onRequest ctx.headers.get');
+  }
+
+  {
+    const res = await fetch(BASE + '/api/cookie-probe', {
+      headers: { cookie: 'session=prod-api-cookie', 'x-probe': 'prod-header' },
+    });
+    const body = await res.json();
+    assert(body.get === 'prod-api-cookie', 'prod API req.cookies.get');
+    assert(body.direct === 'prod-api-cookie', 'prod API req.cookies record');
+    assert(body.header === 'prod-header', 'prod API req.headers.get');
+    assert(body.headerMap === true, 'prod API headers() returns a Map');
+    assert(body.headerAmbient === 'prod-header', 'prod API headers().get');
+    assert(body.headerSize >= 2, 'prod API headers() includes request headers');
   }
 
   browser = await puppeteer.launch({

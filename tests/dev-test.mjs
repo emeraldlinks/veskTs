@@ -402,6 +402,28 @@ async function runEventsTests() {
 
   const page = await (await fetch(`${BASE}/`)).text();
   assert(page.includes('Welcome to Vesk'), 'home still renders with events file present');
+
+  const cookiePage = await fetch(`${BASE}/`, {
+    headers: { cookie: 'session=dev-cookie', 'x-probe': 'dev-page-header' },
+  });
+  assert(cookiePage.headers.get('x-session-seen') === 'dev-cookie', 'dev middleware reads ctx.cookies.get');
+  assert(cookiePage.headers.get('x-event-session-seen') === 'dev-cookie', 'dev onRequest reads ctx.cookies.get');
+  assert(cookiePage.headers.get('x-event-session-direct') === 'dev-cookie', 'dev onRequest reads ctx.cookies record');
+  assert(cookiePage.headers.get('x-header-map') === '1', 'dev middleware ctx.headers is a Map');
+  assert(cookiePage.headers.get('x-header-probe') === 'dev-page-header', 'dev middleware ctx.headers.get');
+  assert(cookiePage.headers.get('x-event-header-map') === '1', 'dev onRequest ctx.headers is a Map');
+  assert(cookiePage.headers.get('x-event-header-seen') === 'dev-page-header', 'dev onRequest ctx.headers.get');
+
+  const cookieApi = await fetch(`${BASE}/api/cookie-probe`, {
+    headers: { cookie: 'session=dev-api-cookie', 'x-probe': 'dev-header' },
+  });
+  const cookieBody = await cookieApi.json();
+  assert(cookieBody.get === 'dev-api-cookie', 'dev API req.cookies.get');
+  assert(cookieBody.direct === 'dev-api-cookie', 'dev API req.cookies record');
+  assert(cookieBody.header === 'dev-header', 'dev API req.headers.get');
+  assert(cookieBody.headerMap === true, 'dev API headers() returns a Map');
+  assert(cookieBody.headerAmbient === 'dev-header', 'dev API headers().get');
+  assert(cookieBody.headerSize >= 2, 'dev API headers() includes request headers');
 }
 
 async function main() {

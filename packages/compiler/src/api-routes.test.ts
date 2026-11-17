@@ -440,6 +440,13 @@ function makeBody(buf) {
     );
     expect(await small.json()).toEqual({ a: 1 });
 
+    const cookieRequest = buildWebRequest(
+      { method: 'GET', headers: { host: 'localhost', cookie: 'session=abc' }, ...makeBody(Buffer.alloc(0)) },
+      'http://localhost/x',
+      null
+    );
+    expect(cookieRequest.cookies.get('session')).toBe('abc');
+
     // over the cap: getBody throws a 413
     let status = 0;
     const big = buildWebRequest(
@@ -453,8 +460,8 @@ function makeBody(buf) {
 
     const err = tooLargeError(1024);
     expect(err.status).toBe(413);
-    passed += 3;
-    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected)');
+    passed += 4;
+    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected) and exposes cookies.get()');
   } catch (e) {
     failed++;
     console.log(`  ✗ body cap — ${e.message}`);

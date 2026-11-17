@@ -13,6 +13,7 @@ export type {
   VeskSecurityPreset,
   SecurityConfig,
   MiddlewareChainItem,
+  MiddlewareCookies,
   MiddlewareExtractResult,
   AncestorLayout,
   BuildOptions,

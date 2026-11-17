@@ -207,6 +207,21 @@ async function main(): Promise<void> {
 		eq(request.cookies.session, 'abc def', 'decoded value');
 		eq(request.cookies.theme, 'dark', 'second cookie');
 	});
+	await it('cookies.get(name) is available and matches direct access', () => {
+		const req = fakeRequest('');
+		req.headers = { host: 'localhost', cookie: 'session=abc%20def; theme=dark' };
+		const request = makeWebRequest(req, 'http://localhost/api/x');
+		eq(request.cookies.get('session'), 'abc def', 'get() returns the decoded value');
+		eq(request.cookies.get('missing'), undefined, 'get() returns undefined when absent');
+		eq(JSON.stringify(request.cookies), '{"session":"abc def","theme":"dark"}', 'get() stays out of JSON');
+	});
+	await it('a cookie literally named get stays readable through get()', () => {
+		const req = fakeRequest('');
+		req.headers = { host: 'localhost', cookie: 'get=literal; normal=1' };
+		const request = makeWebRequest(req, 'http://localhost/api/x');
+		eq(request.cookies.get('get'), 'literal', 'the get cookie is readable');
+		eq(request.cookies.get('normal'), '1', 'other cookies remain readable');
+	});
 	await it('a malformed escape does not lose the rest of the jar', () => {
 		const req = fakeRequest('');
 		req.headers = { host: 'localhost', cookie: 'bad=%E0%A4%A; good=1' };

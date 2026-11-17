@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { DEFAULT_MAX_BODY_BYTES, resolveComponentName, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
+import { toHeadersMap } from '@vesk/runtime/src/request';
 import { build } from '@vesk/adapter/src/index';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { reportServerError, registerErrorHooks } from '@vesk/adapter/src/error-report';
@@ -669,7 +670,8 @@ await doBuild();
         params: {},
         url,
         locals: Object.assign({}, serverStore),
-        cookies: {} as Record<string, string>,
+        headers: toHeadersMap(webRequest.headers),
+        cookies: parseCookies(String(req.headers.cookie || '')),
       };
       (globalThis as Record<string, unknown>).__vesk_request = evtCtx;
       try {
@@ -798,7 +800,8 @@ let finalBody = body;
             params: {},
             url,
             locals: Object.assign({}, serverStore || {}),
-            cookies: { ...parseCookies(String(req.headers.cookie || '')) },
+            headers: toHeadersMap(req.headers),
+            cookies: parseCookies(String(req.headers.cookie || '')),
             set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
             get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
           };

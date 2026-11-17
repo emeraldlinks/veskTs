@@ -15,6 +15,7 @@ import { buildWebRequest } from '@vesk/compiler/src/api-routes';
 import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { getAction, validateActionInput, issuesToFieldMap } from '@vesk/runtime/src/action';
+import { toHeadersMap } from '@vesk/runtime/src/request';
 import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 
@@ -301,6 +302,7 @@ export async function handleActionRequest(
     params,
     url: actionUrl,
     locals: {},
+    headers: toHeadersMap(webRequest.headers),
     cookies: parseCookies(String(req.headers.cookie || '')),
   };
   try {
@@ -308,11 +310,7 @@ export async function handleActionRequest(
       request: webRequest,
       params,
       url: actionUrl.href,
-      headers: () => {
-        const m = new Map<string, string>();
-        for (const [k, v] of webRequest.headers.entries()) m.set(k.toLowerCase(), String(v));
-        return m;
-      },
+      headers: () => toHeadersMap(webRequest.headers),
       cookies: () => parseCookies(String(req.headers.cookie || '')),
       locals: () => {
         const cur = (globalThis as Record<string, unknown>).__vesk_request as { locals?: Record<string, unknown> } | undefined;
