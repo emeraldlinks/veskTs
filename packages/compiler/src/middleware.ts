@@ -173,6 +173,13 @@ export async function executeMiddlewareChain(
   const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
   const locals: Record<string, unknown> = Object.assign({}, serverStore || {});
   const cookies = parseCookies(request.headers?.get('cookie') || '') || {};
+  if (typeof (cookies as Record<string, unknown>).get !== 'function') {
+    Object.defineProperty(cookies, 'get', {
+      value: (name: string) => cookies[name],
+      enumerable: false,
+      configurable: true,
+    });
+  }
 
   let __aborted = false;
   let __abortResponse: Response | null = null;

@@ -6,6 +6,11 @@ export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
   ctx.set('startTime', Date.now());
   console.log("user: ", ctx.get("user"));
 
+  const session = ctx.cookies?.get
+    ? ctx.cookies.get('session')
+    : ctx.cookie?.('session');
+  if (session) ctx.header('x-session-seen', session);
+
   // rewrite fixtures: API -> API, API -> page, page -> page
   if (ctx.url.pathname === '/api/mw-rewrite') {
     return next(ctx.url.searchParams.get('to') || '/api/mw-rewrite-target');

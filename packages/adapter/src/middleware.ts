@@ -56,6 +56,9 @@ function __mwAttachCtx(ctx) {
   if (!Array.isArray(ctx.errors)) ctx.errors = [];
   if (typeof ctx.error !== "function") ctx.error = (err) => { ctx.errors.push({ error: err }); return err; };
   if (!ctx.__pendingHeaders) ctx.__pendingHeaders = {};
+  if (ctx.cookies && typeof ctx.cookies.get !== "function") {
+    try { Object.defineProperty(ctx.cookies, "get", { value: (name) => ctx.cookies[name], enumerable: false, configurable: true }); } catch {}
+  }
   if (typeof ctx.cookie !== "function") ctx.cookie = (name) => (ctx.cookies ? ctx.cookies[name] : undefined);
   if (typeof ctx.getHeader !== "function") ctx.getHeader = (name) => (ctx.request && ctx.request.headers ? ctx.request.headers.get(String(name)) : null);
   if (typeof ctx.header !== "function") ctx.header = (name, value) => {

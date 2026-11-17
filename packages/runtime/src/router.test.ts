@@ -608,7 +608,7 @@ testAsync('server middleware redirects an SPA navigation', async () => {
 	const tree = buildRouteTree([
 		{ path: '/', page: () => document.createTextNode('Home') },
 		{ path: '/portal', page: () => document.createTextNode('Portal') },
-		{ path: '/auth/login', page: () => document.createTextNode('Login') },
+		{ path: '/login', page: () => document.createTextNode('Login') },
 	]);
 	const previousFetch = globalThis.fetch;
 	const previousEndpoint = (globalThis as any).__veskServerMiddlewareEndpoint;
@@ -639,6 +639,35 @@ testAsync('server middleware redirects an SPA navigation', async () => {
 		globalThis.fetch = previousFetch;
 		if (previousEndpoint === undefined) delete (globalThis as any).__veskServerMiddlewareEndpoint;
 		else (globalThis as any).__veskServerMiddlewareEndpoint = previousEndpoint;
+	}
+});
+
+testAsync('server middleware runs for an unmatched SPA navigation', async () => {
+	const container = document.createElement('div');
+	const tree = buildRouteTree([
+		{ path: '/', page: () => document.createTextNode('Home') },
+		{ path: '/login', page: () => document.createTextNode('Login') },
+	]);
+	const previousFetch = globalThis.fetch;
+	const requested: string[] = [];
+	globalThis.fetch = async (url: string) => {
+		requested.push(String(url));
+		const encodedPath = String(url).split('path=')[1] ?? '';
+		return {
+			ok: true,
+			status: 200,
+			headers: { get: () => 'application/json' },
+			json: async () => ({ redirect: encodedPath.includes('%2Fmissing') ? '/login' : null, allow: true }),
+		} as any;
+	};
+	try {
+		const router = createFileRouter(tree, { container, serverMiddleware: true } as any);
+		await router.navigate('/missing', { replace: true });
+		await tick(80);
+		expect(requested.some((url) => url.includes('/_vesk/middleware?path=%2Fmissing'))).toBeTruthy();
+		expect(container.textContent).toContain('Login');
+	} finally {
+		globalThis.fetch = previousFetch;
 	}
 });
 
@@ -2733,6 +2762,14 @@ test('the match reports the pathname it was computed FOR', () => {
 		test_assert(m !== null, `expected a match for ${url}`);
 		test_assert(m!.pathname === url, `expected pathname ${JSON.stringify(url)}, got ${JSON.stringify(m!.pathname)}`);
 	}
+});
+
+test('an unmatched child does not fall back to the root page', () => {
+	const tree = groupTree();
+	(tree[0] as unknown as { page: string; fullPath: string }).page = 'PAGE_ROOT';
+	(tree[0] as unknown as { page: string; fullPath: string }).fullPath = '/';
+	test_assert(matchRoute(tree, '/does-not-exist') === null, '/does-not-exist incorrectly matched the root page');
+	test_assert(matchRoute(tree, '/about') !== null, 'the real child route stopped matching');
 });
 
 test('the group-page fix and the pathname fix hold together', () => {

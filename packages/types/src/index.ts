@@ -110,12 +110,16 @@ export interface MiddlewareError {
  * }
  * ```
  */
+export type MiddlewareCookies = Record<string, string | undefined> & {
+  get(name: string): string | undefined;
+};
+
 export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocals> {
   request: Request;
   params: Record<string, string>;
   url: URL;
   locals: L;
-  cookies: Record<string, string | undefined>;
+  cookies: MiddlewareCookies;
   /** Explicit per-call shape escape hatch: ctx.set<MyLocals>('user', value). */
   set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void;
   set<K extends keyof L & string>(key: K, value: L[K]): void;

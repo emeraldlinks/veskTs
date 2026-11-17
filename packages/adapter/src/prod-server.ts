@@ -3,6 +3,7 @@ import { resolve, dirname, basename } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
+import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { reportServerError } from '@vesk/adapter/src/error-report';
@@ -580,6 +581,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       }
     }
 
+    const requestCookies = parseCookies(String(req.headers.cookie || ''));
     if (url.pathname === '/_vesk/middleware' && middlewareMod) {
       const targetPath = url.searchParams.get('path') || '/';
       const targetUrl = new URL(targetPath, url.origin);
@@ -592,7 +594,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         params: {},
         url: targetUrl,
         locals: Object.assign({}, (globalThis as Record<string, unknown>).__vesk_server_ctx || {}),
-        cookies: {},
+        cookies: { ...requestCookies },
         set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
         get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
       };
@@ -620,7 +622,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         params: {},
         url,
         locals: Object.assign({}, serverStore || {}),
-        cookies: {},
+        cookies: { ...requestCookies },
         set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
         get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
       };
@@ -629,7 +631,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
         params: {},
         url,
         locals: Object.assign({}, serverStore || {}),
-        cookies: {},
+        cookies: { ...requestCookies },
         request: null,
         set() {},
         get() { return undefined; },
@@ -726,7 +728,12 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       }
     }
 
-    const appDir = resolve(projectDir, 'app');
+    // `startProdServer` is often pointed at a nested build directory such as
+    // `.vesk/prod-test`. In that case `projectDir` is `.vesk`, but the boundary
+    // source still lives at `<repo>/app` — without the parent fallback every
+    // hard-load 404 silently used the built-in page instead of `not-found.vsk`.
+    const localAppDir = resolve(projectDir, 'app');
+    const appDir = existsSync(localAppDir) ? localAppDir : resolve(projectDir, '..', 'app');
     const pageCssUrls = resolveCssUrls({
       enabled: hasBuiltGlobalCss(outDir),
     });

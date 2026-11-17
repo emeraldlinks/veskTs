@@ -2095,7 +2095,64 @@ function routeFullPathForChunk(chunkName: string): string | null {
 
     const ctx = rawCtx;
 
-    const match = matchUrl(routeTree, url.pathname);
+    let match = matchUrl(routeTree, url.pathname);
+
+    // Development used to return the 404 before touching the middleware chain,
+    // unlike production (which runs it for every request). A root auth/session
+    // middleware therefore silently stopped running the moment the URL did not
+    // map to a page. Run the same onion here before choosing the boundary; a
+    // rewrite may still turn this into a real page or API hit.
+    if (!match && mwChain.length > 0 && req.method !== 'HEAD') {
+      const noMatchReq = new Request(`http://localhost${url.pathname}${url.search}`, {
+        headers: req.headers as Record<string, string>,
+        method: req.method || 'GET',
+      });
+      let rewriteTarget: string | null = null;
+      try {
+        const mwResult = await executeMiddlewareChain(mwChain, noMatchReq, {}, {
+          plugins: getActiveDevPlugins() as VeskPlugin[],
+          onLast: async (rewrite: string | null) => {
+            if (rewrite) rewriteTarget = rewrite;
+            return null;
+          },
+        });
+        if (mwResult.response) {
+          const mwResp = (toVeskResponse(mwResult.response as any) || mwResult.response) as Response;
+          const respRecord = mwResp as unknown as Record<string, unknown>;
+          if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
+          logRequest(mwResp.status);
+          res.writeHead(mwResp.status, toNodeHeaders(mwResp));
+          res.end(await mwResp.text());
+          return;
+        }
+        if (rewriteTarget) {
+          const target = new URL(rewriteTarget, `http://localhost${url.pathname}${url.search}`);
+          url.pathname = target.pathname;
+          url.search = target.search;
+          if (isApiPathname(target.pathname)) {
+            const targetMatch = matchApiUrl(getDevApiRoutes(), target.pathname + target.search);
+            const response = targetMatch
+              ? await dispatchDevApi(targetMatch, Object.assign({}, mwResult.locals || {}))
+              : new Response(null, { status: 404 });
+            const finalResponse = response ?? new Response(null, { status: 500 });
+            logRequest(finalResponse.status);
+            res.writeHead(finalResponse.status, toNodeHeaders(finalResponse));
+            res.end(await finalResponse.text());
+            return;
+          }
+          match = matchUrl(routeTree, url.pathname);
+          if (match) mwRanForRewrite = true;
+        }
+      } catch (e) {
+        const err = e as Error & { name: string };
+        if (err.name === 'NotFoundError') {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Not Found' }));
+          return;
+        }
+        throw e;
+      }
+    }
 
     if (!match) {
       // Nearest-boundary walk over the URL's directories, the same rule the

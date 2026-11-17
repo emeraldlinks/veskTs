@@ -46,12 +46,15 @@ export interface MiddlewareError {
     error: unknown;
     [key: string]: unknown;
 }
+export type MiddlewareCookies = Record<string, string | undefined> & {
+    get(name: string): string | undefined;
+};
 export interface MiddlewareContext {
     request: Request;
     params: Record<string, string>;
     url: URL;
     locals: Record<string, unknown>;
-    cookies: Record<string, string | undefined>;
+    cookies: MiddlewareCookies;
     set(key: string, value: unknown): void;
     get(key: string): unknown;
     errors?: MiddlewareError[];

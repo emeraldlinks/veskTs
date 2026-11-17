@@ -383,6 +383,27 @@ function chunkErrorForNode(node: RouteNode | null): Error | undefined {
 }
 
 /**
+ * Code splitting can keep the not-found component in the owning route chunk.
+ * An unmatched URL has no page node, so the normal navigation chunk loader
+ * never sees that chunk — load the boundary chain explicitly before looking up
+ * the function, otherwise the router falls back to the built-in 404 and wipes
+ * the SSR boundary.
+ */
+async function resolveNotFoundComponent(
+	router: RouterInstance,
+	chain: RouteNode[],
+): Promise<Function | null> {
+	let fn = findNotFoundComponent(chain as Record<string, unknown>[]);
+	if (fn) return fn;
+	const pending = hasPendingChunks(chain);
+	if (pending.length === 0) return null;
+	await loadChunksQuietly(pending);
+	if (typeof router.__updateComponents === 'function') router.__updateComponents(chain);
+	fn = findNotFoundComponent(chain as Record<string, unknown>[]);
+	return fn;
+}
+
+/**
  * Active connectivity check for failure paths where passive signals
  * (`navigator.onLine`) are unreliable (proxies, CDP emulation, some
  * browsers lag the flag). Any HTTP response — even 404/500 — proves the
@@ -407,7 +428,7 @@ async function renderNotFound(
 	clearOfflineFlag(router, container);
 	const chain = match.matchChain;
 	const paramValues = match.params;
-	const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
+	const notFoundFn = await resolveNotFoundComponent(router, chain);
 	if (notFoundFn) {
 		const tempRoot = document.createDocumentFragment();
 		const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
@@ -1168,7 +1189,7 @@ async function hydrateInitial(
 
 	let pageNode: RouteNode | null = findPageNodeOrFailed(match);
 	if (!pageNode) {
-		const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
+		const notFoundFn = await resolveNotFoundComponent(router, chain);
 		if (notFoundFn) {
 			const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
 			const walker2 = createHydrateWalker(container);
@@ -1177,7 +1198,9 @@ async function hydrateInitial(
 			});
 			return;
 		}
-		container.innerHTML = defaultErrorHtml(404, 'Not Found');
+		// Keep server markup when the boundary chunk could not resolve; wiping
+		// it produces the blank 404 that looks like hydration never ran.
+		if (!container.firstChild) container.innerHTML = defaultErrorHtml(404, 'Not Found');
 		return;
 	}
 
@@ -1826,7 +1849,8 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 	const runServerMiddleware = async (ctx: Record<string, unknown>, next: (rewrite?: string) => Promise<void>): Promise<void> => {
 		if (options.serverMiddleware !== true || typeof window === 'undefined' || serverMiddlewareDisabled) return next();
-		const path = String(ctx.url || '/');
+		const url = ctx.url;
+		const path = url instanceof URL ? url.pathname + url.search : String(url || '/');
 		const cached = serverMiddlewareCache.get(path);
 		if (cached && Date.now() - cached.at < 2500) {
 			if (cached.body && typeof cached.body.redirect === 'string' && cached.body.redirect) {
@@ -1988,7 +2012,22 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					trackHydration(hydrateInitial(router, match, container, hydrateStrategy));
 					router._currentMatch = match;
 				} else {
-					router.navigate(path, { replace: true });
+					// The server already rendered the boundary. Hydrate it in
+					// place instead of navigating to (and re-matching) the same
+					// URL, which cleared #root before the async boundary chunk
+					// could paint.
+					const boundaryMatch: RouteMatch = {
+						// Keep the owning layouts/boundaries, but drop page
+						// functions: the root page otherwise looks like the route
+						// that produced this SSR boundary and gets hydrated against
+						// not-found markup (which falls through to a 500).
+						matchChain: flattenLayoutChain(routeTree, path.split('/').filter(Boolean))
+							.map((node) => ({ ...node, page: null, _pageName: undefined })),
+						params: {},
+						pathname: path,
+					};
+					trackHydration(hydrateInitial(router, boundaryMatch, container, hydrateStrategy));
+					router._currentMatch = boundaryMatch;
 					(globalThis as { __vesk_hydrated?: boolean }).__vesk_hydrated = true;
 				}
 			} else {
@@ -2004,24 +2043,93 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 			const url = (raw as unknown) instanceof URL ? (raw as unknown as URL) : new URL(raw, window.location.origin);
 			const match = matchRoute(routeTree, url.pathname);
 			if (!match) {
-				const chain = flattenLayoutChain(routeTree, url.pathname.split('/').filter(Boolean));
-				const notFoundFn = findNotFoundComponent(chain as Record<string, unknown>[]);
-				if (notFoundFn) {
-					void (async () => {
-						const tempRoot = document.createDocumentFragment();
-						const walker = createHydrateWalker(tempRoot as unknown as HTMLElement, []);
-						const nfProps = { params: {}, url: url.pathname };
-						const nfDom = await runInBlockWindow(() => notFoundFn(nfProps, new Map(), walker));
-						if (nfDom && typeof nfDom === 'object' && (nfDom as Node).nodeType) {
-							if (container.replaceChildren) container.replaceChildren(nfDom as Node);
-							else { container.innerHTML = ''; container.appendChild(nfDom as Node); }
-						} else if (typeof nfDom === 'string') {
-							container.innerHTML = nfDom;
+				const boundaryMatch: RouteMatch = {
+					matchChain: flattenLayoutChain(routeTree, url.pathname.split('/').filter(Boolean)),
+					params: {},
+					pathname: url.pathname,
+				};
+				// An unmatched URL never reaches afterGuards(), which is where the
+				// middleware chain normally runs. Run it here so a root auth /
+				// session middleware can redirect before the 404 is painted.
+				const runNoMatchNavigation = async () => {
+					const noMatchUrl = `${url.pathname}${url.search}`;
+					const mwFns: Function[] = [
+						...(options.serverMiddleware === true ? [runServerMiddleware] : []),
+						...(Array.isArray(middleware) ? middleware : (middleware ? [middleware] : [])),
+					];
+					let rewriteTarget: string | null = null;
+					for (const fn of mwFns) {
+						let calledNext = false;
+						let result: unknown;
+						const noMatchNext = async (rewrite?: string) => {
+							calledNext = true;
+							if (rewrite) rewriteTarget = rewrite;
+							return null;
+						};
+						try {
+							// Middleware is called as `fn(ctx, next)`, so the
+							// server proxy must receive `next` as its second
+							// argument rather than only via `ctx.next`.
+							result = await fn({
+								path: noMatchUrl,
+								url,
+								params: {},
+								router,
+								locals: {},
+								request: new Request(url.href, { method: 'GET' }),
+								next: noMatchNext,
+							}, noMatchNext);
+						} catch (err) {
+							if (!calledNext) {
+								container.innerHTML = defaultErrorHtml(500, 'Internal Server Error');
+								return;
+							}
+							throw err;
 						}
-					})();
-				} else {
-					container.innerHTML = defaultErrorHtml(404, 'Not Found');
-				}
+						if (result && typeof result === 'object') {
+							const mwResult = result as { redirect?: unknown; rewrite?: unknown };
+							if (typeof mwResult.redirect === 'string' && mwResult.redirect) {
+								router.navigate(mwResult.redirect, { replace: true });
+								return;
+							}
+							if (typeof mwResult.rewrite === 'string' && mwResult.rewrite) rewriteTarget = mwResult.rewrite;
+						}
+						if (calledNext && result == null) continue;
+						if (result instanceof Response) {
+							const location = result.headers.get('location');
+							if (location && result.status >= 300 && result.status < 400) {
+								router.navigate(location, { replace: true });
+								return;
+							}
+							if (result.status >= 400) {
+								const body = await result.text();
+								container.innerHTML = body || defaultErrorHtml(result.status, 'Request Failed');
+								return;
+							}
+						}
+						if (typeof result === 'string') container.innerHTML = result;
+						return;
+					}
+
+					if (rewriteTarget && rewriteTarget !== noMatchUrl) {
+						router.navigate(rewriteTarget, { replace: true });
+						return;
+					}
+
+					const fullUrl = url.pathname + url.search;
+					const target = mode ? '#' + fullUrl : fullUrl;
+					const liveFull = window.location.pathname + window.location.search + window.location.hash;
+					if (opts.replace) {
+						window.history.replaceState({ path: fullUrl }, '', target);
+					} else if (target !== liveFull) {
+						window.history.pushState({ path: fullUrl }, '', target);
+					}
+					set(_state.path, url.pathname);
+					set(_state.search, url.search.startsWith('?') ? url.search.slice(1) : url.search);
+					await renderNotFound(router, boundaryMatch, container);
+					handleScroll(url.pathname, opts.replace, opts.scrollBehavior);
+				};
+				trackHydration(runNoMatchNavigation());
 				return;
 			}
 

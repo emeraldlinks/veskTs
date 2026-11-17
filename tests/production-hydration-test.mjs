@@ -36,6 +36,13 @@ async function main() {
     await new Promise(r => setTimeout(r, 1000));
   }
 
+  // Middleware contexts must see request cookies in production, both as the
+  // plain record and through the documented ctx.cookies.get(name) helper.
+  {
+    const res = await fetch(BASE + '/', { headers: { cookie: 'session=prod-cookie' } });
+    assert(res.headers.get('x-session-seen') === 'prod-cookie', 'prod middleware reads ctx.cookies');
+  }
+
   browser = await puppeteer.launch({
     // Chrome's own 30s default is the tightest step in the suite on a loaded
     // machine (measured 16s to launch on a 2-core box), which turned slow
@@ -86,6 +93,50 @@ async function main() {
     const h1 = await page.evaluate(() => document.querySelector('h1')?.textContent?.trim() || '');
     assert(h1 === expectedH1, `${path} — h1: ${h1}`);
     assert(errors.length === 0, `${path} — zero JS errors`);
+    await page.close();
+  }
+
+  // ── 1b. Not-found boundaries hydrate in place ──
+  console.log('\n=== Not-found hydration ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    let navigations = 0;
+    const mainFrame = page.mainFrame();
+    page.on('framenavigated', frame => { if (frame === mainFrame) navigations++; });
+    page.on('pageerror', err => errors.push(err.message));
+
+    await page.goto(BASE + '/does-not-exist', { waitUntil: 'networkidle0' });
+    await new Promise(r => setTimeout(r, 400));
+    let state = await page.evaluate(() => ({
+      body: document.body.textContent.replace(/\s+/g, ' ').trim(),
+      root: (document.getElementById('root') || document.body).textContent.trim(),
+      hydrated: window.__vesk_hydrated === true,
+    }));
+    assert(state.body.includes('Page Not Found'), 'direct 404 keeps the SSR boundary');
+    assert(state.root.length > 0, 'direct 404 does not blank #root');
+    assert(state.hydrated, 'direct 404 hydrates');
+    assert(navigations === 1, `direct 404 does not reload (navigations=${navigations})`);
+    assert(errors.length === 0, 'direct 404 has zero JS errors');
+
+    await page.goto(BASE + '/', { waitUntil: 'networkidle0' });
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await page.evaluate(() => window.__vesk_router.navigate('/does-not-exist'));
+    await page.waitForFunction(
+      () => document.body.textContent.includes('Page Not Found'),
+      { timeout: 15000 },
+    );
+    state = await page.evaluate(() => ({
+      body: document.body.textContent.replace(/\s+/g, ' ').trim(),
+      root: (document.getElementById('root') || document.body).textContent.trim(),
+      path: location.pathname,
+      spa: window.__spaFlag === true,
+    }));
+    assert(state.path === '/does-not-exist', 'SPA 404 updates the URL');
+    assert(state.body.includes('Page Not Found'), 'SPA 404 renders the boundary');
+    assert(state.root.length > 0, 'SPA 404 does not blank #root');
+    assert(state.spa, 'SPA 404 does not reload the page');
+    assert(errors.length === 0, 'SPA 404 has zero JS errors');
     await page.close();
   }
 

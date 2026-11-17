@@ -28,6 +28,39 @@ Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
   page/layout. Regression: `middleware.test.ts` route-local API chain.
 - [x] Docs/skills/llms updated for instance redirects and rewrite semantics.
 
+**This session (middleware on unmatched routes + not-found hydration):**
+
+- [x] **Middleware now runs for every request**, including unmatched URLs, in
+  both directions: `prod-server.ts` runs the root chain before the 404;
+  `cli/dev-server.ts` runs it before 404 and honors response/redirect and
+  rewrite-to-API/rewrite-to-page (`mwRanForRewrite`); the client file router
+  runs it on no-match SPA navigations.
+- [x] **Production middleware contexts now receive request cookies.** The
+  middleware endpoint and both SSR/event contexts parsed `req.headers.cookie`
+  into `cookies: { ...requestCookies }` instead of `{}`.
+- [x] `ctx.cookies.get(name)` is supported alongside `ctx.cookie(name)` and the
+  plain record in generated adapters, the compiler chain, and
+  `@vesk/types` (`MiddlewareCookies`). Regression in `middleware.test.ts`.
+- [x] **`matchRoute` no longer falls back to the root page.** An unmatched path
+  matched the root node because the root is always included for layout wrapping;
+  `chainConsumesPath` now requires a page and full segment consumption for
+  non-empty paths. Regression in `router.test.ts`.
+- [x] Client no-match navigation: `runServerMiddleware` receives its `next` as
+  the second argument (it was only on `ctx.next`, so calling `next()` threw and
+  painted 500); `ctx.url` is a `URL`; redirects/rewrites/`Response` bodies and
+  string bodies short-circuit; URL/history updates only after middleware.
+- [x] **Hydration of a hard-loaded 404 kept the SSR boundary.** Initial
+  `hydrateInitial(boundaryMatch)` now strips page functions/`_pageName` from the
+  synthetic chain (otherwise the root page hydrated against not-found markup and
+  fell into the 500 path), and `resolveNotFoundComponent` loads pending boundary
+  chunks before falling back. Production `startProdServer` also falls back to
+  `../app` when pointed at a nested outDir such as `.vesk/prod-test`.
+- [x] Tests: runtime router 119/119, adapter middleware 6/6, `npm run typecheck`
+  clean; `tests/production-hydration-test.mjs` **65/65**; dev hydration
+  `tests/hydration-test.mjs` **537/537**, including new Test 27 (direct + SPA
+  unmatched route, URL update, no reload, zero pageerrors). `npm run test:dev`
+  green (36/36). `test-app` refreshed via `scripts/refresh-testapp-deps.mjs`.
+
 **This session (reactive collections port):**
 
 - [x] Ported Ripple's four reactive collections as public runtime API:

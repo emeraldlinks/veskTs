@@ -2380,6 +2380,48 @@ async function main() {
     await page.close();
   }
 
+  {
+    // 27: Unmatched routes must keep the SSR not-found boundary, hydrate it in
+    // place, and run root middleware on SPA navigation. The middleware chain
+    // normally lives in afterGuards(), which an unmatched URL never reaches.
+    console.log('\n=== TEST 27: unmatched route middleware + not-found hydration ===');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await goto(page, BASE + '/does-not-exist', { waitUntil: 'networkidle0' });
+    let state = await page.evaluate(() => ({
+      body: document.body.textContent.replace(/\s+/g, ' ').trim(),
+      root: (document.getElementById('root') || document.body).textContent.trim(),
+      hydrated: window.__vesk_hydrated === true,
+    }));
+    assert(state.body.includes('Page Not Found'), '27 direct 404 keeps the SSR boundary');
+    assert(state.root.length > 0, '27 direct 404 does not blank #root');
+    assert(state.hydrated, '27 direct 404 hydrates');
+
+    await goto(page, BASE + '/', { waitUntil: 'networkidle0' });
+    await waitForHydration(page);
+    await page.evaluate(() => {
+      window.__spaFlag = true;
+      window.__vesk_router.navigate('/does-not-exist');
+    });
+    await page.waitForFunction(
+      () => document.body.textContent.includes('Page Not Found'),
+      { timeout: 15000 },
+    );
+    state = await page.evaluate(() => ({
+      path: location.pathname,
+      body: document.body.textContent.replace(/\s+/g, ' ').trim(),
+      root: (document.getElementById('root') || document.body).textContent.trim(),
+      spa: window.__spaFlag === true,
+    }));
+    assert(state.path === '/does-not-exist', '27 SPA 404 updates the URL');
+    assert(state.body.includes('Page Not Found'), '27 SPA 404 renders the boundary');
+    assert(state.root.length > 0, '27 SPA 404 does not blank #root');
+    assert(state.spa, '27 SPA 404 does not reload the page');
+    assert(errors.length === 0, `27 zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+    await page.close();
+  }
+
   // ── Results ────────────────────────────────────────
   console.log(`\n\u2550\u2550\u2550 Results: ${passed} passed, ${failed} failed, ${skipped} skipped, ${passed + failed + skipped} total \u2550\u2550\u2550`);
   if (failed > 0) process.exit(1);

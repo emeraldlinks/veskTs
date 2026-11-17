@@ -219,10 +219,29 @@ export function flattenLayoutChain(tree: RouteNode[], pathParts: string[], resul
 	return result;
 }
 
+function chainConsumesPath(matchChain: RouteNode[], pathParts: string[]): boolean {
+	if (pathParts.length === 0) return true;
+	let consumed = 0;
+	let hasPage = false;
+	for (const node of matchChain) {
+		if (node.page || (node as { _pageName?: unknown })._pageName) hasPage = true;
+		if (node.isGroup) continue;
+		const segCount = node.segmentCount != null ? node.segmentCount : 1;
+		consumed = node.isCatchAll ? pathParts.length : consumed + Math.max(0, segCount);
+		if (consumed > pathParts.length) return false;
+	}
+	// The root is deliberately matched for every URL so its layout can wrap a
+	// deeper page. That means a chain can contain the root page alone after no
+	// child matched (`/does-not-exist`), which is a 404 — not a root-page hit.
+	// Require the chain to consume every segment and own a page.
+	return hasPage && consumed === pathParts.length;
+}
+
 export function matchRoute(tree: RouteNode[], pathname: string): RouteMatch | null {
 	const pathParts = pathname.split('/').filter(Boolean);
 	const matchChain = flattenLayoutChain(tree, pathParts);
 	if (matchChain.length === 0) return null;
+	if (!chainConsumesPath(matchChain, pathParts)) return null;
 
 	const params: Record<string, string> = {};
 	let partIdx = 0;
