@@ -25,6 +25,12 @@ export function parseCookies(header) {
   return out;
 }
 
+export function toHeadersMap(source) {
+  const out = new Map();
+  if (source) source.forEach((value, name) => out.set(String(name).toLowerCase(), String(value)));
+  return out;
+}
+
 export function assertSameOrigin() {}
 
 export async function runHooks() {

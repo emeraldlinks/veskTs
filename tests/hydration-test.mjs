@@ -1393,6 +1393,7 @@ async function main() {
           assert(icon.btn !== null, '/guardtest renders the icon-toggle button');
           assert(icon.allIcons.length === 1 && icon.allIcons[0].inside, '/guardtest initial icon renders inside the button only');
           await clickEl(page, '#icon-btn');
+          await page.waitForFunction(() => document.querySelector('#icon-btn .icon-check') !== null, { timeout: 5000 }).catch(() => {});
           const open = await page.evaluate(() => ({
             inBtn: document.querySelector('#icon-btn .icon-check') !== null,
             extraneous: [...document.querySelectorAll('.icon-check, .icon-cross')].filter(n => !n.closest('#icon-btn')).map(n => n.className),
@@ -1400,6 +1401,7 @@ async function main() {
           assert(open.inBtn, '/guardtest toggled icon renders back INSIDE the button (no disappearing nodes)');
           assert(open.extraneous.length === 0, `/guardtest toggle leaked no icons outside the button (got ${open.extraneous.join(', ')})`);
           await clickEl(page, '#icon-btn');
+          await page.waitForFunction(() => document.querySelector('#icon-btn .icon-cross') !== null, { timeout: 5000 }).catch(() => {});
           const closed = await page.evaluate(() => ({
             inBtn: document.querySelector('#icon-btn .icon-cross') !== null,
             extraneous: [...document.querySelectorAll('.icon-check, .icon-cross')].filter(n => !n.closest('#icon-btn')).map(n => n.className),
