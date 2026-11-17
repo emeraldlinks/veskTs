@@ -3,7 +3,8 @@ import { resolve, extname, dirname, basename } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { DEFAULT_MAX_BODY_BYTES, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
+import { DEFAULT_MAX_BODY_BYTES, resolveComponentName, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
+import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { build } from '@vesk/adapter/src/index';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { reportServerError, registerErrorHooks } from '@vesk/adapter/src/error-report';
@@ -15,6 +16,7 @@ import { resolveRuntimeErrorPayload, renderDevErrorPage } from './ssr-error';
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import { buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
+import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
 import { makeWebRequest, bodyTooLarge } from '@vesk/adapter/src/web-request';
 import type { RouteNode, DevServerOptions, Manifest, VeskPlugin } from '@vesk/adapter/src/types';
 import { getPluginRecords } from './plugins';
@@ -715,91 +717,145 @@ let finalBody = body;
       return;
     }
 
-    if (config && url.pathname.startsWith('/api')) {
-      const apiRoute = config.routes.find(r => r.type === 'api' && matchPath(r.path, url.pathname));
-      if (apiRoute) {
-        const handlerPath = resolve(devDir, apiRoute.function);
-        if (existsSync(handlerPath)) {
-          try {
-            const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-            const response = await mod.handle(webRequest);
-            await deliverResponse(res, response);
-          } catch (e) {
-            const message = e instanceof Error ? e.message : String(e);
-            res.writeHead(500, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ ok: false, error: message }));
-          }
-          return;
-        }
-      }
-    }
-
+    let middlewarePendingHeaders: Record<string, string> = {};
     if (config) {
-      const ssrRoute = config.routes.find(r => r.type === 'ssr' && matchPath(r.path, url.pathname));
-      if (ssrRoute) {
-        const handlerPath = resolve(devDir, ssrRoute.function);
-        if (existsSync(handlerPath)) {
-          try {
-            const t0 = process.hrtime.bigint();
-            const tImport0 = process.hrtime.bigint();
-            const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const tImport1 = process.hrtime.bigint();
-            const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-            const response = await mod.handle(webRequest);
-            const tHandle1 = process.hrtime.bigint();
-            const body = await response.text();
-            const tText1 = process.hrtime.bigint();
-
-            const headers = Object.fromEntries(response.headers);
-            const contentType = headers['content-type'] || '';
-            let finalBody = body;
-            if (contentType.includes('text/html')) {
-              finalBody = injectDevScripts(body);
+      // Matched SSR/API functions run the root middleware inside their generated
+      // wrappers. An unmatched URL has no function to run it, so the dev server
+      // must run the same onion before choosing the not-found boundary — a root
+      // auth/session middleware used to silently stop running the moment the
+      // path did not map to a page. A rewrite restarts dispatch once, with the
+      // generated wrapper told to skip middleware (it already ran here).
+      let routeSkipMiddleware = false;
+      for (let pass = 0; pass < 2; pass++) {
+        if (url.pathname.startsWith('/api')) {
+          const apiRoute = config.routes.find(r => r.type === 'api' && matchPath(r.path, url.pathname));
+          if (apiRoute) {
+            const handlerPath = resolve(devDir, apiRoute.function);
+            if (existsSync(handlerPath)) {
+              try {
+                const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
+                const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
+                if (routeSkipMiddleware) Object.defineProperty(webRequest, '__veskSkipMiddleware', { value: true });
+                const response = await mod.handle(webRequest);
+                await deliverResponse(res, response);
+              } catch (e) {
+                const message = e instanceof Error ? e.message : String(e);
+                res.writeHead(500, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ ok: false, error: message }));
+              }
+              return;
             }
-            res.writeHead(response.status, headers);
-            res.end(finalBody);
-            console.error(`[vdtime] ${url.pathname} ssrVersion=${ssrVersion} total=${Number(tHandle1 - t0) / 1e6 | 0}ms import=${Number(tImport1 - tImport0) / 1e6 | 0}ms handle=${Number(tHandle1 - tImport1) / 1e6 | 0}ms text=${Number(tText1 - tHandle1) / 1e6 | 0}ms`);
-          } catch (e) {
-            console.error('[vesk dev] SSR render failed:', e instanceof Error ? (e.stack || e.message) : String(e));
-            await reportServerError(e, { url: url.href, target: 'dev', status: 500 });
-            res.writeHead(500, { 'Content-Type': 'text/html' });
-            res.end(renderSsrErrorPage(e, url.pathname));
           }
+        }
+
+        const ssrRoute = config.routes.find(r => r.type === 'ssr' && matchPath(r.path, url.pathname));
+        if (ssrRoute) {
+          const handlerPath = resolve(devDir, ssrRoute.function);
+          if (existsSync(handlerPath)) {
+            try {
+              const t0 = process.hrtime.bigint();
+              const tImport0 = process.hrtime.bigint();
+              const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
+              const tImport1 = process.hrtime.bigint();
+              const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
+              if (routeSkipMiddleware) Object.defineProperty(webRequest, '__veskSkipMiddleware', { value: true });
+              const response = await mod.handle(webRequest);
+              const tHandle1 = process.hrtime.bigint();
+              const body = await response.text();
+              const tText1 = process.hrtime.bigint();
+
+              const headers = Object.fromEntries(response.headers);
+              const contentType = headers['content-type'] || '';
+              let finalBody = body;
+              if (contentType.includes('text/html')) {
+                finalBody = injectDevScripts(body);
+              }
+              res.writeHead(response.status, headers);
+              res.end(finalBody);
+              console.error(`[vdtime] ${url.pathname} ssrVersion=${ssrVersion} total=${Number(tHandle1 - t0) / 1e6 | 0}ms import=${Number(tImport1 - tImport0) / 1e6 | 0}ms handle=${Number(tHandle1 - tImport1) / 1e6 | 0}ms text=${Number(tText1 - tHandle1) / 1e6 | 0}ms`);
+            } catch (e) {
+              console.error('[vesk dev] SSR render failed:', e instanceof Error ? (e.stack || e.message) : String(e));
+              await reportServerError(e, { url: url.href, target: 'dev', status: 500 });
+              res.writeHead(500, { 'Content-Type': 'text/html' });
+              res.end(renderSsrErrorPage(e, url.pathname));
+            }
+            return;
+          }
+        }
+
+        if (pass > 0) break;
+
+        const middlewarePath = resolve(devDir, 'server', 'middleware.js');
+        if (!config.middleware || !existsSync(middlewarePath)) break;
+
+        try {
+          const middlewareMod = await import(`${middlewarePath}?t=${ssrVersion}`) as {
+            execute: (ctx: Record<string, unknown>) => Promise<{ response: Response | null; rewriteUrl: string | null }>;
+          };
+          const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
+          const mwCtx: Record<string, unknown> = {
+            request: makeWebRequest(req, url.href, maxBodyBytes),
+            params: {},
+            url,
+            locals: Object.assign({}, serverStore || {}),
+            cookies: { ...parseCookies(String(req.headers.cookie || '')) },
+            set(key: string, value: unknown) { (this.locals as Record<string, unknown>)[key] = value; },
+            get(key: string) { return (this.locals as Record<string, unknown>)[key]; },
+          };
+          (globalThis as Record<string, unknown>).__vesk_request = mwCtx;
+          const mwResult = await middlewareMod.execute(mwCtx);
+          middlewarePendingHeaders = (mwCtx.__pendingHeaders as Record<string, string>) || {};
+          if (mwResult.response) {
+            for (const [key, value] of Object.entries(middlewarePendingHeaders)) mwResult.response.headers.set(key, value);
+            await deliverResponse(res, mwResult.response);
+            return;
+          }
+          if (mwResult.rewriteUrl) {
+            const rewriteTarget = new URL(mwResult.rewriteUrl, url.href);
+            url.pathname = rewriteTarget.pathname;
+            url.search = rewriteTarget.search;
+            routeSkipMiddleware = true;
+            continue;
+          }
+        } catch (e) {
+          console.error('[vesk dev] middleware failed:', e instanceof Error ? (e.stack || e.message) : String(e));
+          res.writeHead(500, { 'Content-Type': 'text/html' });
+          res.end(renderSsrErrorPage(e, url.pathname));
           return;
         }
+        break;
       }
     }
 
+    let notFoundHtml: string | null = null;
     if (config) {
-      const rootRoute = config.routes.find(r => r.type === 'ssr' && r.path === '/');
-      if (rootRoute) {
-        const handlerPath = resolve(devDir, rootRoute.function);
-        if (existsSync(handlerPath)) {
-          try {
-            const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
-            const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
-            const response = await mod.handle(webRequest);
-            const body = await response.text();
-            const headers = Object.fromEntries(response.headers);
-            const contentType = headers['content-type'] || '';
-            let finalBody = body;
-            if (contentType.includes('text/html')) {
-              finalBody = injectDevScripts(body);
-            }
-            res.writeHead(200, headers);
-            res.end(finalBody);
-          } catch (e) {
-            res.writeHead(500, { 'Content-Type': 'text/html' });
-            res.end(renderSsrErrorPage(e, url.pathname));
-          }
-          return;
+      const boundaryPath = resolveBoundaryFileForUrl(url.pathname, appDir, 'not-found.vsk');
+      if (boundaryPath) {
+        try {
+          const runtimePath = resolve(devDir, 'server', 'runtime.js');
+          const { renderFullPage, storeDataScriptGlobal } = await import(`${runtimePath}?t=${ssrVersion}`) as {
+            renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>;
+            storeDataScriptGlobal: (payload: unknown) => string | null;
+          };
+          const src = readFileSync(boundaryPath, 'utf-8');
+          const compName = resolveComponentName(src) || 'NotFound';
+          const cssUrls = existsSync(resolve(devDir, 'static', 'global.css')) ? ['/_vesk/static/global.css'] : [];
+          notFoundHtml = await renderFullPage(src, compName, { params: {}, url: url.pathname }, new Map(), {
+            hydrate: true,
+            cssUrls,
+            clientScriptUrl: config.assets?.client?.url || '/_vesk/static/client.js',
+            externalDataScript: storeDataScriptGlobal,
+            sourcePath: boundaryPath,
+            headExtra: config.headExtra,
+          });
+        } catch (e) {
+          console.error('[vesk dev] not-found render failed:', e instanceof Error ? (e.stack || e.message) : String(e));
         }
       }
     }
 
-    res.writeHead(404, { 'Content-Type': 'text/html' });
-    res.end(injectDevScripts(renderDefaultNotFoundPage({ url: url.pathname })));
+    res.writeHead(404, { 'Content-Type': 'text/html', ...middlewarePendingHeaders });
+    res.end(injectDevScripts(notFoundHtml || renderDefaultNotFoundPage({ url: url.pathname })));
   });
 
   const hmr = createHmrServer(server, appDir, devDir, componentMap);

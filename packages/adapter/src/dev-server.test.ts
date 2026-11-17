@@ -193,8 +193,12 @@ try {
   // ── source: injectDevScripts used at every former </body> site ──────────
   const devSrc = readFileSync(devServerSrcPath, 'utf-8');
   {
-    const callSites = (devSrc.match(/injectDevScripts\(body\)/g) || []).length;
-    assert(callSites === 3, `dev-server.ts calls injectDevScripts at exactly 3 </body> sites (got ${callSites})`);
+    const bodyCallSites = (devSrc.match(/injectDevScripts\(body\)/g) || []).length;
+    const boundaryCallSites = (devSrc.match(/injectDevScripts\(notFoundHtml/g) || []).length;
+    assert(
+      bodyCallSites === 2 && boundaryCallSites === 1,
+      `dev-server.ts injects dev scripts at both SSR sites plus the not-found boundary (got body=${bodyCallSites}, boundary=${boundaryCallSites})`,
+    );
     // The only `</body>` replace left is the one inside injectDevScripts itself.
     const rawBodyReplaces = (devSrc.match(/\.replace\(\s*'<\/body>'/g) || []).length;
     assert(rawBodyReplaces === 1, `only the injectDevScripts helper does a </body> replace (got ${rawBodyReplaces})`);
