@@ -604,7 +604,7 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
   lines.push(`__sa({ c: null, p: __prev });`);
   lines.push(`try {`);
   lines.push(`const __escape = (s) => { s = String(s); return s.split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;').split(${JSON.stringify('"')}).join('&quot;'); };`);
-  lines.push(`const __styleText = (v) => { if (typeof v === 'string') return v; if (v && typeof v === 'object') { let s = ''; for (const k in v) { const x = v[k]; if (x == null || x === false) continue; s += k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase()) + ':' + x + ';'; } return s; } return String(v); };`);
+  lines.push(`const __styleText = (v) => { const __kebab = (k) => { let out = ''; for (let i = 0; i < k.length; i++) { const c = k[i]; if (c >= 'A' && c <= 'Z') { out += '-'; out += c.toLowerCase(); } else out += c; } return out; }; if (typeof v === 'string') return v; if (v && typeof v === 'object') { let s = ''; for (const k in v) { const x = v[k]; if (x == null || x === false) continue; s += __kebab(k) + ':' + x + ';'; } return s; } return String(v); };`);
   lines.push(`const __attr = (n, v) => (v == null || v === false) ? '' : ' ' + n + '="' + __escape(n === 'style' ? __styleText(v) : String(v)) + '"';`);
   lines.push(`const raw = (s) => s == null ? '' : String(s);`);
   // A component may return an ARRAY of strings (`<For>` maps its children), and

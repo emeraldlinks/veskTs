@@ -5,6 +5,30 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (compiler audit fixes):**
+
+- [x] `blankGenericArrowTypeParams` now skips regex literals (char-scanned, not
+  regex-matched), so `/<T>(x) => x/` survives client codegen instead of becoming
+  `/   (x) => x/`. Parser + expression/statement client-codegen regressions.
+- [x] `generateVskDts` keeps `export { … }`, `export type { … }`, aliased
+  specifiers, and `export *`, while suppressing a local component's duplicate
+  self re-export. `vsk-tsx.test.ts` regressions for each form.
+- [x] Cookie named `get` no longer becomes unreadable: compiler and adapter
+  middleware snapshot the plain cookie record before installing
+  `cookies.get(name)`; `ctx.cookie('get')` and `ctx.cookies.get('get')` both
+  return the value. Regression in `middleware.test.ts`.
+- [x] `parseJsonc` strips trailing commas with an in-string-aware scan, so a
+  tsconfig path target containing `,]` resolves. `module-imports.test.ts`
+  regression with `"./weird,]"`.
+- [x] Removed the remaining source-parsing regexes in compiler `src`
+  (`config`, `client-codegen`, `ir-generator`, `server-jsx-lowering`,
+  `middleware`, `vsk-tsx`, generated `server-jsgen` style helper). Only the
+  documented escaping/redaction regexes and test assertions remain.
+- [x] Validation: targeted parser/client/vsk-tsx/middleware/module-imports/
+  config/server-codegen/slot-props/abuse-reactivity tests green; per-package
+  `tsc --noEmit` green; `tests/production-hydration-test.mjs` **65/65**;
+  `test-app` refreshed to `0.2.102+ci.1794914342541`; asset budget OK.
+
 **This session (redirect APIs + middleware rewrites):**
 
 - [x] Added mutating `VeskResponse.redirect(url, status = 302)` alongside the

@@ -51,6 +51,28 @@ function bothModes(name, source, assertionsFn, opts = {}) {
 }
 
 // Strip ES module imports/exports so new Function() can evaluate
+describe('Client Codegen — regex literals', () => {
+	const sourceExpression = `
+		component App {
+			const re = /<T>(x) => x/;
+			return <p>{String(re)}</p>;
+		}
+	`;
+	const sourceStatement = `
+		component App {
+			const re = /<T>(x) => x/;
+			<p>{String(re)}</p>
+		}
+	`;
+	for (const [mode, source] of [['expression', sourceExpression], ['statement', sourceStatement]] as const) {
+		it(`preserves a regex containing generic-arrow-shaped text (${mode} mode)`, () => {
+			const code = compileClient(source, null, { forceClient: true });
+			expect(code).toContain('/<T>(x) => x/');
+			expect(code).not.toContain('/   (x) => x/');
+		});
+	}
+});
+
 function stripModuleWrapper(code) {
 	return code
 		.replace(/^import\s*\{[\s\S]*?\}\s*from\s*['"][^'"]*['"];?\s*/gm, '')

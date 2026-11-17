@@ -32,7 +32,7 @@ import { generateIR } from '@vesk/compiler/src/ir-generator';
 import { transformTopLevelForActions } from '@vesk/compiler/src/actions';
 import { extractRuntimeNames, extractTopLevelNames } from '@vesk/compiler/src/server-utils';
 import { importBindingPairs, localValueImportNames } from '@vesk/compiler/src/module-imports';
-import { stripTrackGeneric } from '@vesk/compiler/src/scan';
+import { stripTrackGeneric, isIdentStart, isIdentChar } from '@vesk/compiler/src/scan';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
 import { collectVskReexportPaths, vskRegistryAliases } from '@vesk/compiler/src/vsk-imports';
 import { inlineMdImportsFrom } from '@vesk/compiler/src/md-inline';
@@ -56,6 +56,14 @@ function callExpr(callee: Record<string, unknown>, args: Record<string, unknown>
  * When `expr` is exactly `get(<word>)`, returns the word; otherwise `null`.
  * Used to substitute `get(tracked)` back to the raw tracked cell name.
  */
+function isPlainIdentifier(text: string): boolean {
+  if (!text || !isIdentStart(text[0])) return false;
+  for (let i = 1; i < text.length; i++) {
+    if (!isIdentChar(text[i])) return false;
+  }
+  return true;
+}
+
 function simpleGetName(expr: string): string | null {
   if (!expr.startsWith('get(') || !expr.endsWith(')')) return null;
   const inner = expr.slice(4, -1);
@@ -117,7 +125,7 @@ function untrackBindingArg(expr: string): string {
 function trackedRefTarget(expr: string, tracked: Map<string, TrackedInfo>): string | null {
   const cell = simpleGetName(expr);
   if (cell !== null) return cell;
-  if (/^[A-Za-z_$][\w$]*$/.test(expr)) {
+  if (isPlainIdentifier(expr)) {
     const info = tracked.get(expr);
     if (info && info.kind === 'cell' && info.cellName === expr) return expr;
   }

@@ -53,13 +53,23 @@ function __mwBindResult(data, schema) {
 }
 
 function __mwAttachCtx(ctx) {
+  let __mwCookieValues = null;
   if (!Array.isArray(ctx.errors)) ctx.errors = [];
   if (typeof ctx.error !== "function") ctx.error = (err) => { ctx.errors.push({ error: err }); return err; };
   if (!ctx.__pendingHeaders) ctx.__pendingHeaders = {};
   if (ctx.cookies && typeof ctx.cookies.get !== "function") {
-    try { Object.defineProperty(ctx.cookies, "get", { value: (name) => ctx.cookies[name], enumerable: false, configurable: true }); } catch {}
+    try {
+      __mwCookieValues = Object.assign({}, ctx.cookies);
+      Object.defineProperty(ctx.cookies, "get", { value: (name) => {
+        const value = ctx.cookies[name];
+        return typeof value === "function" && Object.prototype.hasOwnProperty.call(__mwCookieValues, name) ? __mwCookieValues[name] : value;
+      }, enumerable: false, configurable: true });
+    } catch {}
   }
-  if (typeof ctx.cookie !== "function") ctx.cookie = (name) => (ctx.cookies ? ctx.cookies[name] : undefined);
+  if (typeof ctx.cookie !== "function") ctx.cookie = (name) => {
+    const value = ctx.cookies ? ctx.cookies[name] : undefined;
+    return __mwCookieValues && typeof value === "function" && Object.prototype.hasOwnProperty.call(__mwCookieValues, name) ? __mwCookieValues[name] : value;
+  };
   if (typeof ctx.getHeader !== "function") ctx.getHeader = (name) => (ctx.request && ctx.request.headers ? ctx.request.headers.get(String(name)) : null);
   if (typeof ctx.header !== "function") ctx.header = (name, value) => {
     const key = String(name).toLowerCase();

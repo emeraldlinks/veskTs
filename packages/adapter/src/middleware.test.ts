@@ -31,6 +31,7 @@ function main(): void {
   assert(code?.includes('__mwCloneResponse(await onLast(rewriteUrl, ctx))') === true, 'normalizes the downstream response before pass-through mutation');
   assert(code?.includes('__mwAttachCtx(ctx)') === true, 'attaches additive ctx helpers');
   assert(code?.includes('Object.defineProperty(ctx.cookies, "get"') === true, 'supports ctx.cookies.get(name) as well as ctx.cookie(name)');
+  assert(code?.includes('__mwCookieValues = Object.assign({}, ctx.cookies)') === true, 'snapshots cookie values before installing ctx.cookies.get');
 
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);

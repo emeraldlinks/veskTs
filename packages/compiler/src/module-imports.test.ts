@@ -826,6 +826,27 @@ test('resolveAliasModule/resolveSsrModule: @/ and @app/ paths resolve from baseU
   }
 });
 
+test('resolveAliasModule: trailing-comma cleanup does not alter strings', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('weird,]'), `export const W = 1;`);
+    writeTsconfig(fx, [
+      `{`,
+      `  // trailing commas inside strings must survive`,
+      `  "compilerOptions": {`,
+      `    "baseUrl": ".",`,
+      `    "paths": {`,
+      `      "@weird": ["./weird,]"],`,
+      `    },`,
+      `  },`,
+      `}`,
+    ].join('\n'));
+    expect(resolveAliasModule('@weird', fx.dir)).toEqual(fx.file('weird,]'));
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test('resolveImportPath: alias resolves to an absolute path; missing alias falls through', () => {
   const fx = makeFixture();
   try {

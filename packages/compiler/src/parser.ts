@@ -344,6 +344,10 @@ export function blankGenericArrowTypeParams(source: string): string {
       i += 2;
       continue;
     }
+    if (ch === '/' && source[i + 1] !== '/' && source[i + 1] !== '*' && canStartRegex(source, i)) {
+      const end = regexLiteralEnd(source, i);
+      if (end !== -1) { i = end; continue; }
+    }
     if (ch !== '<') { i++; continue; }
 
     // A candidate `<` in expression position: find the matching `>`, tracking
@@ -448,6 +452,54 @@ function isArrowParameterList(source: string, from: number): boolean {
 
 function isSpaceChar(ch: string): boolean {
   return ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r' || ch === '\f' || ch === '\v';
+}
+
+const REGEX_PREFIX_KEYWORDS = new Set([
+  'return', 'throw', 'case', 'delete', 'void', 'typeof', 'instanceof',
+  'in', 'of', 'new', 'yield', 'await', 'else', 'do',
+]);
+
+function regexLiteralEnd(source: string, start: number): number {
+  let i = start + 1;
+  let inClass = false;
+  while (i < source.length) {
+    const ch = source[i];
+    if (ch === '\\') { i += 2; continue; }
+    if (ch === '\n' && !inClass) return -1;
+    if (ch === '[') inClass = true;
+    else if (ch === ']') inClass = false;
+    else if (ch === '/' && !inClass) return i + 1;
+    i++;
+  }
+  return -1;
+}
+
+function canStartRegex(source: string, start: number): boolean {
+  let i = start - 1;
+  while (true) {
+    while (i >= 0 && isSpaceChar(source[i])) i--;
+    if (i >= 1 && source[i] === '/' && source[i - 1] === '*') {
+      i -= 2;
+      while (i >= 1 && !(source[i - 1] === '/' && source[i] === '*')) i--;
+      i -= 2;
+      continue;
+    }
+    if (i >= 1 && source[i] === '/' && source[i - 1] === '/') {
+      i -= 2;
+      while (i >= 0 && source[i] !== '\n') i--;
+      continue;
+    }
+    break;
+  }
+  if (i < 0) return true;
+  const ch = source[i];
+  if ('=([{,:;!?&|+-*%^~<>'.includes(ch)) return true;
+  if (isIdentChar(ch.charCodeAt(0))) {
+    let begin = i;
+    while (begin > 0 && isIdentChar(source[begin - 1].charCodeAt(0))) begin--;
+    return REGEX_PREFIX_KEYWORDS.has(source.slice(begin, i + 1));
+  }
+  return false;
 }
 
 export function createBaseParser(): typeof acorn.Parser {

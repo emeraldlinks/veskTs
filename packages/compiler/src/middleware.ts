@@ -4,6 +4,7 @@ import { extractMiddleware } from '@vesk/compiler/src/router';
 import { parseCookies } from '@vesk/compiler/src/api-routes';
 import type { RouteNode } from '@vesk/compiler/src/types';
 import type { VeskPlugin, MiddlewareContext, MiddlewareChainOptions } from '@vesk/compiler/src/types';
+import { isWhitespaceChar } from '@vesk/compiler/src/scan';
 
 export interface MiddlewareEntry {
   sourcePath: string;
@@ -173,9 +174,15 @@ export async function executeMiddlewareChain(
   const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
   const locals: Record<string, unknown> = Object.assign({}, serverStore || {});
   const cookies = parseCookies(request.headers?.get('cookie') || '') || {};
+  const cookieValues = { ...cookies } as Record<string, string>;
   if (typeof (cookies as Record<string, unknown>).get !== 'function') {
     Object.defineProperty(cookies, 'get', {
-      value: (name: string) => cookies[name],
+      value: (name: string) => {
+        const value = cookies[name];
+        return typeof value === 'function' && Object.prototype.hasOwnProperty.call(cookieValues, name)
+          ? cookieValues[name]
+          : value;
+      },
       enumerable: false,
       configurable: true,
     });
@@ -200,7 +207,10 @@ export async function executeMiddlewareChain(
     },
     __pendingHeaders: {} as Record<string, string>,
     cookie(name: string) {
-      return cookies[name];
+      const value = cookies[name];
+      return typeof value === 'function' && Object.prototype.hasOwnProperty.call(cookieValues, name)
+        ? cookieValues[name]
+        : value;
     },
     getHeader(name: string) {
       return request.headers.get(name);
@@ -392,8 +402,13 @@ export async function executeMiddlewareChain(
       // `Response.redirect('/login', 302)` should work just like
       // `ServerResponse.redirect('/login')` — normalize it into a redirect
       // response instead of surfacing a 500.
-      if (e instanceof TypeError && /Failed to parse URL from/.test(String(e.message))) {
-        const target = /Failed to parse URL from (\S+)/.exec(String(e.message))?.[1] ?? '';
+      const msg = String(err.message);
+      const urlPrefix = 'Failed to parse URL from ';
+      if (e instanceof TypeError && msg.startsWith(urlPrefix)) {
+        const rest = msg.slice(urlPrefix.length);
+        let end = 0;
+        while (end < rest.length && !isWhitespaceChar(rest[end])) end++;
+        const target = rest.slice(0, end);
         return __mwCloneResponse(new Response(null, { status: 302, headers: { Location: target } })) as Response;
       }
       // Any other TypeError from the middleware (e.g. reading a property of

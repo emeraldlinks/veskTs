@@ -10,6 +10,17 @@ export const MD_DEFAULT_ALLOW_TAGS = [
 
 const MD_HTML_MODES = ['escape', 'allow', 'allowlist'];
 
+function normalizeTag(tag: string): string {
+  let out = '';
+  const text = String(tag).toLowerCase();
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    const code = ch.charCodeAt(0);
+    if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || ch === '-') out += ch;
+  }
+  return out;
+}
+
 function normalizeMdConfig(md: MdConfig | undefined): MdConfig | undefined {
   if (!md || typeof md !== 'object') return md;
   if (md.html !== undefined && !MD_HTML_MODES.includes(md.html)) {
@@ -23,7 +34,7 @@ function normalizeMdConfig(md: MdConfig | undefined): MdConfig | undefined {
     if (!Array.isArray(out.allowTags)) {
       throw VeskError.configError('md.allowTags must be an array of tag names.', []);
     }
-    out.allowTags = out.allowTags.map((t: string) => String(t).toLowerCase().replace(/[^a-z0-9-]/g, '')).filter(Boolean);
+    out.allowTags = out.allowTags.map((t: string) => normalizeTag(t)).filter(Boolean);
   }
   return out;
 }

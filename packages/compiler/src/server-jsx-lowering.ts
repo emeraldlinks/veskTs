@@ -43,22 +43,62 @@ const ESCAPE = '__escape';
 const ATTR = '__attr';
 const RAW = '__raw';
 
+function splitJsxTextLines(value: string): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === '\r') {
+      lines.push(line);
+      if (value[i + 1] === '\n') i++;
+      line = '';
+    } else if (ch === '\n') {
+      lines.push(line);
+      line = '';
+    } else {
+      line += ch;
+    }
+  }
+  lines.push(line);
+  return lines;
+}
+
+function hasNonSpaceTab(text: string): boolean {
+  for (let i = 0; i < text.length; i++) {
+    if (text[i] !== ' ' && text[i] !== '\t') return true;
+  }
+  return false;
+}
+
+function trimLeadingSpaces(text: string): string {
+  let start = 0;
+  while (start < text.length && text[start] === ' ') start++;
+  return text.slice(start);
+}
+
+function trimTrailingSpaces(text: string): string {
+  let end = text.length;
+  while (end > 0 && text[end - 1] === ' ') end--;
+  return text.slice(0, end);
+}
+
 /**
  * JSX text semantics, matching what the compiler emits for StaticNode text:
  * lines are trimmed, blank lines vanish, and interior newlines collapse to a
  * single space. Getting this wrong is visible as stray whitespace in SSR HTML.
  */
 export function normalizeJsxText(value: string): string {
-  const lines = value.split(/\r\n|\n|\r/);
+  const lines = splitJsxTextLines(value);
   let lastNonEmpty = -1;
   for (let i = 0; i < lines.length; i++) {
-    if (/[^ \t]/.test(lines[i])) lastNonEmpty = i;
+    if (hasNonSpaceTab(lines[i])) lastNonEmpty = i;
   }
   let out = '';
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i].replace(/\t/g, ' ');
-    if (i !== 0) line = line.replace(/^ +/, '');
-    if (i !== lines.length - 1) line = line.replace(/ +$/, '');
+    let line = '';
+    for (let j = 0; j < lines[i].length; j++) line += lines[i][j] === '\t' ? ' ' : lines[i][j];
+    if (i !== 0) line = trimLeadingSpaces(line);
+    if (i !== lines.length - 1) line = trimTrailingSpaces(line);
     if (line) {
       if (i !== lastNonEmpty) line += ' ';
       out += line;

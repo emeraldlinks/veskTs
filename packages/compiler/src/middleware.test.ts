@@ -237,6 +237,25 @@ test('middleware returning Response.redirect(relative) short-circuits to a redir
 	cleanup(tmp);
 });
 
+test('a cookie named get stays readable through ctx.cookies.get and ctx.cookie', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx, next) {',
+			"  const a = ctx.cookies.get('get');",
+			"  const b = ctx.cookie('get');",
+			"  const d = ctx.cookie('normal');",
+			'  return new Response([a, b, d].join("|"));',
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/', { headers: { cookie: 'get=secret; normal=abc' } }), {}, {});
+	expect(await result.response?.text()).toBe('secret|secret|abc');
+	cleanup(tmp);
+});
+
 test('next(rewrite) records rewriteUrl and updates ctx.url', async () => {
 	const tmp = createFixture({
 		'app/page.vsk': '',

@@ -8,6 +8,7 @@ import { parse } from '@vesk/compiler/src/parser';
 import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement } from '@vesk/compiler/src/strip-ts';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
 import { VeskError } from '@vesk/compiler/src/errors';
+import { isWhitespaceChar } from '@vesk/compiler/src/scan';
 
 // =============================================================
 // SSR module-value imports.
@@ -810,6 +811,47 @@ interface TsconfigAliases {
 const EMPTY_ALIASES: TsconfigAliases = { exact: new Map(), wildcard: [] };
 const ALIAS_CACHE = new Map<string, { mtimeMs: number; aliases: TsconfigAliases }>();
 
+function stripJsonTrailingCommas(text: string): string {
+  let out = '';
+  let inString = false;
+  let quote = '';
+  let trailingCommaAt = -1;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (ch === '\\') {
+        out += text[i + 1] ?? '';
+        i++;
+      } else if (ch === quote) {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      inString = true;
+      quote = ch;
+      out += ch;
+      trailingCommaAt = -1;
+      continue;
+    }
+    if (ch === ',') {
+      trailingCommaAt = out.length;
+      out += ch;
+      continue;
+    }
+    if (ch === '}' || ch === ']') {
+      if (trailingCommaAt !== -1) out = out.slice(0, trailingCommaAt) + ch;
+      else out += ch;
+      trailingCommaAt = -1;
+      continue;
+    }
+    out += ch;
+    if (!isWhitespaceChar(ch)) trailingCommaAt = -1;
+  }
+  return out;
+}
+
 /** Strips `//` + block comments and trailing commas so a tsconfig.json parses. */
 function parseJsonc(raw: string): unknown {
   let out = '';
@@ -847,7 +889,7 @@ function parseJsonc(raw: string): unknown {
     }
     out += ch;
   }
-  return JSON.parse(out.replace(/,\s*([}\]])/g, '$1'));
+  return JSON.parse(stripJsonTrailingCommas(out));
 }
 
 /** Nearest `tsconfig.json` at or above `fromDir`, or null. */

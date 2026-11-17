@@ -27,7 +27,7 @@ import {
 import type { IRNode } from '@vesk/compiler/src/ir';
 import { VeskError, codeFrame } from '@vesk/compiler/src/errors';
 import { createBaseParser } from '@vesk/compiler/src/parser';
-import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, collapseNewlineWhitespace, skipString, skipComment } from '@vesk/compiler/src/scan';
+import { skipWhitespace, findBalancedEnd, splitTopLevel, startsWithIdentifier, stripDeclKeyword, isWhitespaceChar, isIdentStart, isIdentChar, collapseNewlineWhitespace, skipString, skipComment } from '@vesk/compiler/src/scan';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
 import { stripTypeImport } from '@vesk/compiler/src/vsk-imports';
 import { importBindingPairs } from '@vesk/compiler/src/module-imports';
@@ -55,11 +55,33 @@ let __slotProps: Set<string> | null = null;
  */
 let __typeTexts: Map<string, string> | null = null;
 
+function isPlainIdentifier(text: string): boolean {
+  if (!text || !isIdentStart(text[0])) return false;
+  for (let i = 1; i < text.length; i++) {
+    if (!isIdentChar(text[i])) return false;
+  }
+  return true;
+}
+
+function normalizePropName(text: string): string {
+  let out = text.trim();
+  if (startsWithIdentifier(out, 'readonly')) {
+    let i = 0;
+    while (isWhitespaceChar(out[i])) i++;
+    i += 'readonly'.length;
+    while (isWhitespaceChar(out[i])) i++;
+    out = out.slice(i);
+  }
+  if (out.startsWith('$')) out = out.slice(1);
+  if (out.endsWith('?')) out = out.slice(0, -1);
+  return out.trim();
+}
+
 function resolveNamedTypeText(text: string | null): string | null {
   if (!text || !__typeTexts || __typeTexts.size === 0) return text;
   let t = text.trim();
   for (let i = 0; i < 8; i++) {
-    if (!/^[A-Za-z_$][\w$]*$/.test(t)) return t;
+    if (!isPlainIdentifier(t)) return t;
     const next = __typeTexts.get(t);
     if (!next || next === t) return t;
     t = next.trim();
@@ -1045,9 +1067,9 @@ function slotPropNamesFromType(propsType: string | null): Set<string> {
     for (const part of members) {
       const colon = findTopLevelColon(part);
       if (colon === -1) continue;
-      const namePart = part.slice(0, colon).trim().replace(/^readonly\s+/, '').replace(/^\$/, '').replace(/\?$/, '').trim();
+      const namePart = normalizePropName(part.slice(0, colon));
       const typePart = part.slice(colon + 1).trim();
-      if (namePart && /^[A-Za-z_$][\w$]*$/.test(namePart) && typePart.includes('Component')) out.add(namePart);
+      if (namePart && isPlainIdentifier(namePart) && typePart.includes('Component')) out.add(namePart);
     }
   }
   return out;
@@ -2183,7 +2205,7 @@ function warnStaleConstBindings(comp: ComponentIR, file: string): void {
         `Inline the expression in the binding, or wrap the value in derived().`
     );
   };
-  const isEventAttr = (target: string | null): boolean => !!target && /^on./.test(target);
+  const isEventAttr = (target: string | null): boolean => !!target && target.length > 2 && target[0] === 'o' && target[1] === 'n';
   eachNode(comp.body, (n) => {
     if (n instanceof DynamicBinding) {
       if (!isEventAttr(n.target)) {

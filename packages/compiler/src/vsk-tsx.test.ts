@@ -162,6 +162,25 @@ test('dts: interface declarations included', () => {
   has(dts, 'export type FeedProps = { posts: Post[] };', 'props alias');
 });
 
+test('dts: named and aliased type re-exports kept', () => {
+  const dts = generateVskDts(`type Foo = { a: string }\ntype Bar = number\nexport { Foo, Bar as Renamed };\nexport type { Bar };`);
+  has(dts, 'type Foo = { a: string }', 'local type kept');
+  has(dts, 'type Bar = number', 'second local type kept');
+  has(dts, 'export { Foo, Bar as Renamed }', 'named/aliased specifiers kept');
+  has(dts, 'export type { Bar }', 'export type specifier kept');
+});
+
+test('dts: export * statements kept', () => {
+  const dts = generateVskDts(`export * from './shared';\nexport component App { <p>x</p> }`);
+  has(dts, `export * from './shared';`, 'export all kept');
+});
+
+test('dts: a local component self re-export is not duplicated', () => {
+  const dts = generateVskDts(`export component Foo { <p>x</p> }\nexport { Foo };`);
+  has(dts, 'export declare function Foo(props: any): Component;', 'component signature');
+  notHas(dts, 'export { Foo }', 'no duplicate re-export');
+});
+
 test('dts: collision with user Props type inlines instead', () => {
   const dts = generateVskDts(`type AppProps = { custom: boolean }\nexport component App(props: { label: string }) { <p>x</p> }`);
   has(dts, 'type AppProps = { custom: boolean }', 'user type kept');

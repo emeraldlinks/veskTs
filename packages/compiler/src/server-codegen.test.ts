@@ -2430,6 +2430,10 @@ describe('self-closing elements in SSR output', () => {
 		const html = render('component App(props: { c: string; s: string }) { return <div class={props.c} style={{ backgroundColor: props.s }} />; }', 'App', { c: 'dot', s: '#0f0' });
 		expect(html).toBe('<div class="dot" style="background-color:#0f0;"></div>');
 	});
+	it('keeps the leading dash for vendor-prefixed style keys', () => {
+		const html = render('component App(props: { t: string }) { return <div style={{ WebkitTransform: props.t }} />; }', 'App', { t: 'rotate(1deg)' });
+		expect(html).toBe('<div style="-webkit-transform:rotate(1deg);"></div>');
+	});
 	it('still nests children normally inside a non-void element', () => {
 		expect(render('component App { return <div><span>a</span></div>; }', 'App')).toBe('<div><span>a</span></div>');
 	});

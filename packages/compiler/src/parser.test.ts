@@ -12,7 +12,7 @@
  * NOTE: Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  * Run with: node --experimental-vm-modules packages/compiler/src/parser.test.js
  */
-import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
+import { parse, parseGeneratedJs, blankGenericArrowTypeParams } from '@vesk/compiler/src/parser';
 import { tokenizeCode, findSpecifierExports, hasTopLevelValueDeclaration } from '@vesk/compiler/src/tokens';
 
 let passed = 0;
@@ -1506,6 +1506,17 @@ describe('generic arrow functions', () => {
 	it('leaves a <T,> inside a string or comment alone', () => {
 		expect(parses('const s = "<T,>(x) => x";')).toBe(true);
 		expect(parses('// <T,>(x) => x\nconst a = 1;')).toBe(true);
+	});
+
+	it('leaves regex literals with generic-arrow-shaped text alone', () => {
+		const src = "const re = /<T>(x) => x/;\nconst ok = re.test('<T>(x) => x');";
+		expect(blankGenericArrowTypeParams(src)).toBe(src);
+		expect(parses(src)).toBe(true);
+	});
+
+	it('leaves regex literals with escaped brackets and a closing slash alone', () => {
+		const src = String.raw`const re = /<T>\](\/) => x/;`;
+		expect(blankGenericArrowTypeParams(src)).toBe(src);
 	});
 });
 
