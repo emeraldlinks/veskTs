@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.104 — 2026-11-17
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler:** make parsing regex-free and repair cookie/dts edges
+
 ## 0.2.103 — 2026-11-17
 
 _No breaking changes._
