@@ -75,7 +75,7 @@ it('inlined middleware does not redeclare VeskResponse in an API function', () =
 			"import { VeskResponse } from '@vesk/runtime/server';",
 			'export async function middleware(ctx, next) { return VeskResponse.redirect("/next", 302); }',
 		].join('\n'),
-	]);
+	], { dedupeVeskResponse: true });
 	const { funcCode } = generateApiFunction(catchAll, join(root, 'api'), join(root, 'out'), { middlewareCode });
 	if (funcCode.includes("from '@vesk/runtime/server'")) {
 		throw new Error('middleware VeskResponse import was not deduped');

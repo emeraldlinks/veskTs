@@ -80,7 +80,10 @@ function collectPlanModules(
   };
   const visitPlan = (p: PrecompileFilePlan): void => {
     for (const mod of p.modules) visitKey(mod.key);
-    for (const sub of p.subFiles) visitPlan(sub.plan);
+    for (const sub of p.subFiles) {
+      const child = sub.plan;
+      if (!('__vskPlanRef' in child)) visitPlan(child);
+    }
   };
   visitPlan(plan);
   return out;

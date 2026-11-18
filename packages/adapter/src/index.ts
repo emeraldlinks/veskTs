@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync, copyFileSync, existsSync, readFileSync, readd
 import { resolve, dirname, relative, basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
-import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
+import { createHydratePlanRegistry, generateSsrFunction, hydratePlanModuleSource } from '@vesk/adapter/src/ssr-function';
 import { resolveUserCssPath, isTailwindPlugin, resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { collectActionIds } from '@vesk/compiler/src/actions';
 import { ModuleRegistry } from '@vesk/compiler/src/module-imports';
@@ -407,7 +407,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         let mwCode: string | null = null;
         if (mwChain.length > 0) {
           const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));
-          mwCode = compileMiddlewareCode(mwSources);
+          mwCode = compileMiddlewareCode(mwSources, { dedupeVeskResponse: true });
         }
         // For standalone routes the layout chain is cleared — only the
         // standalone node's own layout (if any) applies, no root ancestors.
@@ -419,6 +419,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
           componentMap,
           { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra, clientScriptUrl: clientUrl, clientScriptIntegrity: clientIntegrity },
           registry,
+          hydratePlans,
         );
         writeFileSync(funcPath, funcCode, 'utf-8');
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
@@ -451,12 +452,14 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   }
 
   const registry = new ModuleRegistry();
+  const hydratePlans = createHydratePlanRegistry();
   walk(routeTree);
 
-  // Every SSR function imports this shared registry: module source code is
-  // stored here ONCE instead of being re-embedded in every function plan,
-  // which keeps the cold-start bundle small enough to initialize.
+  // Every SSR function imports these shared registries: module source code and
+  // nested `.vsk` plans are stored here ONCE instead of being re-embedded in
+  // every function, which keeps the serverless bundle small enough to build.
   writeFileSync(resolve(outDir, 'server', '__vesk-modules.mjs'), registry.toModuleSource(), 'utf-8');
+  writeFileSync(resolve(outDir, 'server', '__vesk-plans.mjs'), hydratePlanModuleSource(hydratePlans), 'utf-8');
 
   markPhase('server runtime + ssr functions');
   const apiRoutes: ApiRouteNode[] = [];
@@ -470,7 +473,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         let mwCode: string | null = null;
         if (mwChain.length > 0) {
           const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));
-          mwCode = compileMiddlewareCode(mwSources);
+          mwCode = compileMiddlewareCode(mwSources, { dedupeVeskResponse: true });
         }
         const { funcPath, funcCode, name } = generateApiFunction(node, apiDir, outDir, { middlewareCode: mwCode });
         writeFileSync(funcPath, funcCode, 'utf-8');

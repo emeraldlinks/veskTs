@@ -2462,6 +2462,32 @@ describe('AOT hydrate — serverless module resolution', () => {
 	});
 });
 
+describe('AOT hydrate — shared plan refs', () => {
+	it('resolves subFiles from the shared plan registry', () => {
+		const dir = mkdtempSync(join(tmpdir(), 'vesk-planref-'));
+		writeFileSync(join(dir, 'Child.vsk'), 'component Child() { <b>child</b> }\n');
+		writeFileSync(
+			join(dir, 'page.vsk'),
+			"import { Child } from './Child.vsk'\nexport component Page() { <div><Child /></div> }\n",
+		);
+		const registry = new ModuleRegistry();
+		const plan = precompileFile(
+			readFileSync(join(dir, 'page.vsk'), 'utf-8'),
+			join(dir, 'page.vsk'),
+			registry,
+		);
+		expect(plan.subFiles.length > 0).toBe(true);
+		const shared: Record<number, any> = {};
+		plan.subFiles.forEach((sub, id) => {
+			shared[id] = sub.plan;
+			(sub.plan as any) = { __vskPlanRef: id };
+		});
+		const cached = hydratePrecompile(plan, registry.modules(), shared);
+		expect(cached.componentMap.has('Child')).toBe(true);
+		rmSync(dir, { recursive: true, force: true });
+	});
+});
+
 describe('AOT plan — file source dedup', () => {
 	it('stores the whole file source once, not on every IR node', () => {
 		// Regression: Expression/RuntimeStatement.source holds the WHOLE file

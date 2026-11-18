@@ -3,7 +3,7 @@
  *
  * Run with: npx tsx packages/adapter/src/ssr-function.test.ts
  */
-import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
+import { createHydratePlanRegistry, generateSsrFunction, hydratePlanModuleSource } from '@vesk/adapter/src/ssr-function';
 import { compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -246,7 +246,7 @@ console.log('\n\u2550\u2550\u2550 Request-scoped SSR token (data-nav) \u2550\u25
           "import { VeskResponse } from '@vesk/runtime/server';",
           'export async function middleware(ctx, next) { return VeskResponse.redirect("/next", 302); }',
         ].join('\n'),
-      ]),
+      ], { dedupeVeskResponse: true }),
     },
   ).funcCode;
   const runtimeLine = code.split('\n').find((line) => line.includes("from '../runtime.js';") && line.includes('renderFullPage'));
@@ -255,6 +255,41 @@ console.log('\n\u2550\u2550\u2550 Request-scoped SSR token (data-nav) \u2550\u25
   assert(!code.includes("from '@vesk/runtime/server'"), 'middleware VeskResponse import is deduped');
   const declarations = code.split('\n').filter((line) => line.startsWith('import {') && line.includes('VeskResponse') && line.includes('from'));
   assert(declarations.length === 1, 'VeskResponse is declared exactly once');
+}
+
+write('app/components/Shared.vsk', 'component Shared() { return <i>shared</i>; }');
+write('app/refpage/page.vsk', "import { Shared } from '../components/Shared.vsk'\nexport component RefPage() { return <div><Shared /></div>; }\n");
+
+{
+  const planRegistry = createHydratePlanRegistry();
+  const codeA = generateSsrFunction(
+    { sourceDir: join(appDir, 'app'), fullPath: '/', layout: 'Layout' },
+    appDir,
+    outDir,
+    new Map(),
+    {},
+    undefined,
+    planRegistry,
+  ).funcCode;
+  const codeB = generateSsrFunction(
+    { sourceDir: join(appDir, 'app/refpage'), fullPath: '/refpage', layout: null },
+    appDir,
+    outDir,
+    new Map(),
+    { ancestorLayouts: [appRoot] },
+    undefined,
+    planRegistry,
+  ).funcCode;
+  const moduleSrc = hydratePlanModuleSource(planRegistry);
+  assert(codeA.includes("import { __veskPlans } from '../__vesk-plans.mjs';"), 'function imports shared plan registry');
+  assert(codeA.includes('hydratePrecompile(__veskPlans['), 'function hydrates a referenced plan');
+  assert(codeA.includes('__veskModules, __veskPlans'), 'hydrate call receives shared plan registry');
+  assert(!codeA.includes('"__vskIrType"'), 'function does not inline plan JSON');
+  assert(moduleSrc.includes('export const __veskPlans = {'), 'shared module exports the plan registry');
+  assert(moduleSrc.includes('__vskPlanRef'), 'registered plans use nested plan refs');
+  const ids = (code) => [...code.matchAll(/__veskPlans\[(\d+)\]/g)].map((m) => m[1]);
+  const setA = new Set(ids(codeA));
+  assert(ids(codeB).some((id) => setA.has(id)), 'two routes share deduped plan ids');
 }
 
 rmSync(appDir, { recursive: true, force: true });

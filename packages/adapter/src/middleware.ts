@@ -364,7 +364,10 @@ export function compileMiddleware(mwChain: MiddlewareChainItem[], _appDir: strin
   return code;
 }
 
-export function compileMiddlewareCode(mwSourceTexts: string[]): string | null {
+export function compileMiddlewareCode(
+  mwSourceTexts: string[],
+  options: { dedupeVeskResponse?: boolean } = {},
+): string | null {
   if (!mwSourceTexts || mwSourceTexts.length === 0) return null;
 
   const parts: string[] = [];
@@ -373,7 +376,7 @@ export function compileMiddlewareCode(mwSourceTexts: string[]): string | null {
     const extracted = extractMiddlewareBody(mwSourceTexts[i]);
     if (!extracted) continue;
     for (const line of extracted.imports) {
-      if (line.includes('VeskResponse') && line.includes('runtime')) continue;
+      if (options.dedupeVeskResponse && line.includes('VeskResponse') && line.includes('runtime')) continue;
       if (!imports.includes(line)) imports.push(line);
     }
     parts.push(`async function mw_${i}(${extracted.params}) {\n${extracted.body}\n}`);

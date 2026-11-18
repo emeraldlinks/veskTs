@@ -52,9 +52,18 @@ export type PrecompileBundledModule = ModuleRef;
 
 export type PrecompileBinding = ModuleBindingData;
 
+/** Reference to a plan stored once in the shared `__veskPlans` registry. */
+export interface VskPlanRef {
+  __vskPlanRef: number;
+}
+
 export interface PrecompileSubFilePlan {
   importPath: string;
-  plan: PrecompileFilePlan;
+  plan: PrecompileFilePlan | VskPlanRef;
+}
+
+function isPlanRef(plan: PrecompileFilePlan | VskPlanRef): plan is VskPlanRef {
+  return typeof (plan as VskPlanRef).__vskPlanRef === 'number';
 }
 
 export interface PrecompileFilePlan {
@@ -316,6 +325,7 @@ function hydrateFile(
   plan: PrecompileFilePlan,
   seen: Set<string>,
   modules: Record<string, ModuleEntry>,
+  plans?: Record<number, PrecompileFilePlan>,
 ): CompileFileResult {
   const ir = plan.ir ? (irFromJSON(plan.ir) as IRRoot) : new IRRoot([], [], new Set(), null, null, []);
   const __vesk = loadRuntimeImports(plan.runtimeImports || []);
@@ -336,8 +346,10 @@ function hydrateFile(
 
   for (const sub of plan.subFiles || []) {
     if (seen.has(sub.importPath)) continue;
+    const subPlan = isPlanRef(sub.plan) ? plans?.[sub.plan.__vskPlanRef] : sub.plan;
+    if (!subPlan) continue;
     seen.add(sub.importPath);
-    const subResult = hydrateFile(sub.plan, seen, modules);
+    const subResult = hydrateFile(subPlan, seen, modules, plans);
     for (const [name, fn] of subResult.componentMap) {
       if (!componentMap.has(name)) componentMap.set(name, fn);
     }
@@ -362,6 +374,7 @@ function hydrateFile(
 export function hydratePrecompile(
   plan: PrecompileFilePlan,
   modules: Record<string, ModuleEntry>,
+  plans?: Record<number, PrecompileFilePlan>,
 ): CompileFileResult {
-  return hydrateFile(plan, new Set(), modules);
+  return hydrateFile(plan, new Set(), modules, plans);
 }
