@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.106 — 2026-11-18
+
+_No breaking changes._
+
+### Fixes
+
+- **runtime:** hydrate boundary links on hard loads
+
 ## 0.2.105 — 2026-11-17
 
 _No breaking changes._
