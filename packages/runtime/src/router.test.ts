@@ -1,4 +1,4 @@
-import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute } from '@vesk/runtime/src/router';
+import { buildRouteTree, defineRoute, createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, matchRoute, resolveBoundaryHydrator } from '@vesk/runtime/src/router';
 import { findErrorComponent, findNotFoundComponent, findLoadingComponent, setIsHydrating, applyHead, _state } from '@vesk/runtime/src/router-components';
 import { createHydrateWalker } from '@vesk/runtime/src/hydrate';
 import { parseHTML } from 'linkedom';
@@ -2165,6 +2165,29 @@ test('nearest function error node wins over a closer string node', () => {
 		{ path: '/x', page: () => document.createTextNode('x'), error: err },
 	] as unknown as Record<string, unknown>[];
 	expect(findErrorComponent(chain)).toBe(err);
+});
+
+test('boundary hydrators resolve from the nearest node carrying a boundary name', () => {
+	const outerNf = () => null;
+	const innerNf = () => null;
+	const outerErr = () => null;
+	const innerErr = () => null;
+	const chain = [
+		{ path: '/', notFound: outerNf, _notFoundName: 'NotFound_Outer', error: outerErr, _errorName: 'Error_Outer' },
+		{ path: '/x', notFound: innerNf, _notFoundName: 'NotFound_Inner', error: innerErr, _errorName: 'Error_Inner' },
+	] as unknown as Record<string, unknown>[];
+	const router = {
+		__hydrators: {
+			NotFound_Outer: outerNf,
+			NotFound_Inner: innerNf,
+			Error_Outer: outerErr,
+			Error_Inner: innerErr,
+		},
+	} as unknown as Parameters<typeof resolveBoundaryHydrator>[0];
+	expect(resolveBoundaryHydrator(router, chain, 'notFound')).toBe(innerNf);
+	expect(resolveBoundaryHydrator(router, chain, 'error')).toBe(innerErr);
+	expect(resolveBoundaryHydrator(router, chain.slice(0, 1), 'notFound')).toBe(outerNf);
+	expect(resolveBoundaryHydrator({} as never, chain, 'error')).toBe(null);
 });
 
 // ── Hash-mode (`#/path`) routing ─────────────────────────────

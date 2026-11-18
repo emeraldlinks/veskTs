@@ -1103,7 +1103,7 @@ async function main() {
           footer: footer ? footer.textContent : '',
           body: root ? root.textContent.replace(/\s+/g, ' ').trim() : '',
           markerCount: (() => {
-            const walker = document.createTreeWalker(root, 128, { acceptNode: (n) => n.textContent === 'vesk-ssr-error' ? 1 : 2 });
+            const walker = document.createTreeWalker(document.body, 128, { acceptNode: (n) => (n.textContent || '').startsWith('vesk-ssr-error') ? 1 : 2 });
             let c = 0; while (walker.nextNode()) c++;
             return c;
           })(),
@@ -2421,6 +2421,60 @@ async function main() {
     assert(state.root.length > 0, '27 SPA 404 does not blank #root');
     assert(state.spa, '27 SPA 404 does not reload the page');
     assert(errors.length === 0, `27 zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+    await page.close();
+  }
+
+  {
+    // 28: A hard-loaded 404 must hydrate the SSR boundary itself. Its <Link>
+    // has to navigate via the router (SPA), not fall back to a native reload.
+    console.log('\n=== TEST 28: not-found boundary Link hydrates on hard load ===');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await goto(page, BASE + '/does-not-exist', { waitUntil: 'networkidle0' });
+    await waitForHydration(page);
+    await page.waitForFunction(() => window.__vesk_hydrated === true, { timeout: 10000 });
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await clickEl(page, 'main a[href="/"]');
+    await page.waitForFunction(() => location.pathname === '/', { timeout: 15000 });
+    const state = await page.evaluate(() => ({
+      path: location.pathname,
+      body: document.body.textContent.replace(/\s+/g, ' ').trim(),
+      spa: window.__spaFlag === true,
+    }));
+    assert(state.path === '/', '28 not-found Link updates the URL');
+    assert(state.body.includes('Welcome to Vesk'), '28 not-found Link renders the home page');
+    assert(state.spa, '28 not-found Link navigates without a full reload');
+    assert(errors.length === 0, `28 zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
+    await page.close();
+  }
+
+  {
+    // 29: The error boundary keeps its own <Link> interactive on a hard-loaded
+    // 500. renderErrorPage re-renders the boundary, so the clicked anchor must
+    // be the live one with the router click handler attached.
+    console.log('\n=== TEST 29: error boundary Link hydrates on hard load ===');
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await goto(page, BASE + '/dataerror', { waitUntil: 'networkidle0' });
+    await waitForHydration(page);
+    await page.waitForFunction(
+      () => !!document.querySelector('a.error-home-link') && window.__vesk_hydrated === true,
+      { timeout: 15000 },
+    );
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await clickEl(page, 'a.error-home-link');
+    await page.waitForFunction(() => location.pathname === '/', { timeout: 15000 });
+    const state = await page.evaluate(() => ({
+      path: location.pathname,
+      body: document.body.textContent.replace(/\s+/g, ' ').trim(),
+      spa: window.__spaFlag === true,
+    }));
+    assert(state.path === '/', '29 error Link updates the URL');
+    assert(state.body.includes('Welcome to Vesk'), '29 error Link renders the home page');
+    assert(state.spa, '29 error Link navigates without a full reload');
+    assert(errors.length === 0, `29 zero pageerrors (got ${errors.length}: ${errors.join(', ')})`);
     await page.close();
   }
 

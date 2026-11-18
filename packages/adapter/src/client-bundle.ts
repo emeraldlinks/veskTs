@@ -2167,10 +2167,10 @@ async function buildMainBundle(
     '      n._layoutName = n.layout;\n' +
     '      n.layout = __components[n.layout];\n' +
     '    }\n' +
-    "    if (typeof n.error === 'string') n.error = __components[n.error];\n" +
-    "    if (typeof n.notFound === 'string') n.notFound = __components[n.notFound];\n" +
-    "    if (typeof n.offline === 'string') n.offline = __components[n.offline];\n" +
-    "    if (typeof n.network === 'string') n.network = __components[n.network];\n" +
+    "    if (typeof n.error === 'string') { n._errorName = n.error; n.error = __components[n.error]; }\n" +
+    "    if (typeof n.notFound === 'string') { n._notFoundName = n.notFound; n.notFound = __components[n.notFound]; }\n" +
+    "    if (typeof n.offline === 'string') { n._offlineName = n.offline; n.offline = __components[n.offline]; }\n" +
+    "    if (typeof n.network === 'string') { n._networkName = n.network; n.network = __components[n.network]; }\n" +
     '    if (n.children) __resolveNames(n.children);\n' +
     '  }\n' +
     '}\n' +

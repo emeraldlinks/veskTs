@@ -72,6 +72,16 @@ component List {
 }
 `);
 
+  writeFileSync(join(appDir, 'error.vsk'), `interface ErrorProps { message: string }
+component ErrorPage(props: ErrorProps) {
+	<div>{props.message}</div>
+}
+`);
+  writeFileSync(join(appDir, 'not-found.vsk'), `component NotFound404 {
+	<h1>Not found</h1>
+}
+`);
+
   // Case A: no keyed map anywhere => reconcile must NOT be referenced.
   const simpleTree = [routeNode(appDir, '', '/', 0)];
   const { main: simpleMain } = await generateClientBundle(simpleTree, appDir, new Map(), {
@@ -113,6 +123,27 @@ component List {
   await assert(
     keyedMain.includes('globalThis.reconcile = reconcile;'),
     'keyed app: reconcile global emitted when imported',
+  );
+
+  // Case C: the non-code-split resolver must preserve boundary names. The
+  // router picks hydrate variants by `_errorName` / `_notFoundName`; dropping
+  // them left boundary <Link> handlers on detached DOM.
+  const boundaryTree = [{
+    ...routeNode(appDir, '', '/', 0),
+    error: 'Error_Index',
+    notFound: 'NotFound_Index',
+  }];
+  const { main: boundaryMain } = await generateClientBundle(boundaryTree, appDir, new Map(), {
+    importRuntime: false,
+    codeSplit: false,
+  });
+  await assert(
+    boundaryMain.includes('n._errorName = n.error'),
+    'non-code-split bundle preserves _errorName for hydrator lookup',
+  );
+  await assert(
+    boundaryMain.includes('n._notFoundName = n.notFound'),
+    'non-code-split bundle preserves _notFoundName for hydrator lookup',
   );
 
   rmSync(dir, { recursive: true });

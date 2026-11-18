@@ -5,6 +5,28 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (boundary Link hydration on hard loads):**
+
+- [x] **BUG: hard-loaded 404s kept the SSR boundary but its `<Link>` stayed a
+  native anchor.** Initial hydration called the plain boundary component, which
+  built a detached tree and discarded it. Added `resolveBoundaryHydrator()` to
+  prefer the registered hydrate variant by `_notFoundName` / `_errorName` so the
+  live SSR nodes are claimed and router click handlers attach.
+- [x] **BUG: hard-loaded 500s never re-rendered the SSR error boundary.**
+  The adapter emits `<!--vesk-ssr-error:...-->` before `#root`, but hydration
+  only scanned inside `#root`. Now both `#root` and `document.body` are scanned,
+  and the consumed marker is removed to prevent replaying a stale 500.
+- [x] Adapter's non-code-split client resolver now preserves boundary names
+  (`_errorName`, `_notFoundName`, `_offlineName`, `_networkName`) alongside the
+  resolved component functions; previously the router had no hydrator lookup key.
+- [x] Fixtures/tests: `test-app/app/error.vsk` gained a router `<Link>`;
+  `tests/hydration-test.mjs` adds Tests 28/29 for hard-loaded 404 and 500 Link
+  SPA navigation; runtime router and adapter client-bundle unit regressions added.
+- [x] Validation: runtime router suite green; `client-bundle.test.ts` 8/8;
+  focused 404/error browser probe passes; `tests/hydration-test.mjs` **545/545**;
+  `npm run typecheck` clean. `test-app` refreshed to
+  `0.2.105+ci.1794963040229`.
+
 **This session (typed request headers + event locals):**
 
 - [x] `headers()` and every server `ctx.headers` are now the shared

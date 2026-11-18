@@ -404,6 +404,30 @@ async function resolveNotFoundComponent(
 }
 
 /**
+ * Boundary chunks register a plain component in `__components` AND a hydrate
+ * variant in `__hydrators`, but the route node only carries the unresolved
+ * boundary NAME (`_notFoundName` / `_errorName`). Reusing the plain component to
+ * hydrate server markup builds a detached DOM and discards it — event handlers
+ * (notably `<Link>`) end up on nodes nobody sees. Pick the hydrator by name so
+ * the real SSR nodes are claimed in place.
+ */
+export function resolveBoundaryHydrator(
+	router: { __hydrators?: Record<string, Function> } | null | undefined,
+	chain: RouteNode[],
+	kind: 'notFound' | 'error',
+): Function | null {
+	const hydrators = router?.__hydrators;
+	if (!hydrators) return null;
+	const nameKey = '_' + kind + 'Name';
+	for (let i = chain.length - 1; i >= 0; i--) {
+		const node = chain[i] as Record<string, unknown>;
+		const name = node[nameKey] ?? (typeof node[kind] === 'string' ? node[kind] : null);
+		if (typeof name === 'string' && typeof hydrators[name] === 'function') return hydrators[name]!;
+	}
+	return null;
+}
+
+/**
  * Active connectivity check for failure paths where passive signals
  * (`navigator.onLine`) are unreliable (proxies, CDP emulation, some
  * browsers lag the flag). Any HTTP response — even 404/500 — proves the
@@ -967,7 +991,7 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	// Renders the route's error component inside the layout chain so the error
 	// page keeps the site nav. Throws when no error component exists.
 	function renderErrorInLayout(error: unknown): unknown {
-		const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+		const errorFn = resolveBoundaryHydrator(router, chain, 'error') || findErrorComponent(chain as Record<string, unknown>[]);
 		if (!errorFn) throw error;
 		const retry = () => {
 			if (router && router.navigate) {
@@ -988,7 +1012,7 @@ function renderMatch(router: RouterInstance, match: RouteMatch, container: HTMLE
 	// re-rendering through the layout also throws, e.g. the layout is the
 	// component that failed).
 	function mountStandaloneError(error: unknown): void {
-		const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+		const errorFn = resolveBoundaryHydrator(router, chain, 'error') || findErrorComponent(chain as Record<string, unknown>[]);
 		if (!errorFn) throw error;
 		const retry = () => {
 			if (router && router.navigate) {
@@ -1097,7 +1121,7 @@ async function renderErrorPage(
 	clearOfflineFlag(router, container);
 	const chain = match.matchChain;
 	const paramValues = match.params;
-	const errorFn = findErrorComponent(chain as Record<string, unknown>[]);
+	const errorFn = resolveBoundaryHydrator(router, chain, 'error') || findErrorComponent(chain as Record<string, unknown>[]);
 	if (!errorFn) {
 		if (stale()) return;
 		if (container.replaceChildren) container.replaceChildren();
@@ -1193,8 +1217,11 @@ async function hydrateInitial(
 		if (notFoundFn) {
 			const nfProps = { params: paramValues, url: match.pathname || window.location.pathname };
 			const walker2 = createHydrateWalker(container);
+			// The plain component builds a detached tree; only the hydrate
+			// variant claims the SSR boundary and attaches <Link> handlers.
+			const boundaryFn = resolveBoundaryHydrator(router, chain, 'notFound') || notFoundFn;
 			root(() => {
-				notFoundFn(nfProps, new Map(), walker2);
+				boundaryFn(nfProps, new Map(), walker2);
 			});
 			return;
 		}
@@ -1209,11 +1236,22 @@ async function hydrateInitial(
 	// Rendering the error component client-side instead of hydrating the page
 	// against mismatched markers keeps the initial load from exploding.
 	const ssrErrorMarker = ((): string | null => {
-		const walker = document.createTreeWalker(container, NodeFilter.SHOW_COMMENT);
-		while (walker.nextNode()) {
-			const v = walker.currentNode.nodeValue;
-			if (v && v.startsWith('vesk-ssr-error')) {
-				return v.slice('vesk-ssr-error'.length);
+		// The adapter prepends the marker to the rendered body, which lands it
+		// BEFORE #root in the final document. Scanning only `container` missed
+		// it, so the SSR error boundary was never re-rendered and its <Link>
+		// handlers were never attached. Cover both scopes and consume the
+		// marker so a later re-hydration cannot replay a stale 500.
+		const scopes: Node[] = [container];
+		if (document.body && document.body !== container) scopes.push(document.body);
+		for (const scope of scopes) {
+			const walker = document.createTreeWalker(scope, NodeFilter.SHOW_COMMENT);
+			while (walker.nextNode()) {
+				const comment = walker.currentNode as Comment;
+				const v = comment.nodeValue;
+				if (v && v.startsWith('vesk-ssr-error')) {
+					comment.parentNode?.removeChild(comment);
+					return v.slice('vesk-ssr-error'.length);
+				}
 			}
 		}
 		return null;
