@@ -2,6 +2,15 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.108 — 2026-11-18
+
+_No breaking changes._
+
+### Fixes
+
+- **build:** share hydrate plans and dedupe middleware imports
+- **adapter:** dedupe middleware VeskResponse import
+
 ## 0.2.107 — 2026-11-18
 
 _No breaking changes._
