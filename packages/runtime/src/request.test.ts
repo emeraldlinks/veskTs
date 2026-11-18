@@ -1292,6 +1292,50 @@ describe('VeskResponse static factories return VeskResponse', () => {
 	});
 });
 
+describe('VeskRequest previous route', () => {
+
+	it('reads a local previous route from x-vesk-previous-route', () => {
+		const req = new VeskRequest('http://localhost/login', {
+			headers: { 'x-vesk-previous-route': '/account?tab=security#top' },
+		});
+		expect(req.previousRoute).toBe('/account?tab=security#top');
+		expect(req.previousRouteInfo.source).toBe('x-vesk-previous-route');
+		expect(req.previousRouteInfo.headers.get('x-vesk-previous-route')).toBe('/account?tab=security#top');
+	});
+
+	it('falls back to x-return-to and then a same-origin referer', () => {
+		const returnTo = new VeskRequest('http://localhost/login', {
+			headers: { 'x-return-to': '/billing' },
+		});
+		expect(returnTo.previousRoute).toBe('/billing');
+
+		const referer = new VeskRequest('http://localhost/login', {
+			headers: { referer: 'http://localhost/account?x=1' },
+		});
+		expect(referer.previousRoute).toBe('/account?x=1');
+		expect(referer.previousRouteInfo.source).toBe('referer');
+	});
+
+	it('reads next/returnTo from the query string', () => {
+		const req = new VeskRequest('http://localhost/login?next=%2Fdashboard%3Fx%3D1');
+		expect(req.previousRoute).toBe('/dashboard?x=1');
+		expect(req.previousRouteInfo.source).toBe('query');
+	});
+
+	it('rejects cross-origin and protocol-relative previous routes', () => {
+		const crossOrigin = new VeskRequest('http://localhost/login', {
+			headers: { referer: 'https://evil.test/account' },
+		});
+		expect(crossOrigin.previousRoute).toBeNull();
+
+		const protocolRelative = new VeskRequest('http://localhost/login', {
+			headers: { 'x-vesk-previous-route': '//evil.test/account' },
+		});
+		expect(protocolRelative.previousRoute).toBeNull();
+	});
+
+});
+
 for (const suite of suites) {
 	console.log(`\n${suite.name}`);
 	for (const test of suite.tests) {

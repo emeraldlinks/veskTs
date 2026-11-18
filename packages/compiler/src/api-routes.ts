@@ -5,7 +5,8 @@ import { collapseSlashes } from '@vesk/compiler/src/router';
 import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
-import type { MiddlewareCookies } from '@vesk/compiler/src/types';
+import { resolvePreviousRoute } from '@vesk/runtime/src/previous-route';
+import type { MiddlewareCookies, PreviousRouteInfo, VeskHeaders } from '@vesk/compiler/src/types';
 
 export { parseCookies };
 
@@ -226,7 +227,13 @@ export function buildWebRequest(
   url: string,
   body?: BodyInit | null,
   options?: { maxBodyBytes?: number }
-): Request & { cookies: MiddlewareCookies; query: Record<string, string> } {
+): Request & {
+  cookies: MiddlewareCookies;
+  query: Record<string, string>;
+  readonly previousRoute: string | null;
+  readonly previousRouteInfo: PreviousRouteInfo;
+  readonly previousRouteHeaders: VeskHeaders;
+} {
   const parsedUrl = new URL(url, `http://${nodeReq.headers?.host || 'localhost'}`);
   const method = nodeReq.method || 'GET';
   const headers: Record<string, string> = {};
@@ -269,7 +276,30 @@ export function buildWebRequest(
   for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
   Object.defineProperty(webRequest, 'query', { get: () => query, enumerable: true });
 
-  return webRequest as Request & { cookies: MiddlewareCookies; query: Record<string, string> };
+  let previousRouteInfo: PreviousRouteInfo | null = null;
+  const getPreviousRouteInfo = () => {
+    if (!previousRouteInfo) {
+      previousRouteInfo = resolvePreviousRoute({
+        headers: webRequest.headers,
+        query,
+        origin: parsedUrl.origin,
+      });
+    }
+    return previousRouteInfo;
+  };
+  Object.defineProperties(webRequest, {
+    previousRouteInfo: { get: getPreviousRouteInfo, enumerable: true },
+    previousRouteHeaders: { get: () => getPreviousRouteInfo().headers, enumerable: true },
+    previousRoute: { get: () => getPreviousRouteInfo().route, enumerable: true },
+  });
+
+  return webRequest as Request & {
+    cookies: MiddlewareCookies;
+    query: Record<string, string>;
+    readonly previousRoute: string | null;
+    readonly previousRouteInfo: PreviousRouteInfo;
+    readonly previousRouteHeaders: VeskHeaders;
+  };
 }
 
 export function tooLargeError(max: number): Error & { status: number } {

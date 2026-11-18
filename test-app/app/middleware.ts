@@ -22,6 +22,10 @@ export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
   if (eventHeader) ctx.header('x-event-header-seen', String(eventHeader));
   ctx.header('x-event-header-map', ctx.get('eventHeaderIsMap') ? '1' : '0');
 
+  if (ctx.url.pathname === '/api/previous-route' && ctx.url.searchParams.get('set') === '1') {
+    ctx.previousRoute = '/set-by-middleware';
+  }
+
   // rewrite fixtures: API -> API, API -> page, page -> page
   if (ctx.url.pathname === '/api/mw-rewrite') {
     return next(ctx.url.searchParams.get('to') || '/api/mw-rewrite-target');

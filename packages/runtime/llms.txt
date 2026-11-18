@@ -250,10 +250,10 @@ cookies(): CookieStore           // Proxy over a cookie jar; .get(name), .getAll
 headers(): Record<string, string | Function | undefined>   // Proxy; .get(name), .has(name), .entries()
 locals<L extends object = VeskLocals>(): L   // VeskLocals is augmentable from @vesk/types
 MiddlewareNext = (rewrite?: string) => Promise<VeskResponse | null>   // @vesk/types
-MiddlewareContext<L = VeskLocals>   // @vesk/types: request, params, url, locals, cookies, set/get, cookie, getHeader, header, status/json/text/html/redirect, shouldBindQuery/bindQuery, shouldBindJSON/bindJSON, errors/error, abort/isAborted, abortWithStatus/abortWithStatusJSON
+MiddlewareContext<L = VeskLocals>   // @vesk/types: request, params, url, locals, cookies, previousRoute/previousRouteInfo/previousRouteHeaders, set/get, cookie, getHeader, header, status/json/text/html/redirect, shouldBindQuery/bindQuery, shouldBindJSON/bindJSON, errors/error, abort/isAborted, abortWithStatus/abortWithStatusJSON
 class ServerRequest extends Request { get/set cookies: CookieStore; get/set params: Record<string,string>; get/set locals: VeskLocals }
 class ServerResponse extends Response { static json(body, init?); static redirect(url, status=307); static rewrite(url); static next() }
-class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown>; resolveUrl(url: string): string; static from(request: Request, init?: { params?: Record<string,string>; locals?: Record<string,unknown> }): VeskRequest; get host(): string; get origin(): string; get/set query, ip, protocol, hostname, parsedUrl }
+class VeskRequest extends ServerRequest { parsedUrl: URL; query: Record<string,string>; ip: string; protocol: string; body: Promise<unknown>; resolveUrl(url: string): string; static from(request: Request, init?: { params?: Record<string,string>; locals?: Record<string,unknown> }): VeskRequest; get host(): string; get origin(): string; get/set query, ip, protocol, hostname, parsedUrl; readonly previousRoute: string|null; readonly previousRouteInfo: PreviousRouteInfo; readonly previousRouteHeaders: VeskHeaders }
 VeskResponse  // Proxy over an internal _VeskResponse Response subclass; static stream(readable: ReadableStream, init?: ResponseInit): VeskResponse — chunked streaming (Transfer-Encoding: chunked, delivered via deliverResponse getReader loop; readable as unknown as BodyInit)
 toVeskResponse(res: Response | VeskResponseInstance | null | undefined): VeskResponseInstance | null | undefined  // upgrade a plain Response for setCookie/clearCookie/build; preserves queued cookies/security headers
 PayloadTooLargeError extends Error { readonly status: 413 }   // thrown when a body exceeds DEFAULT_MAX_BODY_BYTES
@@ -272,6 +272,10 @@ signCookie(name, value, host?): Promise<string>
 unsignCookie(name, signedValue, host?): Promise<string | null>
 setSignedCookie(name, value, options?, host?): Promise<string>
 readSignedCookie(name, cookieString, host?): Promise<string | null>
+PREVIOUS_ROUTE_HEADER = "x-vesk-previous-route"; RETURN_TO_HEADER = "x-return-to"; PREVIOUS_ROUTE_QUERY_KEYS = ["next", "returnTo"]
+sanitizePreviousRoute(value: unknown, origin?: string|URL): string|null  // local path only; rejects cross-origin/protocol-relative/control chars
+resolvePreviousRoute({ headers?, query?, origin? }): PreviousRouteInfo   // route/source/headers; source order: x-vesk-previous-route, x-return-to, query, referer
+
 applyRequestSecurity(request: VeskRequest, response: VeskResponseInstance): void
 ```
 - **Adds the ISR module**:

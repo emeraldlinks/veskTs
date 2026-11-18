@@ -233,6 +233,28 @@ console.log('\n\u2550\u2550\u2550 Request-scoped SSR token (data-nav) \u2550\u25
   assert(rootCode.includes('const _errorComp = "Error"'), 'root error boundary for /');
 }
 
+{
+  const code = generateSsrFunction(
+    { sourceDir: join(appDir, 'app'), fullPath: '/', layout: 'Layout' },
+    appDir,
+    outDir,
+    new Map(),
+    {
+      middlewareCode: [
+        "import { VeskResponse } from '@vesk/runtime/server';",
+        'async function mw_0(ctx, next) { return next(); }',
+        'const __mwChain = [mw_0];',
+        'async function __executeMw(ctx) { return __mwChain[0](ctx, () => new Response()); }',
+      ].join('\n'),
+    },
+  ).funcCode;
+  const runtimeLine = code.split('\n').find((line) => line.includes("from '../runtime.js';") && line.includes('renderFullPage'));
+  assert(!!runtimeLine, 'SSR function imports the fixed server runtime surface');
+  assert(!runtimeLine.includes('VeskResponse'), 'runtime import list does not redeclare middleware VeskResponse');
+  assert(!runtimeLine.includes('toVeskResponse'), 'runtime import list does not include unused toVeskResponse');
+  assert((code.match(/import \{ VeskResponse \}/g) || []).length === 1, 'middleware VeskResponse import appears exactly once');
+}
+
 rmSync(appDir, { recursive: true, force: true });
 rmSync(outDir, { recursive: true, force: true });
 

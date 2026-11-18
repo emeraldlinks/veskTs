@@ -17,6 +17,7 @@ import {
 	MapRegion, WhileLoop, SwitchBlock, TryCatch, ForLoop,
 	RuntimeStatement, TrackDecl, ComponentCall, Expression,
 } from '@vesk/compiler/src/ir';
+import { irToJSON, irFromJSON } from '@vesk/compiler/src/precompile-runtime';
 
 let passed = 0;
 let failed = 0;
@@ -2458,6 +2459,58 @@ describe('AOT hydrate — serverless module resolution', () => {
 		const cached = hydratePrecompile(plan, registry.modules());
 		const result = await renderPage('', 'Page', {}, new Map(), { hydrate: true, cached });
 		expect(result.body).toContain('42');
+	});
+});
+
+describe('AOT plan — file source dedup', () => {
+	it('stores the whole file source once, not on every IR node', () => {
+		// Regression: Expression/RuntimeStatement.source holds the WHOLE file
+		// source, and serializing it per node duplicated it hundreds of times
+		// per plan (~80% of a large SSR function) — the serverless-build OOM.
+		const source = [
+			'component Widget(props) {',
+			'\tconst &[n] = track(props.n ?? 0)',
+			'\tconst label = `count ${get(n)}`',
+			'\t<div class="w"><span>{label}</span><button onclick={() => set(n, get(n) + 1)}>{get(n) + 1}</button></div>',
+			'}',
+			'',
+		].join('\n');
+		const plan = precompileFile(source, '/app/does-not-exist/Widget.vsk');
+		const json = JSON.stringify(plan);
+		const escaped = JSON.stringify(source).slice(1, -1);
+		const occurrences = json.split(escaped).length - 1;
+		expect(occurrences).toBe(1);
+		expect(json).toContain('"source":true');
+	});
+
+	it('restores Expression/RuntimeStatement.source on hydrate', () => {
+		const source = 'component A(props) {\n\tconst x = 1 + 2\n\tconst y = x * 3\n\t<p>{y}</p>\n}\n';
+		const plan = precompileFile(source, '/app/does-not-exist/A.vsk');
+		const ir = irFromJSON(plan.ir) as { components: Array<{ body: unknown[] }> };
+		const nodes: Array<{ source?: unknown }> = [];
+		(function walk(n: unknown) {
+			if (!n || typeof n !== 'object') return;
+			if (Array.isArray(n)) { n.forEach(walk); return; }
+			nodes.push(n as { source?: unknown });
+			for (const v of Object.values(n)) walk(v);
+		})(ir.components[0].body);
+		expect(nodes.some((n) => n.source === source)).toBe(true);
+		expect(nodes.some((n) => n.source === true)).toBe(false);
+	});
+
+	it('round-trips irToJSON/irFromJSON with source restored on marked nodes', () => {
+		const source = 'component B() {\n\tconst v = 40 + 2\n\t<i>{v}</i>\n}\n';
+		const ir = generateIR(parse(source), source, undefined);
+		const revived = irFromJSON(irToJSON(ir)) as { components: Array<{ body: unknown[] }> };
+		const nodes: Array<{ source?: unknown }> = [];
+		(function walk(n: unknown) {
+			if (!n || typeof n !== 'object') return;
+			if (Array.isArray(n)) { n.forEach(walk); return; }
+			nodes.push(n as { source?: unknown });
+			for (const v of Object.values(n)) walk(v);
+		})(revived.components[0].body);
+		expect(nodes.some((n) => n.source === source)).toBe(true);
+		expect(nodes.some((n) => n.source === true)).toBe(false);
 	});
 });
 

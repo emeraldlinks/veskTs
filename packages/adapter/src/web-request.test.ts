@@ -200,6 +200,24 @@ async function main(): Promise<void> {
 		eq(request.query.a, '1', 'a');
 		eq(request.query.b, 'two', 'b');
 	});
+	await it('previousRoute reads header and query values', () => {
+		const headerReq = fakeRequest('');
+		headerReq.headers = { host: 'localhost', 'x-vesk-previous-route': '/account?tab=security' };
+		const fromHeader = makeWebRequest(headerReq, 'http://localhost/api/x');
+		eq(fromHeader.previousRoute, '/account?tab=security', 'header value');
+		eq(fromHeader.previousRouteInfo.source, 'x-vesk-previous-route', 'header source');
+
+		const fromQuery = makeWebRequest(fakeRequest(''), 'http://localhost/api/x?next=%2Fdashboard');
+		eq(fromQuery.previousRoute, '/dashboard', 'query value');
+		eq(fromQuery.previousRouteInfo.source, 'query', 'query source');
+		assert(fromQuery.previousRouteHeaders instanceof Map, 'header map is exposed');
+	});
+	await it('previousRoute rejects unsafe values', () => {
+		const req = fakeRequest('');
+		req.headers = { host: 'localhost', 'x-vesk-previous-route': '//evil.test/account' };
+		const request = makeWebRequest(req, 'http://localhost/api/x');
+		eq(request.previousRoute, null, 'protocol-relative value rejected');
+	});
 	await it('cookies are parsed and percent-decoded', () => {
 		const req = fakeRequest('');
 		req.headers = { host: 'localhost', cookie: 'session=abc%20def; theme=dark' };

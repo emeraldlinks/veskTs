@@ -46,7 +46,8 @@ import type { IncomingMessage } from 'node:http';
 import { Buffer } from 'node:buffer';
 import { DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { attachCookieGet } from '@vesk/compiler/src/server-cookies';
-import type { MiddlewareCookies } from '@vesk/types';
+import type { MiddlewareCookies, PreviousRouteInfo, VeskHeaders } from '@vesk/types';
+import { resolvePreviousRoute } from '@vesk/runtime/src/previous-route';
 
 export interface ExtendedRequest extends Request {
   json(): Promise<unknown>;
@@ -55,6 +56,9 @@ export interface ExtendedRequest extends Request {
   clone(): ExtendedRequest;
   cookies: MiddlewareCookies;
   query: Record<string, string>;
+  readonly previousRoute: string | null;
+  readonly previousRouteInfo: PreviousRouteInfo;
+  readonly previousRouteHeaders: VeskHeaders;
 }
 
 export function bodyTooLarge(maxBytes: number): Error & { status: number } {
@@ -202,5 +206,21 @@ export function makeWebRequest(
   const query: Record<string, string> = {};
   for (const [k, v] of parsedUrl.searchParams.entries()) query[k] = v;
   webRequest.query = query;
+  let previousRouteInfo: PreviousRouteInfo | null = null;
+  const getPreviousRouteInfo = () => {
+    if (!previousRouteInfo) {
+      previousRouteInfo = resolvePreviousRoute({
+        headers: webRequest.headers,
+        query,
+        origin: parsedUrl.origin,
+      });
+    }
+    return previousRouteInfo;
+  };
+  Object.defineProperties(webRequest, {
+    previousRouteInfo: { configurable: true, enumerable: true, get: getPreviousRouteInfo },
+    previousRouteHeaders: { configurable: true, enumerable: true, get: () => getPreviousRouteInfo().headers },
+    previousRoute: { configurable: true, enumerable: true, get: () => getPreviousRouteInfo().route },
+  });
   return webRequest;
 }

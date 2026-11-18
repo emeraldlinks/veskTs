@@ -1,5 +1,6 @@
-import type { VeskHeaders, VeskLocals } from '@vesk/types';
+import type { PreviousRouteInfo, VeskHeaders, VeskLocals } from '@vesk/types';
 import { setSecurityOverride, getSecurityOverrides } from './security-overrides.js';
+import { resolvePreviousRoute } from './previous-route.js';
 
 interface RequestContext {
 	_request?: Request;
@@ -494,6 +495,7 @@ export class VeskRequest extends ServerRequest {
 	_body: unknown;
 	_bodyPromise: Promise<unknown> | null;
 	_parsedUrl: URL | null;
+	_previousRouteInfo: PreviousRouteInfo | null;
 	__security?: Record<string, unknown>;
 
 	constructor(input: string | URL, init?: RequestInit) {
@@ -505,6 +507,7 @@ export class VeskRequest extends ServerRequest {
 		this._body = null;
 		this._bodyPromise = null;
 		this._parsedUrl = null;
+		this._previousRouteInfo = null;
 		const cookieHeader = this.headers?.get('cookie') || '';
 		if (cookieHeader) {
 			for (const part of cookieHeader.split(';')) {
@@ -652,6 +655,26 @@ export class VeskRequest extends ServerRequest {
 	set parsedUrl(v: URL) {
 		this._parsedUrl = v;
 		this._query = null;
+		this._previousRouteInfo = null;
+	}
+
+	get previousRouteInfo(): PreviousRouteInfo {
+		if (!this._previousRouteInfo) {
+			this._previousRouteInfo = resolvePreviousRoute({
+				headers: this.headers,
+				query: this.query,
+				origin: this.origin,
+			});
+		}
+		return this._previousRouteInfo;
+	}
+
+	get previousRouteHeaders(): VeskHeaders {
+		return this.previousRouteInfo.headers;
+	}
+
+	get previousRoute(): string | null {
+		return this.previousRouteInfo.route;
 	}
 
 	get query(): Record<string, string> {
@@ -664,7 +687,10 @@ export class VeskRequest extends ServerRequest {
 		}
 		return this._query;
 	}
-	set query(v: Record<string, string>) { this._query = v; }
+	set query(v: Record<string, string>) {
+		this._query = v;
+		this._previousRouteInfo = null;
+	}
 
 	get ip(): string {
 		if (!this._ip) {

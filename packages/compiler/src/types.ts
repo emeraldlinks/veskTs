@@ -37,6 +37,9 @@ export type {
   UseFetchStreamOptions,
   SsrDataSink,
   VeskResponse,
+  VeskHeaders,
+  PreviousRouteInfo,
+  PreviousRouteSource,
   SetCookieOptions,
 } from '@vesk/types';
 

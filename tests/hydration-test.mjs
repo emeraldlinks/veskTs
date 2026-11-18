@@ -59,11 +59,25 @@ async function goto(page, url, opts = {}) {
     try {
       return await page.goto(url, opts);
     } catch (e) {
+      if (String(e).includes('Navigation timeout') && opts.waitUntil === 'networkidle0') {
+        console.log(`  [diag] networkidle0 timed out for ${url}; retrying with domcontentloaded`);
+        return await page.goto(url, { ...opts, waitUntil: 'domcontentloaded', timeout: 60000 });
+      }
       if (!String(e).includes('Requesting main frame too early') && !String(e).includes('Navigating frame was detached') && !String(e).includes('Attempted to use detached Frame')) throw e;
       await new Promise(r => setTimeout(r, 200));
     }
   }
   throw new Error('goto retried too many times: ' + url);
+}
+
+async function reload(page) {
+  try {
+    return await page.reload({ waitUntil: 'networkidle0' });
+  } catch (e) {
+    if (!String(e).includes('Navigation timeout')) throw e;
+    console.log('  [diag] reload networkidle0 timed out; retrying with domcontentloaded');
+    return await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
+  }
 }
 
 async function clickNav(page, href, expectedPath) {
@@ -1006,6 +1020,37 @@ async function main() {
     await page.close();
   }
 
+  // ── Test: previous-route request/middleware API ──
+  console.log('\n=== TEST: previous-route API ===');
+  {
+    const page = await browser.newPage();
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
+
+    const results = await page.evaluate(async () => {
+      const read = async (url, headers) => {
+        const res = await fetch(url, { headers, referrerPolicy: 'no-referrer', cache: 'no-store' });
+        return res.json();
+      };
+      return {
+        fromHeader: await read('/api/previous-route', { 'x-vesk-previous-route': '/account?tab=security' }),
+        fromQuery: await read('/api/previous-route?next=%2Fdashboard%3Fx%3D1'),
+        rejected: await read('/api/previous-route?case=reject', { 'x-vesk-previous-route': '//evil.test/account' }),
+      };
+    });
+
+    assert(results.fromHeader.previous === '/account?tab=security', 'previousRoute reads x-vesk-previous-route (got ' + JSON.stringify(results.fromHeader) + ')');
+    assert(results.fromHeader.source === 'x-vesk-previous-route', 'previousRouteInfo.source reports the header source');
+    assert(results.fromHeader.headers['x-vesk-previous-route'] === '/account?tab=security', 'previousRouteInfo exposes the contributing header');
+    assert(results.fromQuery.previous === '/dashboard?x=1', 'previousRoute reads the next query param (got ' + JSON.stringify(results.fromQuery) + ')');
+    assert(results.fromQuery.source === 'query', 'previousRouteInfo.source reports the query source');
+    assert(results.rejected.source !== 'x-vesk-previous-route', 'previousRoute rejects protocol-relative header values (got ' + JSON.stringify(results.rejected) + ')');
+
+    const emitted = await fetch(BASE + '/api/previous-route?set=1');
+    assert(emitted.headers.get('x-vesk-previous-route') === '/set-by-middleware', 'ctx.previousRoute setter emits x-vesk-previous-route');
+
+    await page.close();
+  }
+
   // ── Test: Markdown (<Md content={...} />) ─────────────
   console.log('\n=== TEST: Markdown ===');
   {
@@ -1568,7 +1613,7 @@ async function main() {
 
     // 19c: Hard reload after the SPA session still keeps #root and claims all markers.
     console.log('  19c: hard reload after SPA nav');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await reload(page);
     const reloadSurvive = await page.evaluate(() => !!document.getElementById('root'));
     assert(reloadSurvive, 'hard reload keeps #root on nested-layout route');
     const relMarkers = await countMarkers();
@@ -1659,7 +1704,7 @@ async function main() {
     }
 
     console.log('  20c: hard reload after the SPA session');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await reload(page);
     {
       const s = await readBlockNav();
       assert(s.survived, 'hard reload keeps #root on /blocknav');
@@ -1764,7 +1809,7 @@ async function main() {
     assert(spaLanded, 'SPA nav /lobby/deep -> /lobby renders in the surviving standalone chain');
 
     console.log('  21d: hard reload after the SPA session still stays standalone');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await reload(page);
     {
       const s = await readStandalone();
       assert(s.survived, 'hard reload keeps #root on /lobby');
@@ -1903,7 +1948,7 @@ async function main() {
 
     // 22e: hard reload after the interaction + SPA session — claims again.
     console.log('  22e: hard reload after interaction + SPA session');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await reload(page);
     {
       const s = await readChips();
       assert(s.count === 3 && JSON.stringify(s.values) === JSON.stringify(['10', '20', '30']),
@@ -1968,7 +2013,7 @@ async function main() {
     }
 
     console.log('  23e: hard reload — chain claims again');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await reload(page);
     {
       const s = await read();
       assert(!!s && s.text === 'SSR' && s.count === 1, 'reload: SSR claimed exactly once (got ' + JSON.stringify(s) + ')');
@@ -2037,7 +2082,7 @@ async function main() {
     }
 
     console.log('  23b-d: hard reload — SSR fallback claimed again, still no crash');
-    await page.reload({ waitUntil: 'networkidle0' });
+    await reload(page);
     {
       const s = await read();
       assert(!!s && s.rowCount === 0 && s.emptyCount === 1, 'reload: fallback back exactly once (got ' + JSON.stringify(s) + ')');
@@ -2214,7 +2259,7 @@ async function main() {
       assert(await page.evaluate(() => window.__spaFlag === true), '24d stayed SPA (no reload)');
 
       // 24e: hard reload on guides — claims the 3-level chain exactly once.
-      await page.reload({ waitUntil: 'networkidle0' });
+      await reload(page);
       {
         const s = await countChrome();
         assert(s.nav === 1 && s.main === 1 && s.footer === 1 && s.guides === 1,

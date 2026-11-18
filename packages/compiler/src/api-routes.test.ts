@@ -447,6 +447,15 @@ function makeBody(buf) {
     );
     expect(cookieRequest.cookies.get('session')).toBe('abc');
 
+    const previous = buildWebRequest(
+      { method: 'GET', headers: { host: 'localhost', 'x-vesk-previous-route': '/account?tab=security' }, ...makeBody(Buffer.alloc(0)) },
+      'http://localhost/x',
+      null
+    );
+    expect(previous.previousRoute).toBe('/account?tab=security');
+    expect(previous.previousRouteInfo.source).toBe('x-vesk-previous-route');
+    expect(previous.previousRouteHeaders.get('x-vesk-previous-route')).toBe('/account?tab=security');
+
     // over the cap: getBody throws a 413
     let status = 0;
     const big = buildWebRequest(
@@ -460,8 +469,8 @@ function makeBody(buf) {
 
     const err = tooLargeError(1024);
     expect(err.status).toBe(413);
-    passed += 4;
-    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected) and exposes cookies.get()');
+    passed += 7;
+    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected), exposes cookies.get(), and resolves previousRoute');
   } catch (e) {
     failed++;
     console.log(`  ✗ body cap — ${e.message}`);

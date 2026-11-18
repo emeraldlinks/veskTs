@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { extractMiddleware } from '@vesk/compiler/src/router';
 import { parseCookies } from '@vesk/compiler/src/api-routes';
 import { toHeadersMap } from '@vesk/runtime/src/request';
+import { PREVIOUS_ROUTE_HEADER, resolvePreviousRoute, sanitizePreviousRoute } from '@vesk/runtime/src/previous-route';
 import type { RouteNode } from '@vesk/compiler/src/types';
 import type { VeskPlugin, MiddlewareContext, MiddlewareChainOptions } from '@vesk/compiler/src/types';
 import { isWhitespaceChar } from '@vesk/compiler/src/scan';
@@ -179,13 +180,23 @@ export async function executeMiddlewareChain(
   let __aborted = false;
   let __abortResponse: Response | null = null;
   const __errors: Array<{ error: unknown }> = [];
+  const __requestHeaders = toHeadersMap(request.headers);
+  const __requestQuery: Record<string, string> = {};
+  for (const [key, value] of url.searchParams) __requestQuery[key] = value;
+  const __previousRouteBase = () => resolvePreviousRoute({
+    headers: __requestHeaders,
+    query: __requestQuery,
+    origin: url.origin,
+  });
+  let __previousRouteOverride: string | null = null;
+  const __pendingHeaders: Record<string, string> = {};
 
   const ctx = new Proxy({
     request,
     params,
     url,
     locals,
-    headers: toHeadersMap(request.headers),
+    headers: __requestHeaders,
     cookies,
     errors: __errors,
     set(key: string, value: unknown) {
@@ -194,18 +205,35 @@ export async function executeMiddlewareChain(
     get(key: string) {
       return locals[key];
     },
-    __pendingHeaders: {} as Record<string, string>,
+    __pendingHeaders,
     cookie(name: string) {
       return cookies.get(name);
+    },
+    get previousRoute(): string | null {
+      if (__previousRouteOverride !== null) return __previousRouteOverride;
+      return __previousRouteBase().route;
+    },
+    set previousRoute(value: unknown) {
+      const safe = sanitizePreviousRoute(value, url.origin);
+      __previousRouteOverride = safe;
+      if (safe) __pendingHeaders[PREVIOUS_ROUTE_HEADER] = safe;
+      else delete __pendingHeaders[PREVIOUS_ROUTE_HEADER];
+    },
+    get previousRouteInfo() {
+      const info = __previousRouteBase();
+      if (__previousRouteOverride === null) return info;
+      return { ...info, route: __previousRouteOverride, source: PREVIOUS_ROUTE_HEADER };
+    },
+    get previousRouteHeaders() {
+      return __previousRouteBase().headers;
     },
     getHeader(name: string) {
       return request.headers.get(name);
     },
     header(name: string, value: string | null | undefined) {
       const key = String(name).toLowerCase();
-      const pending = (this as Record<string, unknown>).__pendingHeaders as Record<string, string>;
-      if (value == null) delete pending[key];
-      else pending[key] = String(value);
+      if (value == null) delete __pendingHeaders[key];
+      else __pendingHeaders[key] = String(value);
     },
     status(code: number) {
       return __mwCloneResponse(__mwMakeResponse(null, { status: code }));

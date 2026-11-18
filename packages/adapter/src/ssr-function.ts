@@ -680,7 +680,7 @@ let htmlFnCode: string;
 
   const funcCode = [
     "import { __veskModules } from '../__vesk-modules.mjs';",
-    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, toHeadersMap, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, VeskResponse, toVeskResponse, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
+    "import { renderFullPage, renderPageStream, renderPage, hydratePrecompile, parseCookies, toHeadersMap, getAction, validateActionInput, issuesToFieldMap, storeDataScriptGlobal, withSsrStore, assertSameOrigin, VeskRequest, installPersistedStoreServerHooks, persistedStoreCookieName, getPersistedStoreKeys, resetPersistedStoreKeys, buildStorePrePaintPayload, storeInitScriptGlobal, storeInitScriptTag } from '../runtime.js';",
     '',
     middlewareCode || '',
     registryCode,

@@ -118,6 +118,25 @@ for (const [name, proto] of IR_CLASSES) {
 }
 
 /**
+ * Key holding the file source ONCE at the top of a serialized IR root, and the
+ * in-node marker meaning "restore this node's `source` from that key".
+ *
+ * `Expression.source` / `RuntimeStatement.source` carry the WHOLE `.vsk` file
+ * source (it is what `server-head.ts` slices top-level initializers out of).
+ * Serializing it on every node duplicated the file hundreds of times per plan
+ * — measured at ~80% of a large SSR function's bytes (23 MB of a 29 MB
+ * function) — which blew the memory budget of the serverless platform build.
+ * The value is identical on every node of a file, so it rides once at the root
+ * and is re-applied to the marked nodes on revive.
+ */
+const FILE_SOURCE_KEY = '__vskFileSource';
+const SOURCE_MARKER = true;
+
+interface IrJsonCtx {
+  fileSource: string | null;
+}
+
+/**
  * Recursively JSON-serializes an IR root. IR class instances are tagged with
  * their class name so `irFromJSON` can revive them with their prototypes;
  * `Set` values (IRRoot.importedNames) are tagged too. ESTree node subtrees
@@ -125,49 +144,77 @@ for (const [name, proto] of IR_CLASSES) {
  * generically — `start`/`end` and `loc` arrays are plain JSON.
  */
 export function irToJSON(value: unknown): unknown {
+  const ctx: IrJsonCtx = { fileSource: null };
+  const root = irToJSONValue(value, ctx);
+  if (ctx.fileSource !== null && root !== null && typeof root === 'object' && !Array.isArray(root)) {
+    (root as Record<string, unknown>)[FILE_SOURCE_KEY] = ctx.fileSource;
+  }
+  return root;
+}
+
+function irToJSONValue(value: unknown, ctx: IrJsonCtx): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) {
     const out: unknown[] = [];
-    for (const item of value) out.push(irToJSON(item));
+    for (const item of value) out.push(irToJSONValue(item, ctx));
     return out;
   }
   if (value instanceof Set) {
-    return { __vskIrType: 'set', items: irToJSON([...value]) };
+    return { __vskIrType: 'set', items: irToJSONValue([...value], ctx) };
   }
   const clsName = CLASS_BY_CTOR.get(value.constructor);
   const data: Record<string, unknown> = {};
   for (const key of Object.keys(value)) {
-    data[key] = irToJSON((value as Record<string, unknown>)[key]);
+    const prop = (value as Record<string, unknown>)[key];
+    if (key === 'source' && typeof prop === 'string') {
+      if (ctx.fileSource === null) ctx.fileSource = prop;
+      data[key] = SOURCE_MARKER;
+      continue;
+    }
+    data[key] = irToJSONValue(prop, ctx);
   }
   if (clsName) return { __vskIrType: 'class', name: clsName, data };
   return data;
 }
 
 export function irFromJSON(value: unknown): unknown {
+  const src =
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)[FILE_SOURCE_KEY]
+      : undefined;
+  return irFromJSONValue(value, typeof src === 'string' ? src : null);
+}
+
+function irFromJSONValue(value: unknown, fileSource: string | null): unknown {
   if (value === null || typeof value !== 'object') return value;
   if (Array.isArray(value)) {
     const out: unknown[] = [];
-    for (const item of value) out.push(irFromJSON(item));
+    for (const item of value) out.push(irFromJSONValue(item, fileSource));
     return out;
   }
   const asRecord = value as Record<string, unknown>;
   if (typeof asRecord.__vskIrType === 'string') {
     if (asRecord.__vskIrType === 'set') {
-      const items = irFromJSON(asRecord.items) as unknown[];
+      const items = irFromJSONValue(asRecord.items, fileSource) as unknown[];
       return new Set(items);
     }
     if (asRecord.__vskIrType === 'class') {
       const proto = CLASS_PROTOS.get(asRecord.name as string);
       const revived = proto ? Object.create(proto) : {};
-      const data = irFromJSON(asRecord.data) as Record<string, unknown>;
+      const data = irFromJSONValue(asRecord.data, fileSource) as Record<string, unknown>;
       for (const key of Object.keys(data)) revived[key] = data[key];
+      if (fileSource !== null && (revived as Record<string, unknown>).source === SOURCE_MARKER) {
+        (revived as Record<string, unknown>).source = fileSource;
+      }
       return revived;
     }
   }
   const out: Record<string, unknown> = {};
   for (const key of Object.keys(asRecord)) {
-    out[key] = irFromJSON(asRecord[key]);
+    if (key === FILE_SOURCE_KEY) continue;
+    out[key] = irFromJSONValue(asRecord[key], fileSource);
   }
+  if (fileSource !== null && out.source === SOURCE_MARKER) out.source = fileSource;
   return out;
 }
 

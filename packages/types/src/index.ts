@@ -121,6 +121,22 @@ export type MiddlewareCookies = Record<string, string | undefined> & {
  */
 export type VeskHeaders = Map<string, string>;
 
+export type PreviousRouteSource =
+  | 'x-vesk-previous-route'
+  | 'x-return-to'
+  | 'query'
+  | 'referer'
+  | null;
+
+export interface PreviousRouteInfo {
+  /** Sanitized local path (pathname + query + hash), or null when unavailable. */
+  route: string | null;
+  /** Which candidate produced {@link route}. */
+  source: PreviousRouteSource;
+  /** Previous-route-related request headers, lower-cased. */
+  headers: VeskHeaders;
+}
+
 export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocals> {
   request: Request;
   params: Record<string, string>;
@@ -128,6 +144,12 @@ export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocal
   locals: L;
   headers: VeskHeaders;
   cookies: MiddlewareCookies;
+  /** Sanitized local previous route. Assigning emits `x-vesk-previous-route` on the response. */
+  previousRoute: string | null;
+  /** Previous route plus the headers/query source it came from. */
+  readonly previousRouteInfo: PreviousRouteInfo;
+  /** Previous-route-related request headers, lower-cased. */
+  readonly previousRouteHeaders: VeskHeaders;
   /** Explicit per-call shape escape hatch: ctx.set<MyLocals>('user', value). */
   set<T extends Record<string, unknown> = L, K extends keyof T & string = keyof T & string>(key: K, value: T[K]): void;
   set<K extends keyof L & string>(key: K, value: L[K]): void;
@@ -900,6 +922,12 @@ export interface VeskRequest extends ServerRequest {
   protocol: string;
   hostname: string;
   parsedUrl: URL;
+  /** Sanitized local previous route from header, query, or same-origin referer. */
+  readonly previousRoute: string | null;
+  /** Previous route plus the headers/query source it came from. */
+  readonly previousRouteInfo: PreviousRouteInfo;
+  /** Previous-route-related request headers, lower-cased. */
+  readonly previousRouteHeaders: VeskHeaders;
   /** Host header (honors `x-forwarded-host` only when `trustProxy` is set). */
   readonly host: string;
   /** `protocol://host` — the base for resolving relative URLs. */

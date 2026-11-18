@@ -45,6 +45,7 @@
 | `/api/echo/:msg` | `app/api/echo/[msg]/route.ts` | api (dynamic) |
 | `/api/posts` | `app/api/posts/route.ts` | api |
 | `/api/events` | `app/api/events/route.ts` | api (reads server events context) |
+| `/api/previous-route` | `app/api/previous-route/route.ts` | api (reads previousRoute request API) |
 | `/api/fail` | `app/api/fail/route.ts` | api (401 failure demo) |
 | `/store/not-found` | `app/store/not-found.vsk` | route-level not-found |
 | `/store/error` | `app/store/error.vsk` | route-level error boundary |

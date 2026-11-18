@@ -10,6 +10,8 @@ export { createLayoutSlot, trackSlotContent, auditLayoutSlots, LAYOUT_SLOT_OPEN,
 export type { LayoutSlot, LayoutSlotAudit, SlotIdentity } from '@vesk/runtime/src/layout';
 export type { HydrationReport, HydrationIssue, HydrationIssueKind, HydrationMismatchHandler, DeferredHydrationOptions, IdleHydrationOptions, InteractionHydrationOptions, ViewportHydrationHandle } from '@vesk/runtime/src/hydrate';
 export { createRouter, createFileRouter, Outlet, Link, NavLink, useNavigate, useParams, usePathname, useSearchParams, useRouter, buildRouteTree, defineRoute, Redirect, redirect, permanentRedirect, notFound, NotFoundError, ensureChunk, matchRoute } from '@vesk/runtime/src/router';
+export { PREVIOUS_ROUTE_HEADER, RETURN_TO_HEADER, PREVIOUS_ROUTE_QUERY_KEYS, sanitizePreviousRoute, resolvePreviousRoute } from '@vesk/runtime/src/previous-route';
+export type { PreviousRouteInfo, PreviousRouteSource } from '@vesk/types';
 export { getNetworkState, watchNetwork } from '@vesk/runtime/src/network';
 export type { NetworkState, EffectiveType } from '@vesk/runtime/src/network';
 export { bindValue, bindChecked, bindGroup } from '@vesk/runtime/src/bindings';

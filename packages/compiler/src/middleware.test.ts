@@ -237,6 +237,43 @@ test('middleware returning Response.redirect(relative) short-circuits to a redir
 	cleanup(tmp);
 });
 
+test('ctx.previousRoute reads the incoming header and exposes its headers', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			"  const info = ctx.previousRouteInfo;",
+			'  return new Response([ctx.previousRoute, info.source, info.headers.get("x-vesk-previous-route")].join("|"));',
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/login', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/login', {
+		headers: { 'x-vesk-previous-route': '/account?tab=security' },
+	}), {}, {});
+	expect(await result.response.text()).toBe('/account?tab=security|x-vesk-previous-route|/account?tab=security');
+	cleanup(tmp);
+});
+
+test('ctx.previousRoute setter emits the previous-route response header', async () => {
+	const tmp = createFixture({
+		'app/page.vsk': '',
+		'app/middleware.ts': [
+			'export async function middleware(ctx) {',
+			"  ctx.previousRoute = '/private';",
+			"  return new Response(null, { status: 302, headers: { Location: '/login' } });",
+			'}',
+		].join('\n'),
+	});
+	const tree = scanRoutes(join(tmp, 'app'));
+	const chain = collectMiddlewareChain(tree, '/private', tmp);
+	const result = await executeMiddlewareChain(chain, new Request('http://localhost/private'), {}, {});
+	expect(result.response.headers.get('x-vesk-previous-route')).toBe('/private');
+	expect(result.response.headers.get('Location')).toBe('/login');
+	cleanup(tmp);
+});
+
 test('a cookie named get stays readable through ctx.cookies.get and ctx.cookie', async () => {
 	const tmp = createFixture({
 		'app/page.vsk': '',

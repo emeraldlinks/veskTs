@@ -52,6 +52,79 @@ function __mwBindResult(data, schema) {
   return { data };
 }
 
+const __PREVIOUS_ROUTE_HEADER = "x-vesk-previous-route";
+const __RETURN_TO_HEADER = "x-return-to";
+const __REFERRER_HEADER = "referer";
+
+function __mwReadHeader(headers, name) {
+  if (!headers) return null;
+  try {
+    if (typeof headers.get === "function") {
+      const value = headers.get(name);
+      return value == null || value === "" ? null : String(value);
+    }
+  } catch {}
+  const value = headers[name];
+  if (value == null) return null;
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
+function __mwRelevantHeaders(headers) {
+  const out = new Map();
+  for (const name of [__PREVIOUS_ROUTE_HEADER, __RETURN_TO_HEADER, __REFERRER_HEADER]) {
+    const value = __mwReadHeader(headers, name);
+    if (value != null) out.set(name, value);
+  }
+  return out;
+}
+
+function __mwPreviousOrigin(url) {
+  const raw = String((url && url.href) || url || "http://vesk.local");
+  try { return new URL(raw, "http://vesk.local").origin; } catch { return "http://vesk.local"; }
+}
+
+function __mwSanitizePreviousRoute(value, origin) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim();
+  const backslash = String.fromCharCode(92);
+  if (!raw || raw[0] === backslash) return null;
+  if (raw.startsWith("//") || raw.startsWith("/" + backslash)) return null;
+  const isPath = raw.charCodeAt(0) === 47;
+  if (!isPath && raw.indexOf(":") === -1) return null;
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i);
+    if (code < 32 || code === 127) return null;
+  }
+  try {
+    const base = new URL(origin);
+    const parsed = new URL(raw, base);
+    if (parsed.origin !== base.origin) return null;
+    if (parsed.pathname.startsWith("//") || parsed.pathname.startsWith("/" + backslash)) return null;
+    return parsed.pathname + parsed.search + parsed.hash;
+  } catch { return null; }
+}
+
+function __mwResolvePreviousRoute(headers, url, origin) {
+  const relevant = __mwRelevantHeaders(headers);
+  const query = { next: null, returnTo: null };
+  try {
+    const parsed = new URL(String((url && url.href) || url || "http://vesk.local"), origin);
+    query.next = parsed.searchParams.get("next");
+    query.returnTo = parsed.searchParams.get("returnTo");
+  } catch {}
+  const candidates = [
+    [__PREVIOUS_ROUTE_HEADER, relevant.get(__PREVIOUS_ROUTE_HEADER)],
+    [__RETURN_TO_HEADER, relevant.get(__RETURN_TO_HEADER)],
+    ["query", query.next || query.returnTo],
+    [__REFERRER_HEADER, relevant.get(__REFERRER_HEADER)],
+  ];
+  for (const [source, value] of candidates) {
+    const route = __mwSanitizePreviousRoute(value, origin);
+    if (route) return { route, source, headers: relevant };
+  }
+  return { route: null, source: null, headers: relevant };
+}
+
 function __mwAttachCtx(ctx) {
   let __mwCookieValues = null;
   if (!(ctx.headers instanceof Map)) {
@@ -96,6 +169,36 @@ function __mwAttachCtx(ctx) {
     if (value == null) delete ctx.__pendingHeaders[key];
     else ctx.__pendingHeaders[key] = String(value);
   };
+  const __mwPreviousOriginValue = __mwPreviousOrigin(ctx.url);
+  const __mwPreviousUrlValue = ctx.url;
+  let __mwPreviousRouteOverride = null;
+  const __mwPreviousInfo = () => __mwResolvePreviousRoute(ctx.headers, __mwPreviousUrlValue, __mwPreviousOriginValue);
+  try {
+    Object.defineProperty(ctx, "previousRoute", {
+      configurable: true,
+      enumerable: true,
+      get: () => __mwPreviousRouteOverride !== null ? __mwPreviousRouteOverride : __mwPreviousInfo().route,
+      set: (value) => {
+        const safe = __mwSanitizePreviousRoute(value, __mwPreviousOriginValue);
+        __mwPreviousRouteOverride = safe;
+        ctx.header(__PREVIOUS_ROUTE_HEADER, safe);
+      },
+    });
+    Object.defineProperty(ctx, "previousRouteInfo", {
+      configurable: true,
+      enumerable: true,
+      get: () => {
+        const info = __mwPreviousInfo();
+        if (__mwPreviousRouteOverride === null) return info;
+        return { route: __mwPreviousRouteOverride, source: __PREVIOUS_ROUTE_HEADER, headers: info.headers };
+      },
+    });
+    Object.defineProperty(ctx, "previousRouteHeaders", {
+      configurable: true,
+      enumerable: true,
+      get: () => __mwPreviousInfo().headers,
+    });
+  } catch {}
   if (typeof ctx.status !== "function") ctx.status = (code) => __mwCloneResponse(__mwMakeResponse(null, { status: code }));
   if (typeof ctx.json !== "function") ctx.json = (body, init) => {
     const headers = Object.assign({ "Content-Type": "application/json" }, (init && init.headers) || {});

@@ -5,6 +5,39 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (previous-route request/middleware API):**
+
+- [x] Added non-automatic previous-route access to `VeskRequest` and middleware
+  `ctx`: `previousRoute`, `previousRouteInfo` (`route`/`source`/`headers`), and
+  `previousRouteHeaders`. Resolution is sanitized local-path-only and checks
+  `x-vesk-previous-route`, `x-return-to`, `next`/`returnTo` query params, then a
+  same-origin `Referer`; cross-origin/protocol-relative/control-char values are
+  rejected.
+- [x] `ctx.previousRoute = value` is explicit opt-in propagation: it queues
+  `x-vesk-previous-route` on the middleware response via the existing pending
+  header pipeline. Both compiler and adapter middleware compilers emit it.
+- [x] Public exports/types/docs: `PreviousRouteInfo`, `PreviousRouteSource`,
+  `PREVIOUS_ROUTE_HEADER`, `RETURN_TO_HEADER`, `PREVIOUS_ROUTE_QUERY_KEYS`,
+  `sanitizePreviousRoute`, `resolvePreviousRoute`; runtime `docs.md`/`llms.txt`/
+  `AGENTS.md` updated.
+- [x] Also wired the API request shims used by both servers: adapter
+  `web-request.ts` (prod/API actions) and compiler `api-routes.ts` (CLI dev API
+  routes) now expose the same `previousRoute` getters, with regression tests in
+  `web-request.test.ts` (18/18) and `api-routes.test.ts` (35/35). Added the two
+  new public types to the compiler's compatibility re-export.
+- [x] Focused green: `runtime/request.test.ts` 136/136, compiler
+  `middleware.test.ts` 22/22, adapter `middleware.test.ts` 10/10, adapter
+  `api-function-middleware.test.ts` 1/1, `npm run typecheck` clean.
+- [x] Packages rebuilt and test-app tarballs refreshed twice (final tarball
+  `0.2.105+ci.1794986991566`); dev server restarted from fresh tarballs.
+- [x] Browser coverage green: `node tests/hydration-test.mjs` **552 passed,
+  0 failed** against the test-app dev server, including the new
+  `TEST: previous-route API` block. Added a narrow `networkidle0` timeout
+  fallback in the test harness because the dev HMR socket intermittently kept
+  the page from reaching network idle.
+- [ ] Remaining: GitHub CI after commit/push (full local suite intentionally
+  not run).
+
 **This session (boundary Link hydration on hard loads):**
 
 - [x] **BUG: hard-loaded 404s kept the SSR boundary but its `<Link>` stayed a
