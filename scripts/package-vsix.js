@@ -67,7 +67,7 @@ mkdirSync(resolve(work, 'extension/syntaxes'), { recursive: true });
 const manifest = `<?xml version="1.0" encoding="utf-8"?>
 <PackageManifest Version="2.0.0" xmlns="http://schemas.microsoft.com/developer/vsx-schema/2011" xmlns:d="http://schemas.microsoft.com/developer/vsx-schema-design/2011">
   <Metadata>
-    <Identity Language="en-US" Id="vesk-vscode" Version="${version}" Publisher="vesk" />
+    <Identity Language="en-US" Id="vesk-vscode" Version="${version}" Publisher="${pkg.publisher}" />
     <DisplayName>Vesk Language Support</DisplayName>
     <Description xml:space="preserve">Language support for .vsk component files</Description>
     <Tags>vesk,vsk,.vsk,Vesk,__ext_vsk</Tags>
@@ -105,7 +105,7 @@ const manifest = `<?xml version="1.0" encoding="utf-8"?>
 writeFileSync(resolve(work, 'extension.vsixmanifest'), manifest, 'utf8');
 
 const contentTypes = `<?xml version="1.0" encoding="utf-8"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension=".js" ContentType="application/javascript"/><Default Extension=".json" ContentType="application/json"/><Default Extension=".map" ContentType="application/json"/><Default Extension=".mjs" ContentType="application/javascript"/><Default Extension=".txt" ContentType="text/plain"/><Default Extension=".vsixmanifest" ContentType="text/xml"/></Types>`;
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension=".js" ContentType="application/javascript"/><Default Extension=".json" ContentType="application/json"/><Default Extension=".map" ContentType="application/json"/><Default Extension=".mjs" ContentType="application/javascript"/><Default Extension=".png" ContentType="image/png"/><Default Extension=".txt" ContentType="text/plain"/><Default Extension=".vsixmanifest" ContentType="text/xml"/></Types>`;
 writeFileSync(resolve(work, '[Content_Types].xml'), contentTypes, 'utf8');
 
 const copy = (from, to) => {
@@ -113,6 +113,11 @@ const copy = (from, to) => {
 };
 
 copy(resolve(extDir, 'package.json'), 'extension/package.json');
+if (pkg.icon) {
+  const iconRel = `extension/${pkg.icon}`;
+  mkdirSync(dirname(resolve(work, iconRel)), { recursive: true });
+  copy(resolve(extDir, pkg.icon), iconRel);
+}
 copy(resolve(extDir, 'language-configuration.json'), 'extension/language-configuration.json');
 copy(resolve(extDir, 'LICENSE'), 'extension/LICENSE.txt');
 copy(resolve(extDir, 'syntaxes/vsk.tmLanguage.json'), 'extension/syntaxes/vsk.tmLanguage.json');
@@ -130,11 +135,7 @@ const out = resolve(extDir, `vesk-vscode-${version}.vsix`);
 rmSync(out, { force: true });
 const archive = resolve(work, 'archive');
 
-const py = `
-import zipfile, os, sys
-arch = zipfile.ZipFile(${JSON.stringify(archive)}, 'w', zipfile.ZIP_DEFLATED, compresslevel=9)
-root = ${JSON.stringify(work)}
-order = [
+const zipFiles = [
   'extension.vsixmanifest',
   '[Content_Types].xml',
   'extension/package.json',
@@ -145,7 +146,14 @@ order = [
   'extension/lsp-server/index.mjs',
   'extension/dist/extension.js.map',
   'extension/dist/extension.js',
-]
+];
+if (pkg.icon) zipFiles.push(`extension/${pkg.icon}`);
+
+const py = `
+import zipfile, os, sys
+arch = zipfile.ZipFile(${JSON.stringify(archive)}, 'w', zipfile.ZIP_DEFLATED, compresslevel=9)
+root = ${JSON.stringify(work)}
+order = ${JSON.stringify(zipFiles)}
 for rel in order:
     p = os.path.join(root, rel)
     if not os.path.exists(p):

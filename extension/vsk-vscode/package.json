@@ -2,10 +2,10 @@
   "name": "vesk-vscode",
   "displayName": "Vesk Language Support",
   "description": "Language support for .vsk component files",
-  "version": "0.3.15",
+  "version": "0.3.16",
   "private": true,
   "license": "MIT",
-  "publisher": "vesk",
+  "publisher": "cofoundr-technologies-limited",
   "repository": {
     "type": "git",
     "url": "https://github.com/emeraldlinks/veskTs"
@@ -55,7 +55,7 @@
       }
     }
   },
-  "icon": "icons/vsk-file-icon.png",
+  "icon": "icons/logo_one.png",
   "main": "./dist/extension.js",
   "contributes": {
     "iconThemes": [
