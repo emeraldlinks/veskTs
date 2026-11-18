@@ -4,6 +4,7 @@
  * Run with: npx tsx packages/adapter/src/ssr-function.test.ts
  */
 import { generateSsrFunction } from '@vesk/adapter/src/ssr-function';
+import { compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -240,19 +241,20 @@ console.log('\n\u2550\u2550\u2550 Request-scoped SSR token (data-nav) \u2550\u25
     outDir,
     new Map(),
     {
-      middlewareCode: [
-        "import { VeskResponse } from '@vesk/runtime/server';",
-        'async function mw_0(ctx, next) { return next(); }',
-        'const __mwChain = [mw_0];',
-        'async function __executeMw(ctx) { return __mwChain[0](ctx, () => new Response()); }',
-      ].join('\n'),
+      middlewareCode: compileMiddlewareCode([
+        [
+          "import { VeskResponse } from '@vesk/runtime/server';",
+          'export async function middleware(ctx, next) { return VeskResponse.redirect("/next", 302); }',
+        ].join('\n'),
+      ]),
     },
   ).funcCode;
   const runtimeLine = code.split('\n').find((line) => line.includes("from '../runtime.js';") && line.includes('renderFullPage'));
   assert(!!runtimeLine, 'SSR function imports the fixed server runtime surface');
-  assert(!runtimeLine.includes('VeskResponse'), 'runtime import list does not redeclare middleware VeskResponse');
-  assert(!runtimeLine.includes('toVeskResponse'), 'runtime import list does not include unused toVeskResponse');
-  assert((code.match(/import \{ VeskResponse \}/g) || []).length === 1, 'middleware VeskResponse import appears exactly once');
+  assert(runtimeLine.includes('VeskResponse'), 'runtime import list provides VeskResponse to inlined middleware');
+  assert(!code.includes("from '@vesk/runtime/server'"), 'middleware VeskResponse import is deduped');
+  const declarations = code.split('\n').filter((line) => line.startsWith('import {') && line.includes('VeskResponse') && line.includes('from'));
+  assert(declarations.length === 1, 'VeskResponse is declared exactly once');
 }
 
 rmSync(appDir, { recursive: true, force: true });

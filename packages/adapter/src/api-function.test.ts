@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
+import { compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import type { ApiRouteNode } from '@vesk/adapter/src/types';
 
 let passed = 0;
@@ -66,6 +67,23 @@ const dynamic: ApiRouteNode = {
 it('a single dynamic API param still captures one segment', () => {
 	const { funcCode } = generateApiFunction(dynamic, join(root, 'api'), join(root, 'out'));
 	expectIncludes(funcCode, '"id": urlParts[1]');
+});
+
+it('inlined middleware does not redeclare VeskResponse in an API function', () => {
+	const middlewareCode = compileMiddlewareCode([
+		[
+			"import { VeskResponse } from '@vesk/runtime/server';",
+			'export async function middleware(ctx, next) { return VeskResponse.redirect("/next", 302); }',
+		].join('\n'),
+	]);
+	const { funcCode } = generateApiFunction(catchAll, join(root, 'api'), join(root, 'out'), { middlewareCode });
+	if (funcCode.includes("from '@vesk/runtime/server'")) {
+		throw new Error('middleware VeskResponse import was not deduped');
+	}
+	const aliases = funcCode.match(/import \{ VeskResponse as __veskVeskResponse \}/g) || [];
+	if (aliases.length !== 1) {
+		throw new Error(`expected exactly one runtime VeskResponse alias, got ${aliases.length}`);
+	}
 });
 
 rmSync(root, { recursive: true, force: true });

@@ -338,7 +338,10 @@ export function compileMiddleware(mwChain: MiddlewareChainItem[], _appDir: strin
     const src = readFileSync(sourcePath, 'utf-8');
     const extracted = extractMiddlewareBody(src);
     if (!extracted) continue;
-    for (const line of extracted.imports) if (!imports.includes(line)) imports.push(line);
+    for (const line of extracted.imports) {
+      if (line.includes('VeskResponse') && line.includes('runtime')) continue;
+      if (!imports.includes(line)) imports.push(line);
+    }
     parts.push(`async function mw_${i}(${extracted.params}) {\n${extracted.body}\n}`);
   }
 
@@ -369,7 +372,10 @@ export function compileMiddlewareCode(mwSourceTexts: string[]): string | null {
   for (let i = 0; i < mwSourceTexts.length; i++) {
     const extracted = extractMiddlewareBody(mwSourceTexts[i]);
     if (!extracted) continue;
-    for (const line of extracted.imports) if (!imports.includes(line)) imports.push(line);
+    for (const line of extracted.imports) {
+      if (line.includes('VeskResponse') && line.includes('runtime')) continue;
+      if (!imports.includes(line)) imports.push(line);
+    }
     parts.push(`async function mw_${i}(${extracted.params}) {\n${extracted.body}\n}`);
   }
 
