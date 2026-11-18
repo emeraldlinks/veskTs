@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.107 — 2026-11-18
+
+_No breaking changes._
+
+### Features
+
+- **server:** expose previous route to requests and middleware
+
 ## 0.2.106 — 2026-11-18
 
 _No breaking changes._
