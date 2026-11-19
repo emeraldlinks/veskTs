@@ -1419,6 +1419,39 @@ testAsync('navigate sends X-Vesk-Data and patches DOM with fresh props', async (
 	}
 });
 
+testAsync('navigate sends the origin route as x-vesk-previous-route', async () => {
+	const container = document.createElement('div');
+	let capturedPreviousRoute = null;
+	const origFetch = globalThis.fetch;
+	const loc = globalThis.window.location;
+	const origLocation = { pathname: loc.pathname, search: loc.search, hash: loc.hash, href: loc.href };
+	loc.pathname = '/home';
+	loc.search = '';
+	loc.hash = '';
+	loc.href = 'http://localhost/home';
+	globalThis.fetch = async (path, init) => {
+		capturedPreviousRoute = init && init.headers ? init.headers['x-vesk-previous-route'] : null;
+		return mockFetchResponse({ props: {}, head: '' });
+	};
+	try {
+		const tree = buildRouteTree([
+			{ path: '/', page: () => null },
+			{ path: '/about', page: () => null },
+		]);
+		tree[0].segmentCount = 0;
+		const router = createFileRouter(tree, { container });
+		router.navigate('/about', { replace: true });
+		expect(capturedPreviousRoute).toBe('/home');
+		await tick(10);
+	} finally {
+		globalThis.fetch = origFetch;
+		loc.pathname = origLocation.pathname;
+		loc.search = origLocation.search;
+		loc.hash = origLocation.hash;
+		loc.href = origLocation.href;
+	}
+});
+
 testAsync('prefetch caches route data; navigate reuses it within the cache TTL', async () => {
 	const container = document.createElement('div');
 	let fetchCount = 0;

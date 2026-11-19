@@ -124,6 +124,14 @@ export async function middleware(ctx, next) {
   assert((response.headers.get('set-cookie') || '').includes('api_seen=1'), 'pass-through cookie reaches the API response');
   assert(body === '{"ok":true}', `unexpected body ${body}`);
 
+  const refererResponse = await mod.handle(new Request('http://localhost/api/mw', {
+    headers: { referer: 'http://127.0.0.1:3000/blog/hello-world' },
+  }));
+  assert(
+    refererResponse.headers.get('x-previous-seen') === '/blog/hello-world',
+    'generated middleware accepts a same-app referer with loopback host and port variants',
+  );
+
   rmSync(root, { recursive: true, force: true });
 }
 

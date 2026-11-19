@@ -275,6 +275,7 @@ readSignedCookie(name, cookieString, host?): Promise<string | null>
 PREVIOUS_ROUTE_HEADER = "x-vesk-previous-route"; RETURN_TO_HEADER = "x-return-to"; PREVIOUS_ROUTE_QUERY_KEYS = ["next", "returnTo"]
 sanitizePreviousRoute(value: unknown, origin?: string|URL): string|null  // local path only; rejects cross-origin/protocol-relative/control chars
 resolvePreviousRoute({ headers?, query?, origin? }): PreviousRouteInfo   // route/source/headers; source order: x-vesk-previous-route, x-return-to, query, referer
+// useFetch/createResource and SPA route data fetches add x-vesk-previous-route with the origin route to same-origin requests (SSR + browser); SPA captures the route at navigate() entry; loopback host/port variants are same-app; explicit x-vesk-previous-route/x-return-to headers win
 
 applyRequestSecurity(request: VeskRequest, response: VeskResponseInstance): void
 ```

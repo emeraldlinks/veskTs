@@ -1316,6 +1316,14 @@ describe('VeskRequest previous route', () => {
 		expect(referer.previousRouteInfo.source).toBe('referer');
 	});
 
+	it('accepts a same-app referer with loopback host and port variants', () => {
+		const req = new VeskRequest('http://localhost/login', {
+			headers: { referer: 'http://127.0.0.1:3000/account?x=1' },
+		});
+		expect(req.previousRoute).toBe('/account?x=1');
+		expect(req.previousRouteInfo.source).toBe('referer');
+	});
+
 	it('reads next/returnTo from the query string', () => {
 		const req = new VeskRequest('http://localhost/login?next=%2Fdashboard%3Fx%3D1');
 		expect(req.previousRoute).toBe('/dashboard?x=1');

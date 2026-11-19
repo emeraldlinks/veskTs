@@ -510,6 +510,85 @@ it('routes SSR fetches through the __vesk_ssr_fetch hook, not global fetch', asy
   cleanupGlobals();
 });
 
+it('adds the current route as x-vesk-previous-route on same-origin SSR fetches', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vesk_request = {
+    url: new URL('http://localhost/posts?page=2'),
+  };
+  (globalThis as any).__vesk_ssr_base_url = 'http://127.0.0.1:4173';
+  let seen: RequestInit | undefined;
+  (globalThis as any).__vesk_ssr_fetch = (url: string, init?: RequestInit) => {
+    seen = init;
+    return Promise.resolve({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve({ ok: true }) } as Response);
+  };
+  const res = useFetch<{ ok: boolean }>('/api/prev-ssr');
+  await waitFor(() => !res.loading);
+  expect((seen?.headers as Record<string, string>)['x-vesk-previous-route']).toBe('/posts?page=2');
+  cleanupGlobals();
+});
+
+it('keeps explicit previous-route headers on SSR fetches', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vesk_request = {
+    url: new URL('http://localhost:4173/posts'),
+    resolveUrl(u: string) { return new URL(u, this.url).href; },
+  };
+  let seen: RequestInit | undefined;
+  (globalThis as any).__vesk_ssr_fetch = (url: string, init?: RequestInit) => {
+    seen = init;
+    return Promise.resolve({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve({ ok: true }) } as Response);
+  };
+  const res = useFetch<{ ok: boolean }>('/api/prev-explicit', {
+    headers: { 'x-return-to': '/explicit' },
+  });
+  await waitFor(() => !res.loading);
+  const headers = seen?.headers as Record<string, string>;
+  expect(headers['x-return-to']).toBe('/explicit');
+  expect(headers['x-vesk-previous-route']).toBe(undefined);
+  cleanupGlobals();
+});
+
+it('does not add previous-route to cross-origin SSR fetches', async () => {
+  cleanupGlobals();
+  (globalThis as any).__vsk_ssr = true;
+  (globalThis as any).__vesk_request = {
+    url: new URL('http://localhost:4173/posts'),
+    resolveUrl(u: string) { return new URL(u, this.url).href; },
+  };
+  let seen: RequestInit | undefined;
+  (globalThis as any).__vesk_ssr_fetch = (url: string, init?: RequestInit) => {
+    seen = init;
+    return Promise.resolve({ ok: true, status: 200, statusText: 'OK', json: () => Promise.resolve({ ok: true }) } as Response);
+  };
+  const res = useFetch<{ ok: boolean }>('http://other.test/api/prev-cross');
+  await waitFor(() => !res.loading);
+  expect((seen?.headers as Record<string, string>)['x-vesk-previous-route']).toBe(undefined);
+  cleanupGlobals();
+});
+
+it('adds the browser path as x-vesk-previous-route on client fetches', async () => {
+  cleanupGlobals();
+  Object.defineProperty(globalThis, 'location', {
+    configurable: true,
+    value: {
+      href: 'http://localhost:3000/posts?tab=all',
+      origin: 'http://localhost:3000',
+      pathname: '/posts',
+      search: '?tab=all',
+      hash: '',
+    },
+  });
+  const mock = mockFetch(() => jsonResponse({ ok: true }));
+  const res = useFetch<{ ok: boolean }>('/api/prev-client');
+  await waitFor(() => !res.loading);
+  expect((mock.calls[0].init?.headers as Record<string, string>)['x-vesk-previous-route']).toBe('/posts?tab=all');
+  mock.restore();
+  delete (globalThis as any).location;
+  cleanupGlobals();
+});
+
 it('SSR retries use a fixed delay, not exponential backoff', async () => {
   cleanupGlobals();
   (globalThis as any).__vsk_ssr = true;

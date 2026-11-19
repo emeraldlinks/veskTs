@@ -83,6 +83,21 @@ function __mwPreviousOrigin(url) {
   try { return new URL(raw, "http://vesk.local").origin; } catch { return "http://vesk.local"; }
 }
 
+function __mwSameRouteOrigin(value, base) {
+  if (value.protocol !== base.protocol) return false;
+  const host = (name) => {
+    const lower = String(name).toLowerCase();
+    return lower === "localhost" || lower === "127.0.0.1" || lower === "::1" || lower === "[::1]" ? "loopback" : lower;
+  };
+  const port = (url) => url.port || (url.protocol === "https:" ? "443" : "80");
+  const valueHost = host(value.hostname);
+  if (valueHost !== host(base.hostname)) return false;
+  const valuePort = port(value);
+  const basePort = port(base);
+  if (valuePort === basePort) return true;
+  return valueHost === "loopback" && (valuePort === "80" || basePort === "80");
+}
+
 function __mwSanitizePreviousRoute(value, origin) {
   if (typeof value !== "string") return null;
   const raw = value.trim();
@@ -98,7 +113,7 @@ function __mwSanitizePreviousRoute(value, origin) {
   try {
     const base = new URL(origin);
     const parsed = new URL(raw, base);
-    if (parsed.origin !== base.origin) return null;
+    if (!__mwSameRouteOrigin(parsed, base)) return null;
     if (parsed.pathname.startsWith("//") || parsed.pathname.startsWith("/" + backslash)) return null;
     return parsed.pathname + parsed.search + parsed.hash;
   } catch { return null; }

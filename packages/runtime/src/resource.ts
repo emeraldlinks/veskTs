@@ -1,5 +1,6 @@
 import { tracked, get, set, scope, on_destroy } from '@vesk/runtime/src/ripple-runtime';
 import { is_destroyed } from '@vesk/runtime/src/ripple-blocks';
+import { withPreviousRouteHeader } from '@vesk/runtime/src/previous-route';
 import type { Tracked } from '@vesk/runtime/src/ripple-runtime';
 
 interface ResourceState<T> {
@@ -307,11 +308,12 @@ function resolveFetchUrl(url: string): string {
 }
 
 function doFetch(url: string, init?: RequestInit): Promise<Response> {
+	const nextInit = withPreviousRouteHeader(url, init);
 	const hook = (g() as Record<string, unknown>).__vesk_ssr_fetch;
 	if (isServer() && typeof hook === 'function') {
-		return (hook as (u: string, i?: RequestInit) => Promise<Response>)(url, init);
+		return (hook as (u: string, i?: RequestInit) => Promise<Response>)(url, nextInit);
 	}
-	return fetch(url, init);
+	return fetch(url, nextInit);
 }
 
 function createFetcher<T>(url: string, options: UseFetchOptions<T>): (signal?: AbortSignal) => Promise<T> {

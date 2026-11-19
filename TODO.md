@@ -5,6 +5,33 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (build-time import gate + previous-route propagation):**
+
+- [x] `vesk build` now validates emitted server module imports with ASTs and
+      exact Node ESM resolution; extensionless local imports and value imports
+      of type-only exports fail as `V0902` before `config.json` is written.
+- [x] `useFetch`/`createResource` add `x-vesk-previous-route` with the current
+      route to same-origin requests, including SSR fetches where there is no
+      browser `Referer`. Explicit `x-vesk-previous-route`/`x-return-to` headers
+      are preserved.
+- [x] SPA navigations capture the origin route before `updateUrl()` and send it
+      on `X-Vesk-Data` route-data fetches and the server-middleware endpoint;
+      router helpers live in `runtime/src/previous-route.ts`.
+- [x] Loopback host/port variants (`localhost`, `127.0.0.1`, `::1`, missing
+      port vs `:3000`) are treated as the same app origin by both runtime
+      request sanitization and generated middleware, so full SSR navigations
+      resolve `/blog` from a `Referer: http://127.0.0.1:3000/blog`.
+- [x] `test-app/app/middleware.ts` now emits `x-previous-route-ctx` and
+      `x-previous-route-source` from `ctx.previousRoute` /
+      `ctx.previousRouteInfo.source`; hydration Test 4b verifies SPA nav
+      home → `/about` sends `/`, server-side `ctx.previousRoute` is `/`, and
+      full SSR `blog` → `blog/hello-world` resolves `/blog` from `Referer`.
+- [x] Focused green: compiler `module-imports` 52/52, adapter `api-function`
+      6/6, runtime `resource` 50/50, runtime router/request regressions,
+      middleware/request/API suites 221/221. `npm run typecheck` clean.
+      Full `node tests/hydration-test.mjs` **556 passed, 0 failed** against the
+      test-app dev server, including the new `TEST 4b` ctx assertions.
+
 **This session (previous-route request/middleware API):**
 
 - [x] Added non-automatic previous-route access to `VeskRequest` and middleware

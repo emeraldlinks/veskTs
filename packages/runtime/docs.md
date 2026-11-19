@@ -466,6 +466,12 @@ Nothing is rewritten automatically. The value is a sanitized local path
 (`pathname + search + hash`) resolved in this order: `x-vesk-previous-route`,
 `x-return-to`, `next`/`returnTo` query params, same-origin `Referer`.
 Cross-origin, protocol-relative, and control-character values are rejected.
+Loopback host/port variants (`localhost` vs `127.0.0.1`, with or without `:3000`)
+are treated as the same app origin. `useFetch`/`createResource` and SPA route
+data fetches automatically add `x-vesk-previous-route` with the origin route to
+same-origin requests, including SSR fetches where browsers have no `Referer`.
+SPA navigations capture the route at `navigate()` entry, before the URL is
+replaced. Explicit `x-vesk-previous-route` or `x-return-to` headers are preserved.
 
 Assigning `ctx.previousRoute` is explicit opt-in for propagating the value to
 the next request: it queues an `x-vesk-previous-route` response header on the

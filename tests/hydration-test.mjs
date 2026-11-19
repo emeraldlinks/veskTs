@@ -323,6 +323,64 @@ async function main() {
     await page.close();
   }
 
+  console.log('\n=== TEST 4b: ctx.previousRoute on SPA and full SSR nav ===');
+  {
+    const page = await browser.newPage();
+    const spaPreviousRoutes = [];
+    page.on('request', (req) => {
+      try {
+        if (req.url().startsWith(BASE + '/about') && req.headers()['x-vesk-data'] === '1') {
+          spaPreviousRoutes.push(req.headers()['x-vesk-previous-route']);
+        }
+      } catch {}
+    });
+    await goto(page, BASE, { waitUntil: 'networkidle0' });
+    await clickNav(page, '/about', '/about');
+    await page.waitForFunction(
+      () => document.querySelector('h1')?.textContent?.trim() === 'About Vesk',
+      { timeout: 15000 },
+    );
+    assert(
+      spaPreviousRoutes.includes('/'),
+      'SPA nav sends the origin route as x-vesk-previous-route (got ' + JSON.stringify(spaPreviousRoutes) + ')',
+    );
+
+    const spaCtx = await page.evaluate(async () => {
+      const res = await fetch('/about', {
+        headers: { 'X-Vesk-Data': '1', 'x-vesk-previous-route': '/' },
+        referrerPolicy: 'no-referrer',
+        cache: 'no-store',
+      });
+      return {
+        route: res.headers.get('x-previous-route-ctx'),
+        source: res.headers.get('x-previous-route-source'),
+      };
+    });
+    assert(
+      spaCtx.route === '/' && spaCtx.source === 'x-vesk-previous-route',
+      'SPA route data uses ctx.previousRoute from the origin route (got ' + JSON.stringify(spaCtx) + ')',
+    );
+    await page.close();
+  }
+  {
+    const page = await browser.newPage();
+    let ssrRoute = null;
+    let ssrSource = null;
+    page.on('response', (res) => {
+      try {
+        if (res.url().startsWith(BASE + '/blog/hello-world') && res.request().resourceType() === 'document') {
+          ssrRoute = res.headers()['x-previous-route-ctx'];
+          ssrSource = res.headers()['x-previous-route-source'];
+        }
+      } catch {}
+    });
+    await page.setExtraHTTPHeaders({ referer: BASE + '/blog' });
+    await goto(page, BASE + '/blog/hello-world', { waitUntil: 'networkidle0' });
+    assert(ssrRoute === '/blog', 'full SSR nav uses ctx.previousRoute from Referer (got ' + ssrRoute + ')');
+    assert(ssrSource === 'referer', 'full SSR nav reports referer source (got ' + ssrSource + ')');
+    await page.close();
+  }
+
   // ── Test 5: Back navigation ───────────────────────────
   console.log('\n=== TEST 5: Back navigation ===');
   {

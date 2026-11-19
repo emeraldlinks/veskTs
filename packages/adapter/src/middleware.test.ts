@@ -33,6 +33,7 @@ function main(): void {
   assert(code?.includes('Object.defineProperty(ctx, "previousRoute"') === true, 'attaches ctx.previousRoute');
   assert(code?.includes('Object.defineProperty(ctx, "previousRouteInfo"') === true, 'attaches ctx.previousRouteInfo');
   assert(code?.includes('__mwResolvePreviousRoute') === true, 'emits the inline previous-route resolver');
+  assert(code?.includes('__mwSameRouteOrigin') === true, 'emits loopback-aware previous-route origin checks');
   assert(code?.includes('Object.defineProperty(ctx.cookies, "get"') === true, 'supports ctx.cookies.get(name) as well as ctx.cookie(name)');
   assert(code?.includes('__mwCookieValues = Object.assign({}, ctx.cookies)') === true, 'snapshots cookie values before installing ctx.cookies.get');
 

@@ -5,7 +5,7 @@ import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { createHydratePlanRegistry, generateSsrFunction, hydratePlanModuleSource } from '@vesk/adapter/src/ssr-function';
 import { resolveUserCssPath, isTailwindPlugin, resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { collectActionIds } from '@vesk/compiler/src/actions';
-import { ModuleRegistry } from '@vesk/compiler/src/module-imports';
+import { ModuleRegistry, assertServerImportsLoadable } from '@vesk/compiler/src/module-imports';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { describeAsset, type AssetDigest } from '@vesk/adapter/src/asset-hash';
 
@@ -392,6 +392,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
 
   const ssrRoutes: RouteNode[] = [];
   const actionMap: Record<string, string> = {};
+  const serverImportEntries: string[] = [];
   function walk(nodes: RouteNode[], ancestorLayouts: AncestorLayout[] = []): void {
     for (const node of nodes) {
       // Standalone layouts drop the entire ancestor chain — they replace
@@ -422,6 +423,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
           hydratePlans,
         );
         writeFileSync(funcPath, funcCode, 'utf-8');
+        serverImportEntries.push(funcPath);
         const pagePath = resolve(appDir, node.sourceDir, 'page.vsk');
         if (existsSync(pagePath)) {
           const src = readFileSync(pagePath, 'utf-8');
@@ -460,6 +462,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
   // every function, which keeps the serverless bundle small enough to build.
   writeFileSync(resolve(outDir, 'server', '__vesk-modules.mjs'), registry.toModuleSource(), 'utf-8');
   writeFileSync(resolve(outDir, 'server', '__vesk-plans.mjs'), hydratePlanModuleSource(hydratePlans), 'utf-8');
+  serverImportEntries.push(resolve(outDir, 'server', '__vesk-modules.mjs'), resolve(outDir, 'server', '__vesk-plans.mjs'));
 
   markPhase('server runtime + ssr functions');
   const apiRoutes: ApiRouteNode[] = [];
@@ -477,6 +480,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
         }
         const { funcPath, funcCode, name } = generateApiFunction(node, apiDir, outDir, { middlewareCode: mwCode });
         writeFileSync(funcPath, funcCode, 'utf-8');
+        serverImportEntries.push(funcPath);
         apiRoutes.push(node);
         console.error(`vesk build: api  → server/api/${name}.js  (${node.fullPath})${mwCode ? ' [mw]' : ''}`);
       }
@@ -491,13 +495,19 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     const mwCode = compileMiddleware(mwChain, appDir);
     if (mwCode) {
       writeFileSync(resolve(outDir, 'server', 'middleware.js'), mwCode, 'utf-8');
+      serverImportEntries.push(resolve(outDir, 'server', 'middleware.js'));
       middlewareEnabled = true;
       console.error(`vesk build: mw   → server/middleware.js  (${mwChain.length} middlewares)`);
     }
   }
 
   const hasEvents = await compileEvents(appDir, outDir);
-  if (hasEvents) console.error('vesk build: evt  → server/events.js (onStart/onRequest/onStop)');
+  if (hasEvents) {
+    serverImportEntries.push(resolve(outDir, 'server', 'events.js'));
+    console.error('vesk build: evt  → server/events.js (onStart/onRequest/onStop)');
+  }
+
+  assertServerImportsLoadable(serverImportEntries);
 
   copyStaticAssets(publicDir, outDir);
   markPhase('client runtime + chunks');

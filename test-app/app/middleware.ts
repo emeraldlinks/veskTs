@@ -21,6 +21,10 @@ export async function middleware(ctx: MiddlewareContext, next: MiddlewareNext) {
   const eventHeader = ctx.get('eventHeader');
   if (eventHeader) ctx.header('x-event-header-seen', String(eventHeader));
   ctx.header('x-event-header-map', ctx.get('eventHeaderIsMap') ? '1' : '0');
+  const previousRouteFromContext = ctx.previousRoute;
+  const previousRouteSource = ctx.previousRouteInfo.source;
+  if (previousRouteFromContext) ctx.header('x-previous-route-ctx', previousRouteFromContext);
+  if (previousRouteSource) ctx.header('x-previous-route-source', previousRouteSource);
 
   if (ctx.url.pathname === '/api/previous-route' && ctx.url.searchParams.get('set') === '1') {
     ctx.previousRoute = '/set-by-middleware';

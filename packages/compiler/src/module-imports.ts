@@ -1,10 +1,10 @@
 import { readFileSync, existsSync, realpathSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, extname, isAbsolute, join, resolve } from 'node:path';
+import { dirname, extname, isAbsolute, join, resolve, sep } from 'node:path';
 import { print } from 'esrap';
 import ts from 'esrap/languages/ts';
 import { walk } from 'zimmerframe';
-import { parse } from '@vesk/compiler/src/parser';
+import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
 import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement } from '@vesk/compiler/src/strip-ts';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
 import { VeskError } from '@vesk/compiler/src/errors';
@@ -1688,6 +1688,268 @@ function stringLiteralValue(node: unknown): string | null {
     return n.value;
   }
   return null;
+}
+
+interface ServerImportProblem {
+  kind: 'specifier' | 'export';
+  importer: string;
+  specifier: string;
+  target?: string;
+  name?: string;
+}
+
+interface ServerExportInfo {
+  names: Set<string>;
+  hasEsmExports: boolean;
+  hasCjsExports: boolean;
+}
+
+function isNodeModulesPath(file: string): boolean {
+  return file.split(sep).includes('node_modules');
+}
+
+function collectPatternNames(node: any, out: Set<string>): void {
+  if (!node) return;
+  if (node.type === 'Identifier') {
+    if (typeof node.name === 'string') out.add(node.name);
+    return;
+  }
+  if (node.type === 'RestElement') {
+    collectPatternNames(node.argument, out);
+    return;
+  }
+  if (node.type === 'AssignmentPattern') {
+    collectPatternNames(node.left, out);
+    return;
+  }
+  if (node.type === 'ArrayPattern') {
+    for (const element of node.elements || []) collectPatternNames(element, out);
+    return;
+  }
+  if (node.type === 'ObjectPattern') {
+    for (const property of node.properties || []) {
+      collectPatternNames(property.type === 'Property' ? property.value : property.argument, out);
+    }
+  }
+}
+
+function parseServerImportSource(file: string): ReturnType<typeof parse> | null {
+  try {
+    const raw = readFileSync(file, 'utf8');
+    return parseGeneratedJs(raw) ?? parse(raw, { filename: file });
+  } catch {
+    return null;
+  }
+}
+
+export function findUnresolvedServerImports(entryFiles: string[]): ServerImportProblem[] {
+  const problems: ServerImportProblem[] = [];
+  const seenProblems = new Set<string>();
+  const checked = new Set<string>();
+  const exportCache = new Map<string, ServerExportInfo>();
+  const resolvingExports = new Set<string>();
+
+  const pushProblem = (problem: ServerImportProblem): void => {
+    const key = `${problem.kind}:${problem.importer}:${problem.specifier}:${problem.name ?? ''}:${problem.target ?? ''}`;
+    if (seenProblems.has(key)) return;
+    seenProblems.add(key);
+    problems.push(problem);
+  };
+
+  const strictResolve = (specifier: string, importer: string): string | null => {
+    if (isCompilerOwnedTarget(specifier) || isValueLessTarget(specifier) || specifier.startsWith('node:')) return null;
+    const fromDir = dirname(importer);
+    if (specifier === '.' || specifier === '..' || specifier.startsWith('./') || specifier.startsWith('../') || isAbsolute(specifier)) {
+      const target = resolve(fromDir, specifier);
+      let isFile = false;
+      try {
+        isFile = statSync(target).isFile();
+      } catch {
+        isFile = false;
+      }
+      if (!isFile) {
+        pushProblem({ kind: 'specifier', importer, specifier, target });
+        return null;
+      }
+      return target;
+    }
+    if (resolveAliasModule(specifier, fromDir)) {
+      pushProblem({ kind: 'specifier', importer, specifier });
+      return null;
+    }
+    const target = resolveViaPackageExports(specifier, fromDir) ?? nativeResolve(specifier, fromDir);
+    if (!target || isBuiltinPath(target)) return null;
+    return target;
+  };
+
+  const analyzeExports = (file: string): ServerExportInfo => {
+    const cached = exportCache.get(file);
+    if (cached) return cached;
+    const info: ServerExportInfo = { names: new Set<string>(), hasEsmExports: false, hasCjsExports: false };
+    exportCache.set(file, info);
+    if (resolvingExports.has(file) || isNodeModulesPath(file)) return info;
+    resolvingExports.add(file);
+    const ast = parseServerImportSource(file);
+    if (ast) {
+      for (const stmt of (ast.body || []) as any[]) {
+        if (stmt.type === 'ExportNamedDeclaration') {
+          info.hasEsmExports = true;
+          if (stmt.exportKind === 'type') continue;
+          if (stmt.declaration) {
+            const decl = stmt.declaration;
+            if (decl.type === 'VariableDeclaration') {
+              for (const declarator of decl.declarations || []) collectPatternNames(declarator.id, info.names);
+            } else if (decl.id?.name) {
+              info.names.add(decl.id.name);
+            }
+          }
+          for (const spec of stmt.specifiers || []) {
+            if (spec.exportKind === 'type') continue;
+            const exported = spec.exported || spec.local;
+            const name = exported?.name ?? exported?.value;
+            if (name) info.names.add(name);
+          }
+        } else if (stmt.type === 'ExportDefaultDeclaration') {
+          info.hasEsmExports = true;
+          if (stmt.exportKind !== 'type' || stmt.exportKind === undefined) info.names.add('default');
+        } else if (stmt.type === 'ExportAllDeclaration') {
+          info.hasEsmExports = true;
+          if (stmt.exportKind === 'type') continue;
+          if (stmt.exported) {
+            const name = stmt.exported.name ?? stmt.exported.value;
+            if (name) info.names.add(name);
+          } else {
+            const source = stringLiteralValue(stmt.source);
+            const target = source ? strictResolve(source, file) : null;
+            if (target) {
+              const targetInfo = analyzeExports(target);
+              if (targetInfo.hasEsmExports && !targetInfo.hasCjsExports) {
+                for (const name of targetInfo.names) info.names.add(name);
+              }
+            }
+          }
+        }
+      }
+      walk(ast as any, null, {
+        AssignmentExpression(node: Record<string, unknown>, ctx: any) {
+          const left = node.left as { type?: string; object?: { type?: string; name?: string }; property?: { type?: string; name?: string; value?: unknown } } | null | undefined;
+          const isModuleExports = left?.object?.name === 'module' && left.property?.name === 'exports';
+          const isExportsMember = left?.object?.name === 'exports';
+          if (isModuleExports || isExportsMember) info.hasCjsExports = true;
+          ctx.next();
+        },
+      });
+    }
+    resolvingExports.delete(file);
+    return info;
+  };
+
+  const checkImportBindings = (node: any, importer: string, specifier: string, target: string): void => {
+    if (node.importKind === 'type' || isNodeModulesPath(target)) return;
+    const info = analyzeExports(target);
+    if (!info.hasEsmExports || info.hasCjsExports) return;
+    for (const spec of node.specifiers || []) {
+      if (spec.importKind === 'type') continue;
+      let imported = '';
+      if (spec.type === 'ImportDefaultSpecifier') imported = 'default';
+      else if (spec.type === 'ImportNamespaceSpecifier') continue;
+      else imported = spec.imported?.name ?? spec.imported?.value ?? spec.local?.name ?? '';
+      if (imported && !info.names.has(imported)) {
+        pushProblem({ kind: 'export', importer, specifier, target, name: imported });
+      }
+    }
+  };
+
+  const checkFile = (file: string): void => {
+    const abs = resolve(file);
+    if (checked.has(abs)) return;
+    checked.add(abs);
+    const ast = parseServerImportSource(abs);
+    if (!ast) return;
+    walk(ast as any, null, {
+      ImportDeclaration(node: Record<string, unknown>, ctx: any) {
+        const specifier = stringLiteralValue(node.source);
+        if (specifier) {
+          const target = strictResolve(specifier, abs);
+          if (target && !isNodeModulesPath(target)) {
+            checkImportBindings(node, abs, specifier, target);
+            checkFile(target);
+          }
+        }
+        ctx.next();
+      },
+      ExportNamedDeclaration(node: Record<string, unknown>, ctx: any) {
+        if (node.exportKind !== 'type' && node.source) {
+          const specifier = stringLiteralValue(node.source);
+          if (specifier) {
+            const target = strictResolve(specifier, abs);
+            if (target && !isNodeModulesPath(target)) checkFile(target);
+          }
+        }
+        ctx.next();
+      },
+      ExportAllDeclaration(node: Record<string, unknown>, ctx: any) {
+        if (node.exportKind !== 'type') {
+          const specifier = stringLiteralValue(node.source);
+          if (specifier) {
+            const target = strictResolve(specifier, abs);
+            if (target && !isNodeModulesPath(target)) checkFile(target);
+          }
+        }
+        ctx.next();
+      },
+      CallExpression(node: Record<string, unknown>, ctx: any) {
+        const callee = node.callee as { type?: string; name?: string } | null | undefined;
+        if (callee?.type === 'Identifier' && callee.name === 'require') {
+          const specifier = stringLiteralValue((node.arguments as unknown[] | undefined)?.[0]);
+          if (specifier) {
+            const target = strictResolve(specifier, abs);
+            if (target && !isNodeModulesPath(target)) checkFile(target);
+          }
+        }
+        ctx.next();
+      },
+      ImportExpression(node: Record<string, unknown>, ctx: any) {
+        const specifier = stringLiteralValue(node.source);
+        if (specifier) {
+          const target = strictResolve(specifier, abs);
+          if (target && !isNodeModulesPath(target)) checkFile(target);
+        }
+        ctx.next();
+      },
+    });
+  };
+
+  for (const file of entryFiles) checkFile(file);
+  return problems;
+}
+
+export function formatServerImportProblems(problems: ServerImportProblem[]): string {
+  const lines = problems.map((problem) => {
+    if (problem.kind === 'export') {
+      const target = problem.target ? ` (${problem.target})` : '';
+      return `${problem.importer}: "${problem.name}" is not a runtime export of "${problem.specifier}"${target}.`;
+    }
+    const target = problem.target ? ` (expected ${problem.target})` : '';
+    return `${problem.importer}: "${problem.specifier}" is not loadable at runtime${target}.`;
+  });
+  return `vesk build: server imports are not runtime-loadable:\n${lines.join('\n')}\nFix local imports with explicit file extensions, or use import type for type-only imports.`;
+}
+
+export function assertServerImportsLoadable(entryFiles: string[]): void {
+  const problems = findUnresolvedServerImports(entryFiles);
+  if (problems.length === 0) return;
+  const first = problems[0];
+  throw new VeskError(formatServerImportProblems(problems), {
+    code: 'V0902',
+    file: first.importer,
+    nextSteps: [
+      'Add the real file extension to local runtime imports, e.g. import { x } from "./module.ts".',
+      'Change imports used only in type positions to import type { X } from "./module.ts".',
+      'Check that the imported module actually exports the named value at runtime.',
+    ],
+    tip: 'TypeScript bundler resolution accepts extensionless imports; Node ESM does not.',
+  });
 }
 
 /**

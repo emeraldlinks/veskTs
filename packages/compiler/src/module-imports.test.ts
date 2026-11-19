@@ -21,6 +21,8 @@ import {
   resolveAliasModule,
   findTsconfigPath,
   readSsrSource,
+  findUnresolvedServerImports,
+  assertServerImportsLoadable,
 } from '@vesk/compiler/src/module-imports';
 
 let passed = 0;
@@ -977,6 +979,44 @@ test('loadSsrModule: one bad module no longer poisons an unrelated good one', ()
     // The good module is still usable after the failure — the old shared-graph
     // path left exports undefined, which is what produced `X is not iterable`.
     expect((good!.IDS as string[]).length).toEqual(2);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('server imports: extensionless transitive import fails before runtime', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('payment.ts'), `export const Payment = 1;\n`);
+    writeFileSync(fx.file('register.ts'), `import { Payment } from './payment';\nexport const register = () => Payment;\n`);
+    writeFileSync(fx.file('entry.js'), `import { register } from ${JSON.stringify(fx.file('register.ts'))};\nexport const handle = register;\n`);
+    const problems = findUnresolvedServerImports([fx.file('entry.js')]);
+    expect(problems.length).toEqual(1);
+    expect(problems[0].kind).toEqual('specifier');
+    expect(problems[0].specifier).toEqual('./payment');
+    expect(problems[0].importer).toEqual(fx.file('register.ts'));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('server imports: type export imported as a value fails before runtime', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('payment.ts'), `export type Payment = { id: number };\n`);
+    writeFileSync(fx.file('entry.js'), `import { Payment } from ${JSON.stringify(fx.file('payment.ts'))};\nexport const handle = Payment;\n`);
+    expect(() => assertServerImportsLoadable([fx.file('entry.js')])).toThrow(/not a runtime export/);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('server imports: explicit import type is ignored', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('payment.ts'), `export type Payment = { id: number };\n`);
+    writeFileSync(fx.file('entry.js'), `import type { Payment } from ${JSON.stringify(fx.file('payment.ts'))};\nexport const handle = 1;\n`);
+    expect(findUnresolvedServerImports([fx.file('entry.js')]).length).toEqual(0);
   } finally {
     fx.cleanup();
   }

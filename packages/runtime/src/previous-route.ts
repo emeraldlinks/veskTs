@@ -57,6 +57,23 @@ function normalizedOrigin(origin: string | URL | undefined): URL {
   }
 }
 
+function sameRouteOrigin(value: URL, base: URL): boolean {
+  if (value.protocol !== base.protocol) return false;
+  const host = (input: string): string => {
+    const lower = input.toLowerCase();
+    return lower === 'localhost' || lower === '127.0.0.1' || lower === '::1' || lower === '[::1]'
+      ? 'loopback'
+      : lower;
+  };
+  const port = (input: URL): string => input.port || (input.protocol === 'https:' ? '443' : '80');
+  const valueHost = host(value.hostname);
+  if (valueHost !== host(base.hostname)) return false;
+  const valuePort = port(value);
+  const basePort = port(base);
+  if (valuePort === basePort) return true;
+  return valueHost === 'loopback' && (valuePort === '80' || basePort === '80');
+}
+
 export function sanitizePreviousRoute(value: unknown, origin: string | URL = 'http://vesk.local'): string | null {
   if (typeof value !== 'string') return null;
   const raw = value.trim();
@@ -70,7 +87,7 @@ export function sanitizePreviousRoute(value: unknown, origin: string | URL = 'ht
   try {
     const base = normalizedOrigin(origin);
     const url = new URL(raw, base);
-    if (url.origin !== base.origin) return null;
+    if (!sameRouteOrigin(url, base)) return null;
     if (url.pathname.startsWith('//') || url.pathname.startsWith('/\\')) return null;
     return url.pathname + url.search + url.hash;
   } catch {
@@ -95,4 +112,70 @@ export function resolvePreviousRoute(input: {
     if (route) return { route, source: candidate.source, headers };
   }
   return { route: null, source: null, headers };
+}
+
+function normalizeHeaders(headers: HeadersInit | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+  if (typeof Headers !== 'undefined' && headers instanceof Headers) {
+    headers.forEach((value, key) => (out[key] = value));
+  } else if (Array.isArray(headers)) {
+    for (const [key, value] of headers) out[key] = value;
+  } else {
+    Object.assign(out, headers);
+  }
+  return out;
+}
+
+function currentRouteContext(): { origin: string; route: string } | null {
+  const globals = globalThis as Record<string, unknown>;
+  if (globals.__vsk_ssr) {
+    const ctx = globals.__vesk_request as Record<string, unknown> | undefined;
+    if (!ctx) return null;
+    const request = ctx.request as Request | undefined;
+    const raw = ctx.url instanceof URL
+      ? ctx.url.href
+      : typeof ctx.url === 'string'
+        ? ctx.url
+        : request?.url;
+    if (!raw) return null;
+    try {
+      const url = new URL(raw, 'http://vesk.local');
+      return { origin: url.origin, route: url.pathname + url.search + url.hash };
+    } catch {
+      return null;
+    }
+  }
+  const loc = typeof location !== 'undefined'
+    ? location
+    : typeof window !== 'undefined'
+      ? window.location
+      : null;
+  if (!loc) return null;
+  return { origin: loc.origin, route: loc.pathname + loc.search + loc.hash };
+}
+
+export function currentRouteValue(): string | null {
+  const ctx = currentRouteContext();
+  return ctx ? sanitizePreviousRoute(ctx.route, ctx.origin) : null;
+}
+
+export function withPreviousRouteHeader(url: string, init?: RequestInit, previousRoute: string | null = currentRouteValue()): RequestInit {
+  const headers = normalizeHeaders(init?.headers);
+  const existing: Record<string, string> = {};
+  for (const key of Object.keys(headers)) existing[key.toLowerCase()] = headers[key];
+  if (existing[PREVIOUS_ROUTE_HEADER] !== undefined || existing[RETURN_TO_HEADER] !== undefined) {
+    return init ?? {};
+  }
+  const ctx = currentRouteContext();
+  if (!ctx || !previousRoute) return init ?? {};
+  try {
+    const target = new URL(url, ctx.origin);
+    if (!sameRouteOrigin(target, new URL(ctx.origin))) return init ?? {};
+  } catch {
+    return init ?? {};
+  }
+  headers[PREVIOUS_ROUTE_HEADER] = previousRoute;
+
+  return init ? { ...init, headers } : { headers };
 }

@@ -17,6 +17,7 @@ import {
 } from '@vesk/runtime/src/router-components';
 import { getNetworkState, watchNetwork } from '@vesk/runtime/src/network';
 import { loadingStart, loadingFinish, getLoadingState } from '@vesk/runtime/src/loading-indicator';
+import { currentRouteValue, withPreviousRouteHeader } from '@vesk/runtime/src/previous-route';
 
 export {
 	Outlet, Link, NavLink,
@@ -303,9 +304,10 @@ function isConnectivityFailure(err: unknown): boolean {
 
 const _dataPromises = new Map<string, Promise<RouteDataResult | null>>();
 
-async function fetchRouteData(path: string): Promise<RouteDataResult | null> {
+async function fetchRouteData(path: string, previousRoute?: string | null): Promise<RouteDataResult | null> {
 	try {
-		const res = await fetch(path, { headers: { 'X-Vesk-Data': '1' }, credentials: 'same-origin' });
+		const init = withPreviousRouteHeader(path, { headers: { 'X-Vesk-Data': '1' }, credentials: 'same-origin' }, previousRoute);
+		const res = await fetch(path, init);
 		if (res.redirected && res.url) {
 			const finalUrl = new URL(res.url);
 			const requested = new URL(path, window.location.origin);
@@ -342,11 +344,11 @@ async function fetchRouteData(path: string): Promise<RouteDataResult | null> {
 	}
 }
 
-function getRouteData(path: string, scope?: string): Promise<RouteDataResult | null> {
+function getRouteData(path: string, scope?: string, previousRoute?: string | null): Promise<RouteDataResult | null> {
 	const key = scope === undefined ? path : path + '\u0000' + scope;
 	const existing = _dataPromises.get(key);
 	if (existing) return existing;
-	const p = fetchRouteData(path).finally(() => { _dataPromises.delete(key); });
+	const p = fetchRouteData(path, previousRoute).finally(() => { _dataPromises.delete(key); });
 	_dataPromises.set(key, p);
 	return p;
 }
@@ -1633,6 +1635,7 @@ export function createRouter(
 		},
 
 		navigate(path: string, opts = {}) {
+			const previousRoute = currentRouteValue();
 			const mode = hashModeOf(this);
 			const raw = mode && typeof path === 'string' && path.startsWith('#/') ? path.slice(1) : path;
 			const url = new URL(raw, window.location.origin);
@@ -1721,8 +1724,8 @@ export function createRouter(
 				const fetchData = () => {
 					if (firstRenderFailed) return;
 					if (!shouldFetchData(this, match!)) { loadingFinish(); scrollToHash(); return; }
-				getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
-					if (navToken !== this._navToken) return;
+					getRouteData(url.pathname + url.search, 'nav' + navToken, previousRoute).then(async (data) => {
+						if (navToken !== this._navToken) return;
 					if (!data) { loadingFinish(); return; }
 					if (data.redirect) {
 						loadingFinish();
@@ -1899,11 +1902,12 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		}
 		const endpoint = (globalThis as { __veskServerMiddlewareEndpoint?: string }).__veskServerMiddlewareEndpoint ?? '/_vesk/middleware';
 		try {
-			const res = await fetch(`${endpoint}?path=${encodeURIComponent(path)}`, {
+			const middlewareUrl = `${endpoint}?path=${encodeURIComponent(path)}`;
+			const res = await fetch(middlewareUrl, withPreviousRouteHeader(middlewareUrl, {
 				credentials: 'include',
 				headers: { Accept: 'application/json' },
 				cache: 'no-store',
-			});
+			}));
 			if (res.status === 404) {
 				serverMiddlewareDisabled = true;
 				return next();
@@ -2076,6 +2080,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 		},
 
 		navigate(pathname: string, opts = {}) {
+			const previousRoute = currentRouteValue();
 			const mode = hashModeOf(router);
 			const raw = mode && typeof pathname === 'string' && pathname.startsWith('#/') ? pathname.slice(1) : pathname;
 			const url = (raw as unknown) instanceof URL ? (raw as unknown as URL) : new URL(raw, window.location.origin);
@@ -2260,7 +2265,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 					if (firstRenderFailed) return;
 					navDebug('fetchData?', url.pathname, String(shouldFetchData(router, match!)));
 					if (!shouldFetchData(router, match!)) { loadingFinish(); scrollToHash(); return; }
-					getRouteData(url.pathname + url.search, 'nav' + navToken).then(async (data) => {
+					getRouteData(url.pathname + url.search, 'nav' + navToken, previousRoute).then(async (data) => {
 						navDebug('data arrived', url.pathname, 'token=' + navToken, 'current=' + router._navToken, 'realProps', JSON.stringify(data && hasRealPageData(data)));
 						if (navToken !== router._navToken) return;
 						if (!data) { loadingFinish(); return; }
