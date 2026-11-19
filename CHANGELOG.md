@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.2.109 — 2026-11-19
+
+_No breaking changes._
+
+### Fixes
+
+- **build:** gate server imports and propagate previous route
+
+### Chores
+
+- **vscode:** set publisher and extension icon
+
 ## 0.2.108 — 2026-11-18
 
 _No breaking changes._
