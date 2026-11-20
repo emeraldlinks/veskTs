@@ -11,8 +11,8 @@
 
 ```
 <project-name>/
-  package.json          # scripts: dev/build/start/typecheck
-  vesk.config.ts        # defineConfig + tailwind plugin + security preset
+  package.json          # scripts: dev/build/start/typecheck; includes @vesk/docs
+  vesk.config.ts        # defineConfig + tailwind + security preset + docs (JWT bearer session)
   tsconfig.json         # strict TS, jsxImportSource '@vesk/compiler', path aliases (@/* → root, @app/* → ./app/*)
   .env.example          # env var examples
   .gitignore            # node_modules, dist, .vesk, .env

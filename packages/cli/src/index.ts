@@ -28,6 +28,7 @@ function usage(code = 0) {
   console.error('  vesk build                       Auto-detect platform from CI env (vercel/netlify/cf/deno/aws/coxmos)');
   console.error('  vesk seo [--strict]           Run SEO analysis on app/');
   console.error('  vesk typecheck [--no-strict]  Typecheck .vsk/.ts files via tsc-in-.vsk (strict by default)');
+  console.error('  vesk inspect [query] [--json] Inspect API routes, schemas and diagnostics');
   console.error('  vesk start [-p 3000]          Start production server');
   console.error('  vesk dev [-p 3000]            Start dev server with HMR');
   console.error('  vesk init                     Create app/global.css (Tailwind entrypoint) if missing');
@@ -179,6 +180,7 @@ if (cmd === 'build') {
   if (mdCfg) opts.md = mdCfg;
   if (config.routeDataCache !== undefined) opts.routeDataCache = config.routeDataCache;
   if (platform) opts.platform = platform;
+  opts.config = config;
   // `ssg: {}` in the config turns on prerendering (the option is boolean).
   if (config.ssg !== undefined && config.ssg !== false) opts.ssg = true;
 
@@ -363,6 +365,29 @@ if (cmd === 'migrate') {
   const verb = report.dryRun ? 'would change' : 'changed';
   console.error(`  ${verb} ${report.filesChanged.length} file(s): ${report.filesChanged.join(', ')}`);
   if (report.dryRun) console.error('  (dry run — re-run without --dry-run to apply)');
+  process.exit(0);
+}
+
+if (cmd === 'inspect') {
+  const projectDir = process.cwd();
+  const config = (await loadVeskConfig(projectDir) || {}) as Record<string, unknown>;
+  const { appDir: appDirPath } = resolveProjectDirs(projectDir, config);
+  const intelligenceConfig = (config.intelligence ?? {}) as { cacheDir?: string; exclude?: string[] };
+  const docsConfig = config.docs && typeof config.docs === 'object' ? (config.docs as { auth?: { defaultScheme?: string } }) : null;
+  const { analyzeProject, inspect, formatInspection } = await import('@vesk/docs') as {
+    analyzeProject: (options: { projectRoot: string; appDir: string; cacheDir?: string; exclude?: string[]; defaultSecurityScheme?: string }) => import('@vesk/docs').ProjectIntelligence;
+    inspect: (intelligence: import('@vesk/docs').ProjectIntelligence, query: string | null) => import('@vesk/docs').InspectResult;
+    formatInspection: (result: import('@vesk/docs').InspectResult, json: boolean) => string;
+  };
+  const intelligence = analyzeProject({
+    projectRoot: projectDir,
+    appDir: appDirPath,
+    cacheDir: intelligenceConfig.cacheDir,
+    exclude: intelligenceConfig.exclude,
+    defaultSecurityScheme: docsConfig?.auth?.defaultScheme,
+  });
+  const query = args.slice(1).filter((arg) => !arg.startsWith('--')).join(' ').trim() || null;
+  process.stdout.write(formatInspection(inspect(intelligence, query), args.includes('--json')));
   process.exit(0);
 }
 

@@ -421,6 +421,79 @@ export interface CompressionConfig {
   etag?: boolean;
 }
 
+export type IntelligenceCertainty = 'explicit' | 'resolved' | 'inferred' | 'unknown' | 'contradictory';
+
+export interface IntelligenceSourceLocation {
+  file: string;
+  line: number;
+  column: number;
+}
+
+export interface IntelligenceProvenance<T = unknown> {
+  certainty: IntelligenceCertainty;
+  value?: T;
+  source?: IntelligenceSourceLocation;
+  reason?: string;
+}
+
+export interface VeskIntelligenceConfig {
+  enabled?: boolean;
+  cacheDir?: string;
+  exclude?: string[];
+}
+
+export interface VeskDocsOpenApiConfig {
+  jsonPath?: string;
+  yamlPath?: string;
+}
+
+export type VeskDocsSecuritySchemeConfig =
+  | { type: 'apiKey'; in: 'header' | 'query' | 'cookie'; name: string; description?: string }
+  | { type: 'http'; scheme: 'bearer' | 'basic'; bearerFormat?: string; description?: string };
+
+export type VeskDocsAuthSessionSource = 'cookie' | 'localStorage' | 'sessionStorage';
+
+export interface VeskDocsAuthSessionConfig {
+  source: VeskDocsAuthSessionSource;
+  key: string;
+  scheme?: string;
+  header?: string;
+  prefix?: string;
+}
+
+export interface VeskDocsAuthConfig {
+  credentials?: 'omit' | 'same-origin' | 'include';
+  persistAuthorization?: boolean;
+  defaultScheme?: string;
+  loginPath?: string;
+  session?: VeskDocsAuthSessionConfig;
+}
+
+export interface VeskDocsConfig {
+  enabled?: boolean;
+  dev?: boolean;
+  prod?: boolean;
+  path?: string;
+  playground?: boolean;
+  openapi?: false | VeskDocsOpenApiConfig;
+  securitySchemes?: Record<string, VeskDocsSecuritySchemeConfig>;
+  security?: Array<Record<string, string[]>>;
+  auth?: VeskDocsAuthConfig;
+}
+
+export interface ManifestIntelligenceInfo {
+  projectFile: string;
+  hash: string;
+  docsPath: string | null;
+  openapiPaths: string[];
+}
+
+export interface GeneratedDocsAsset {
+  path: string;
+  contentType: string;
+  content: string;
+}
+
 export interface VeskConfig {
   appDir?: string;
   outDir?: string;
@@ -446,6 +519,8 @@ export interface VeskConfig {
    *  - `true` streams all levels (default in dev).
    *  - Per-type object to selectively enable levels: `{ log, warn, error, info, debug }`. */
   logs?: boolean | { log?: boolean; warn?: boolean; error?: boolean; info?: boolean; debug?: boolean };
+  intelligence?: VeskIntelligenceConfig;
+  docs?: false | VeskDocsConfig;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -478,6 +553,7 @@ export interface BuildOptions {
   routeDataCache?: number;
   /** Markdown policy applied for the build (SSG prerender warnings). */
   md?: MdConfig;
+  config?: VeskConfig;
 }
 
 export interface DevServerOptions {
@@ -490,6 +566,7 @@ export interface DevServerOptions {
   maxBodyBytes?: number;
   /** Dev plugin / module config — names feed the dev panel plugin list. */
   plugins?: VeskPlugin[];
+  config?: VeskConfig;
 }
 
 export interface ProdServerOptions {
@@ -721,6 +798,7 @@ export interface Manifest {
     client: { file: string; url: string; hash: string; bytes: number; integrity: string };
     chunks: Array<{ file: string; hash: string; bytes: number; integrity: string }>;
   };
+  intelligence?: ManifestIntelligenceInfo;
 }
 
 export interface SsgRouteResult {
@@ -914,6 +992,7 @@ export interface ServerRequest extends Request {
   cookies: CookieStore | Record<string, string>;
   params: Record<string, string>;
   locals: Record<string, unknown>;
+  json<T = unknown>(): Promise<T>;
 }
 
 export interface VeskRequest extends ServerRequest {

@@ -11,6 +11,7 @@
 | `vesk start` | `-p <port>` `--port <port>` | Starts the production server (`startProdServer`) against `.vesk/`. |
 | `vesk dev` | `-p <port>` `--port <port>` | Starts the HMR dev server (`startDevServer`). |
 | `vesk typecheck` | `--no-strict` | Typechecks `.vsk`/`.ts` via tsc-in-.vsk (`typecheckProject`, strict by default). Exits non-zero on errors. |
+| `vesk inspect [query]` | `--json` | Runs the Intelligence Compiler over API routes and prints route/operation/schema summaries. `--json` emits a compact machine-readable summary. |
 | `vesk seo` | `--strict` | Runs `runSeoAudit(appDir)` and exits non-zero if strict + errors found. |
 | `vesk --help` | | Prints usage and exits. |
 
@@ -24,6 +25,7 @@ Scaffolding is separate: `npx create-vesk@latest <project-name>`.
 - **`.ts`**: transpiled with `typescript.transpileModule`, **stripped of `import { ... } from '@vesk/compiler'`** lines, then injected with a fake `globalThis.__vesk_inject = { defineConfig, definePlugin, preset }` before `await import(tmpFile)`. Written to `.vesk/config.tmp.js` (directory created if missing) and deleted after load.
 - `.env` and `.env.local` are loaded first (simple `KEY=VAL` parser, strips quotes, does not override existing `process.env`).
 - Result is passed through `validateConfig(config)` if present; security is resolved via `preset(...)`.
+- `intelligence` and `docs` options are validated there too; invalid docs paths/OpenAPI paths fail config loading before dev/build/inspect.
 
 ## Dev server (`dev-server.ts`)
 
@@ -32,7 +34,7 @@ Scaffolding is separate: `npx create-vesk@latest <project-name>`.
 - Calls `ensurePackagesBuilt()` first (no-op if `dist/` is fresh).
 - Resolves the runtime directory from `node_modules/@vesk/runtime` (preferring `ripple-runtime.js` at the package root, falling back to `dist/`).
 - Reads `app/global.css` (legacy `src/global.css` or `src/app.css`); strips Tailwind directives for dev CSS, keeps raw for Tailwind plugin.
-- Watches `app/` + `public/` for changes; recompiles affected routes.
+- Watches `app/` + `public/` for changes; recompiles affected routes. API/config changes also refresh Intelligence Compiler artifacts and dev docs.
 - Serves API routes under `/api/*`, middleware via `collectMiddlewareChain` + `executeMiddlewareChain`, actions via `handleActionRequest`.
 - On each page request: `scanRoutes`, `matchUrl`, collect middleware, compile the page (with `compileClient` + `generateClientBundle` for JS, `renderFullPage`/`renderPage` for HTML), inject HMR client script, set `__vesk_ssr_base_url` for `load()`.
 - `X-Vesk-Data: 1` requests render the page data phase and respond `application/json`. If the page throws server-side during a data request, the dev server returns `{ "error": <message> }` with status 500 (matching the production adapter's SSR function) so the SPA router renders the route error component.

@@ -65,7 +65,7 @@ All under `packages/runtime/src/`:
 | `router-components.ts` | `Outlet`, `Link`, `NavLink`, router hooks (`useNavigate`/`useParams`/`usePathname`/`useSearchParams`/`useRouter`), `Redirect`/`notFound`, head/scroll handling. |
 | `router-match.ts` | Route tree matching: `matchRoute`, `flattenLayoutChain`, `compileRoutePattern`, `buildTreeFromMap`. |
 | `resource.ts` | `createResource` / `useFetch` (`.json`/`.text`/`.arrayBuffer`/`.stream`), `streamText`, SSR data handoff, client cache, dedupe, retry/timeout/abort, `resolveFetchUrl` (prefers `ctx.resolveUrl` → `ctx.url` string → `__vesk_ssr_base_url`), `HttpError`/`TimeoutError`. `useFetch.stream` consumes `ReadableStream` chunk-by-chunk into an `into` cell (`onChunk` callback), `urlOrFn` may be a provider `() => string` re-evaluated on every fetch/`refresh()` so a tracked path change propagates without recreating the resource. |
-| `request.ts` | Server HTTP abstraction: `ServerRequest`, `VeskRequest` (`resolveUrl`, `from`, `host`/`origin`, `previousRoute`/`previousRouteInfo`, locals `get`/`set`, cookie parsing, body-cap guard), `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream(ReadableStream)`), `cookies`/`headers`/`locals`, `withValidation`, `cors`, hooks, webhooks (`webhook()` — POST-only, non-short-circuiting signature compare; `algorithm` `'SHA-256'`/`'SHA-512'`, `signaturePrefix`, `headerName`, `signedPayload` for providers that sign a field subset such as Paystack), signed cookies, `VeskResponse.stream`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`. |
+| `request.ts` | Server HTTP abstraction: `ServerRequest` (`json<T>()` typed body), `VeskRequest` (`resolveUrl`, `from`, `host`/`origin`, `previousRoute`/`previousRouteInfo`, locals `get`/`set`, cookie parsing, body-cap guard), `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream(ReadableStream)`), `cookies`/`headers`/`locals`, `withValidation`, `cors`, hooks, webhooks (`webhook()` — POST-only, non-short-circuiting signature compare; `algorithm` `'SHA-256'`/`'SHA-512'`, `signaturePrefix`, `headerName`, `signedPayload` for providers that sign a field subset such as Paystack), signed cookies, `VeskResponse.stream`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`. |
 | `previous-route.ts` | Sanitized previous-route resolution from `x-vesk-previous-route`, `x-return-to`, `next`/`returnTo` query params, and same-origin `Referer`; exports `PREVIOUS_ROUTE_HEADER`, `RETURN_TO_HEADER`, `PREVIOUS_ROUTE_QUERY_KEYS`, `sanitizePreviousRoute`, `resolvePreviousRoute`. |
 | `isr.ts` | Incremental Static Regeneration: `isr`, `pageIsr`, `componentIsr`, `revalidatePath`/`revalidateTag`, cache clearing. |
 | `form.ts` | `Form` / `Field` components + validation rules (`required`, `email`, `minLength`, `maxLength`, `pattern`, `custom`). |
@@ -442,12 +442,13 @@ tracked path switch propagates (supply `key` when the URL is dynamic). `into` is
 `Tracked<string>`; the `Resource` also exposes `.into` for `Md`'s `streamCellFrom`.
 
 ### Server-only (index-server.ts)
-Request: `cookies`, `headers`, `locals`, `ServerRequest`, `VeskRequest`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`.
+Request: `cookies`, `headers`, `locals`, `ServerRequest` (`json<T = unknown>(): Promise<T>`), `VeskRequest`, `PayloadTooLargeError`, `DEFAULT_MAX_BODY_BYTES`.
 `locals<L>()` defaults to the application-augmentable `VeskLocals` interface from
 `@vesk/types`; augment it once with `declare module '@vesk/types'` to make
 unparameterized `locals()` and `MiddlewareContext` reads globally typed while
 retaining `unknown` for undeclared keys.
-(`resolveUrl`, `from`, `host`/`origin`, `query`/`parsedUrl`, `getBody`),
+(`resolveUrl`, `from`, `host`/`origin`, `query`/`parsedUrl`, `getBody`);
+`request.json<Type>()` is a compile-time cast over `Request.json()`; use `bindJSON`/`withValidation` when runtime validation is required.
 `ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream`),
 `withValidation`, `useBody`, `useParams` (request), `useRequest`, `cors`,
 `defineHook`, `removeHook`, `runHooks`, `webhook`, `WebhookOptions`, `signCookie`, `unsignCookie`,

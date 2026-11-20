@@ -6,11 +6,11 @@
 
 - `name`: `@vesk/vesk-cli` (ships the `vesk` binary), version: 0.2.16, ESM, `type: module`, Node >= 20.
 - `bin`: `./dist/cli.js`.
-- Deps: `@vesk/adapter`, `@vesk/compiler`, `@vesk/plugin-tailwind`, `@vesk/runtime`, `esbuild`, `esrap`, `sharp`, `typescript`, `ws`, `zimmerframe`.
+- Deps: `@vesk/adapter`, `@vesk/compiler`, `@vesk/docs`, `@vesk/plugin-tailwind`, `@vesk/runtime`, `esbuild`, `esrap`, `sharp`, `typescript`, `ws`, `zimmerframe`.
 
 ## Entry points
 
-- `packages/cli/src/index.ts` — CLI entry. Parses `process.argv`, dispatches to `build`/`start`/`dev`/`typecheck`/`seo`.
+- `packages/cli/src/index.ts` — CLI entry. Parses `process.argv`, dispatches to `build`/`start`/`dev`/`typecheck`/`inspect`/`seo`.
 - `packages/cli/src/dev-server.ts` — `startDevServer(port, projectDir, config)`.
 - `packages/cli/src/action-handler.ts` — server action routing.
 - `packages/cli/src/build-packages.ts` — monorepo incremental build (`buildPackages(force)`).
@@ -22,6 +22,7 @@ args[0] == 'build'    → loadConfig → build(appDirPath, opts)
 args[0] == 'start'    → startProdServer(outDir, { port })
 args[0] == 'dev'      → setRuntimeModule(__veskRuntime) → startDevServer(port, projectDir, config)
 args[0] == 'typecheck'→ typecheckProject(projectDir, { strict }) via @vesk/compiler/src/typecheck
+args[0] == 'inspect'  → @vesk/docs analyzeProject → inspect → formatInspection
 args[0] == 'seo'      → runSeoAudit(appDirPath)
 else / --help          → usage()
 ```
@@ -44,7 +45,7 @@ when the value is exactly `edge`, else node), `--seo`, `--strict`,
    - `await import(tmpFile).default`
    - Delete `globalThis.__vesk_inject`
 4. For `.js`: `await import(configPath).default`.
-5. Wrap with `defineConfig` if it's a function; `validateConfig(config)`.
+5. Wrap with `defineConfig` if it's a function; `validateConfig(config)` (includes `intelligence`/`docs` path validation).
 6. If `config.security.redactLogs !== false`, call `setRedactLogging(true)`.
 
 ## Dev server request flow (dev-server.ts)
@@ -68,9 +69,9 @@ Key exports from dev-server: `startDevServer(port, projectDir, config)`.
 
 ## build-packages.ts
 
-Incremental monorepo build for runtime/compiler/adapter:
+Incremental monorepo build for runtime/compiler/docs/adapter:
 
-- `PACKAGES` map: `runtime` (client+server), `compiler` (entry `index`, copies `acorn-ts-plugin`), `adapter` (entry `index`).
+- `PACKAGES` map: `runtime` (client+server), `compiler` (entry `index`, copies `acorn-ts-plugin`), `docs` (entry `index`), `adapter` (entry `index`).
 - `distStale(pkgDir, entry)`: compares newest `.ts` mtime in `src/` against `dist/<entry>.js` mtime.
 - `buildPackages(force)`: runs `tsc -p tsconfig.build.json` per stale package, copies assets, writes a minimal `dist/package.json` with the correct `exports` map.
 - `ensurePackagesBuilt()` → `buildPackages(false)`.
@@ -80,6 +81,7 @@ Incremental monorepo build for runtime/compiler/adapter:
 
 - Imports `@vesk/compiler/src/server-codegen`, `client-codegen`, `router`, `api-routes`, `middleware`, `types`, `config`, `server-utils`.
 - Imports `@vesk/adapter/src/client-bundle`, `index`, `seo-audit`, `prod-server`.
+- Dynamically imports `@vesk/docs` for build-time analysis, dev docs artifacts, and `inspect`.
 - Imports `@vesk/runtime/src/index-server` as the runtime module injected via `setRuntimeModule`.
 - The dev server is the only place that must strip duplicate `export default` from client bundles (historical bug).
 

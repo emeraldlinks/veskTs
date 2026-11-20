@@ -208,8 +208,52 @@ export default defineConfig({
   security: preset('production', { trustProxy: true }),
   plugins: [definePlugin({ name: 'x', onCSS: (css) => css })],
   routeDataCache: 0,   // SPA route-data freshness TTL (ms). 0 = refetch on every SPA visit.
+  intelligence: { enabled: true, cacheDir: '.vesk/intelligence', exclude: [] },
+  docs: {
+    dev: true,
+    prod: false,
+    path: '/docs',
+    playground: true,
+    securitySchemes: {
+      sessionCookie: { type: 'apiKey', in: 'cookie', name: 'session' },
+      bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+    },
+    security: [{ sessionCookie: [] }],
+    auth: { credentials: 'same-origin', persistAuthorization: false },
+  },
 });
 ```
+
+`intelligence` controls the source-analysis cache/exclusions used by
+`@vesk/docs` and `vesk inspect`. `docs` controls generated OpenAPI artifacts and
+the local Swagger UI: dev UI is on by default, prod UI requires `prod: true`, and
+`openapi: false` suppresses both OpenAPI files. Only `app/api/**` HTTP handlers
+are indexed, documented, and inspected; page routes are never included.
+`docs: false` or `intelligence.enabled: false` disables all docs/OpenAPI output.
+App routes and public files always win over generated `/docs`, `/openapi.json`,
+`/openapi.yaml`, and `/docs/swagger-ui/*` paths.
+
+Auth documentation is automated in the same pass as route/schema analysis. Vesk
+infers `sessionCookie` from authenticated user locals and guarded user locals;
+`@security <name>` adds an explicit scheme, `@public` or `@security none` marks a
+route public, and middleware security propagates to every route in its path
+scope. Reading a cookie or header for telemetry or debugging does not mark a
+route protected. Swagger UI shows the Authorize dialog for declared schemes,
+sends browser cookies for same-origin API calls, and adds `401`/`403` responses
+to protected operations.
+
+`docs.auth.session` preauthorizes Swagger UI from an existing browser session.
+Use `{ source: 'localStorage', key: 'accessToken', scheme: 'bearerAuth' }` for
+JWT bearer auth, or `{ source: 'cookie', key: 'session' }` for a cookie session.
+The generated spec gains the matching `bearerAuth` or `sessionCookie` scheme;
+the token value itself is read by the browser at runtime and never embedded in
+generated files. When docs are enabled, `vesk dev` and `vesk start` print
+`api docs live at <url>` using `docs.path` or `/docs`.
+
+Response statuses are inferred, not forced to `200`: explicit `VeskResponse`
+status arguments, `.setStatus()`/`.status()` calls, redirects, `notFound()`,
+`permanentRedirect()`, and JSDoc `@status <code>` win; otherwise successful
+returns document `200`.
 
 
 ---

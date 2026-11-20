@@ -15,6 +15,8 @@ export type {
   VeskSecurityPreset,
   VeskSecurity,
   VeskConfig,
+  VeskDocsAuthConfig,
+  VeskDocsSecuritySchemeConfig,
   MdConfig,
   MdHtmlMode,
   MdProps,
@@ -41,6 +43,14 @@ export type {
   PreviousRouteInfo,
   PreviousRouteSource,
   SetCookieOptions,
+  IntelligenceCertainty,
+  IntelligenceSourceLocation,
+  IntelligenceProvenance,
+  VeskIntelligenceConfig,
+  VeskDocsConfig,
+  VeskDocsOpenApiConfig,
+  ManifestIntelligenceInfo,
+  GeneratedDocsAsset,
 } from '@vesk/types';
 
 export interface CompileFileResult {

@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@vesk/docs": ["./src/index.ts"],
+      "@vesk/docs/src/*": ["./src/*"],
+      "@vesk/types": ["../types/src/index.ts"],
+      "@vesk/types/src/*": ["../types/src/*"],
+      "@vesk/compiler": ["../compiler/src/index.ts"],
+      "@vesk/compiler/src/*": ["../compiler/src/*"]
+    }
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}

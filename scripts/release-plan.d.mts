@@ -26,14 +26,21 @@ export interface RawCommit {
   body?: string;
 }
 
+export type ReleaseBump = 'patch' | 'minor';
+
 export declare const STABLE: 'stable';
+export declare const PATCH: 'patch';
+export declare const MINOR: 'minor';
 export declare const CHANNELS: string[];
 
 export declare function parseVersion(version: unknown): ParsedVersion | null;
 export declare function formatVersion(core: { major: number; minor: number; patch: number }, pre?: string | null): string;
 export declare function compareVersions(a: string, b: string): number;
 export declare function maxVersion(versions: string[]): string | null;
-export declare function nextVersion(channel: string, seen: string[]): string;
+export declare function isBump(value: unknown): value is ReleaseBump;
+export declare function isFeatureCommit(subject: string, body?: string): boolean;
+export declare function bumpFromCommits(commits: Array<string | RawCommit>): ReleaseBump;
+export declare function nextVersion(channel: string, seen: string[], bump?: ReleaseBump): string;
 export declare function classifyCommit(subject: string, body?: string): ClassifiedCommit;
 export declare function renderChangelog(version: string, date: string, commits: RawCommit[]): string;
 export declare function mergeChangelog(existing: string, section: string): string;

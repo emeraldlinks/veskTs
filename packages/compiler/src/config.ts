@@ -1,4 +1,12 @@
-import type { VeskConfig, VeskPlugin, VeskSecurity, VeskSecurityPreset, MdConfig } from '@vesk/compiler/src/types';
+import type {
+  VeskConfig,
+  VeskPlugin,
+  VeskSecurity,
+  VeskSecurityPreset,
+  MdConfig,
+  VeskDocsConfig,
+  VeskDocsSecuritySchemeConfig,
+} from '@vesk/compiler/src/types';
 import { VeskError } from '@vesk/compiler/src/errors';
 
 /** Tags allowed by default when md.html = 'allowlist' and no allowTags given. */
@@ -19,6 +27,132 @@ function normalizeTag(tag: string): string {
     if ((code >= 97 && code <= 122) || (code >= 48 && code <= 57) || ch === '-') out += ch;
   }
   return out;
+}
+
+function isValidDocsPath(value: string): boolean {
+  if (value.length < 2 || value[0] !== '/' || value.endsWith('/')) return false;
+  for (let i = 1; i < value.length; i++) {
+    const ch = value[i];
+    if (ch === '?' || ch === '#' || ch === '[' || ch === ']' || ch === '*' || ch === '\\' || ch === ' ' || ch === '\t') return false;
+  }
+  return true;
+}
+
+function validateConfiguredPath(value: string, suffix: string, label: string): void {
+  if (!isValidDocsPath(value) || !value.endsWith(suffix)) {
+    throw VeskError.configError(`${label} must be an absolute static path ending in ${suffix}.`, [`/openapi${suffix}`]);
+  }
+}
+
+const DOC_CREDENTIAL_MODES = ['omit', 'same-origin', 'include'];
+const DOC_AUTH_SESSION_SOURCES = ['cookie', 'localStorage', 'sessionStorage'];
+
+function validateSecuritySchemes(value: VeskDocsSecuritySchemeConfig[] | Record<string, VeskDocsSecuritySchemeConfig> | undefined): void {
+  if (value === undefined) return;
+  if (typeof value !== 'object' || Array.isArray(value)) throw VeskError.configError('docs.securitySchemes must be an object.');
+  for (const [id, scheme] of Object.entries(value)) {
+    if (!id) throw VeskError.configError('docs.securitySchemes contains an empty scheme name.');
+    if (!scheme || typeof scheme !== 'object') throw VeskError.configError(`docs.securitySchemes.${id} must be an object.`);
+    if (scheme.type === 'apiKey') {
+      if (scheme.in !== 'header' && scheme.in !== 'query' && scheme.in !== 'cookie') {
+        throw VeskError.configError(`docs.securitySchemes.${id}.in must be "header", "query", or "cookie".`);
+      }
+      if (typeof scheme.name !== 'string' || !scheme.name) {
+        throw VeskError.configError(`docs.securitySchemes.${id}.name must be a non-empty string.`);
+      }
+    } else if (scheme.type === 'http') {
+      if (scheme.scheme !== 'bearer' && scheme.scheme !== 'basic') {
+        throw VeskError.configError(`docs.securitySchemes.${id}.scheme must be "bearer" or "basic".`);
+      }
+    } else {
+      throw VeskError.configError(`docs.securitySchemes.${id}.type must be "apiKey" or "http".`);
+    }
+    if (scheme.description !== undefined && typeof scheme.description !== 'string') {
+      throw VeskError.configError(`docs.securitySchemes.${id}.description must be a string.`);
+    }
+    if (scheme.type === 'http' && scheme.bearerFormat !== undefined && typeof scheme.bearerFormat !== 'string') {
+      throw VeskError.configError(`docs.securitySchemes.${id}.bearerFormat must be a string.`);
+    }
+  }
+}
+
+function validateSecurityRequirements(value: Array<Record<string, string[]>> | undefined): void {
+  if (value === undefined) return;
+  if (!Array.isArray(value)) throw VeskError.configError('docs.security must be an array.');
+  for (const requirement of value) {
+    if (!requirement || typeof requirement !== 'object' || Array.isArray(requirement)) {
+      throw VeskError.configError('docs.security entries must be objects.');
+    }
+    for (const [scheme, scopes] of Object.entries(requirement)) {
+      if (!scheme) throw VeskError.configError('docs.security contains an empty scheme name.');
+      if (!Array.isArray(scopes) || scopes.some((scope) => typeof scope !== 'string')) {
+        throw VeskError.configError(`docs.security.${scheme} must be an array of scope strings.`);
+      }
+    }
+  }
+}
+
+function validateDocsAuth(value: VeskDocsConfig['auth']): void {
+  if (value === undefined) return;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw VeskError.configError('docs.auth must be an object.');
+  if (value.credentials !== undefined && !DOC_CREDENTIAL_MODES.includes(value.credentials)) {
+    throw VeskError.configError('docs.auth.credentials must be "omit", "same-origin", or "include".');
+  }
+  if (value.persistAuthorization !== undefined && typeof value.persistAuthorization !== 'boolean') {
+    throw VeskError.configError('docs.auth.persistAuthorization must be a boolean.');
+  }
+  if (value.defaultScheme !== undefined && (typeof value.defaultScheme !== 'string' || !value.defaultScheme)) {
+    throw VeskError.configError('docs.auth.defaultScheme must be a non-empty string.');
+  }
+  if (value.loginPath !== undefined && (typeof value.loginPath !== 'string' || !value.loginPath.startsWith('/'))) {
+    throw VeskError.configError('docs.auth.loginPath must be an absolute path.');
+  }
+  const session = value.session;
+  if (session !== undefined) {
+    if (!session || typeof session !== 'object' || Array.isArray(session)) {
+      throw VeskError.configError('docs.auth.session must be an object.');
+    }
+    if (!DOC_AUTH_SESSION_SOURCES.includes(session.source)) {
+      throw VeskError.configError('docs.auth.session.source must be "cookie", "localStorage", or "sessionStorage".');
+    }
+    if (typeof session.key !== 'string' || !session.key) {
+      throw VeskError.configError('docs.auth.session.key must be a non-empty string.');
+    }
+    for (const field of ['scheme', 'header'] as const) {
+      const fieldValue = session[field];
+      if (fieldValue !== undefined && (typeof fieldValue !== 'string' || !fieldValue)) {
+        throw VeskError.configError(`docs.auth.session.${field} must be a non-empty string.`);
+      }
+    }
+    if (session.prefix !== undefined && typeof session.prefix !== 'string') {
+      throw VeskError.configError('docs.auth.session.prefix must be a string.');
+    }
+  }
+}
+
+function validateDocsConfig(docs: false | VeskDocsConfig | undefined): void {
+  if (docs === undefined || docs === false) return;
+  if (typeof docs !== 'object') throw VeskError.configError('docs must be false or an object.', ['docs: false', 'docs: { path: "/docs" }']);
+  const booleans: Array<keyof VeskDocsConfig> = ['enabled', 'dev', 'prod', 'playground'];
+  for (const key of booleans) {
+    const value = docs[key];
+    if (value !== undefined && typeof value !== 'boolean') {
+      throw VeskError.configError(`docs.${key} must be a boolean.`);
+    }
+  }
+  if (docs.path !== undefined) {
+    if (typeof docs.path !== 'string' || !isValidDocsPath(docs.path)) {
+      throw VeskError.configError('docs.path must be an absolute static path such as "/docs".', ['/docs']);
+    }
+  }
+  if (docs.openapi !== undefined && docs.openapi !== false) {
+    if (typeof docs.openapi !== 'object') throw VeskError.configError('docs.openapi must be false or an object.');
+    if (docs.openapi.jsonPath !== undefined) validateConfiguredPath(docs.openapi.jsonPath, '.json', 'docs.openapi.jsonPath');
+    if (docs.openapi.yamlPath !== undefined) validateConfiguredPath(docs.openapi.yamlPath, '.yaml', 'docs.openapi.yamlPath');
+  }
+  validateSecuritySchemes(docs.securitySchemes);
+  validateSecurityRequirements(docs.security);
+  validateDocsAuth(docs.auth);
 }
 
 function normalizeMdConfig(md: MdConfig | undefined): MdConfig | undefined {
@@ -127,6 +261,22 @@ export function defineConfig(config: VeskConfig): VeskConfig {
 }
 
 export function validateConfig(config: VeskConfig): VeskConfig {
+  if (config.intelligence !== undefined) {
+    const intelligence = config.intelligence;
+    if (typeof intelligence !== 'object') throw VeskError.configError('intelligence must be an object.');
+    if (intelligence.enabled !== undefined && typeof intelligence.enabled !== 'boolean') {
+      throw VeskError.configError('intelligence.enabled must be a boolean.');
+    }
+    if (intelligence.cacheDir !== undefined && typeof intelligence.cacheDir !== 'string') {
+      throw VeskError.configError('intelligence.cacheDir must be a string.');
+    }
+    if (intelligence.exclude !== undefined) {
+      if (!Array.isArray(intelligence.exclude) || intelligence.exclude.some((entry) => typeof entry !== 'string')) {
+        throw VeskError.configError('intelligence.exclude must be an array of strings.');
+      }
+    }
+  }
+  validateDocsConfig(config.docs);
   if (!config.plugins) return config;
   if (!Array.isArray(config.plugins)) {
     throw new Error('[vesk] config.plugins must be an array.');

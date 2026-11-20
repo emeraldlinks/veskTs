@@ -21,11 +21,21 @@ import { isSocketlessTarget, tcpDriverViolations, edgeDriverBuildError } from '@
 import { copyStaticAssets } from '@vesk/adapter/src/static';
 import type {
   RouteNode, ApiRouteNode, BuildOptions, BuildResult, AncestorLayout,
-  MiddlewareChainItem, VeskPlugin, Manifest,
+  MiddlewareChainItem, VeskPlugin, Manifest, ManifestIntelligenceInfo,
 } from '@vesk/adapter/src/types';
 import type { PluginRecord } from '@vesk/adapter/src/plugins';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+function collectAppPaths(nodes: RouteNode[]): string[] {
+  const paths: string[] = [];
+  const visit = (node: RouteNode): void => {
+    if (node.page) paths.push(node.fullPath);
+    for (const child of node.children ?? []) visit(child);
+  };
+  for (const node of nodes) visit(node);
+  return paths;
+}
 
 async function resolveCompilerApi<T = Record<string, unknown>>(name: string): Promise<T> {
   const monorepoSrc = resolve(__dirname, '..', '..', 'compiler', 'src');
@@ -559,8 +569,49 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
     }
   }
 
+  let intelligenceInfo: ManifestIntelligenceInfo | undefined;
+  {
+    const { analyzeProject, writeIntelligenceArtifacts } = await import('@vesk/docs') as {
+      analyzeProject: (options: { projectRoot: string; appDir: string; cacheDir?: string; exclude?: string[]; defaultSecurityScheme?: string }) => import('@vesk/docs').ProjectIntelligence;
+      writeIntelligenceArtifacts: (options: {
+        intelligence: import('@vesk/docs').ProjectIntelligence;
+        config: import('@vesk/adapter/src/types').BuildOptions['config'];
+        outDir: string;
+        projectRoot: string;
+        environment: 'prod';
+        appPaths: string[];
+        publicDir: string;
+      }) => ManifestIntelligenceInfo;
+    };
+    const projectRoot = resolve(appDir, '..');
+    if (options?.config?.intelligence?.enabled !== false) {
+      const intelligence = analyzeProject({
+        projectRoot,
+        appDir,
+        cacheDir: options?.config?.intelligence?.cacheDir,
+        exclude: options?.config?.intelligence?.exclude,
+        defaultSecurityScheme:
+          options?.config?.docs && typeof options.config.docs === 'object'
+            ? options.config.docs.auth?.defaultScheme
+            : undefined,
+      });
+      intelligenceInfo = writeIntelligenceArtifacts({
+        intelligence,
+        config: options?.config,
+        outDir,
+        projectRoot,
+        environment: 'prod',
+        appPaths: [...collectAppPaths(routeTree), ...prerenderedRoutes.map((route) => route.path)],
+        publicDir,
+      });
+      console.error(`vesk build: intel  → intelligence/project.json (${intelligence.routes.length} routes, ${intelligence.schemas.length} schemas)`);
+      if (intelligenceInfo.docsPath) console.error(`vesk build: docs  → ${intelligenceInfo.docsPath}`);
+    }
+  }
+
   markPhase('ssg+images+seo');
   const manifest = generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes, middlewareEnabled, actionMap, pluginHeadExtra, hasEvents);
+  if (intelligenceInfo) manifest.intelligence = intelligenceInfo;
   // The asset map is what makes a deploy auditable: sizes, content hashes and
   // the SRI digests a page can carry.
   // The build id is the asset map's own fingerprint: same assets, same id.

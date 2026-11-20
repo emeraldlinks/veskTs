@@ -5,6 +5,7 @@ import { resolve, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { isChannel, STABLE } from './release-plan.mjs';
+import { BUILD_ORDER, PUBLISH_ORDER } from './publish-plan.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const PACKAGES_DIR = join(ROOT, 'packages');
@@ -14,6 +15,7 @@ const INTERNAL_NAMES = new Set([
   '@vesk/adapter',
   '@vesk/agentic',
   '@vesk/compiler',
+  '@vesk/docs',
   '@vesk/lsp',
   '@vesk/plugin-pwa',
   '@vesk/plugin-tailwind',
@@ -26,25 +28,6 @@ const INTERNAL_NAMES = new Set([
   'vite-plugin-vesk',
   'lucide-vesk',
 ]);
-
-const PUBLISH_ORDER = [
-  '@vesk/types',
-  '@vesk/agentic',
-  '@vesk/compiler',
-  '@vesk/runtime',
-  '@vesk/plugin-pwa',
-  '@vesk/plugin-tailwind',
-  '@vesk/plugin-multipart',
-  '@vesk/prettier-plugin',
-  '@vesk/adapter',
-  'vite-plugin-vesk',
-  // '@vesk/lsp' — broken imports (LiveTypecheckProgram, createTypecheckOptions,
-  // ./context, ./text-utils missing from compiler); re-enable when fixed.
-  '@vesk/vesk-cli',
-  'lucide-vesk',
-  'create-vesk',
-  '@vesk/testing',
-];
 
 const SEMVER = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
 
@@ -134,25 +117,6 @@ for (const name of PUBLISH_ORDER) {
 console.log(`\n\x1b[1mrelease: building all packages\x1b[0m`);
 // Build in dependency order — runtime/adapter before compiler/cli — so a
 // package's typecheck always sees its dependencies' freshly built dist/.
-const BUILD_ORDER = [
-  '@vesk/types',
-  // agentic before adapter — adapter's dev-server imports @vesk/agentic,
-  // so agentic's dist types must exist first on fresh checkouts (CI).
-  '@vesk/agentic',
-  '@vesk/runtime',
-  '@vesk/compiler',
-  '@vesk/plugin-pwa',
-  '@vesk/plugin-tailwind',
-  '@vesk/plugin-multipart',
-  '@vesk/adapter',
-  'vite-plugin-vesk',
-  '@vesk/prettier-plugin',
-  // '@vesk/lsp' — see PUBLISH_ORDER note
-  '@vesk/vesk-cli',
-  'lucide-vesk',
-  'create-vesk',
-  '@vesk/testing',
-];
 for (const name of BUILD_ORDER) {
   const p = byName.get(name);
   if (!p) continue;

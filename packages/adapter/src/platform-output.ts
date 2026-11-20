@@ -29,6 +29,8 @@ export const MIME: Record<string, string> = {
   '.wasm': 'application/wasm',
   '.map': 'application/json',
   '.webmanifest': 'application/manifest+json',
+  '.yaml': 'application/yaml; charset=utf-8',
+  '.yml': 'application/yaml; charset=utf-8',
 };
 
 export function ensureCleanDir(dir: string): void {

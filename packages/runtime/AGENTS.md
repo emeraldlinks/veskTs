@@ -107,7 +107,7 @@ reactivity/hydration change.
 | `router-components.ts` | Link/NavLink/Outlet/hooks/guards | `router.test.ts` |
 | `router-match.ts` | route tree matching | `router.test.ts` |
 | `resource.ts` | resources, SSR handoff, cache, `useFetch.stream` (provider re-evaluated per fetch, `into` progressive, `onChunk`, `resolveFetchUrl` prefers `ctx.resolveUrl`), `streamText`, `HttpError`/`TimeoutError` | `resource.test.ts` |
-| `request.ts` | server request/response, cookies, hooks, cors, security, `VeskRequest.resolveUrl`/`from`/`host`/`origin`/`previousRoute`, `VeskResponse.stream(ReadableStream)` | `request.test.ts` |
+| `request.ts` | server request/response, cookies, hooks, cors, security, `ServerRequest.json<T>()`, `VeskRequest.resolveUrl`/`from`/`host`/`origin`/`previousRoute`, `VeskResponse.stream(ReadableStream)` | `request.test.ts` |
 | `previous-route.ts` | sanitized previous-route resolution from headers/query/referer; `PREVIOUS_ROUTE_HEADER`, `resolvePreviousRoute`, `sanitizePreviousRoute` | `request.test.ts` |
 | `isr.ts` | ISR caching + revalidation | `isr.test.ts` |
 | `form.ts` | Form/Field + rules | `form.test.ts` |

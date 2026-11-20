@@ -1,4 +1,4 @@
-import { defineConfig, definePlugin, preset } from '@vesk/compiler/src/config';
+import { defineConfig, definePlugin, preset, validateConfig } from '@vesk/compiler/src/config';
 
 let passed = 0;
 let failed = 0;
@@ -203,6 +203,80 @@ describe('md config (raw-HTML policy)', () => {
 	it('throws on non-array allowTags', () => {
 		let threw = false;
 		try { defineConfig({ md: { html: 'allowlist', allowTags: 'em' } }); }
+		catch { threw = true; }
+		expect(threw).toBe(true);
+	});
+});
+
+describe('docs auth config', () => {
+	it('accepts declarative security schemes and global requirements', () => {
+		let threw = false;
+		try {
+			validateConfig({
+				docs: {
+					securitySchemes: {
+						sessionCookie: { type: 'apiKey', in: 'cookie', name: 'session' },
+						bearerAuth: { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+					},
+					security: [{ sessionCookie: [] }],
+					auth: { credentials: 'same-origin', persistAuthorization: false, defaultScheme: 'sessionCookie', loginPath: '/api/login' },
+				},
+			});
+		} catch { threw = true; }
+		expect(threw).toBe(false);
+	});
+
+	it('rejects unsupported scheme types', () => {
+		let threw = false;
+		try { validateConfig({ docs: { securitySchemes: { oauth: { type: 'oauth2' } } } as Parameters<typeof validateConfig>[0] }); }
+		catch { threw = true; }
+		expect(threw).toBe(true);
+	});
+
+	it('accepts jwt bearer session auth from localStorage', () => {
+		let threw = false;
+		try {
+			validateConfig({
+				docs: {
+					auth: {
+						credentials: 'omit',
+						session: { source: 'localStorage', key: 'accessToken', scheme: 'bearerAuth' },
+					},
+				},
+			});
+		} catch { threw = true; }
+		expect(threw).toBe(false);
+	});
+
+	it('accepts cookie session auth with a configured cookie key', () => {
+		let threw = false;
+		try {
+			validateConfig({
+				docs: {
+					auth: {
+						credentials: 'same-origin',
+						session: { source: 'cookie', key: 'sid', scheme: 'sessionCookie' },
+					},
+				},
+			});
+		} catch { threw = true; }
+		expect(threw).toBe(false);
+	});
+
+	it('rejects invalid credential mode', () => {
+		let threw = false;
+		try { validateConfig({ docs: { auth: { credentials: 'always' } } } as Parameters<typeof validateConfig>[0]); }
+		catch { threw = true; }
+		expect(threw).toBe(true);
+	});
+
+	it('rejects invalid session auth config', () => {
+		let threw = false;
+		try { validateConfig({ docs: { auth: { session: { source: 'indexedDB', key: 'token' } } } } as Parameters<typeof validateConfig>[0]); }
+		catch { threw = true; }
+		expect(threw).toBe(true);
+		threw = false;
+		try { validateConfig({ docs: { auth: { session: { source: 'cookie', key: '' } } } } as Parameters<typeof validateConfig>[0]); }
 		catch { threw = true; }
 		expect(threw).toBe(true);
 	});

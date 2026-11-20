@@ -836,10 +836,10 @@ class _VeskResponse extends ServerResponse {
 		return super.text();
 	}
 
-	async json(): Promise<unknown> {
+	async json<T = unknown>(): Promise<T> {
 		this._flushSecurityHeaders();
 		this._assertBodyWithinLimit();
-		return super.json();
+		return super.json() as Promise<T>;
 	}
 
 	async formData(): Promise<FormData> {

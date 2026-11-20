@@ -53,9 +53,10 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
 | Package | Surface |
 | --- | --- |
 | `packages/compiler` | `@vesk/compiler` — preprocess/parser/IR/codegen, exports `parse`, `createBaseParser`, `VeskParserPlugin`, `generateIR`, `render` (server codegen), `compileClient`/`compile`, `isStaticIR`, `defineConfig`, `definePlugin`, `preset`, `validateConfig`, `scanRoutes`, `scanComponents`, `collectSources`, `matchUrl`, plus `typecheckProject` (via `src/typecheck`) |
+| `packages/docs` | `@vesk/docs` — Intelligence Compiler: `analyzeProject` (API routes only), semantic IR/JSON Schema, OpenAPI 3.1 JSON/YAML generators, local Swagger UI HTML/assets, automated auth/protected-route detection, `buildIntelligenceArtifacts`/`writeIntelligenceArtifacts`, `inspect`/`formatInspection` |
 | `packages/runtime` | `@vesk/runtime` — client barrel `index-client`, server barrel `index-server` (split: hydrators/bindings client-only; request/ISR server-only). Subpath exports: `@vesk/runtime/router` (full routing surface + LoadingIndicator), `@vesk/runtime/server` (request/response primitives) |
 | `packages/adapter` | build output (platforms: node/vercel/netlify/cloudflare/deno/aws/edge/coxmos), dev server, prod server, SSR function, SEO audit |
-| `packages/cli` | `vesk` binary — dev/build/start/typecheck/seo |
+| `packages/cli` | `vesk` binary — dev/build/start/typecheck/inspect/seo |
 | `packages/lsp`, `prettier-plugin`, `plugin-tailwind`, `create-vesk` | tooling |
 
 ## Router surface (`@vesk/runtime/router`)

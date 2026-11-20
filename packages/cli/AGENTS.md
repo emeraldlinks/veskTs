@@ -28,6 +28,7 @@ node packages/cli/dist/cli.js build --platform vercel --seo
 node packages/cli/dist/cli.js dev -p 3002
 node packages/cli/dist/cli.js start -p 3000
 node packages/cli/dist/cli.js typecheck       # tsc-in-.vsk over app/ (.vsk + .ts)
+node packages/cli/dist/cli.js inspect --json  # Intelligence Compiler summary
 node packages/cli/dist/cli.js seo --strict
 
 # dev / prod E2E (slow)
@@ -42,7 +43,7 @@ npx tsc --noEmit -p packages/cli/tsconfig.json
 
 | File | Responsibility |
 |---|---|
-| `src/index.ts` | CLI entry: arg parsing, env/config loading, command dispatch (`build`/`start`/`dev`/`seo`). |
+| `src/index.ts` | CLI entry: arg parsing, env/config loading, command dispatch (`build`/`start`/`dev`/`typecheck`/`inspect`/`seo`). |
 | `src/dev-server.ts` | HMR dev server: HTTP + WebSocket, file watching, per-request compile, middleware/API/action routing, CSS injection. |
 | `src/action-handler.ts` | Server action HTTP handler. |
 | `src/build-packages.ts` | Incremental monorepo build for runtime/compiler/adapter. |

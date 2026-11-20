@@ -10,6 +10,7 @@
   "dependencies": {
     "@vesk/adapter": "^0.2.109",
     "@vesk/compiler": "^0.2.109",
+    "@vesk/docs": "^0.2.109",
     "@vesk/plugin-tailwind": "^0.2.109",
     "@vesk/runtime": "^0.2.109",
     "esrap": "^2.3.0",

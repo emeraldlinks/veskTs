@@ -228,6 +228,7 @@ function __mimeSource(): string {
     '.txt': 'text/plain; charset=utf-8', '.xml': 'application/xml',
     '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
     '.wasm': 'application/wasm', '.map': 'application/json', '.webmanifest': 'application/manifest+json',
+    '.yaml': 'application/yaml; charset=utf-8', '.yml': 'application/yaml; charset=utf-8',
   };
   return m[ext] || 'application/octet-stream';
 }`;
@@ -268,7 +269,7 @@ function inlineStaticSource(staticDir: string): string {
   const files = listStaticDir(staticDir);
   const entries = files.map(f => {
     const t = mimeFor(f.rel);
-    const isText = /\.(html|htm|js|mjs|css|json|svg|txt|xml|map|webmanifest)$/i.test(f.rel);
+    const isText = /\.(html|htm|js|mjs|css|json|svg|txt|xml|map|webmanifest|yaml|yml)$/i.test(f.rel);
     return isText
       ? `${JSON.stringify(f.rel)}: { t: ${JSON.stringify(t)}, s: ${JSON.stringify(f.buffer.toString('utf8'))} }`
       : `${JSON.stringify(f.rel)}: { t: ${JSON.stringify(t)}, b: ${JSON.stringify(f.buffer.toString('base64'))} }`;

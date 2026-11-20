@@ -60,4 +60,13 @@ export type {
   VeskTaggedLeafComponent,
   VeskComponentRegistry,
   VeskScope,
+  IntelligenceCertainty,
+  IntelligenceSourceLocation,
+  IntelligenceProvenance,
+  VeskIntelligenceConfig,
+  VeskDocsConfig,
+  VeskDocsOpenApiConfig,
+  VeskDocsAuthConfig,
+  VeskDocsSecuritySchemeConfig,
+  ManifestIntelligenceInfo,
 } from '@vesk/types';

@@ -25,6 +25,7 @@ const PACKAGES: Record<string, PackageBuild> = {
     entry: 'index',
     copy: [{ from: 'src/acorn-ts-plugin', to: 'acorn-ts-plugin' }],
   },
+  docs: { name: '@vesk/docs', entry: 'index' },
   // agentic before adapter — adapter's dev-server imports @vesk/agentic,
   // so agentic's dist types must exist first on fresh checkouts (CI).
   agentic: { name: '@vesk/agentic', entry: 'index' },
@@ -86,6 +87,8 @@ function distPackageJson(pkgName: string, entry: string, serverEntry: string | u
 }
 
 export function buildPackages(force = false): void {
+  const swaggerAssets = spawnSync(process.execPath, [resolve(root, 'packages', 'docs', 'scripts', 'copy-swagger-ui.mjs')], { stdio: 'inherit' });
+  if (swaggerAssets.status !== 0) throw new Error('failed to copy Swagger UI assets for @vesk/docs');
   for (const [pkg, cfg] of Object.entries(PACKAGES)) {
     const pkgDir = resolve(root, 'packages', pkg);
     if (!existsSync(join(pkgDir, 'src'))) continue;

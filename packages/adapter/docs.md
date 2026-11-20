@@ -95,12 +95,20 @@ It also exposes `startDevServer` from `src/dev-server.ts` (not re-exported from
 13. **Sitemap / robots** — `generateSitemap` → `static/public/sitemap.xml` and
     `generateRobotsTxt` → `static/public/robots.txt`, **unless** those files
     already exist in `static/public` (user overrides win).
-14. **Manifest** — `generateManifest(...)` → `config.json`.
-15. **Platform emit** — `detectPlatform(...)`; if the result is not `'node'`,
+14. **Intelligence / docs** — `analyzeProject()` writes `intelligence/project.json`;
+    `@vesk/docs` also emits `/openapi.json`, `/openapi.yaml`, and an optional
+    local Swagger UI `/docs/index.html` into `static/public/` (prod UI requires
+    `docs.prod: true`). Only `app/api/**` routes are documented; page routes are
+    never included. Generated paths never overwrite app routes or public files.
+    Auth schemes, protected operations, and explicit status codes are inferred
+    from handlers/middleware and emitted into the OpenAPI document.
+15. **Manifest** — `generateManifest(...)` → `config.json` (including
+    `manifest.intelligence` when analysis ran).
+16. **Platform emit** — `detectPlatform(...)`; if the result is not `'node'`,
     `emitPlatformOutput(platform, ctx)` writes the platform artifact under
     `.vesk/<platform>/` (and, for Vercel, creates a `.vercel/output` symlink).
     A `target: 'edge'` option forces `node` → `edge`.
-16. **Teardown** — runs each `plugin.onBuildEnd()` hook; logs "done"; returns
+17. **Teardown** — runs each `plugin.onBuildEnd()` hook; logs "done"; returns
     `{ routeTree, apiTree, ssrRoutes, apiRoutes, manifest }`.
 
 ### SPA route data (`routeDataCache`)
@@ -131,7 +139,9 @@ Default `outDir` is `<project>/.vesk`:
 
 ```
 .vesk/
-├── config.json              # Manifest (routes, prerendered, static, actions, middleware)
+├── config.json              # Manifest (routes, prerendered, static, actions, middleware, intelligence)
+├── intelligence/            # Intelligence Compiler project.json
+│   └── project.json
 ├── server/
 │   ├── runtime.js           # Bundled server runtime (renderFullPage, renderPageStream, renderPage, parseCookies, ...)
 │   ├── middleware.js        # Optional — root middleware chain
@@ -144,7 +154,7 @@ Default `outDir` is `<project>/.vesk`:
 │   ├── page-<slug>.js       # Code-split route chunks (only when codeSplit: true)
 │   ├── global.css           # Single compiled stylesheet (user CSS + Tailwind output)
 │   ├── images/              # Optimized image variants (sharp)
-│   └── public/              # Copied public assets + sitemap.xml + robots.txt
+│   └── public/              # Copied public assets + sitemap.xml + robots.txt + generated OpenAPI/docs
 ├── prerendered/             # SSG output (only when ssg: true)
 │   └── <path>.html
 └── <platform>/              # Platform artifacts (only when platform != node)

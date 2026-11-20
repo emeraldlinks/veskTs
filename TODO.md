@@ -5,6 +5,120 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (release CI versioning):**
+
+- [x] CI now reads the push's commit range and passes it to `next-version.mjs`;
+      a `feat:` commit or a commit containing `feature` bumps minor and resets
+      patch (`0.2.1` -> `0.3.0`), all other commits bump patch (`0.2.2`).
+- [x] `@vesk/docs` is asserted in both build and publish plans; the publish job
+      runs the release-plan suite before `npm publish`.
+- [x] Validation: release-plan 18/18, full typecheck green, `node --check` on
+      changed scripts, and offline `next-version` probes returned `0.3.0` for a
+      feature range and `0.2.110` for a patch-only range.
+- [ ] Run the next green CI push to confirm the registry/tag/release path.
+
+**This session (docs defaults + jwt bearer UI):**
+
+- [x] `create-vesk` now installs `@vesk/docs` and generates `docs` config with
+      dev/prod UI enabled plus JWT bearer session auth from
+      `localStorage.accessToken`.
+- [x] `docs.auth.session` supports `cookie`, `localStorage`, and
+      `sessionStorage` session keys, synthesizes matching OpenAPI schemes, and
+      preauthorizes Swagger UI without embedding token values in generated files.
+- [x] `vesk dev` and `vesk start` print `api docs live at <url>` when docs are
+      enabled, using configured `docs.path` or `/docs`.
+- [x] Validation: docs intelligence green, compiler config 30/30, new
+      create-vesk template suite 4/4, full typecheck green. Browser probe on
+      port 3200 confirmed `Authorization: Bearer test-jwt-value` from
+      `localStorage.accessToken`; temporary prod server confirmed startup line.
+- [ ] Rebuild/create release tarballs so new apps resolve `@vesk/docs` from npm.
+
+**This session (docs auth/status accuracy):**
+
+- [x] Fixed false `sessionCookie` propagation from root-middleware cookie reads
+      and debug handlers; only explicit `@security`, authenticated/guarded user
+      locals, and scoped middleware now mark routes protected.
+- [x] Added status inference for `notFound()`, `permanentRedirect()`, bare
+      `redirect()`, and redirect status arguments/defaults (`Response.redirect`
+      302, `VeskResponse.redirect` 307).
+- [x] Kept `401`/`403` auto-docs only on genuinely protected operations.
+- [x] Validation: docs intelligence suite green, compiler config 27/27, full
+      typecheck green, regenerated test-app OpenAPI shows only `/api/protected`
+      with `sessionCookie`; `/api/parity` now includes `404` and `/api/posts`
+      keeps `503`.
+- [x] Dev browser verification on port 3200: Swagger UI loads local assets,
+      `/api/protected` has the only auth button with `401`/`403`,
+      `/api/parity` shows `200`/`302`/`404`, and `/api/posts` shows `200`/`503`.
+      Root cause of earlier 3100 docs 404 was a stale CLI bundle; rebuilt with
+      `npx tsx packages/cli/build.ts`.
+- [ ] Port 3000 remains held by a stale stopped process from another container
+      session; use port 3200 via `/tmp/opencode/test-app-dev.pid`.
+
+**This session (automated auth docs + status inference):**
+
+- [x] Auth documentation is now inferred from handler/middleware ASTs:
+      `Authorization` → `bearerAuth`, `X-API-Key` → `apiKey`, guarded user
+      locals → `sessionCookie`, plus `@security <scheme>`, `@public`/`@security
+      none`, and middleware-scope propagation.
+- [x] Added declarative `docs.securitySchemes`, `docs.security`, and `docs.auth`
+      config (mirrored types + validation). Swagger UI gets local Authorize
+      support, configurable `credentials`, and `persistAuthorization`; no
+      tokens or cookie values are embedded in generated output.
+- [x] OpenAPI emits merged `components.securitySchemes`, operation/global
+      `security`, `security: []` for public routes, and `401`/`403` responses for
+      protected operations.
+- [x] Response statuses are inferred instead of hardcoded: explicit response
+      status arguments, `.setStatus()`/`.status()`, redirects, and JSDoc
+      `@status <code>` win; ordinary successful returns document `200`.
+- [x] Validation: docs intelligence suite green, compiler config 27/27, full
+      typecheck green. Dev/prod browser probes pending this session.
+- [ ] Remaining: GitHub CI after commit/push.
+
+**This session (Swagger UI docs + API-only scope):**
+
+- [x] Replaced the custom generated docs HTML with Swagger UI. Assets from
+      `swagger-ui-dist` are copied into `@vesk/docs/dist/swagger-ui` at build
+      time and served locally under `<docs path>/swagger-ui/*`; no runtime CDN.
+- [x] OpenAPI operations now use the real `/api/...` paths. The analyzer/IR/docs
+      cover only `app/api/**` API routes; page routes are never documented or
+      exposed through `vesk inspect`, OpenAPI, or Swagger UI.
+- [x] Generated docs assets honor the route/public-file collision rules, and the
+      dev server serves them only when no app route or public file owns the path.
+- [x] Added regressions for API-only paths, local Swagger asset references,
+      disabled-OpenAPI inline spec fallback, HTML escaping, and asset collisions.
+- [x] Validation: `packages/docs/src/intelligence.test.ts` green; `npm run
+      typecheck` clean; prod build/probe green; dev browser probe shows 20 Swagger
+      operations, all `/api/*`, zero page errors. Hydration rerun reached Test
+      18d with no failures before the tool timeout (previous full run 556/556).
+- [ ] Remaining: GitHub CI after commit/push.
+
+**This session (Vesk Intelligence Compiler / docs):**
+
+- [x] Added independent `@vesk/docs` package (`packages/docs`) that builds a
+      reusable project IR from config, routes, middleware, API handlers,
+      components, imports/exports, runtime signals/effects, and resource usage
+      via the TypeScript Compiler API. Public types are mirrored in
+      `packages/types/src/index.ts` and `index.d.ts`.
+- [x] Added `vesk inspect [query] [--json]` with route/operation/schema/
+      diagnostic views, query filtering, and cache/exclude config plumbing.
+- [x] Added OpenAPI 3.1 JSON/YAML plus static docs HTML generation into build
+      intelligence artifacts, with dev/prod serving and toggles. Generated
+      paths never shadow app routes or public files.
+- [x] Wired `intelligence`/`docs` config through compiler validation, CLI
+      build/dev/inspect, and adapter build/prod-server, including `cacheDir`,
+      `exclude`, and `enabled:false` handling.
+- [x] Added typed `ServerRequest.json<T>()` request-body parsing (compile-time
+      cast only, no runtime validation) and updated public docs/AGENTS/llms.
+- [x] Validation: docs intelligence suite green; compiler config 24/24;
+      runtime request and focused compiler tests green; `npm run typecheck`
+      and `npm run build` clean; CLI inspect reports 17 routes, 20 operations,
+      54 schemas. Prod/dev artifact probes passed and
+      `tests/hydration-test.mjs` passed **556/556**.
+- [x] Full `node scripts/test.js` exceeded the tool time cap; all non-E2E
+      files after the cutoff were rerun individually and passed. `hmr-perf`
+      passed on rerun after a perf-noise timeout in the generated runner.
+- [ ] Remaining: GitHub CI after commit/push.
+
 **This session (build-time import gate + previous-route propagation):**
 
 - [x] `vesk build` now validates emitted server module imports with ASTs and

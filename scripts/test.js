@@ -11,6 +11,8 @@ execSync('npx tsx packages/cli/src/build-packages.ts', { cwd: root, stdio: 'inhe
 
 const testDirs = [
   resolve(root, 'packages/compiler/src'),
+  resolve(root, 'packages/docs/src'),
+  resolve(root, 'packages/create-vesk/src'),
   resolve(root, 'packages/runtime/src'),
   resolve(root, 'packages/adapter/src'),
   resolve(root, 'packages/plugin-pwa/src'),

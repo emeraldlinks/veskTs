@@ -13,7 +13,7 @@ import { compileClient, compileClientBoth } from '@vesk/compiler/src/client-code
 import { scanRoutes, matchUrl, collectSources, scanComponents } from '@vesk/compiler/src/router';
 import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@vesk/compiler/src/api-routes';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
-import type { MiddlewareCookies } from '@vesk/compiler/src/types';
+import type { GeneratedDocsAsset, MiddlewareCookies, VeskConfig } from '@vesk/compiler/src/types';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
 import { VeskResponse, toHeadersMap, toVeskResponse } from '@vesk/runtime/src/request';
 
@@ -853,6 +853,73 @@ export async function startDevServer(port: number, projectDir: string, config: R
   }
 
   let routeTree: RouteNode[] = scanRoutes(appDirPath);
+
+  interface DevDocsArtifacts {
+    docsPath: string | null;
+    docsHtml: string | null;
+    docsAssets: GeneratedDocsAsset[];
+    openApiJson: string;
+    openApiJsonPath: string | null;
+    openApiYaml: string;
+    openApiYamlPath: string | null;
+  }
+  let devDocsArtifacts: DevDocsArtifacts | null = null;
+
+  function collectAppPaths(nodes: RouteNode[]): string[] {
+    const paths: string[] = [];
+    const visit = (node: RouteNode): void => {
+      if (node.page) paths.push(node.fullPath);
+      for (const child of node.children ?? []) visit(child);
+    };
+    for (const node of nodes) visit(node);
+    return paths;
+  }
+
+  async function refreshIntelligenceArtifacts(): Promise<void> {
+    const veskConfig = config as unknown as VeskConfig | undefined;
+    if (veskConfig?.intelligence?.enabled === false) {
+      devDocsArtifacts = null;
+      return;
+    }
+    try {
+      const docs = await import('@vesk/docs') as {
+        analyzeProject: (options: { projectRoot: string; appDir: string; cacheDir?: string; exclude?: string[]; defaultSecurityScheme?: string }) => unknown;
+        buildIntelligenceArtifacts: (options: {
+          intelligence: unknown;
+          config: VeskConfig | undefined;
+          outDir: string;
+          projectRoot: string;
+          environment: 'dev';
+          appPaths: string[];
+          publicDir: string;
+        }) => DevDocsArtifacts;
+      };
+      const intelligence = docs.analyzeProject({
+        projectRoot: projectDir,
+        appDir: appDirPath,
+        cacheDir: veskConfig?.intelligence?.cacheDir,
+        exclude: veskConfig?.intelligence?.exclude,
+        defaultSecurityScheme:
+          veskConfig?.docs && typeof veskConfig.docs === 'object'
+            ? veskConfig.docs.auth?.defaultScheme
+            : undefined,
+      });
+      devDocsArtifacts = docs.buildIntelligenceArtifacts({
+        intelligence,
+        config: veskConfig,
+        outDir: resolve(projectDir, '.vesk'),
+        projectRoot: projectDir,
+        environment: 'dev',
+        appPaths: collectAppPaths(routeTree),
+        publicDir,
+      });
+    } catch (error) {
+      devDocsArtifacts = null;
+      LOG.warn(`intelligence analysis skipped: ${String(error)}`);
+    }
+  }
+  await refreshIntelligenceArtifacts();
+
   let clientBundle = '';
   let clientChunks = new Map<string, string>();
   let runtimeBundle = '';
@@ -1206,6 +1273,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
     try {
       routeTree = scanRoutes(appDirPath);
       updateSourceMapping();
+      await refreshIntelligenceArtifacts();
       await buildClientBundle();
       await bundleRuntime();
       await rebuildTailwindCss();
@@ -1479,6 +1547,9 @@ function routeFullPathForChunk(chunkName: string): string | null {
                 routeTree = scanRoutes(appDirPath);
                 updateSourceMapping();
               }
+              if (fullPath.startsWith(join(appDirPath, 'api') + '/') || fullPath.endsWith('vesk.config.ts')) {
+                void refreshIntelligenceArtifacts();
+              }
               const changedComponents = sourceToComponents.get(fullPath) || [];
               const treeChanged = needsRescan && prevTree !== stripAnnots(routeTree);
               const isOutsideApp = !fullPath.startsWith(appDirPath + '/') && fullPath !== appDirPath;
@@ -1695,6 +1766,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
     '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
     '.html': 'text/html', '.json': 'application/json',
     '.webmanifest': 'application/manifest+json',
+    '.yaml': 'application/yaml', '.yml': 'application/yaml',
   };
 
   const hmrJsPath = join(runtimeDir, 'hmr-client.js');
@@ -1870,6 +1942,38 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const devResponse = await devRouter.route(req.method || 'GET', url.pathname, body, url.search);
       if (devResponse) {
         writeDevPanelResponse(res, devResponse);
+        return;
+      }
+    }
+
+    if (devDocsArtifacts) {
+      const artifacts = devDocsArtifacts;
+      const docsAsset = artifacts.docsAssets.find((asset) => asset.path === url.pathname);
+      if (docsAsset && !matchUrl(routeTree, docsAsset.path)) {
+        const publicAsset = resolveWithin(publicDir, docsAsset.path.slice(1));
+        if (!publicAsset || !existsSync(publicAsset)) {
+          res.writeHead(200, { 'Content-Type': docsAsset.contentType, 'Cache-Control': 'no-store' });
+          res.end(docsAsset.content);
+          return;
+        }
+      }
+      if (artifacts.docsPath && artifacts.docsHtml && url.pathname === artifacts.docsPath && !matchUrl(routeTree, url.pathname)) {
+        const docsFile = resolveWithin(publicDir, `${artifacts.docsPath.slice(1)}/index.html`);
+        const directDocsFile = resolveWithin(publicDir, artifacts.docsPath.slice(1));
+        if (!docsFile || !existsSync(docsFile)) if (!directDocsFile || !existsSync(directDocsFile)) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(artifacts.docsHtml);
+          return;
+        }
+      }
+      if (artifacts.openApiJsonPath && url.pathname === artifacts.openApiJsonPath) {
+        res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+        res.end(artifacts.openApiJson);
+        return;
+      }
+      if (artifacts.openApiYamlPath && url.pathname === artifacts.openApiYamlPath) {
+        res.writeHead(200, { 'Content-Type': MIME['.yaml'], 'Cache-Control': 'no-store' });
+        res.end(artifacts.openApiYaml);
         return;
       }
     }
@@ -2741,6 +2845,9 @@ function routeFullPathForChunk(chunkName: string): string | null {
 
   server.listen(port, bindHost, () => {
     LOG.ok(`dev server at http://localhost:${port} (listening on ${bindHost})`);
+    if (devDocsArtifacts?.docsPath) {
+      LOG.ok(`api docs live at http://localhost:${port}${devDocsArtifacts.docsPath}`);
+    }
     const routes = collectRoutePaths(routeTree);
     const pageCount = countPages(routeTree);
     const apiCount = countFilesNamed(join(appDirPath, 'api'), 'route.ts');

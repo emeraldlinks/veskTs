@@ -11,16 +11,19 @@
 import {
   CHANNELS,
   STABLE,
+  bumpFromCommits,
   classifyCommit,
   compareVersions,
   formatVersion,
   isChannel,
+  isFeatureCommit,
   maxVersion,
   mergeChangelog,
   nextVersion,
   parseVersion,
   renderChangelog,
 } from '../../../scripts/release-plan.mjs';
+import { BUILD_ORDER, PUBLISH_ORDER } from '../../../scripts/publish-plan.mjs';
 
 let passed = 0;
 let failed = 0;
@@ -67,6 +70,37 @@ it('a prerelease sorts below its own base (semver)', () => {
 
 it('a stable release after a plain version bumps the patch', () => {
   eq(nextVersion(STABLE, ['0.2.47']), '0.2.48', 'next stable');
+});
+
+it('a feature bumps the feature number and resets the bug number', () => {
+  eq(nextVersion(STABLE, ['0.2.1'], 'minor'), '0.3.0', '0.2.1 -> 0.3.0');
+  eq(nextVersion(STABLE, ['0.2.109'], 'minor'), '0.3.0', 'high patch still goes to the next minor');
+  eq(nextVersion(STABLE, ['0.2.1-canary.4'], 'minor'), '0.3.0', 'a feature does not promote tested canaries');
+  eq(nextVersion('canary', ['0.2.1'], 'minor'), '0.3.0-canary.1', 'prerelease uses the new base');
+});
+
+it('a non-feature release still bumps the bug number', () => {
+  eq(nextVersion(STABLE, ['0.2.1'], 'patch'), '0.2.2', '0.2.1 -> 0.2.2');
+  eq(nextVersion(STABLE, ['0.2.1-canary.4'], 'patch'), '0.2.1', 'a patch promotes the tested canary base');
+});
+
+it('detects feature commits from conventional types and the word feature', () => {
+  ok(isFeatureCommit('feat(api): add docs'), 'conventional feat');
+  ok(isFeatureCommit('feat!: drop the marker DOM'), 'breaking feat');
+  ok(isFeatureCommit('feature(api): add docs'), 'feature as a type');
+  ok(isFeatureCommit('add feature toggles', ''), 'feature in the subject');
+  ok(isFeatureCommit('add toggles', 'this feature is ready'), 'feature in the body');
+  ok(!isFeatureCommit('fix(api): decode head escapes', ''), 'fix is not a feature');
+  ok(!isFeatureCommit('chore: defeat the regex checks', ''), 'substring is not the word');
+});
+
+it('a release range is a feature release when any commit is a feature', () => {
+  eq(bumpFromCommits(['fix: a', 'docs: b']), 'patch', 'no feature commits');
+  eq(bumpFromCommits(['fix: a', 'feat: b', 'docs: c']), 'minor', 'one feature commit');
+  eq(bumpFromCommits([
+    { subject: 'chore: a', body: '' },
+    { subject: 'add a new feature', body: '' },
+  ]), 'minor', 'object commits');
 });
 
 it('the first canary of an unpublished base is -canary.1', () => {
@@ -150,6 +184,13 @@ it('a commit body never leaks into another entry', () => {
   ]);
   ok(!out.includes('after: title'), 'a body line did not become an entry');
   eq((out.match(/^- /gm) || []).length, 1, 'exactly one entry');
+});
+
+it('publishes @vesk/docs with the other packages', () => {
+  ok(PUBLISH_ORDER.includes('@vesk/docs'), '@vesk/docs must be published');
+  ok(BUILD_ORDER.includes('@vesk/docs'), '@vesk/docs must be built before publish');
+  ok(PUBLISH_ORDER.indexOf('@vesk/docs') > PUBLISH_ORDER.indexOf('@vesk/compiler'), '@vesk/docs follows its compiler dependency');
+  eq(BUILD_ORDER.indexOf('@vesk/docs') > BUILD_ORDER.indexOf('@vesk/compiler'), true, 'build order respects the dependency');
 });
 
 it('formatVersion round-trips', () => {

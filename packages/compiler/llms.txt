@@ -39,7 +39,7 @@
 | `compileFile` | fn | `(source, options?: { sourcePath?: string }) => CompileFileResult` (`{ ir, componentMap, __vesk }`). |
 | `compileClient`, `compile` | fn | `(source, _componentName: string\|null, { forceClient?, hydrate?, includeTopLevel? }) => string`. |
 | IR classes | class | `IRRoot, ComponentIR, StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion, MapRegion, ComponentCall, Expression`; `type IRNode`. |
-| types | type | `VeskPlugin, MiddlewareContext, MiddlewareNext, VeskLocals, Locals, MiddlewareError, VeskConfig, VeskSecurity, VeskCors, VeskRateLimit`. |
+| types | type | `VeskPlugin, MiddlewareContext, MiddlewareNext, VeskLocals, Locals, MiddlewareError, VeskConfig, VeskSecurity, VeskCors, VeskRateLimit, VeskIntelligenceConfig, VeskDocsConfig, VeskDocsOpenApiConfig, ManifestIntelligenceInfo, IntelligenceCertainty/Provenance/SourceLocation`. |
 | config | fn | `defineConfig, validateConfig, preset, definePlugin` (see config.ts section). |
 | router | fn | `scanRoutes(appDir, options?), scanComponents(dir), collectSources(tree), matchUrl(tree, pathname)`. |
 
@@ -144,7 +144,7 @@ client replaces call with `{ __veskAction:true, id, url }` stub (execute handler
 `definePlugin(plugin)` (requires `name`), `defineConfig(config)` (resolves security preset strings/
 fns, defaults autoEscape+csrf=true, xFrameOptions=DENY, CSP, redactLogs; normalizes `md` config —
 `md.html: 'escape'|'allow'|'allowlist'`, lowercased `md.allowTags`, unknown mode → configError),
-`validateConfig`, `preset(name, overrides?)`.
+`validateConfig`, `preset(name, overrides?)`. Also validates `intelligence` and `docs`: docs path must be an absolute route path without query/hash/brackets/wildcards/spaces; OpenAPI JSON/YAML paths must end in `.json`/`.yaml` and must not collide with each other. `docs.securitySchemes`, `docs.security`, and `docs.auth` are validated declaratively; no secrets or credential values are accepted.
 
 ## errors (errors.ts)
 

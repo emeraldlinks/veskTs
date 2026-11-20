@@ -30,10 +30,10 @@ Interfaces: `VeskPlugin`, `VeskSecurity`, `RouteNode`, `ApiRouteNode`,
 
 Key shapes:
 ```
-BuildOptions { outDir?, publicDir?, plugins?, seo?, strictSeo?, siteUrl?, ssg?, codeSplit?, hmr?, target?: 'node'|'edge', platform?: 'node'|'vercel'|'netlify'|'cloudflare'|'deno'|'aws'|'edge'|'coxmos' }
+BuildOptions { outDir?, publicDir?, plugins?, seo?, strictSeo?, siteUrl?, ssg?, codeSplit?, hmr?, target?: 'node'|'edge', platform?: 'node'|'vercel'|'netlify'|'cloudflare'|'deno'|'aws'|'edge'|'coxmos', config?: VeskConfig }
 BuildResult { routeTree: RouteNode[]; apiTree: ApiRouteNode[]; ssrRoutes: RouteNode[]; apiRoutes: ApiRouteNode[]; manifest: Manifest }
 ClientBundleResult { main: string; chunks: ChunkEntry[] }   // ChunkEntry { name; code }
-Manifest { version: number; middleware: boolean; routes: ManifestRouteEntry[]; prerendered: ManifestPrerenderedEntry[]; static: { prefix; dir }; actions?: ManifestActionEntry[] }
+Manifest { version: number; middleware: boolean; routes: ManifestRouteEntry[]; prerendered: ManifestPrerenderedEntry[]; static: { prefix; dir }; actions?: ManifestActionEntry[]; intelligence?: { projectFile; hash; docsPath; openapiPaths } }
 RouteNode { path; fullPath; isGroup; isDynamic; isCatchAll; page; layout; loading; error; notFound; hasMiddleware; children; sourceDir; segmentCount; _revalidate?; _isrTags?; _pageName?; _layoutName?; chunk? }
 ApiRouteNode { path; fullPath; isDynamic; isCatchAll; filePath; children }
 SsgRouteResult { path; html; static; params? }
@@ -231,15 +231,22 @@ Call: `build(appDir, options)`. Returns `BuildResult | undefined`.
     { siteUrl: options.siteUrl })` → `static/public/sitemap.xml`;
     `generateRobotsTxt(siteUrl)` → `static/public/robots.txt` — both skipped if
     a user file already exists at the target.
-19. `generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes,
-    middlewareEnabled, actionMap)` → write `config.json`.
-20. **Platform** — `detectPlatform(options.platform ? ['--platform', options.platform] : [], process.env)`;
+19. **Intelligence/docs** — `@vesk/docs analyzeProject()` →
+    `intelligence/project.json` (API routes only, never page routes); OpenAPI
+    JSON/YAML and optional local Swagger UI HTML/assets → `static/public/` unless
+    a generated path collides with an app route or public file. Honors
+    `options.config.intelligence` and `options.config.docs`. Auth schemes and
+    protected operations are inferred from handlers/middleware; Swagger UI uses
+    local assets and declarative `docs.securitySchemes`/`docs.auth` config.
+20. `generateManifest(routeTree, ssrRoutes, apiRoutes, prerenderedRoutes,
+    middlewareEnabled, actionMap)` → write `config.json` (includes `intelligence`).
+21. **Platform** — `detectPlatform(options.platform ? ['--platform', options.platform] : [], process.env)`;
     if `'node'` and `options.target === 'edge'` → `'edge'`. If result ≠ `'node'`:
     `emitPlatformOutput(platform, { outDir, ssrRoutes, apiRoutes,
     prerenderedPaths, prerenderedRoutes, hasMiddleware: middlewareEnabled })`.
     For `vercel` also creates `.vercel/output` symlink (inside `emitPlatformOutput`).
-21. Run every `plugin.onBuildEnd()` (awaited).
-22. Return `{ routeTree, apiTree, ssrRoutes, apiRoutes, manifest }`.
+22. Run every `plugin.onBuildEnd()` (awaited).
+23. Return `{ routeTree, apiTree, ssrRoutes, apiRoutes, manifest }`.
 
 **Server runtime exports produced by `bundleRuntime`** (used by generated
 functions): `cookies`, `headers`, `locals`, `renderPage`, `renderFullPage`,

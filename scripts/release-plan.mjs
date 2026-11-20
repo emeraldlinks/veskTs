@@ -6,16 +6,17 @@
  * script and the test suite, so the rules live in exactly one place.
  *
  * The train:
- *   canary  — published on every merge to main, prerelease version, npm
- *             dist-tag `canary`. Never touches `latest`, never bumps the
- *             version committed in the repo, so merging does not produce a
- *             commit per merge.
+ *   canary  — published on demand, prerelease version, npm dist-tag `canary`.
  *   beta    — opt-in, dist-tag `beta`, same prerelease mechanics.
- *   stable  — human-triggered. Bumps the repo to a plain semver, publishes
- *             `latest`, writes CHANGELOG.md, tags the release.
+ *   stable  — the default for green pushes to main. Bumps the repo to a plain
+ *             semver, publishes `latest`, writes CHANGELOG.md, tags the release.
+ *             A release containing a feature bumps minor and resets patch;
+ *             every other release bumps patch.
  */
 
 export const STABLE = 'stable';
+export const PATCH = 'patch';
+export const MINOR = 'minor';
 const PRERELEASE = /^(\d+)\.(\d+)\.(\d+)-([0-9A-Za-z.-]+)$/;
 const PLAIN = /^(\d+)\.(\d+)\.(\d+)$/;
 
@@ -87,27 +88,46 @@ export function maxVersion(versions) {
 	return best;
 }
 
+export function isBump(value) {
+	return value === PATCH || value === MINOR;
+}
+
+const FEATURE_TYPE = /^feat(?:\([^)]*\))?!?:\s+/;
+const FEATURE_WORD = /\bfeature(?:s)?\b/i;
+
+export function isFeatureCommit(subject, body = '') {
+	const text = `${typeof subject === 'string' ? subject : ''}\n${typeof body === 'string' ? body : ''}`;
+	return FEATURE_TYPE.test(typeof subject === 'string' ? subject : '') || FEATURE_WORD.test(text);
+}
+
+export function bumpFromCommits(commits) {
+	for (const commit of commits || []) {
+		const subject = typeof commit === 'string' ? commit : commit?.subject || '';
+		const body = typeof commit === 'string' ? '' : commit?.body || '';
+		if (isFeatureCommit(subject, body)) return MINOR;
+	}
+	return PATCH;
+}
+
 /**
  * The next version to publish for a channel.
  *
  * `seen` is every version known to exist (the repo's packages plus whatever the
  * registry already has), so a canary is never republished and a stable version
- * is never skipped. Prerelease counters of a DIFFERENT label (`beta` when we're
- * about to cut a `canary`) do not consume a number, so the two channels stay
- * independent.
+ * is never skipped. `bump` is `minor` when the release contains a feature and
+ * `patch` otherwise: minor increments the feature number and resets the bug
+ * number to zero (0.2.1 -> 0.3.0), patch increments only the bug number.
  */
-export function nextVersion(channel, seen) {
+export function nextVersion(channel, seen, bump = PATCH) {
+	if (!isBump(bump)) throw new Error(`unknown bump "${bump}" (minor|patch)`);
 	const versions = seen.filter((v) => typeof v === 'string' && parseVersion(v));
 	const highest = maxVersion(versions);
 	const base = highest ? parseVersion(highest) : { major: 0, minor: 0, patch: 0 };
-  // Never reuse a base that is already published in ANY form.
 	let core = { major: base.major, minor: base.minor, patch: base.patch };
-	if (highest && parseVersion(highest).pre === null) {
+	if (bump === MINOR) {
+		core = { major: base.major, minor: base.minor + 1, patch: 0 };
+	} else if (highest && parseVersion(highest).pre === null) {
 		core = { major: base.major, minor: base.minor, patch: base.patch + 1 };
-	} else if (highest && parseVersion(highest).pre !== null) {
-		// The highest known version is itself a prerelease of this base: the base
-		// is unpublished, so the next release (of any channel) is that base.
-		core = { major: base.major, minor: base.minor, patch: base.patch };
 	}
 	if (channel === STABLE) return formatVersion(core);
 	const label = channel;

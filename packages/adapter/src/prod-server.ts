@@ -144,6 +144,7 @@ interface BuildConfig {
   assets?: { hashed: boolean; client: { file: string; url: string; hash: string; bytes: number; integrity: string } };
   /** Build-time-baked onHead-plugin head snippet for not-found/error pages. */
   headExtra?: string;
+  intelligence?: { docsPath: string | null; openapiPaths?: string[] };
 }
 
 interface MatchPathResult {
@@ -507,6 +508,16 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       res.writeHead(200, { 'Content-Type': mimeFor(rootFile) });
       res.end(readFileSync(rootFile));
       return;
+    }
+
+    const docsPath = buildConfig.intelligence?.docsPath;
+    if (docsPath && url.pathname === docsPath) {
+      const docsFile = resolveWithin(publicDir, `${docsPath.slice(1)}/index.html`);
+      if (docsFile && existsSync(docsFile) && statSync(docsFile).isFile()) {
+        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+        res.end(readFileSync(docsFile));
+        return;
+      }
     }
 
     if (url.pathname === '/ssr-data.js') {
@@ -932,6 +943,9 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
 
   server.listen(port, host, () => {
     console.error(`vesk production server at http://localhost:${port} (listening on ${host})`);
+    if (buildConfig.intelligence?.docsPath) {
+      console.error(`api docs live at http://localhost:${port}${buildConfig.intelligence.docsPath}`);
+    }
   });
 
   return server;
