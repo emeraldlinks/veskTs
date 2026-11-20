@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.3.0 — 2026-11-20
+
+_No breaking changes._
+
+### Features
+
+- **docs:** publish docs and bump minor on features
+
 ## 0.2.109 — 2026-11-19
 
 _No breaking changes._
