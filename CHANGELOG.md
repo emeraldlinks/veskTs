@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.3.1 — 2026-11-21
+
+_No breaking changes._
+
+### Refactors
+
+- **server:** dedupe transport helpers and expand API docs
+
+### Tests
+
+- **create-vesk:** derive scaffold docs version
+
 ## 0.3.0 — 2026-11-20
 
 _No breaking changes._
