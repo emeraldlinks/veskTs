@@ -2,7 +2,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { resolve, dirname, basename } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
-import { createRateLimiter, resolveComponentName, safeJsonForScript, getClientProtocol, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
+import { createRateLimiter, getClientIp, resolveComponentName, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
@@ -15,111 +15,25 @@ import { loadVeskConfig } from '@vesk/adapter/src/load-config';
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter/src/default-pages';
 import { installResponsePipeline } from '@vesk/adapter/src/response-pipeline';
 import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
-import { makeWebRequest, bodyTooLarge } from '@vesk/adapter/src/web-request';
+import { makeWebRequest } from '@vesk/adapter/src/web-request';
 import { mimeFor } from '@vesk/adapter/src/platform-output';
+import {
+  buildSsrDataScript,
+  deliverMiddlewareResponse,
+  deliverResponse,
+  errorStatus,
+  matchPath,
+  resolveRequestUrl,
+  toNodeHeaders,
+} from '@vesk/adapter/src/server-core';
 import type { SecurityConfig, CompressionConfig, ProdServerOptions } from '@vesk/adapter/src/types';
 
 // Re-exported so a host embedding the prod server gets the transport types it
 // may need to type its own options without reaching into @vesk/types directly.
 export type { CompressionConfig, ProdServerOptions };
+export { resolveRequestUrl } from '@vesk/adapter/src/server-core';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAULT_MAX_BODY_BYTES): Promise<Buffer> {
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.byteLength;
-    if (total > maxBytes) throw bodyTooLarge(maxBytes);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
-
-/** Open-ended content types. Buffering one would hold the response until the
- *  stream closed — which, for a never-ending event stream, is never. */
-const STREAMING_TYPES = new Set(['text/event-stream', 'application/x-ndjson']);
-
-/** Above this, a "buffered" body is streamed instead rather than held whole. */
-const DELIVER_BUFFER_LIMIT = 1024 * 1024;
-
-/**
- * Writes a handler Response to the socket.
- *
- * A finite body is delivered as ONE `end(buffer)`, not chunk-by-chunk, and that
- * is load-bearing: the response pipeline can only tag a body and revalidate it
- * against `If-None-Match` — and only apply content-encoding — once it can see
- * the whole body. Streaming a 2 KB JSON body would silently opt every API
- * response out of both. A response that turns out to exceed the buffer limit,
- * or that declares an open-ended content type, falls back to streaming so the
- * memory and time-to-first-byte cost of a genuinely large body is unchanged.
- */
-/** Preserve every Set-Cookie header — Headers collapses them otherwise. */
-function toNodeHeaders(response: Response): Record<string, string | string[]> {
-  const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
-  const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-  if (cookies.length > 0) headers['set-cookie'] = cookies;
-  return headers;
-}
-
-async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
-  const headers = toNodeHeaders(response);
-  const body = response.body;
-  if (!body || typeof body.getReader !== 'function') {
-    res.writeHead(response.status, headers);
-    res.end(await response.text());
-    return;
-  }
-  const contentType = String(response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
-  const reader = body.getReader();
-  if (STREAMING_TYPES.has(contentType)) {
-    res.writeHead(response.status, headers);
-    pumpRemaining(res, reader);
-    return;
-  }
-  const chunks: Buffer[] = [];
-  let size = 0;
-  let overflow = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      chunks.push(Buffer.from(value));
-      size += value.byteLength;
-      if (size > DELIVER_BUFFER_LIMIT) { overflow = true; break; }
-    }
-  } catch {
-    /* stream aborted by the client */
-  }
-  res.writeHead(response.status, headers);
-  if (overflow) {
-    for (const chunk of chunks) res.write(chunk);
-    pumpRemaining(res, reader);
-    return;
-  }
-  res.end(Buffer.concat(chunks));
-}
-
-/** Drain an already-started reader onto the socket, then end it. */
-function pumpRemaining(res: ServerResponse, reader: ReadableStreamDefaultReader<Uint8Array>): void {
-  void (async () => {
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(Buffer.from(value));
-      }
-    } catch {
-      /* stream aborted by the client */
-    }
-    res.end();
-  })();
-}
-
-function errorStatus(e: unknown, fallback: number): number {
-  const s = (e as { status?: unknown } | null)?.status ?? (e as { statusCode?: unknown } | null)?.statusCode;
-  return typeof s === 'number' && s >= 400 && s < 600 ? s : fallback;
-}
 
 interface BuildConfigRoute {
   path: string;
@@ -145,30 +59,6 @@ interface BuildConfig {
   /** Build-time-baked onHead-plugin head snippet for not-found/error pages. */
   headExtra?: string;
   intelligence?: { docsPath: string | null; openapiPaths?: string[] };
-}
-
-interface MatchPathResult {
-  [key: string]: string;
-}
-
-function firstHeaderValue(value: string | string[] | undefined): string | undefined {
-  const raw = Array.isArray(value) ? value[0] : value;
-  const trimmed = raw?.split(',')[0]?.trim();
-  return trimmed || undefined;
-}
-
-export function resolveRequestUrl(req: IncomingMessage, port: number, trustProxy: boolean): URL {
-  const proto = (req.socket as { encrypted?: boolean }).encrypted
-    ? 'https'
-    : getClientProtocol({ headers: req.headers } as Record<string, unknown>, trustProxy);
-  const forwardedHost = trustProxy ? firstHeaderValue(req.headers['x-forwarded-host']) : undefined;
-  const host = forwardedHost || (req.headers.host as string) || `localhost:${port}`;
-  const path = req.url || '/';
-  try {
-    return new URL(path, `${proto}://${host}`);
-  } catch {
-    return new URL(path, `http://localhost:${port}`);
-  }
 }
 
 export async function startProdServer(outDir: string, options?: ProdServerOptions): Promise<Server> {
@@ -304,39 +194,6 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     }
   }
 
-  function matchPath(pattern: string, pathname: string): MatchPathResult | null {
-    const patternParts = pattern.split('/').filter(Boolean);
-    const pathParts = pathname.split('/').filter(Boolean);
-    let pi = 0, pp = 0;
-    const params: MatchPathResult = {};
-    while (pi < pathParts.length && pp < patternParts.length) {
-      const seg = patternParts[pp];
-      if (seg.startsWith('*')) {
-        // Catch-all: absorbs every remaining segment (possibly none).
-        params[seg.slice(1)] = pathParts.slice(pi).join('/');
-        pi = pathParts.length;
-        pp++;
-      } else if (seg.startsWith(':')) {
-        const name = seg.slice(1);
-        params[name] = pathParts[pi];
-        pi++; pp++;
-      } else if (seg === pathParts[pi]) {
-        pi++; pp++;
-      } else {
-        return null;
-      }
-    }
-    // A trailing catch-all still matches with an empty tail (`/api/files` ->
-    // `/api/files/*rest` with rest=''). The loop above exits as soon as the
-    // URL is exhausted, so without this the catch-all was never reached.
-    if (pp === patternParts.length - 1 && patternParts[pp].startsWith('*')) {
-      params[patternParts[pp].slice(1)] = pathParts.slice(pi).join('/');
-      pp++;
-    }
-    if (pp === patternParts.length && pi === pathParts.length) return params;
-    return null;
-  }
-
   /**
    * Dispatch a middleware rewrite from inside a generated API/SSR function.
    *
@@ -393,10 +250,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
   (globalThis as Record<string, unknown>).__vesk_dispatch_rewrite = dispatchRewrite;
 
   function getClientIpFromReq(req: IncomingMessage): string {
-    if (!securityConfig?.trustProxy) return req.socket?.remoteAddress || 'unknown';
-    const forwarded = req.headers['x-forwarded-for'];
-    if (forwarded) return (typeof forwarded === 'string' ? forwarded.split(',')[0] : forwarded[0]).trim();
-    return (req.headers['x-real-ip'] as string) || req.socket?.remoteAddress || 'unknown';
+    const ip = getClientIp({ headers: req.headers } as Record<string, unknown>, securityConfig?.trustProxy || false);
+    return ip === 'unknown' ? (req.socket?.remoteAddress || 'unknown') : ip;
   }
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -525,12 +380,8 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       const store = (globalThis as Record<string, unknown>).__vsk_ssr_payload_store as Record<string, { props?: Record<string, unknown>; ssrData?: Record<string, unknown> }> | undefined;
       const payload = store?.[token];
       if (payload) delete store[token];
-      const lines: string[] = [];
-      // script-safe serialization: props may contain user data
-      if (payload?.props) lines.push(`globalThis.__vesk_props = ${safeJsonForScript(JSON.stringify(payload.props))};`);
-      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${safeJsonForScript(JSON.stringify(payload.ssrData))};`);
       res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
-      res.end(lines.join('\n') || '// no ssr data');
+      res.end(buildSsrDataScript(payload));
       return;
     }
 
@@ -599,7 +450,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       const targetUrl = new URL(targetPath, url.origin);
       const middlewareRequest = new Request(targetUrl.href, {
         method: 'GET',
-        headers: req.headers as Record<string, string>,
+        headers: Object.fromEntries(toHeadersMap(req.headers)),
       });
       const mwEndpointCtx = {
         request: middlewareRequest,
@@ -631,7 +482,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
     if (middlewareMod) {
       mwCtx = {
-        request: new Request(url.href, { headers: req.headers as Record<string, string>, method: req.method || 'GET' }),
+        request: new Request(url.href, { headers: Object.fromEntries(toHeadersMap(req.headers)), method: req.method || 'GET' }),
         params: {},
         url,
         locals: Object.assign({}, serverStore || {}),
@@ -662,9 +513,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     if (middlewareMod) {
       const mwResult = await middlewareMod.execute(mwCtx);
       if (mwResult.response) {
-        const body = await mwResult.response.text();
-        res.writeHead(mwResult.response.status, Object.fromEntries(mwResult.response.headers));
-        res.end(body);
+        await deliverMiddlewareResponse(res, mwResult.response);
         return;
       }
       if (mwResult.rewriteUrl) {
@@ -827,25 +676,9 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
               }
 
               const response = await withSecurityScope(() => mod.handle(webRequest));
-              const headers: Record<string, string | number> = Object.fromEntries(response.headers);
+              const headers = toNodeHeaders(response);
               if (!headers['content-type'] && !headers['Content-Type']) headers['Content-Type'] = 'text/html';
-
-              if (response.body && typeof response.body.getReader === 'function') {
-                res.writeHead(response.status, headers);
-                const reader = response.body.getReader();
-                const pump = () => {
-                  reader.read().then(({ done, value }: { done: boolean; value?: Uint8Array }) => {
-                    if (done) { res.end(); return; }
-                    res.write(value);
-                    pump();
-                  }).catch(() => res.end());
-                };
-                pump();
-              } else {
-                const body = await response.text();
-                res.writeHead(response.status, headers);
-                res.end(body);
-              }
+              await deliverResponse(res, response, headers);
               return;
             } catch (e) {
               const err = e instanceof Error ? e : new Error(String(e));

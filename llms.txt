@@ -53,11 +53,22 @@ emits per-cell DOM updates and static subtrees need no hydration runtime.
 | Package | Surface |
 | --- | --- |
 | `packages/compiler` | `@vesk/compiler` — preprocess/parser/IR/codegen, exports `parse`, `createBaseParser`, `VeskParserPlugin`, `generateIR`, `render` (server codegen), `compileClient`/`compile`, `isStaticIR`, `defineConfig`, `definePlugin`, `preset`, `validateConfig`, `scanRoutes`, `scanComponents`, `collectSources`, `matchUrl`, plus `typecheckProject` (via `src/typecheck`) |
-| `packages/docs` | `@vesk/docs` — Intelligence Compiler: `analyzeProject` (API routes only), semantic IR/JSON Schema, OpenAPI 3.1 JSON/YAML generators, local Swagger UI HTML/assets, automated auth/protected-route detection, `buildIntelligenceArtifacts`/`writeIntelligenceArtifacts`, `inspect`/`formatInspection` |
+| `packages/docs` | `@vesk/docs` — Intelligence Compiler: `analyzeProject` (API routes only), semantic IR/JSON Schema, OpenAPI 3.1 JSON/YAML generators, local Swagger UI HTML/assets, automated auth/protected-route detection, `buildIntelligenceArtifacts`/`writeIntelligenceArtifacts`, `inspect`/`formatInspection`; configured with `docs` + `intelligence` in `vesk.config.ts` |
 | `packages/runtime` | `@vesk/runtime` — client barrel `index-client`, server barrel `index-server` (split: hydrators/bindings client-only; request/ISR server-only). Subpath exports: `@vesk/runtime/router` (full routing surface + LoadingIndicator), `@vesk/runtime/server` (request/response primitives) |
 | `packages/adapter` | build output (platforms: node/vercel/netlify/cloudflare/deno/aws/edge/coxmos), dev server, prod server, SSR function, SEO audit |
 | `packages/cli` | `vesk` binary — dev/build/start/typecheck/inspect/seo |
 | `packages/lsp`, `prettier-plugin`, `plugin-tailwind`, `create-vesk` | tooling |
+
+## API docs (`@vesk/docs`)
+
+- Only `app/api/**/route.ts` handlers are documented; page routes are never included.
+- Defaults: Swagger UI at `/docs`, spec at `/openapi.json` and `/openapi.yaml`, local Swagger assets under `/docs/swagger-ui/*`. Dev UI is on by default; production UI requires `docs.prod: true`.
+- `docs.path`, `docs.openapi.jsonPath`, and `docs.openapi.yamlPath` accept absolute static paths; no query, hash, dynamic segments, wildcards, spaces, or trailing slash.
+- App routes and public files win on collision: a page at the docs path suppresses generated Swagger UI instead of causing an error.
+- Route JSDoc: `@summary`, `@description`, `@security <scheme>`, `@security none`, `@public`, `@status <code>`; `req.json<T>()` and `VeskResponse.json<T>()` provide schemas.
+- Security is inferred from Authorization/X-API-Key access, authenticated/guarded user locals, and scoped middleware; plain cookie/header reads do not imply auth.
+- `docs.auth.session` preauthorizes Swagger UI from `cookie`, `localStorage`, or `sessionStorage`; token values are read in the browser and never embedded in generated files.
+- `vesk inspect [query] [--json]` exposes routes, operations, schemas, diagnostics, and dependencies from the same analysis. See `/docs/vesk-docs` for the full guide.
 
 ## Router surface (`@vesk/runtime/router`)
 

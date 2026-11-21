@@ -5,6 +5,51 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (server transport dedupe):**
+
+- [x] Added shared `@vesk/adapter/src/server-core` for header conversion,
+      response delivery, body reads, error status, request URL resolution, and
+      script-safe SSR payload serialization.
+- [x] Extracted canonical route matching into `route-match.ts` and SSR script
+      serialization into `ssr-data.ts`; the generated platform handler now embeds
+      those same implementations instead of maintaining inline copies.
+- [x] Refactored prod, adapter dev, CLI dev, and platform handlers onto the shared
+      helpers; removed local `toNodeHeaders`, `deliverResponse`, `errorStatus`,
+      body readers, `matchPath`, and SSR-data escaping.
+- [x] Merged the remaining repeated CLI/dev/prod server logic: middleware response
+      delivery, MIME lookup, body reads, header normalization, and client IP parsing
+      now use the shared helpers; added source-usage guards for each migration.
+- [x] Review fixes: shared `SsrDataPayload` type in CLI, script-breaking XSS payload
+      assertion in the platform handler test, 2-space/single-quote style on new files,
+      and `deliverMiddlewareResponse` preserves the original response's `build()`.
+- [x] Validation: server-core 12/12, source-usage 7/7, platform handler 15/15,
+      prod origin 5/5, adapter dev 54/54, CLI dev 64/64, package rebuild,
+      CLI bundle rebuild, `npm run typecheck`, CLI typecheck, and `git diff --check`
+      all green. Code review: no findings.
+- [x] Full hydration/browser probe passed on port 3200 against the final rebuilt
+      CLI bundle: **556 passed, 0 failed, 0 skipped, 556 total**.
+
+**This session (vesk-doc API docs + latest deps):**
+
+- [x] Added a full `/docs/vesk-docs` guide covering `@vesk/docs` generation,
+      config, custom paths, route annotations, schemas/statuses, auth/session
+      preauthorization, `vesk inspect`, build artifacts, collisions, and the
+      programmatic API.
+- [x] Updated the CLI reference with `vesk inspect` and expanded both `llms.txt`
+      copies with the API docs surface and `/docs/vesk-docs` pointer.
+- [x] Updated every `vesk-doc` dependency to registry-latest: all `@vesk/*` and
+      `lucide-vesk` to `^0.3.0`, Tailwind `^4.3.5`, TypeScript `^7.0.2`;
+      installed `@vesk/docs` and regenerated `package-lock.json`.
+- [x] Configured docs in `vesk-doc/vesk.config.ts` with `intelligence` plus
+      `docs.dev`, `docs.prod`, and a non-colliding `docs.path` of `/api-reference`
+      because the docs site already owns `/docs`.
+- [x] Typed `app/api/hello/route.ts` POST body so the generated spec has a real
+      `HelloBody` schema and `vesk inspect diagnostics` reports zero issues.
+- [x] Validation: docs-examples 173/173, `vesk-doc` typecheck green,
+      `vesk-doc` build green with `docs → /api-reference`, `vesk inspect`
+      reports 3 routes/4 operations/5 schemas/0 diagnostics, and generated
+      Swagger UI/OpenAPI JSON/YAML verified under `dist/static/public/`.
+
 **This session (release CI versioning):**
 
 - [x] CI now reads the push's commit range and passes it to `next-version.mjs`;

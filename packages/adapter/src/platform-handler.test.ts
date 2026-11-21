@@ -59,6 +59,8 @@ async function main() {
     cpSync(resolve(__dirname, '..', 'dist', 'platform-handler.js'), join(adapterDir(), 'platform-handler.js'));
     // platform-handler imports the branded fallback pages; stage the sibling too.
     cpSync(resolve(__dirname, '..', 'dist', 'default-pages.js'), join(adapterDir(), 'default-pages.js'));
+    cpSync(resolve(__dirname, '..', 'dist', 'route-match.js'), join(adapterDir(), 'route-match.js'));
+    cpSync(resolve(__dirname, '..', 'dist', 'ssr-data.js'), join(adapterDir(), 'ssr-data.js'));
   }
   function stageCompiler() {
     mkdirSync(compilerDist(), { recursive: true });
@@ -232,7 +234,13 @@ export async function handle(request) {
     await it('serves the SSR-data handoff for /ssr-data.js?t=<token> (edge hydration parity)', async () => {
       const g = globalThis as Record<string, unknown>;
       const store = (g.__vsk_ssr_payload_store || (g.__vsk_ssr_payload_store = {})) as Record<string, Record<string, unknown>> ;
-      store['tok123'] = { ssrData: { 'vesk-compiler-latest': { version: '0.2.36' } }, props: { a: 1 } };
+      store['tok123'] = {
+        ssrData: {
+          'vesk-compiler-latest': { version: '0.2.36' },
+          hostile: '</script><script>alert(1)</script>',
+        },
+        props: { a: 1 },
+      };
       const res = await handleRequest(new Request('http://test.local/ssr-data.js?t=tok123'));
       assert(res.status === 200, `expected 200, got ${res.status}`);
       assert((res.headers.get('content-type') || '').includes('javascript'), `expected application/javascript, got ${res.headers.get('content-type')}`);
@@ -241,6 +249,8 @@ export async function handle(request) {
       assert(body.includes('globalThis.__vsk_ssr_data'), 'expected __vsk_ssr_data global in body');
       assert(body.includes('"version":"0.2.36"') || body.includes('0.2.36'), 'expected serialized payload in body');
       assert(body.includes('globalThis.__vesk_props'), 'expected __vesk_props global in body');
+      assert(!body.includes('</script>'), 'expected SSR-data script to escape closing script tags');
+      assert(body.includes('\\u003c/script>'), 'expected < to be emitted as \\u003c');
       assert(store['tok123'] === undefined, 'expected store entry to be consumed on read');
     });
 

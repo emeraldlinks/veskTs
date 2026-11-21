@@ -1,6 +1,6 @@
 import { readFileSync, watch, statSync, existsSync, mkdirSync, readdirSync, writeFileSync, renameSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { resolve, extname, join, dirname, relative } from 'node:path';
+import { resolve, join, dirname, relative } from 'node:path';
 import { createServer } from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { WebSocketServer } from 'ws';
@@ -15,7 +15,7 @@ import { scanApiRoutes, matchApiUrl, buildWebRequest, executeApiRoute } from '@v
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import type { GeneratedDocsAsset, MiddlewareCookies, VeskConfig } from '@vesk/compiler/src/types';
 import { collectMiddlewareChain, executeMiddlewareChain } from '@vesk/compiler/src/middleware';
-import { VeskResponse, toHeadersMap, toVeskResponse } from '@vesk/runtime/src/request';
+import { VeskResponse, toHeadersMap } from '@vesk/runtime/src/request';
 
 // Compiler middleware helpers resolve the response class through this global so
 // cookie/header helpers work for dev-compiled chains without importing runtime.
@@ -24,7 +24,17 @@ import { collectEventsFile, loadEvents, runEventHandlers } from '@vesk/compiler/
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet, buildChunkName, SHARED_CHUNK_NAME } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, isAllowedWsUpgrade, installMdReadHook } from '@vesk/adapter/src/paths';
+import { mimeFor } from '@vesk/adapter/src/platform-output';
 import { createDevApiRouter } from '@vesk/adapter/src/dev-api';
+import {
+  buildSsrDataScript,
+  deliverMiddlewareResponse,
+  deliverResponse,
+  errorStatus as errorStatusCode,
+  readBody,
+  readBodyJson,
+  type SsrDataPayload,
+} from '@vesk/adapter/src/server-core';
 import type { DevPanelResponse, DiagnosticFinding } from '@vesk/adapter/src/dev-api';
 import type { DevHmrState } from '@vesk/adapter/src/dev-server';
 import { produceDiagnostics } from './dev-diagnostics';
@@ -52,14 +62,6 @@ import { buildCodeframe } from '@vesk/adapter/src/error-codeframe';
 import type { HmrErrorPayload } from '@vesk/adapter/src/hmr';
 import { ensurePackagesBuilt } from './build-packages';
 import { handleActionRequest } from './action-handler';
-
-/** Preserve every Set-Cookie header — Headers collapses them otherwise. */
-function toNodeHeaders(response: Response): Record<string, string | string[]> {
-	const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
-	const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-	if (cookies.length > 0) headers['set-cookie'] = cookies;
-	return headers;
-}
 
 // Shared @vesk/agentic checkpoint manager — module singleton so history persists across requests
 const agenticCheckpointManager = new CheckpointManager();
@@ -313,21 +315,17 @@ export async function routeDevPanel(
 ): Promise<void> {
   if (!url.pathname.startsWith('/__vesk/')) return;
 
-  const chunks: Buffer[] = [];
-  let total = 0;
   const maxBodyBytes = deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
-  for await (const chunk of req) {
-    total += (chunk as Buffer).byteLength;
-    if (total > maxBodyBytes) {
+  let body: unknown;
+  try {
+    body = await readBodyJson(req, maxBodyBytes);
+  } catch (e) {
+    if (errorStatusCode(e) === 413) {
       res.writeHead(413, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: `Request body exceeds limit (${maxBodyBytes} bytes)` }));
       return;
     }
-    chunks.push(chunk as Buffer);
-  }
-  let body: unknown;
-  if (chunks.length > 0) {
-    try { body = JSON.parse(Buffer.concat(chunks).toString('utf-8')); } catch { body = undefined; }
+    throw e;
   }
 
   const veskDir = deps.veskDir;
@@ -426,20 +424,6 @@ export async function routeDevPanel(
   writeDevPanelResponse(res, response);
 }
 
-async function readBodyJson(req: IncomingMessage, maxBodyBytes: number): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += (chunk as Buffer).byteLength;
-    if (total > maxBodyBytes) throw new DevBodyTooLargeError(`body exceeds ${maxBodyBytes} bytes`);
-    chunks.push(chunk as Buffer);
-  }
-  if (chunks.length === 0) return undefined;
-  try { return JSON.parse(Buffer.concat(chunks).toString('utf-8')); } catch { return undefined; }
-}
-
-class DevBodyTooLargeError extends Error {}
-
 function defaultAgenticModel(_providerName: string): string {
   return '';
 }
@@ -509,7 +493,6 @@ function writeDevPanelResponse(res: ServerResponse, response: DevPanelResponse):
   }
 }
 
-type SsrDataPayload = { props?: Record<string, unknown>; ssrData?: Record<string, unknown> };
 const ssrDataStore = new Map<string, SsrDataPayload>();
 
 // HMR settle window: small enough to feel instant, large enough to coalesce
@@ -1760,15 +1743,6 @@ function routeFullPathForChunk(chunkName: string): string | null {
     LOG.warn('file watching unavailable, serving without auto-rebuild');
   }
 
-  const MIME: Record<string, string> = {
-    '.svg': 'image/svg+xml', '.css': 'text/css', '': 'application/javascript',
-    '.js': 'application/javascript', '.mjs': 'application/javascript',
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon',
-    '.html': 'text/html', '.json': 'application/json',
-    '.webmanifest': 'application/manifest+json',
-    '.yaml': 'application/yaml', '.yml': 'application/yaml',
-  };
-
   const hmrJsPath = join(runtimeDir, 'hmr-client.js');
   const hmrTsPath = join(runtimeDir, 'hmr-client.ts');
   const hmrClientPath = existsSync(hmrJsPath) ? hmrJsPath : (existsSync(hmrTsPath) ? hmrTsPath : null);
@@ -1806,11 +1780,6 @@ function routeFullPathForChunk(chunkName: string): string | null {
       if (url.pathname.startsWith('/_vesk')) return;
       LOG.request(req.method || 'GET', url.pathname, status, Date.now() - reqStart);
     };
-    const errorStatusCode = (e: unknown): number => {
-      const s = (e as { statusCode?: unknown } | null)?.statusCode ?? (e as { status?: unknown } | null)?.status;
-      return typeof s === 'number' && s >= 100 && s < 600 ? s : 500;
-    };
-
     const rawCtx = buildRequestContext(req);
     if (security?.trustProxy) {
       applyTrustProxy(rawCtx, security.trustProxy as boolean | string);
@@ -1884,11 +1853,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const token = url.searchParams.get('t') || '';
       const payload = ssrDataStore.get(token);
       if (payload) ssrDataStore.delete(token);
-      const lines: string[] = [];
-      if (payload?.props) lines.push(`globalThis.__vesk_props = ${JSON.stringify(payload.props)};`);
-      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${JSON.stringify(payload.ssrData)};`);
       res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
-      res.end(lines.join('\n') || '// no ssr data');
+      res.end(buildSsrDataScript(payload));
       return;
     }
     if (url.pathname === '/_vesk/static/global.css') {
@@ -1913,9 +1879,9 @@ function routeFullPathForChunk(chunkName: string): string | null {
       try {
         body = await readBodyJson(req, maxBodyBytes);
       } catch (e) {
-        if (e instanceof DevBodyTooLargeError) {
+        if (errorStatusCode(e) === 413) {
           res.writeHead(413, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: e.message }));
+          res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
           return;
         }
         throw e;
@@ -1967,12 +1933,12 @@ function routeFullPathForChunk(chunkName: string): string | null {
         }
       }
       if (artifacts.openApiJsonPath && url.pathname === artifacts.openApiJsonPath) {
-        res.writeHead(200, { 'Content-Type': MIME['.json'], 'Cache-Control': 'no-store' });
+        res.writeHead(200, { 'Content-Type': mimeFor('openapi.json'), 'Cache-Control': 'no-store' });
         res.end(artifacts.openApiJson);
         return;
       }
       if (artifacts.openApiYamlPath && url.pathname === artifacts.openApiYamlPath) {
-        res.writeHead(200, { 'Content-Type': MIME['.yaml'], 'Cache-Control': 'no-store' });
+        res.writeHead(200, { 'Content-Type': mimeFor('openapi.yaml'), 'Cache-Control': 'no-store' });
         res.end(artifacts.openApiYaml);
         return;
       }
@@ -1981,8 +1947,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
     if (url.pathname !== '/') {
       const staticPath = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
       if (staticPath && existsSync(staticPath) && statSync(staticPath).isFile()) {
-        const ext = extname(staticPath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        res.writeHead(200, { 'Content-Type': mimeFor(staticPath) });
         res.end(readFileSync(staticPath));
         return;
       }
@@ -1990,7 +1955,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
 
     const eventsCtx = makeEventCtx({
       request: new Request(`http://localhost:${port}${req.url || '/'}`, {
-        headers: req.headers as Record<string, string>,
+        headers: Object.fromEntries(toHeadersMap(req.headers)),
         method: req.method || 'GET',
       }),
       params: {},
@@ -2015,11 +1980,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const targetPath = url.searchParams.get('path') || '/';
       const targetUrl = new URL(targetPath, 'http://localhost');
       const targetChain = collectMiddlewareChain(routeTree, targetUrl.pathname, appDirPath);
-      const rawHeaders: Record<string, string> = {};
-      for (const [k, v] of Object.entries(req.headers)) {
-        rawHeaders[k] = Array.isArray(v) ? v.join(', ') : (v || '');
-      }
-      const mwReq = new Request(targetUrl.href, { headers: rawHeaders, method: 'GET' });
+      const mwReq = new Request(targetUrl.href, { headers: Object.fromEntries(toHeadersMap(req.headers)), method: 'GET' });
       const mwResult = await executeMiddlewareChain(targetChain, mwReq, {}, {
         plugins: getActiveDevPlugins() as VeskPlugin[],
         onLast: async () => null,
@@ -2056,14 +2017,13 @@ function routeFullPathForChunk(chunkName: string): string | null {
     // route still has to hand the target the original bytes.
     async function readDevApiBody(): Promise<{ buffer: Buffer | null; tooLarge: boolean }> {
       if (req.method === 'GET' || req.method === 'HEAD') return { buffer: null, tooLarge: false };
-      const chunks: Buffer[] = [];
-      let total = 0;
-      for await (const chunk of req) {
-        total += (chunk as Buffer).byteLength;
-        if (total > maxBodyBytes) return { buffer: null, tooLarge: true };
-        chunks.push(chunk as Buffer);
+      try {
+        const buffer = await readBody(req, maxBodyBytes);
+        return { buffer: buffer.byteLength > 0 ? buffer : null, tooLarge: false };
+      } catch (e) {
+        if (errorStatusCode(e) === 413) return { buffer: null, tooLarge: true };
+        throw e;
       }
-      return { buffer: chunks.length > 0 ? Buffer.concat(chunks) : null, tooLarge: false };
     }
 
     async function dispatchDevApi(
@@ -2098,38 +2058,30 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const apiRoutes = getDevApiRoutes();
       const apiMatch = matchApiUrl(apiRoutes, req.url || url.pathname);
       if (apiMatch) {
-        const bodyChunks: Buffer[] = [];
-        let bodyTotal = 0;
-        let tooLarge = false;
-        for await (const chunk of req) {
-          bodyTotal += (chunk as Buffer).byteLength;
-          if (bodyTotal > maxBodyBytes) { tooLarge = true; break; }
-          bodyChunks.push(chunk as Buffer);
+        let bodyBuffer: Buffer;
+        try {
+          bodyBuffer = await readBody(req, maxBodyBytes);
+        } catch (e) {
+          if (errorStatusCode(e) === 413) {
+            logRequest(413);
+            res.writeHead(413, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: `Request body exceeds limit (${maxBodyBytes} bytes)` }));
+            return;
+          }
+          throw e;
         }
-        if (tooLarge) {
-          logRequest(413);
-          res.writeHead(413, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: `Request body exceeds limit (${maxBodyBytes} bytes)` }));
-          return;
-        }
-        const bodyBuffer = Buffer.concat(bodyChunks);
         const requestUrl = req.url ? `http://localhost:${port}${req.url.startsWith('/') ? req.url : '/' + req.url}` : url.href;
-        const rawHeaders: Record<string, string> = {};
-        for (const [k, v] of Object.entries(req.headers)) {
-          rawHeaders[k] = Array.isArray(v) ? v.join(', ') : (v || '');
-        }
-
         let apiLocals: Record<string, unknown> = Object.assign({}, eventsCtx?.locals || (globalThis as Record<string, unknown>).__vesk_server_ctx || {});
         const dispatchApi = async (
           locals: Record<string, unknown>,
           target: { node: { filePath: string | null }; params: Record<string, string> } = apiMatch
         ): Promise<Response | null> => {
           const targetUrl = `${url.origin}${url.pathname}${url.search}`;
-          const webRequest = buildWebRequest(req, targetUrl, bodyBuffer.length ? bodyBuffer : null);
+          const webRequest = buildWebRequest(req, targetUrl, bodyBuffer.length ? new Uint8Array(bodyBuffer) : null);
           return await executeApiRoute(target.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, target.params, locals, apiWatchCache);
         };
         if (mwChain.length > 0) {
-          const mwReq = new Request(requestUrl, { headers: rawHeaders, method: req.method || 'GET' });
+          const mwReq = new Request(requestUrl, { headers: Object.fromEntries(toHeadersMap(req.headers)), method: req.method || 'GET' });
           try {
             const mwResult = await executeMiddlewareChain(mwChain, mwReq, apiMatch.params, {
               plugins: getActiveDevPlugins() as VeskPlugin[],
@@ -2157,12 +2109,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
               },
             });
             if (mwResult.response) {
-              const mwResp = (toVeskResponse(mwResult.response as any) || mwResult.response) as Response;
-              const respRecord = mwResp as unknown as Record<string, unknown>;
-              if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
-              logRequest(mwResp.status);
-              res.writeHead(mwResp.status, toNodeHeaders(mwResp));
-              res.end(await mwResp.text());
+              logRequest((mwResult.response as Response).status);
+              await deliverMiddlewareResponse(res, mwResult.response);
               return;
             }
             apiLocals = mwResult.locals || apiLocals;
@@ -2192,9 +2140,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
             return;
           }
           logRequest(response.status);
-          const body = await response.text();
-          res.writeHead(response.status, toNodeHeaders(response));
-          res.end(body);
+          await deliverResponse(res, response);
           return;
         }
         // Fall through: the rewrite target is a page.
@@ -2212,7 +2158,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
     // rewrite may still turn this into a real page or API hit.
     if (!match && mwChain.length > 0 && req.method !== 'HEAD') {
       const noMatchReq = new Request(`http://localhost${url.pathname}${url.search}`, {
-        headers: req.headers as Record<string, string>,
+        headers: Object.fromEntries(toHeadersMap(req.headers)),
         method: req.method || 'GET',
       });
       let rewriteTarget: string | null = null;
@@ -2225,12 +2171,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
           },
         });
         if (mwResult.response) {
-          const mwResp = (toVeskResponse(mwResult.response as any) || mwResult.response) as Response;
-          const respRecord = mwResp as unknown as Record<string, unknown>;
-          if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
-          logRequest(mwResp.status);
-          res.writeHead(mwResp.status, toNodeHeaders(mwResp));
-          res.end(await mwResp.text());
+          logRequest((mwResult.response as Response).status);
+          await deliverMiddlewareResponse(res, mwResult.response);
           return;
         }
         if (rewriteTarget) {
@@ -2244,8 +2186,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
               : new Response(null, { status: 404 });
             const finalResponse = response ?? new Response(null, { status: 500 });
             logRequest(finalResponse.status);
-            res.writeHead(finalResponse.status, toNodeHeaders(finalResponse));
-            res.end(await finalResponse.text());
+            await deliverResponse(res, finalResponse);
             return;
           }
           match = matchUrl(routeTree, url.pathname);
@@ -2585,7 +2526,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
     try {
       if (mwChain.length > 0 && !mwRanForRewrite) {
         const mwReq = new Request(`http://localhost${url.pathname}${url.search}`, {
-          headers: req.headers as Record<string, string>,
+          headers: Object.fromEntries(toHeadersMap(req.headers)),
           method: req.method || 'GET',
         });
         const mwResult = await executeMiddlewareChain(mwChain, mwReq, match.params, {
@@ -2647,12 +2588,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
         });
         mwLocals = mwResult.locals;
         if (mwResult.response) {
-          const mwResp = (toVeskResponse(mwResult.response as any) || mwResult.response) as Response;
-          const respRecord = mwResp as unknown as Record<string, unknown>;
-          if (typeof respRecord.build === 'function') (respRecord.build as () => void)();
-          logRequest(mwResp.status);
-          res.writeHead(mwResp.status, toNodeHeaders(mwResp));
-          res.end(await mwResp.text());
+          logRequest((mwResult.response as Response).status);
+          await deliverMiddlewareResponse(res, mwResult.response);
           return;
         }
       } else {
@@ -2977,10 +2914,7 @@ function buildRequestContext(req: IncomingMessage): {
   locals: Record<string, unknown>;
   ip?: string;
 } {
-  const headers: Record<string, string> = {};
-  for (const [k, v] of Object.entries(req.headers)) {
-    headers[k] = Array.isArray(v) ? v.join(', ') : (v || '');
-  }
+  const headers = Object.fromEntries(toHeadersMap(req.headers));
   const cookies = parseCookies(req.headers.cookie || '');
   return { headers, url: req.url, method: req.method || 'GET', cookies, locals: {}, ip: undefined };
 }

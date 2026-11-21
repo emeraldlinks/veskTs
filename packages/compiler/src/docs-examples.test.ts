@@ -24,6 +24,7 @@ import * as metadata from '../../../vesk-doc/src/content/docs-metadata.js';
 import * as routing from '../../../vesk-doc/src/content/docs-routing.js';
 import * as middleware from '../../../vesk-doc/src/content/docs-middleware.js';
 import * as apiRoutes from '../../../vesk-doc/src/content/docs-api-routes.js';
+import * as veskDocs from '../../../vesk-doc/src/content/docs-vesk-docs.js';
 import * as serverApis from '../../../vesk-doc/src/content/docs-server-apis.js';
 import * as configPlugin from '../../../vesk-doc/src/content/docs-config-plugin.js';
 import * as cli from '../../../vesk-doc/src/content/docs-cli.js';
@@ -42,6 +43,7 @@ const MODULES: Record<string, { pages?: Array<{ slug: string; blocks?: unknown[]
   'docs-routing': routing as never,
   'docs-middleware': middleware as never,
   'docs-api-routes': apiRoutes as never,
+  'docs-vesk-docs': veskDocs as never,
   'docs-server-apis': serverApis as never,
   'docs-config-plugin': configPlugin as never,
   'docs-cli': cli as never,
@@ -417,6 +419,22 @@ for (const [moduleName, mod] of Object.entries(MODULES)) {
       }
     }
   }
+}
+
+const veskDocsRegistered = basePages.docPages.some((page) => page.slug === 'vesk-docs');
+if (veskDocsRegistered) {
+  passed++;
+} else {
+  failed++;
+  failures.push({ name: 'docs registry → /docs/vesk-docs', message: 'the @vesk/docs page is not registered in docPages' });
+}
+
+const cliMentionsInspect = JSON.stringify(cli.pages ?? []).includes('"vesk inspect"');
+if (cliMentionsInspect) {
+  passed++;
+} else {
+  failed++;
+  failures.push({ name: 'docs-cli → vesk inspect', message: 'CLI docs do not mention vesk inspect' });
 }
 
 if (exempt.length > 0) {

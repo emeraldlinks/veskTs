@@ -12,7 +12,7 @@ export const pages: { slug: string; title: string; description: string; group: s
     slug: "cli",
     title: "CLI Commands",
     description:
-      "The full vesk CLI: dev, build, start, typecheck, seo, init — flags, defaults, config loading, dev server behaviors, HMR messages and build output.",
+      "The full vesk CLI: dev, build, start, typecheck, inspect, seo, init — flags, defaults, config loading, dev server behaviors, HMR messages and build output.",
     group: "Tooling",
     blocks: [
       {
@@ -30,6 +30,7 @@ Usage:
   vesk build                       Auto-detect platform from CI env (vercel/netlify/cf/deno/aws/coxmos)
   vesk seo [--strict]           Run SEO analysis on app/
   vesk typecheck [--no-strict]  Typecheck .vsk/.ts files via tsc-in-.vsk (strict by default)
+  vesk inspect [query] [--json] Inspect API routes, schemas and diagnostics
   vesk start [-p 3000]          Start production server
   vesk dev [-p 3000]            Start dev server with HMR
   vesk init                     Create src/global.css (Tailwind entrypoint) if missing
@@ -46,6 +47,7 @@ Scaffolding:  npx create-vesk@latest <project-name>`,
           ["vesk build", "--platform <name> --target node|edge --seo --strict --skip-split", "Builds app/ into .vesk/. Platform auto-detected from CI env, defaults to node; --seo runs an SEO audit, --strict makes it fail the build; --skip-split disables route code splitting."],
           ["vesk start", "-p / --port (default 3000); -H / --host (default 127.0.0.1)", "Production server serving the .vesk/ build; exits with \"Run vesk build first\" when no build exists."],
           ["vesk typecheck", "--no-strict", "Typecheck .vsk/.ts/.tsx/.js via tsc-in-.vsk (strict by default), plus structure warnings; exits non-zero on errors."],
+          ["vesk inspect", "[query] --json", "Runs @vesk/docs over app/api/** and prints API route, operation, schema, diagnostic, or dependency views; --json emits machine-readable output."],
           ["vesk seo", "--strict", "Runs the SEO audit over app/ (page.vsk + layout.vsk); exits non-zero with --strict when errors exist."],
           ["vesk init", "—", "Creates src/global.css (Tailwind entrypoint) if missing; no-op (exit 0) if it already exists."],
           ["vesk --help / -h", "—", "Prints usage; exits 0 with --help/-h, 1 when invoked with no arguments."],
@@ -176,6 +178,37 @@ Scaffolding:  npx create-vesk@latest <project-name>`,
           "Structure warnings (not errors): middleware must be `middleware.ts` (`.vsk`/`.js` rejected), and API routes must be `route.ts` (`.vsk`/`.js` rejected).",
           "Unparsable `.vsk` files surface as `vesk-parse` errors (code `vesk-parse`).",
           "Output summary: \"no type errors found (N warning(s))\" on success; errors formatted as `file(line,column): code: message`.",
+        ],
+      },
+      { kind: "h2", text: "vesk inspect" },
+      {
+        kind: "p",
+        text: "`vesk inspect` runs @vesk/docs over `app/api/**` and prints API documentation intelligence without starting a server. The optional query filters routes and schemas; `--json` emits machine-readable output. Page routes are never inspected. See the @vesk/docs page for the full config and annotation reference.",
+      },
+      {
+        kind: "code",
+        filename: "terminal",
+        language: "bash",
+        code: `vesk inspect
+vesk inspect routes
+vesk inspect route /api/users
+vesk inspect operations
+vesk inspect schemas
+vesk inspect diagnostics
+vesk inspect posts --json`,
+      },
+      {
+        kind: "table",
+        head: ["Query", "View"],
+        rows: [
+          ["no query", "Summary with route, operation, schema, and diagnostic counts."],
+          ["routes / api", "All documented API routes."],
+          ["route <text>", "First route matching the path or handler text."],
+          ["operations / methods", "Flat operation list."],
+          ["schemas / types", "All generated schemas."],
+          ["schema <text>", "First schema matching a name or ID."],
+          ["diagnostics / warnings", "Analyzer diagnostics."],
+          ["dependencies / imports", "Project dependency records."],
         ],
       },
       { kind: "h2", text: "vesk seo" },

@@ -1,13 +1,14 @@
 import { readFileSync, existsSync, watch, statSync } from 'node:fs';
-import { resolve, extname, dirname, basename } from 'node:path';
+import { resolve, dirname, basename } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { DEFAULT_MAX_BODY_BYTES, resolveComponentName, safeJsonForScript } from '@vesk/compiler/src/server-codegen';
+import { DEFAULT_MAX_BODY_BYTES, resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
 import { build } from '@vesk/adapter/src/index';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
+import { mimeFor } from '@vesk/adapter/src/platform-output';
 import { reportServerError, registerErrorHooks } from '@vesk/adapter/src/error-report';
 import { buildErrorPayload, createHmrServer } from './hmr';
 import * as hmrApi from './hmr';
@@ -18,7 +19,15 @@ import { renderDefaultNotFoundPage, renderDefaultErrorPage } from '@vesk/adapter
 import { buildTreeShakenRuntime, runtimeExportNames } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, installMdReadHook } from '@vesk/adapter/src/paths';
 import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
-import { makeWebRequest, bodyTooLarge } from '@vesk/adapter/src/web-request';
+import { makeWebRequest } from '@vesk/adapter/src/web-request';
+import {
+  buildSsrDataScript,
+  deliverResponse,
+  errorStatus,
+  matchPath,
+  readBody,
+  toNodeHeaders,
+} from '@vesk/adapter/src/server-core';
 import type { RouteNode, DevServerOptions, Manifest, VeskPlugin } from '@vesk/adapter/src/types';
 import { getPluginRecords } from './plugins';
 // @vesk/agentic — optional AI plugin; gated by active state if installed
@@ -62,54 +71,6 @@ const devHmrState: () => DevHmrState =
   typeof (hmrApi as unknown as { getHmrState?: () => DevHmrState }).getHmrState === 'function'
     ? (hmrApi as unknown as { getHmrState: () => DevHmrState }).getHmrState
     : defaultDevHmrState;
-
-/**
- * Writes a handler Response to the socket, piping a streaming body
- * chunk-by-chunk (SSE / text streams) instead of buffering everything.
- */
-/** Preserve every Set-Cookie header — Headers collapses them otherwise. */
-function toNodeHeaders(response: Response): Record<string, string | string[]> {
-  const headers: Record<string, string | string[]> = Object.fromEntries(response.headers);
-  const cookies = (response.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? [];
-  if (cookies.length > 0) headers['set-cookie'] = cookies;
-  return headers;
-}
-
-async function deliverResponse(res: ServerResponse, response: Response): Promise<void> {
-  res.writeHead(response.status, toNodeHeaders(response));
-  const body = response.body;
-  if (body && typeof body.getReader === 'function') {
-    const reader = body.getReader();
-    try {
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        res.write(Buffer.from(value));
-      }
-    } catch {
-      /* stream aborted by the client */
-    }
-    res.end();
-    return;
-  }
-  res.end(await response.text());
-}
-
-function errorStatus(e: unknown, fallback: number): number {
-  const s = (e as { status?: unknown } | null)?.status ?? (e as { statusCode?: unknown } | null)?.statusCode;
-  return typeof s === 'number' && s >= 400 && s < 600 ? s : fallback;
-}
-
-async function readBody(req: AsyncIterable<Uint8Array>, maxBytes: number = DEFAULT_MAX_BODY_BYTES): Promise<Buffer> {
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  for await (const chunk of req) {
-    total += chunk.byteLength;
-    if (total > maxBytes) throw bodyTooLarge(maxBytes);
-    chunks.push(chunk);
-  }
-  return Buffer.concat(chunks);
-}
 
 export interface DevPanelResponse {
   status: number;
@@ -225,14 +186,6 @@ export function injectDevScripts(html: string): string {
     '\n';
   return html.replace('</body>', scripts + '</body>');
 }
-
-const MIME: Record<string, string> = {
-  '.svg': 'image/svg+xml', '.css': 'text/css', '.js': 'application/javascript',
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.ico': 'image/x-icon', '.html': 'text/html', '.json': 'application/json',
-  '.webmanifest': 'application/manifest+json',
-  '.woff': 'font/woff', '.woff2': 'font/woff2', '.wasm': 'application/wasm',
-};
 
 export async function startDevServer(appDir: string, options?: DevServerOptions): Promise<Server | void> {
   const port = options?.port || 3000;
@@ -606,11 +559,8 @@ await doBuild();
       const payload = store?.[token];
       if (payload) delete store[token];
       console.error(`[ssr-data-trace] ${url.pathname} token=${token.slice(0,6)} referer=${req.headers['referer'] || req.headers['referrer'] || '-'} payload=${payload ? JSON.stringify({ props: Object.keys(payload.props || {}), data: Object.keys(payload.ssrData || {}) }) : 'NONE'}`);
-      const lines: string[] = [];
-      if (payload?.props) lines.push(`globalThis.__vesk_props = ${safeJsonForScript(JSON.stringify(payload.props))};`);
-      if (payload?.ssrData) lines.push(`globalThis.__vsk_ssr_data = ${safeJsonForScript(JSON.stringify(payload.ssrData))};`);
       res.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' });
-      res.end(lines.join('\n') || '// no ssr data');
+      res.end(buildSsrDataScript(payload));
       return;
     }
 
@@ -633,10 +583,9 @@ await doBuild();
         res.writeHead(403); res.end('Forbidden'); return;
       }
       if (existsSync(staticPath) && statSync(staticPath).isFile()) {
-        const ext = extname(staticPath);
         // Dev names are stable so HMR can rewrite them, which means they must
         // never be cached: the same URL has to serve the newest bytes.
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream', 'Cache-Control': cacheControlFor(basename(staticPath), true) });
+        res.writeHead(200, { 'Content-Type': mimeFor(staticPath), 'Cache-Control': cacheControlFor(basename(staticPath), true) });
         res.end(readFileSync(staticPath));
         return;
       }
@@ -646,8 +595,7 @@ await doBuild();
 
       const sourcePath = url.pathname.length > 1 ? resolveWithin(publicDir, url.pathname.slice(1)) : null;
       if (sourcePath && existsSync(sourcePath) && statSync(sourcePath).isFile()) {
-        const ext = extname(sourcePath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        res.writeHead(200, { 'Content-Type': mimeFor(sourcePath) });
         res.end(readFileSync(sourcePath));
         return;
       }
@@ -655,8 +603,7 @@ await doBuild();
       const buildPublicDir = resolve(devDir, 'static', 'public');
       const buildPath = url.pathname.length > 1 ? resolveWithin(buildPublicDir, url.pathname.slice(1)) : null;
       if (buildPath && existsSync(buildPath) && statSync(buildPath).isFile()) {
-        const ext = extname(buildPath);
-        res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+        res.writeHead(200, { 'Content-Type': mimeFor(buildPath) });
         res.end(readFileSync(buildPath));
         return;
       }
@@ -693,15 +640,15 @@ await doBuild();
               const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
               const response = await mod.handleAction(webRequest, actionId);
               const body = await response.text();
-              const headers = Object.fromEntries(response.headers);
-              const contentType = headers['content-type'] || '';
-let finalBody = body;
-            if (contentType.includes('text/html')) {
-              finalBody = injectDevScripts(body);
-              if (finalBody.includes('/ssr-data.js')) {
-                console.error(`[body-trace] ${url.pathname} HTML body carries ssr-data ref (was-in-body=${body.includes('/ssr-data.js')})`);
+              const headers = toNodeHeaders(response);
+              const contentType = String(headers['content-type'] || headers['Content-Type'] || '');
+              let finalBody = body;
+              if (contentType.includes('text/html')) {
+                finalBody = injectDevScripts(body);
+                if (finalBody.includes('/ssr-data.js')) {
+                  console.error(`[body-trace] ${url.pathname} HTML body carries ssr-data ref (was-in-body=${body.includes('/ssr-data.js')})`);
+                }
               }
-            }
               res.writeHead(response.status, headers);
               res.end(finalBody);
               return;
@@ -766,8 +713,8 @@ let finalBody = body;
               const body = await response.text();
               const tText1 = process.hrtime.bigint();
 
-              const headers = Object.fromEntries(response.headers);
-              const contentType = headers['content-type'] || '';
+              const headers = toNodeHeaders(response);
+              const contentType = String(headers['content-type'] || headers['Content-Type'] || '');
               let finalBody = body;
               if (contentType.includes('text/html')) {
                 finalBody = injectDevScripts(body);
@@ -1015,27 +962,4 @@ let finalBody = body;
     await new Promise(() => {});
   }
   return server;
-}
-
-function matchPath(pattern: string, pathname: string): boolean {
-  const patternParts = pattern.split('/').filter(Boolean);
-  const pathParts = pathname.split('/').filter(Boolean);
-
-  let pi = 0, pp = 0;
-  while (pi < pathParts.length && pp < patternParts.length) {
-    const seg = patternParts[pp];
-    // `*name` is a catch-all and absorbs the rest of the path.
-    if (seg.startsWith('*')) { pi = pathParts.length; pp++; }
-    else if (seg.startsWith(':')) {
-      pi++; pp++;
-    } else if (seg === pathParts[pi]) {
-      pi++; pp++;
-    } else {
-      return false;
-    }
-  }
-  // A trailing catch-all still matches an empty tail; the loop above exits as
-  // soon as the URL is exhausted, so without this it was never reached.
-  if (pp === patternParts.length - 1 && patternParts[pp].startsWith('*')) pp++;
-  return pp === patternParts.length && pi === pathParts.length;
 }

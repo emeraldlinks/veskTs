@@ -33,6 +33,7 @@ import { pages as routingPages } from "./docs-routing";
 import { pages as serverApisPages } from "./docs-server-apis";
 import { pages as configPluginPages } from "./docs-config-plugin";
 import { pages as apiRoutesPages } from "./docs-api-routes";
+import { pages as veskDocsPages } from "./docs-vesk-docs";
 import { pages as cliPages } from "./docs-cli";
 import { pages as nativePages } from "./docs-native";
 import { pages as nativeGettingStartedPages } from "./docs-native-getting-started";
@@ -2137,6 +2138,7 @@ const extendedPages: DocPage[] = [
   ...serverApisPages,
   ...configPluginPages,
   ...apiRoutesPages,
+  ...veskDocsPages,
   ...cliPages,
   ...nativePages,
   ...nativeGettingStartedPages,
@@ -2213,6 +2215,7 @@ const docSlugOrder = [
   "native-compiler",
   "native-commands",
   "cli",
+  "vesk-docs",
   "plugin-api",
   "lsp",
   "lsp-editors",

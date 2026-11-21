@@ -20,5 +20,15 @@ export default defineConfig({
 	plugins: [
 		tailwindcss({ entry: 'app/global.css', appDir: 'app' }),
 	],
+	intelligence: {
+		enabled: true,
+		cacheDir: '.vesk/intelligence',
+	},
+	docs: {
+		dev: true,
+		prod: true,
+		path: '/api-reference',
+		playground: true,
+	},
 	ssg: {},
 });

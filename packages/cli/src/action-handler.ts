@@ -17,6 +17,7 @@ import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { getAction, validateActionInput, issuesToFieldMap } from '@vesk/runtime/src/action';
 import { toHeadersMap } from '@vesk/runtime/src/request';
 import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
+import { errorStatus, readBody } from '@vesk/adapter/src/server-core';
 import type { RouteNode, VeskPlugin } from '@vesk/compiler/src/types';
 
 function actionCssUrls(appDirPath: string): string[] {
@@ -217,22 +218,20 @@ export async function handleActionRequest(
 
   const actionId = url.pathname.replace('/_vesk/action/', '');
 
-  const chunks: Buffer[] = [];
-  let bodyTotal = 0;
-  let tooLarge = false;
-  for await (const chunk of req) {
-    bodyTotal += (chunk as Buffer).byteLength;
-    if (bodyTotal > (ctx.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES)) { tooLarge = true; break; }
-    chunks.push(chunk as Buffer);
+  const maxBodyBytes = ctx.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES;
+  let bodyBuffer: Buffer;
+  try {
+    bodyBuffer = await readBody(req, maxBodyBytes);
+  } catch (e) {
+    if (errorStatus(e, 500) === 413) {
+      res.writeHead(413, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: false, error: `Request body exceeds limit (${maxBodyBytes} bytes)` }));
+      return true;
+    }
+    throw e;
   }
-  if (tooLarge) {
-    res.writeHead(413, { 'Content-Type': 'application/json' });
-    res.end(JSON.stringify({ ok: false, error: `Request body exceeds limit (${ctx.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES} bytes)` }));
-    return true;
-  }
-  const bodyBuffer = Buffer.concat(chunks);
 
-  const webRequest = buildWebRequest(req, req.url || url.href, bodyBuffer.length ? bodyBuffer : null);
+  const webRequest = buildWebRequest(req, req.url || url.href, bodyBuffer.length ? new Uint8Array(bodyBuffer) : null);
 
   const referer = String(req.headers.referer || '');
   let refererUrl: URL | null = null;

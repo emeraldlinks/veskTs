@@ -4,9 +4,11 @@ import { fileURLToPath } from 'node:url';
 import type { RouteNode, ApiRouteNode } from '@vesk/adapter/src/types';
 // Relative (not `@vesk/adapter/src/...`) so the compiled module keeps working
 // when the dist is copied into a registry-style node_modules layout — see
-// platform-handler.test.ts. No other runtime import in this file, so the pack
-// stays standalone.
+// platform-handler.test.ts. All runtime imports in this file are relative, so
+// the pack stays standalone.
 import { renderDefaultNotFoundPage, renderDefaultErrorPage } from './default-pages';
+import { matchPath } from './route-match';
+import { buildSsrDataScript, escapeForScript } from './ssr-data';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -114,6 +116,11 @@ export function generatePlatformHandlerSource(input: PlatformHandlerInput): stri
 
   const defaultNotFoundLine = `const __defaultNotFoundHtml = ${JSON.stringify(renderDefaultNotFoundPage())};`;
 
+  const sharedFunctions = `
+const escapeForScript = ${escapeForScript.toString()};
+const buildSsrDataScript = ${buildSsrDataScript.toString()};
+const __sharedMatchPath = ${matchPath.toString()};
+`;
   const serverStoreLine = hasEvents ? 'const __serverStore = globalThis.__vesk_server_ctx || {};' : '';
   const eventsStartLine = hasEvents ? '  await __eventsStart({ server: null });' : '';
   const eventsRequestLine = hasEvents ? '  await __eventsRequest(mwCtx);' : '';
@@ -134,9 +141,10 @@ ${parseCookiesImport}
 ${mwImport}
 ${eventsImport}
 ${prerenderedList}
-${isrCache}
-${defaultNotFoundLine}
-const __routes = [${routeEntries.map((e) => e.entry).join(',\n')}];
+ ${isrCache}
+ ${defaultNotFoundLine}
+ ${sharedFunctions}
+ const __routes = [${routeEntries.map((e) => e.entry).join(',\n')}];
 
 async function __invokeRoute(route, request) {
   try {
@@ -158,35 +166,6 @@ async function __invokeRoute(route, request) {
   }
 }
 
-function __escapeScript(json) {
-  return json.split('<').join('\\u003c').split('\\u2028').join('\\u2028').split('\\u2029').join('\\u2029');
-}
-
-function __matchPath(pattern, pathname) {
-  const patternParts = pattern.split('/').filter(Boolean);
-  const pathParts = pathname.split('/').filter(Boolean);
-  let pi = 0, pp = 0;
-  const params = {};
-  while (pi < pathParts.length && pp < patternParts.length) {
-    const seg = patternParts[pp];
-    // A "*name" segment is a catch-all and absorbs the rest of the path.
-    if (seg.startsWith('*')) { params[seg.slice(1)] = pathParts.slice(pi).join('/'); pi = pathParts.length; pp++; }
-    else if (seg.startsWith(':')) {
-      params[seg.slice(1)] = pathParts[pi];
-      pi++; pp++;
-    } else if (seg === pathParts[pi]) {
-      pi++; pp++;
-    } else {
-      return null;
-    }
-  }
-  // A trailing catch-all still matches an empty tail; the loop above exits as
-  // soon as the URL is exhausted, so without this it was never reached.
-  if (pp === patternParts.length - 1 && patternParts[pp].startsWith('*')) { params[patternParts[pp].slice(1)] = pathParts.slice(pi).join('/'); pp++; }
-  if (pp === patternParts.length && pi === pathParts.length) return params;
-  return null;
-}
-
 async function __dispatchRewrite(rewrite, request) {
   const target = new URL(rewrite, request.url);
   const method = (request.method || 'GET').toUpperCase();
@@ -199,7 +178,7 @@ async function __dispatchRewrite(rewrite, request) {
   Object.defineProperty(targetRequest, '__veskSkipMiddleware', { value: true });
 
   for (const route of __routes) {
-    if (!__matchPath(route.path, target.pathname)) continue;
+    if (!__sharedMatchPath(route.path, target.pathname)) continue;
     return await __invokeRoute(route, targetRequest);
   }
   return new Response(JSON.stringify({ error: 'Rewrite target not found' }), {
@@ -242,10 +221,7 @@ ${serverStoreLine}
     const dataStore = (globalThis.__vsk_ssr_payload_store || {});
     const payload = dataStore[dataToken];
     if (payload) delete dataStore[dataToken];
-    const dataLines = [];
-    if (payload && payload.props) dataLines.push('globalThis.__vesk_props = ' + __escapeScript(JSON.stringify(payload.props)) + ';');
-    if (payload && payload.ssrData) dataLines.push('globalThis.__vsk_ssr_data = ' + __escapeScript(JSON.stringify(payload.ssrData)) + ';');
-    return new Response(dataLines.join('\\n') || '// no ssr data', {
+    return new Response(buildSsrDataScript(payload), {
       status: 200,
       headers: { 'Content-Type': 'application/javascript', 'Cache-Control': 'no-store' },
     });
@@ -291,7 +267,7 @@ ${eventsRequestLine}
   globalThis.__vesk_request = mwCtx;
 
   for (const route of __routes) {
-    const params = __matchPath(route.path, url.pathname);
+    const params = __sharedMatchPath(route.path, url.pathname);
     if (!params) continue;
 
     if (route.type === 'api') {
