@@ -34,9 +34,16 @@ assert.equal(result.status, 0, result.stderr || result.stdout);
 const packageJson = JSON.parse(readFileSync(join(project, 'package.json'), 'utf8')) as PackageJson;
 const config = readFileSync(join(project, 'vesk.config.ts'), 'utf8');
 const readme = readFileSync(join(project, 'README.md'), 'utf8');
+const scaffold = readFileSync(join(here, 'index.js'), 'utf8');
+const docsMarker = "'@vesk/docs': '";
+const docsMarkerAt = scaffold.indexOf(docsMarker);
+const expectedDocsVersion = scaffold.slice(
+  docsMarkerAt + docsMarker.length,
+  scaffold.indexOf("'", docsMarkerAt + docsMarker.length),
+);
 
 check('generated app includes @vesk/docs', () => {
-  assert.equal(packageJson.dependencies['@vesk/docs'], '^0.2.109');
+  assert.equal(packageJson.dependencies['@vesk/docs'], expectedDocsVersion);
 });
 
 check('generated config enables docs in dev and prod', () => {
