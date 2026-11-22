@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.3.2 — 2026-11-22
+
+_No breaking changes._
+
+### Fixes
+
+- **cli:** stop package bootstrap in installed CLIs
+
 ## 0.3.1 — 2026-11-21
 
 _No breaking changes._
