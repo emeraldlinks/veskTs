@@ -5,6 +5,24 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (installed CLI bootstrap fix):**
+
+- [x] Fixed `build-packages.ts` self-execution in the bundled CLI: the whole
+      direct-run block now requires both the `.ts` source path and argv identity,
+      so installed `vesk` commands no longer start a monorepo package build.
+- [x] Added monorepo-root detection and made `buildPackages()`/`ensurePackagesBuilt()`
+      no-op outside a checkout; Swagger asset copying is now checkout-only.
+- [x] Added `packages/cli/src/build-packages.test.ts` with installed-layout and
+      bundled-CLI regression coverage; wired it into `scripts/test.js`.
+- [x] Validation: regression test 5/5, CLI/full typecheck, package rebuild,
+      hydration probe 556/556, and `git diff --check` all green. Full
+      `scripts/test.js` reached unrelated suites but timed out twice locally on
+      slow tests (`ssr-defer`, `image-pipeline`); one transient `hmr-perf`
+      threshold failure passed 10/10 standalone, and `image-pipeline` passed
+      10/10 standalone. CI remains the full-suite gate.
+- [x] Code review: made the installed-layout regression test use Windows
+      junction symlinks so it does not require elevated privileges on Windows.
+
 **This session (server transport dedupe):**
 
 - [x] Added shared `@vesk/adapter/src/server-core` for header conversion,

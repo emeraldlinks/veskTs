@@ -8,6 +8,16 @@ const require = createRequire(import.meta.url);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, '..', '..', '..');
 
+export function isMonorepoRoot(rootDir: string): boolean {
+  return existsSync(join(rootDir, 'packages', 'compiler', 'src'))
+    && existsSync(join(rootDir, 'packages', 'docs', 'src'))
+    && existsSync(join(rootDir, 'packages', 'docs', 'scripts', 'copy-swagger-ui.mjs'));
+}
+
+export function isBuildPackagesSource(importPath: string): boolean {
+  return importPath.endsWith('build-packages.ts');
+}
+
 interface PackageBuild {
   name: string;
   entry: string;
@@ -86,11 +96,12 @@ function distPackageJson(pkgName: string, entry: string, serverEntry: string | u
   }, null, 2) + '\n';
 }
 
-export function buildPackages(force = false): void {
-  const swaggerAssets = spawnSync(process.execPath, [resolve(root, 'packages', 'docs', 'scripts', 'copy-swagger-ui.mjs')], { stdio: 'inherit' });
+export function buildPackages(force = false, rootDir = root): void {
+  if (!isMonorepoRoot(rootDir)) return;
+  const swaggerAssets = spawnSync(process.execPath, [resolve(rootDir, 'packages', 'docs', 'scripts', 'copy-swagger-ui.mjs')], { stdio: 'inherit' });
   if (swaggerAssets.status !== 0) throw new Error('failed to copy Swagger UI assets for @vesk/docs');
   for (const [pkg, cfg] of Object.entries(PACKAGES)) {
-    const pkgDir = resolve(root, 'packages', pkg);
+    const pkgDir = resolve(rootDir, 'packages', pkg);
     if (!existsSync(join(pkgDir, 'src'))) continue;
     if (!force && !distStale(pkgDir, cfg.entry)) continue;
 
@@ -133,24 +144,21 @@ export function buildPackages(force = false): void {
   }
 }
 
-export function ensurePackagesBuilt(): void {
-  buildPackages(false);
+export function ensurePackagesBuilt(rootDir = root): void {
+  buildPackages(false, rootDir);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+const selfPath = fileURLToPath(import.meta.url);
+if (isBuildPackagesSource(selfPath) && process.argv[1] && resolve(process.argv[1]) === selfPath) {
   buildPackages(process.argv.includes('--force'));
   // The CLI (`dist/cli.js`) is a single esbuild bundle that INLINES
   // `@vesk/compiler` and `@vesk/adapter`. Rebuilding only `packages/*/dist`
   // therefore leaves `vesk build` running a stale compiler — the exact reason
   // a bare-specifier SSR bundling fix did nothing on Vercel. When this script
   // is run directly (the documented post-compiler-edit command), re-bundle the
-  // CLI too.
-  //
-  // Guard on `.ts`: inside the bundled CLI every module's `import.meta.url` is
-  // `dist/cli.js`, so the outer check above is also true there. Re-bundling in
-  // that case would recurse while `cli.js` is executing. The non-literal
-  // dynamic import keeps `esbuild` out of the CLI bundle graph.
-  if (fileURLToPath(import.meta.url).endsWith('build-packages.ts')) {
+  // CLI too. The non-literal dynamic import keeps esbuild out of the CLI bundle
+  // graph.
+  if (isBuildPackagesSource(selfPath)) {
     const { bundleCli } = await import(new URL('./bundle-cli.ts', import.meta.url).href);
     await bundleCli();
   }

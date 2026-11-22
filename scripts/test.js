@@ -1,5 +1,5 @@
 import { readdirSync, existsSync, statSync } from 'fs'
-import { resolve, dirname } from 'path'
+import { resolve, dirname, basename } from 'path'
 import { fileURLToPath } from 'url'
 import { execSync, spawn, spawnSync } from 'child_process'
 
@@ -28,6 +28,10 @@ const e2eFiles = new Set([
   'hydration.test.ts',
   'panel-e2e.test.ts',
 ])
+
+const extraTestFiles = [
+  resolve(root, 'packages/cli/src/build-packages.test.ts'),
+]
 
 function runTestFile(filePath, env) {
   const output = execSync(`npx tsx "${filePath}"`, {
@@ -96,6 +100,36 @@ for (const dir of testDirs) {
       console.error(e.message.slice(0, 300))
       if (e.stdout) console.log(e.stdout.slice(-500))
     }
+  }
+}
+
+for (const filePath of extraTestFiles) {
+  if (!existsSync(filePath)) continue
+  const file = basename(filePath)
+  totalFiles++
+  process.stdout.write(`${file} ... `)
+  try {
+    const output = runTestFile(filePath)
+    const counts = parseCounts(output)
+    if (counts) {
+      const passed = counts.passed
+      const failed = counts.failed
+      totalPassed += passed
+      totalFailed += failed
+      if (failed > 0) {
+        console.log(`FAIL (${failed} failure${failed > 1 ? 's' : ''})`)
+        console.log(output.split('\n').slice(-10).join('\n'))
+      } else {
+        console.log(`OK (${passed} tests)`)
+      }
+    } else {
+      console.log('OK (no count line)')
+    }
+  } catch (e) {
+    totalFailed++
+    console.log('ERROR')
+    console.error(e.message.slice(0, 300))
+    if (e.stdout) console.log(e.stdout.slice(-500))
   }
 }
 
