@@ -106,6 +106,8 @@ async function main(){
   assert(!devSrc.includes('devTailwindCssContent'), 'no separate tailwind content buffer anymore');
   assert(devSrc.includes("url.pathname === '/_vesk/static/global.css'"), 'dev server serves the single global.css route');
   assert(!devSrc.includes("url.pathname === '/_vesk/static/_tailwind.css'"), 'no separate _tailwind.css route in dev');
+  assert(devSrc.includes("url.pathname === '/_tailwind.html'"), 'dev server serves _tailwind.html');
+  assert(/url\.pathname === '\/_tailwind\.html'[\s\S]*?isTailwindActiveDev\(\)/.test(devSrc), '_tailwind.html is gated by active Tailwind plugin');
   assert(/onPluginChange[\s\S]*?rebuildTailwindCss/.test(devSrc), 'onPluginChange triggers rebuildTailwindCss before reload');
   const cssUrlsDyn = (devSrc.match(/activeCssUrls\(\)/g)||[]).length;
   assert(cssUrlsDyn >= 6, `all renderFullPage/renderPageStream/cssUrls use activeCssUrls (got ${cssUrlsDyn})`);

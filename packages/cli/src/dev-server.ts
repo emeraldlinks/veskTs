@@ -38,6 +38,7 @@ import {
 import type { DevPanelResponse, DiagnosticFinding } from '@vesk/adapter/src/dev-api';
 import type { DevHmrState } from '@vesk/adapter/src/dev-server';
 import { produceDiagnostics } from './dev-diagnostics';
+import { generateTailwindDocs, renderTailwindViewerHtml } from './dev-tailwind-docs';
 // @vesk/agentic — optional AI plugin; gated by active state if installed
 import { createAgentRouter } from '@vesk/agentic/src/dev-api';
 import { CheckpointManager } from '@vesk/agentic/src/checkpoints';
@@ -54,7 +55,7 @@ import type { RouteNode, VeskPlugin, VeskEventHandlers, ServerEventContext, Comp
 import { getPluginRecords, filterActivePlugins } from '@vesk/adapter/src/plugins';
 import { renderDefaultNotFoundPage } from '@vesk/adapter/src/default-pages';
 import { resolveBoundaryFileForUrl } from '@vesk/adapter/src/ssr-function';
-import { resolveCssUrls, hasUserCss } from '@vesk/adapter/src/css';
+import { resolveCssUrls, hasUserCss, isTailwindPlugin } from '@vesk/adapter/src/css';
 import { buildErrorPayload } from '@vesk/adapter/src/hmr';
 import { resolveClientErrorReport, resolveRuntimeErrorPayload, renderDevErrorPage, formatErrorLocation } from '@vesk/adapter/src/ssr-error';
 import type { ClientErrorReport, RuntimeErrorContext } from '@vesk/adapter/src/ssr-error';
@@ -797,9 +798,27 @@ export async function startDevServer(port: number, projectDir: string, config: R
   function cssLinkTags(): string {
     return activeCssUrls().map((u) => `\t<link rel="stylesheet" href="${u}" />`).join('\n') + '\n';
   }
+  function isTailwindActiveDev(): boolean {
+    return isTailwindPlugin(getActiveDevPlugins() as VeskPlugin[]);
+  }
+  function invalidateTailwindDocs(): void {
+    devTailwindDocsHtml = null;
+    devTailwindDocsKey = '';
+  }
+  async function getTailwindDocsHtml(): Promise<string | null> {
+    if (!isTailwindActiveDev()) return null;
+    const key = `${devCssSource}\u0000${lastServedCssGlobal.length}\u0000${devGlobalCssContent.length}`;
+    if (devTailwindDocsHtml && devTailwindDocsKey === key) return devTailwindDocsHtml;
+    const result = await generateTailwindDocs({ baseDir: projectDir, cssSource: devCssSource || undefined });
+    devTailwindDocsHtml = result.html;
+    devTailwindDocsKey = key;
+    return devTailwindDocsHtml;
+  }
 
   let devGlobalCssContent = '';
   let lastServedCssGlobal = '';
+  let devTailwindDocsHtml: string | null = null;
+  let devTailwindDocsKey = '';
   const appCssPath = join(appDirPath, 'global.css');
   const srcDir = join(projectDir, 'src');
   const cssPath = join(srcDir, 'global.css');
@@ -1259,6 +1278,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
       await refreshIntelligenceArtifacts();
       await buildClientBundle();
       await bundleRuntime();
+      invalidateTailwindDocs();
       await rebuildTailwindCss();
       devLastBuildMs = Date.now() - t0;
       devLastError = null;
@@ -1291,6 +1311,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
     getDiagnostics: () => produceDiagnostics({ bundleBytes: devBundleBytes, configPluginNames, findings: devDiagnostics }),
     rebuild: () => fullRebuild(),
     onPluginChange: async () => {
+      invalidateTailwindDocs();
       try { await rebuildTailwindCss(); } catch {}
       if (typeof (globalThis as Record<string, unknown>).__vesk_broadcastHmr === 'function') {
         ((globalThis as Record<string, unknown>).__vesk_broadcastHmr as (m: Record<string, unknown>) => void)({ type: 'reload' });
@@ -1368,6 +1389,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const changed = nextGlobal !== lastServedCssGlobal;
       devGlobalCssContent = nextGlobal;
       lastServedCssGlobal = nextGlobal;
+      if (changed) invalidateTailwindDocs();
       return changed;
     } catch (e) {
       LOG.err(`CSS rebuild error:`, (e as Error).message);
@@ -1908,6 +1930,27 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const devResponse = await devRouter.route(req.method || 'GET', url.pathname, body, url.search);
       if (devResponse) {
         writeDevPanelResponse(res, devResponse);
+        return;
+      }
+    }
+
+    if (url.pathname === '/_tailwind.html' || url.pathname === '/_tailwind' || url.pathname === '/_tailwind/') {
+      if (!isTailwindActiveDev()) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end('Tailwind docs are available in dev only when @vesk/plugin-tailwind is active.');
+        return;
+      }
+      try {
+        const html = await getTailwindDocsHtml();
+        if (html) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
+          res.end(html);
+          return;
+        }
+      } catch (e) {
+        LOG.err(`tailwind docs error: ${(e as Error).message}`);
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
+        res.end(`Tailwind docs error: ${(e as Error).message}`);
         return;
       }
     }
