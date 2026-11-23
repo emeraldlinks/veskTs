@@ -1,6 +1,6 @@
 {
   "name": "@vesk/adapter",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "type": "module",
   "description": "Vesk adapter — builds deployable .vesk/ output for Deno and Node serverless",
   "main": "./dist/index.js",
@@ -23,10 +23,10 @@
     "sharp": "^0.35.3"
   },
   "dependencies": {
-    "@vesk/compiler": "^0.3.2",
-    "@vesk/docs": "^0.3.2",
-    "@vesk/runtime": "^0.3.2",
-    "@vesk/types": "^0.3.2"
+    "@vesk/compiler": "^0.4.0",
+    "@vesk/docs": "^0.4.0",
+    "@vesk/runtime": "^0.4.0",
+    "@vesk/types": "^0.4.0"
   },
   "devDependencies": {
     "@types/ws": "^8.18.1",

@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.4.0 — 2026-11-23
+
+_No breaking changes._
+
+### Features
+
+- **cli:** add dev tailwind docs page
+
 ## 0.3.2 — 2026-11-22
 
 _No breaking changes._
