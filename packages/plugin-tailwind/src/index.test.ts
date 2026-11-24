@@ -2,7 +2,10 @@
  * Tailwind plugin tests — focused on extractTailwindDirectives, whose
  * brace counting must survive braces inside strings and comments.
  */
-import { extractTailwindDirectives } from './index';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { extractTailwindDirectives, scanCandidates } from './index';
 
 let passed = 0;
 let failed = 0;
@@ -119,6 +122,22 @@ describe('extractTailwindDirectives', () => {
     const r = extractTailwindDirectives(css);
     expect(r.directives).toBe('');
     expect(r.userCSS).toBe('.card { color: red }');
+  });
+});
+
+describe('scanCandidates', () => {
+  it('finds class names inside dynamic class expressions', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'vesk-tailwind-'));
+    try {
+      mkdirSync(join(dir, 'nested', 'deep'), { recursive: true });
+      writeFileSync(join(dir, 'nested', 'deep', 'component.vsk'), `<div class={"flex w-[248px] " + (open ? '-translate-x-full' : 'translate-x-0')}></div>`);
+      const found = scanCandidates(dir);
+      if (!found.includes('w-[248px]')) throw new Error('Expected w-[248px] in candidates');
+      if (!found.includes('-translate-x-full')) throw new Error('Expected -translate-x-full in candidates');
+      if (!found.includes('translate-x-0')) throw new Error('Expected translate-x-0 in candidates');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

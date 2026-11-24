@@ -14,6 +14,8 @@ interface GlobScanOptions {
 }
 
 const CLASS_RE = /class(?:\w+)?=["']([^"']*)["']/g
+const DYNAMIC_CLASS_RE = /class=\{([^}]*)\}/g
+const STRING_LITERAL_RE = /["'`]([^"'`]*)["'`]/g
 
 export interface TailwindOptions {
   entry?: string
@@ -42,7 +44,7 @@ function walkFiles(dir: string): string[] {
   return out
 }
 
-function scanCandidates(dir: string): string[] {
+export function scanCandidates(dir: string): string[] {
   const candidates = new Set<string>()
   const base = resolve(dir)
   if (!existsSync(base)) return []
@@ -55,6 +57,17 @@ function scanCandidates(dir: string): string[] {
         for (const cls of classes) {
           if (cls && cls.length > 1 && !cls.startsWith('{') && !cls.startsWith('}')) {
             candidates.add(cls)
+          }
+        }
+      }
+      while ((match = DYNAMIC_CLASS_RE.exec(content)) !== null) {
+        let literal
+        while ((literal = STRING_LITERAL_RE.exec(match[1])) !== null) {
+          const classes = literal[1].split(/\s+/)
+          for (const cls of classes) {
+            if (cls && cls.length > 1 && !cls.startsWith('{') && !cls.startsWith('}')) {
+              candidates.add(cls)
+            }
           }
         }
       }
