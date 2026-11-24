@@ -1829,6 +1829,12 @@ describe('Root Event Delegation', () => {
 		expect(html).toContain('<button>');
 		expect(html).toContain('Click');
 	});
+	it('preserves static inline event attributes', () => {
+		const html = render(`component App {
+			<button onclick="showToast()">Click</button>
+		}`, 'App');
+		expect(html).toContain('onclick="showToast()"');
+	});
 	it('client codegen emits delegation setup', () => {
 		const code = compileClient(`component App {
 			let &[c] = track(0);

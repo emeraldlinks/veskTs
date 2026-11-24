@@ -211,8 +211,8 @@ function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string,
     lines.push('__out.push(' + JSON.stringify(`<!--vsk:t:${sanitizeMarkerName(node.tag)}-->`) + ');');
   }
   for (const attr of node.attributes) {
-    if (isEvent(attr.name)) continue;
     if (dynAttrTargets.has(attr.name)) continue;
+    if (isEvent(attr.name) && attr.value === '') continue;
     if (attr.value === '') {
       openTag += ` ${attr.name}`;
     } else {

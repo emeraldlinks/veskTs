@@ -193,8 +193,12 @@ function effectBlockToHandlerExpr(eff: string): string {
 export function transformTracked(irNode: Expression | RuntimeStatement | DynamicBinding, tracked: Map<string, TrackedInfo>): string {
   const ast = (irNode as any).ast;
   if (!ast) return (irNode as any).raw;
+  const raw = (irNode as any).raw;
   if (tracked.size === 0) {
-    if (!hasTsSyntax(ast)) return (irNode as any).raw;
+    if (typeof raw === 'string' && raw.length > 0) {
+      if (!hasTsSyntax(ast)) return raw;
+      return printAst(stripTsTypes(ast));
+    }
     return printAst(stripTsTypes(ast));
   }
   const stripped = stripTsTypes(ast);
@@ -831,8 +835,8 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
   for (const d of dynAttrs) if (d.target) dynAttrNames.add(d.target);
 
   for (const attr of node.attributes) {
-    if (attr.name.startsWith('on') && attr.name.length > 2) continue;
     if (dynAttrNames.has(attr.name)) continue;
+    if (attr.name.startsWith('on') && attr.name.length > 2 && attr.value === '') continue;
     if (attr.value === '') {
       ctx.push(`${el}.setAttribute(${JSON.stringify(attr.name)}, '');`);
     } else {

@@ -51,6 +51,26 @@ function bothModes(name, source, assertionsFn, opts = {}) {
 }
 
 // Strip ES module imports/exports so new Function() can evaluate
+describe('Client Codegen — concise event handlers', () => {
+	const sourceExpression = `
+		component App {
+			return <button onClick={() => go('/labs')}>go</button>;
+		}
+	`;
+	const sourceStatement = `
+		component App {
+			<button onClick={() => go('/labs')}>go</button>
+		}
+	`;
+	for (const [mode, source] of [['expression', sourceExpression], ['statement', sourceStatement]] as const) {
+		bothModes(`does not invoke a concise handler during render (${mode} mode)`, source, (code) => {
+			const calls = code.split("go('/labs')").length - 1;
+			expect(calls).toBe(1);
+			expect(code).toContain("__evh_click = () => go('/labs')");
+		});
+	}
+});
+
 describe('Client Codegen — regex literals', () => {
 	const sourceExpression = `
 		component App {
