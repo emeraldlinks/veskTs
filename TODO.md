@@ -5,6 +5,32 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (Windows route/docs compatibility):**
+
+- [x] **BUG: `/docs` showed absolute Windows paths as API routes** (e.g.
+      `/api/C:\Users\...\app\api\echo\...\[msg]`). `scanApiRoutes()` used a
+      hand-rolled `basename()` that split on `'/'` only while `path.join()`
+      emits `'\\'` on Windows, so every nested segment became the whole
+      directory path and dynamic `[msg]` dirs stopped being detected. Replaced
+      with `routeSegmentName()`, which scans both separators; the docs and
+      manifest consumers now receive clean `/echo/:msg`-style `fullPath`s.
+- [x] **BUG: generated page component names contained backslashes on Windows**
+      (`Page_Admin\panel`). `extractComponentName()` now folds `'\'` to `'/'`
+      before splitting; exported it for a synthetic Windows-path regression.
+- [x] **BUG: nested `error.vsk` / `not-found.vsk` lookup used the root boundary
+      on Windows.** `resolveBoundaryFile()` now folds native separators before
+      walking up from a route directory.
+- [x] Fixtures made portable (`os.tmpdir()` instead of `/tmp`, native `path.dirname`)
+      and the docs `sourceFile` assertion normalized; added Windows-path
+      regressions for API routes, OpenAPI paths, component names, and boundaries.
+- [x] Validation: `api-routes.test.ts` 37/37, `router.test.ts` 37/37,
+      `ssr-function.test.ts` 56/56, docs intelligence suite all checks passed,
+      package rebuild, `npm run typecheck`, `git diff --check` all green. The
+      hydration probe was not run (no reactivity/hydration change and no
+      `CHROMIUM_PATH` in this environment).
+- [ ] Verify the generated docs and API routing in the user's Windows `myshopp`
+      app after installing the rebuilt packages.
+
 **This session (installed CLI bootstrap fix):**
 
 - [x] Fixed `build-packages.ts` self-execution in the bundled CLI: the whole

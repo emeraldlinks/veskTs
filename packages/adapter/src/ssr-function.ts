@@ -16,7 +16,7 @@ import type { RouteNode, AncestorLayout, SsrFunctionOptions } from '@vesk/adapte
  * the implementation.
  */
 export function resolveBoundaryFile(sourceDir: string, appDir: string, file: string): string | null {
-  const rel = relative(appDir, sourceDir).split('/').filter(Boolean);
+  const rel = relative(appDir, sourceDir).split('\\').join('/').split('/').filter(Boolean);
   for (let depth = rel.length; depth >= 0; depth--) {
     const dir = depth === 0 ? appDir : join(appDir, ...rel.slice(0, depth));
     const p = join(dir, file);

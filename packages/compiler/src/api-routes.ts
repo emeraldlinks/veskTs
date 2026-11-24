@@ -10,8 +10,15 @@ import type { MiddlewareCookies, PreviousRouteInfo, VeskHeaders } from '@vesk/co
 
 export { parseCookies };
 
-function basename(p: string): string {
-  const idx = p.lastIndexOf('/');
+/**
+ * Last path segment of a directory, from either POSIX or Windows separators.
+ * `join()` emits native separators, so a `/`-only split turns a Windows
+ * directory into a whole absolute path — which then leaks into route URLs.
+ */
+export function routeSegmentName(p: string): string {
+  const forward = p.lastIndexOf('/');
+  const backward = p.lastIndexOf('\\');
+  const idx = forward > backward ? forward : backward;
   return idx === -1 ? p : p.slice(idx + 1);
 }
 
@@ -37,7 +44,7 @@ function scanApiDir(rootDir: string, dir: string, parentPath: string): ApiRouteN
     }
   }
 
-  const segName = basename(dir);
+  const segName = routeSegmentName(dir);
   const isDynamic = segName.startsWith('[') && segName.endsWith(']') && !segName.startsWith('[...');
   const isCatchAll = segName.startsWith('[...') && segName.endsWith(']');
   const isPrivate = segName.startsWith('_');
