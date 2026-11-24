@@ -690,6 +690,32 @@ test('typecheck: unknown/custom tags still permissive via IntrinsicElements inde
   }
 });
 
+test('typecheck: honors tsconfig compilerOptions.types', () => {
+  const f = fixture({
+    'tsconfig.json': JSON.stringify({ compilerOptions: { types: ['custom'] } }),
+    'app/page.ts': 'const value: string = CUSTOM_VALUE;\nexport default value;\n',
+    'node_modules/@types/custom/index.d.ts': 'declare const CUSTOM_VALUE: string;\n',
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    const msgs = formatTypecheckErrors(errors);
+    if (msgs !== '') throw new Error(`expected tsconfig types to resolve the global, got:\n${msgs}`);
+  } finally { f.cleanup(); }
+});
+
+test('typecheck: excludes unlisted @types packages by default', () => {
+  const f = fixture({
+    'app/page.ts': 'const value: string = CUSTOM_VALUE;\nexport default value;\n',
+    'node_modules/@types/custom/index.d.ts': 'declare const CUSTOM_VALUE: string;\n',
+  });
+  try {
+    const { errors } = typecheckProject(f.root);
+    if (!errors.some((e) => e.code.includes('2304'))) {
+      throw new Error(`expected an unresolved global without tsconfig types, got:\n${formatTypecheckErrors(errors) || '(no errors)'}`);
+    }
+  } finally { f.cleanup(); }
+});
+
 const results = () => {
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);

@@ -8,6 +8,7 @@ import { resolveAliasModule } from '@vesk/compiler/src/module-imports';
 export interface TypecheckOptions {
   strict?: boolean;
   appDir?: string;
+  types?: string[];
 }
 
 export interface TypecheckError {
@@ -23,7 +24,7 @@ const SKIP_FILES = new Set(['__vesk_ambient.d.ts', '__vesk_runtime_override.d.ts
 
 export const AMBIENT = `
 declare namespace JSX {
-  type VeskEventHandler<E extends Event = Event> = (event: E) => void;
+  type VeskEventHandler<E extends Event = Event> = ((event: E) => void) | string;
   interface VeskCommonAttributes {
     key?: string | number;
     class?: string;
@@ -34,6 +35,7 @@ declare namespace JSX {
     lang?: string;
     dir?: 'ltr' | 'rtl' | 'auto';
     tabIndex?: number;
+    tabindex?: number | string;
     role?: string;
   }
   interface VeskEventAttributes {
@@ -789,6 +791,14 @@ function sourcePosition(source: string, offset: number): { line: number; charact
   return { line, character: bounded - lineStart + 1 };
 }
 
+function readProjectTypes(projectRoot: string): string[] | undefined {
+  const configPath = join(projectRoot, 'tsconfig.json');
+  const read = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (read.error || !read.config) return undefined;
+  const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, projectRoot, undefined, configPath);
+  return parsed.options.types;
+}
+
 export function typecheckProject(projectRoot: string, opts: TypecheckOptions = {}): TypecheckResult {
   const appDir = opts.appDir ?? join(projectRoot, 'app');
   const vskFiles = new Map<string, string>();
@@ -849,7 +859,7 @@ export function typecheckProject(projectRoot: string, opts: TypecheckOptions = {
     allowNonTsExtensions: true,
     resolveJsonModule: true,
     lib: ['lib.es2022.d.ts', 'lib.dom.d.ts', 'lib.dom.iterable.d.ts'],
-    types: [],
+    types: opts.types ?? readProjectTypes(projectRoot) ?? [],
     allowJs: false,
   };
 
