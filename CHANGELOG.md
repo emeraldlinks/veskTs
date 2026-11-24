@@ -2,6 +2,18 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.4.1 — 2026-11-24
+
+_No breaking changes._
+
+### Fixes
+
+- **router:** preserve props without data path
+- **tailwind:** scan dynamic class literals
+- **adapter:** externalize all node builtins
+- **compiler:** honor tsconfig types in typecheck
+- **compiler:** preserve static inline event handlers
+
 ## 0.4.0 — 2026-11-23
 
 _No breaking changes._

@@ -1,6 +1,6 @@
 {
   "name": "@vesk/docs",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "type": "module",
   "description": "Vesk Intelligence Compiler — API-route intelligence, OpenAPI, and local Swagger UI docs",
   "main": "./dist/index.js",
@@ -19,8 +19,8 @@
     "prepublishOnly": "npm run build"
   },
   "dependencies": {
-    "@vesk/compiler": "^0.4.0",
-    "@vesk/types": "^0.4.0",
+    "@vesk/compiler": "^0.4.1",
+    "@vesk/types": "^0.4.1",
     "typescript": "^5.8.0"
   },
   "devDependencies": {
