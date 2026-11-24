@@ -2,6 +2,16 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.4.2 — 2026-11-24
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler:** normalize Windows API route segments
+- **cli:** invalidate dev cache for shared sources
+- **compiler:** preserve static markup through hydration
+
 ## 0.4.1 — 2026-11-24
 
 _No breaking changes._
