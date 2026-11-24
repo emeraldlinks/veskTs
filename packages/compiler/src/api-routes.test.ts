@@ -1,6 +1,6 @@
-import { scanApiRoutes, matchApiUrl } from '@vesk/compiler/src/api-routes';
+import { scanApiRoutes, matchApiUrl, apiRouteSegmentName } from '@vesk/compiler/src/api-routes';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, win32 } from 'path';
 import { tmpdir } from 'os';
 
 let passed = 0;
@@ -76,6 +76,21 @@ function findNode(nodes, path) {
 	}
 	return null;
 }
+
+describe('apiRouteSegmentName', () => {
+
+	it('extracts POSIX route segments', () => {
+		expect(apiRouteSegmentName('/app/api/users')).toBe('users');
+		expect(apiRouteSegmentName('/app/api/users/')).toBe('users');
+	});
+
+	it('extracts Windows route segments', () => {
+		expect(apiRouteSegmentName('C:\\Users\\KERRY\\Documents\\myshopp\\app\\api\\hello')).toBe('hello');
+		expect(apiRouteSegmentName(win32.join('C:\\myshopp\\app\\api', 'users', '[id]'))).toBe('[id]');
+		expect(apiRouteSegmentName('C:\\myshopp\\app\\api\\users\\')).toBe('users');
+	});
+
+});
 
 describe('scanApiRoutes', () => {
 

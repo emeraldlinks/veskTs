@@ -10,11 +10,13 @@ import type { MiddlewareCookies, PreviousRouteInfo, VeskHeaders } from '@vesk/co
 
 export { parseCookies };
 
-function basename(p: string): string {
-  const idx = p.lastIndexOf('/');
-  return idx === -1 ? p : p.slice(idx + 1);
+export function apiRouteSegmentName(p: string): string {
+  let end = p.length;
+  while (end > 0 && (p[end - 1] === '/' || p[end - 1] === '\\')) end--;
+  let start = end;
+  while (start > 0 && p[start - 1] !== '/' && p[start - 1] !== '\\') start--;
+  return p.slice(start, end);
 }
-
 
 
 export function scanApiRoutes(apiDir: string): ApiRouteNode[] {
@@ -37,7 +39,7 @@ function scanApiDir(rootDir: string, dir: string, parentPath: string): ApiRouteN
     }
   }
 
-  const segName = basename(dir);
+  const segName = apiRouteSegmentName(dir);
   const isDynamic = segName.startsWith('[') && segName.endsWith(']') && !segName.startsWith('[...');
   const isCatchAll = segName.startsWith('[...') && segName.endsWith(']');
   const isPrivate = segName.startsWith('_');
