@@ -1016,8 +1016,20 @@ export async function startDevServer(port: number, projectDir: string, config: R
       }
     };
     walk(appDirPath);
+    for (const dir of ['components', 'mock', 'lib', 'hooks', 'types', 'plugins', 'src/components', 'src/mock', 'src/lib', 'src/hooks', 'src/types']) {
+      const p = join(projectDir, dir);
+      if (p !== appDirPath) walk(p);
+    }
     // A different compiler produces different output for identical sources.
     try { parts.push(`compiler:${readFileSync(join(process.cwd(), 'node_modules', '@vesk', 'compiler', 'package.json'), 'utf8')}`); } catch { /* best effort */ }
+    try {
+      const compilerDist = join(process.cwd(), 'node_modules', '@vesk', 'compiler', 'dist');
+      for (const name of ['client-codegen.js', 'server-jsgen.js', 'server-utils.js']) {
+        const p = join(compilerDist, name);
+        const st = statSync(p);
+        parts.push(`compiler-dist:${name}:${st.mtimeMs}:${st.size}`);
+      }
+    } catch { /* best effort */ }
     return createHash('sha256').update(parts.join('\n')).digest('hex').slice(0, 32);
   }
 
