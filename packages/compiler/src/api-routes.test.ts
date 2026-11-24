@@ -1,6 +1,6 @@
-import { scanApiRoutes, matchApiUrl } from '@vesk/compiler/src/api-routes';
+import { scanApiRoutes, matchApiUrl, routeSegmentName } from '@vesk/compiler/src/api-routes';
 import { mkdirSync, writeFileSync, rmSync, existsSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
 import { tmpdir } from 'os';
 
 let passed = 0;
@@ -61,11 +61,6 @@ function createTestDir(structure) {
 
 function cleanup() {
 	try { rmSync(dir, { recursive: true, force: true }); } catch {}
-}
-
-function dirname(p) {
-	const idx = p.lastIndexOf('/');
-	return idx === -1 ? '.' : p.slice(0, idx) || '.';
 }
 
 function findNode(nodes, path) {
@@ -155,6 +150,40 @@ describe('scanApiRoutes', () => {
 		const path = findNode(tree, ':path');
 		expect(path).not.toBeNull();
 		expect(path.isCatchAll).toBe(true);
+		cleanup();
+	});
+});
+
+describe('Windows paths', () => {
+
+	it('takes the last segment of Windows and mixed-separator paths', () => {
+		expect(routeSegmentName('C:\\Users\\KERRY\\myshopp\\app\\api\\echo')).toBe('echo');
+		expect(routeSegmentName('C:\\Users\\KERRY\\myshopp\\app\\api\\[msg]')).toBe('[msg]');
+		expect(routeSegmentName('C:/Users/KERRY/myshopp/app/api/health/db')).toBe('db');
+		expect(routeSegmentName('C:\\Users\\KERRY/myshopp/app/api/echo')).toBe('echo');
+		expect(routeSegmentName('users')).toBe('users');
+	});
+
+	it('keeps absolute Windows directories out of fullPath', () => {
+		const d = createTestDir({
+			'echo/[msg]/route.ts': '',
+			'health/db/route.ts': '',
+			'hello/route.ts': '',
+		});
+		// Native paths already use backslashes on Windows; passing a
+		// forward-slash root also covers mixed separators in one recursion.
+		const tree = scanApiRoutes(d.split('\\').join('/'));
+		const echo = findNode(tree, ':msg');
+		expect(echo).not.toBeNull();
+		expect(echo.fullPath).toBe('/echo/:msg');
+		const db = findNode(tree, 'db');
+		expect(db).not.toBeNull();
+		expect(db.fullPath).toBe('/health/db');
+		expect(tree.every(node => !node.fullPath.includes('\\') && !node.fullPath.includes(':'))).toBe(true);
+		const match = matchApiUrl(tree, '/api/echo/hello');
+		expect(match).not.toBeNull();
+		expect(match.node.fullPath).toBe('/echo/:msg');
+		expect(match.params.msg).toBe('hello');
 		cleanup();
 	});
 });

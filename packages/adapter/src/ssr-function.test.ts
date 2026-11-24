@@ -3,7 +3,7 @@
  *
  * Run with: npx tsx packages/adapter/src/ssr-function.test.ts
  */
-import { createHydratePlanRegistry, generateSsrFunction, hydratePlanModuleSource } from '@vesk/adapter/src/ssr-function';
+import { createHydratePlanRegistry, generateSsrFunction, hydratePlanModuleSource, resolveBoundaryFile } from '@vesk/adapter/src/ssr-function';
 import { compileMiddlewareCode } from '@vesk/adapter/src/middleware';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -59,6 +59,23 @@ for (const f of [
 
 const appRoot = { sourceDir: 'app', layoutCompName: 'Layout' };
 const docsNode = { sourceDir: 'app/docs' };
+
+{ // boundary lookup walks native Windows segments, not just '/'
+  const realAppDir = join(appDir, 'app');
+  const slugDir = join(realAppDir, 'docs', '[slug]');
+  assert(
+    resolveBoundaryFile(slugDir, realAppDir, 'not-found.vsk') === join(realAppDir, 'docs', 'not-found.vsk'),
+    'nested not-found boundary is selected from a native path',
+  );
+  assert(
+    resolveBoundaryFile(slugDir, realAppDir, 'error.vsk') === join(realAppDir, 'docs', 'error.vsk'),
+    'nested error boundary is selected from a native path',
+  );
+  assert(
+    resolveBoundaryFile(realAppDir, realAppDir, 'not-found.vsk') === join(realAppDir, 'not-found.vsk'),
+    'app root falls back to the root boundary',
+  );
+}
 
 function runFor(node, ancestorLayouts) {
   // `sourceDir` is ABSOLUTE in a real build — `scanDirectory` starts from the

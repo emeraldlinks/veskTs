@@ -157,7 +157,7 @@ const cached = analyzeProject({ projectRoot: root, appDir: join(root, 'app'), ca
 assert.equal(cached.routes.length, 3);
 assert.ok(existsSync(join(root, '.test-intelligence-cache', 'analysis.json')));
 assert.equal(intelligence.routes.length, 3);
-assert.ok(intelligence.routes.every((item) => item.sourceFile.includes('/api/')));
+assert.ok(intelligence.routes.every((item) => item.sourceFile.split('\\').join('/').includes('/api/')));
 assert.ok(!intelligence.routes.some((item) => item.path.includes('dashboard')));
 assert.ok(intelligence.securitySchemes.some((scheme) => scheme.id === 'bearerAuth'));
 assert.ok(intelligence.securitySchemes.some((scheme) => scheme.id === 'sessionCookie'));
@@ -437,5 +437,28 @@ const assetCollision = buildIntelligenceArtifacts({
 assert.equal(assetCollision.docsPath, null);
 assert.equal(assetCollision.docsAssets.length, 0);
 
+// Windows route discovery: absolute directory paths must never reach OpenAPI.
+const winRoot = mkdirSync(join(tmpdir(), `vesk-docs-win-${Date.now()}-${Math.random()}`), { recursive: true });
+const winFixtureRoutes = ['app/api/echo/[msg]/route.ts', 'app/api/health/db/route.ts', 'app/api/hello/route.ts', 'app/api/posts/route.ts'];
+for (const relativePath of winFixtureRoutes) {
+	const target = join(winRoot, ...relativePath.split('/'));
+	mkdirSync(join(target, '..'), { recursive: true });
+	writeFileSync(target, `export async function GET() {\n  return new Response('ok');\n}\n`);
+}
+const winIntelligence = analyzeProject({ projectRoot: winRoot, appDir: join(winRoot, 'app'), disableCache: true });
+assert.deepEqual(winIntelligence.routes.map((item) => item.openApiPath).sort(), [
+	'/api/echo/{msg}',
+	'/api/health/db',
+	'/api/hello',
+	'/api/posts',
+]);
+assert.ok(winIntelligence.routes.every((item) => !item.openApiPath.includes('\\') && !item.openApiPath.includes(':')));
+const winEcho = winIntelligence.routes.find((item) => item.openApiPath === '/api/echo/{msg}');
+assert.ok(winEcho, 'expected /api/echo/{msg} route');
+assert.ok(winEcho.operations.some((operation) => operation.parameters.some((parameter) => parameter.name === 'msg' && parameter.location === 'path')));
+const winSpec = JSON.parse(generateOpenApiJson(winIntelligence)) as { paths: Record<string, unknown> };
+assert.deepEqual(Object.keys(winSpec.paths).sort(), ['/api/echo/{msg}', '/api/health/db', '/api/hello', '/api/posts']);
+
 rmSync(root, { recursive: true, force: true });
+rmSync(winRoot, { recursive: true, force: true });
 console.log('docs intelligence: all checks passed');
