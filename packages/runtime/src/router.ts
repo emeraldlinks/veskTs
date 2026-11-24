@@ -2238,7 +2238,7 @@ export function createFileRouter(routeTree: RouteNode[], options: FileRouterOpti
 
 				const renderContent = () => {
 					const propsNode = findPageNode(match!);
-					if (propsNode && propsNode._dataPath !== url.pathname) {
+					if (propsNode && propsNode._dataPath && propsNode._dataPath !== url.pathname) {
 						propsNode.props = undefined;
 					}
 					try {
