@@ -1835,6 +1835,13 @@ describe('Root Event Delegation', () => {
 		}`, 'App');
 		expect(html).toContain('onclick="showToast()"');
 	});
+	it('does not HTML-escape single quotes inside static inline event attributes', () => {
+		const html = render(`component App {
+			<button onclick="showToast('saved')">Click</button>
+		}`, 'App');
+		expect(html).toContain(`onclick="showToast('saved')"`);
+		expect(html).not.toContain('showToast(&#39;saved&#39;)');
+	});
 	it('client codegen emits delegation setup', () => {
 		const code = compileClient(`component App {
 			let &[c] = track(0);

@@ -12,7 +12,7 @@ import { walk } from 'zimmerframe';
 import type { Node as ESTreeNode } from 'estree';
 import { unwrapTrackCall, stripTrackGeneric, hasTopLevelComma, skipWhitespace, findBalancedEnd, startsWithIdentifier, callsIdentifier } from '@vesk/compiler/src/scan';
 import {
-  isStatic, escapeHtml, indent, exprJS,
+  isStatic, escapeHtml, escapeAttrValue, indent, exprJS,
   extractTopLevelNames, extractRuntimeNames, buildParamInit,
   VOID_ELEMENTS,
   __vskHydrate, __vskMarkerless, __vskImportedNames, setVskImportedNames, setVskForceClaim, takeVskForceClaim, nextVskId,
@@ -216,7 +216,7 @@ function staticNodeToJS(node: StaticNode, isAsync = false, tracked?: Map<string,
     if (attr.value === '') {
       openTag += ` ${attr.name}`;
     } else {
-      openTag += ` ${attr.name}="${escapeHtml(attr.value)}"`;
+      openTag += ` ${attr.name}="${escapeAttrValue(attr.value)}"`;
     }
   }
 

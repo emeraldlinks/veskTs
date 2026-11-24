@@ -142,6 +142,14 @@ describe('Client Codegen — DOM Creation', () => {
 			expect(code).not.toContain('setAttribute');
 		}
 	});
+	bothModes('does not HTML-escape static attribute values on the client', `
+		component App { return <button onclick="showToast('saved')">Click</button>; }
+	`, (code, mode) => {
+		if (mode === 'normal') {
+			expect(code).toContain(`setAttribute("onclick", "showToast('saved')")`);
+			expect(code).not.toContain('showToast(&#39;saved&#39;)');
+		}
+	});
 
 	// No empty-string placeholder for expression-valued attributes on the
 	// client: `setAttribute("disabled", "")` sets the IDL disabled property
@@ -3102,6 +3110,26 @@ describe('Client Codegen — Markerless Hydration', () => {
 			); }
 		`, null, { hydrate: true, forceClient: true, markerless: true });
 		expect(code).toContain("claimOnly(undefined, (typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0))");
+	});
+
+	it('[markerless hyd] static multi-root component claims every root element', () => {
+		const code = compileClient(`
+			component StaticPair() { <div class="one">first</div><aside class="two">second</aside> }
+			export default component App() { const &[t] = track('ok'); return (
+				<div id="root"><em class="static">margin</em><StaticPair/><b>{t}</b></div>
+			); }
+		`, null, { hydrate: true, forceClient: true, markerless: true });
+		expect(code).toContain('__i < 2');
+		expect(code).toContain("__i === 0 ? __hydrate.claimOnly(undefined, (typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0)) : __hydrate.claimOnly(undefined, 0)");
+	});
+
+	it('[marker hyd] static multi-root component claims every root element', () => {
+		const code = compileClient(`
+			component StaticPair() { <div class="one">first</div><aside class="two">second</aside> }
+			export default component App() { <div id="root"><StaticPair/></div> }
+		`, null, { hydrate: true, forceClient: true, markerless: false });
+		expect(code).toContain('__i < 2');
+		expect(code).toContain('__i === 0 ? __hydrate.claimOnly() : __hydrate.claimOnly()');
 	});
 
 	// Marker mode must keep the value-thread machinery off its output: the

@@ -840,7 +840,7 @@ function emitStatic(ctx: Ctx, node: StaticNode, tracked: Map<string, TrackedInfo
     if (attr.value === '') {
       ctx.push(`${el}.setAttribute(${JSON.stringify(attr.name)}, '');`);
     } else {
-      ctx.push(`${el}.setAttribute(${JSON.stringify(attr.name)}, ${JSON.stringify(escapeHtml(attr.value))});`);
+      ctx.push(`${el}.setAttribute(${JSON.stringify(attr.name)}, ${JSON.stringify(attr.value)});`);
     }
   }
 
@@ -2835,10 +2835,14 @@ function buildComponentMap(irRoot: IRRoot, hydrate = false, alloc?: NameAlloc, m
       // markerless mode the claim also consumes the caller's inherited
       // residue deposit (`takeSkipK`), matching a generated component's
       // first-claim budget.
-      const claimExpr = markerless
+      const firstClaim = markerless
         ? `__hydrate.claimOnly(undefined, (typeof __hydrate.takeSkipK === 'function' ? __hydrate.takeSkipK() : 0))`
         : `__hydrate.claimOnly()`;
-      const stub = `(props, __registry, __hydrate) => { return ${claimExpr}; }`;
+      const nextClaim = markerless ? `__hydrate.claimOnly(undefined, 0)` : `__hydrate.claimOnly()`;
+      const claimCount = Math.max(1, comp.body.filter((node) => node instanceof StaticNode).length);
+      const stub = claimCount === 1
+        ? `(props, __registry, __hydrate) => { return ${firstClaim}; }`
+        : `(props, __registry, __hydrate) => { let __root; for (let __i = 0; __i < ${claimCount}; __i++) { const __claimed = __i === 0 ? ${firstClaim} : ${nextClaim}; if (__i === 0) __root = __claimed; } return __root; }`;
       mapLines.push(`${registry}[${JSON.stringify(comp.name)}] = ${stub};`);
       continue;
     }

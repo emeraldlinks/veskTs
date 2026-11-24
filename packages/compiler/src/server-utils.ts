@@ -168,6 +168,15 @@ export function quoteAttr(str: string): string {
   return str.split('"').join('&quot;');
 }
 
+/** Escapes text for a double-quoted HTML attribute value. Single quotes stay literal. */
+export function escapeAttrValue(str: string): string {
+  return str
+    .split('&').join('&amp;')
+    .split('<').join('&lt;')
+    .split('>').join('&gt;')
+    .split('"').join('&quot;');
+}
+
 /**
  * Makes JSON output safe to embed inside an inline <script> block.
  * Escapes `<` (breaks out of script context via `</script>`), line
