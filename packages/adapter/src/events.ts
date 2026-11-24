@@ -1,7 +1,17 @@
 import { writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { builtinModules } from 'node:module';
 import { resolve } from 'node:path';
 import * as esbuild from './esbuild-fallback.js';
 import { collectEventsFile } from '@vesk/compiler/src/events';
+
+const NODE_EXTERNALS = [
+  'fs',
+  'path',
+  'module',
+  'async_hooks',
+  ...builtinModules,
+  ...builtinModules.map(name => `node:${name}`),
+];
 
 let buildId = 0;
 
@@ -120,7 +130,7 @@ export async function compileEvents(appDir: string, outDir: string): Promise<boo
       format: 'esm',
       minify: true,
       outfile: resolve(serverDir, 'events.js'),
-      external: ['fs', 'node:fs', 'path', 'node:path', 'module', 'node:module', 'node:async_hooks'],
+      external: NODE_EXTERNALS,
       target: ['es2022'],
       treeShaking: true,
     });

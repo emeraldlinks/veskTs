@@ -104,6 +104,24 @@ async function main() {
     } catch { /* ignore */ }
   }
 
+  {
+    const tmp = writeFixture({
+      'app/_events.ts': [
+        "import { pathToFileURL } from 'node:url';",
+        'export function onStart() {',
+        "  return pathToFileURL('/tmp/worker.ts').href;",
+        '}',
+      ].join('\n'),
+    });
+    const ok = await compileEvents(join(tmp, 'app'), join(tmp, 'build'));
+    assert(ok === true, 'compiles when _events.ts imports node:url');
+    const eventsPath = join(tmp, 'build', 'server', 'events.js');
+    const mod = await import(pathToFileURL(eventsPath) + `?t=${Date.now()}`);
+    assert(typeof mod.onStart === 'function', 'node:url import survives bundling');
+    assert(mod.onStart().startsWith('file://'), 'externalized node:url import remains executable');
+    rmSync(tmp, { recursive: true, force: true });
+  }
+
   console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
   if (failed > 0) process.exit(1);
   console.log('All adapter events tests passed!');
