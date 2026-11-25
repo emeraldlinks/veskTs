@@ -2,6 +2,15 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.4.3 — 2026-11-25
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler:** keep dev API modules in writable project root
+- **compiler:** make API route imports portable
+
 ## 0.4.2 — 2026-11-24
 
 _No breaking changes._
