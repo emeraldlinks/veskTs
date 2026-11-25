@@ -33,6 +33,10 @@ Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
       Live dev and prod `tests/api-parity-test.mjs` both passed 20/20. The prod
       build required temporarily hiding the pre-existing broken test-app
       `tsconfig.json` typecheck gate; `tsconfig.json` was restored immediately.
+- [x] Fixed CI follow-up: dev prepared modules for routes outside a project
+      fall back to the current working directory's `.vesk/api-modules` instead of
+      the filesystem root, which is not writable on GitHub runners. Added an
+      `api-routes` assertion for the fallback.
 - [ ] Verify in the user's Windows `myshopp` app with the rebuilt CLI.
 
 **This session (Windows file-URL imports):**

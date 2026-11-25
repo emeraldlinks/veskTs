@@ -445,7 +445,7 @@ function makeBody(buf) {
 (async () => {
   console.log('\nbuildWebRequest body limit');
   try {
-    const { buildWebRequest, tooLargeError } = await import('@vesk/compiler/src/api-routes');
+    const { buildWebRequest, tooLargeError, devApiModuleDir } = await import('@vesk/compiler/src/api-routes');
     // under the cap: json() works
     const small = buildWebRequest(
       { method: 'POST', headers: { host: 'localhost', 'content-type': 'application/json' }, ...makeBody(Buffer.from('{"a":1}')) },
@@ -488,6 +488,7 @@ function makeBody(buf) {
     const { executeApiRoute } = await import('@vesk/compiler/src/api-routes');
     const routeDir = createTestDir({ 'route.js': 'export async function GET() { return Response.json({ ok: true }); }' });
     const routeFile = join(routeDir, 'route.js');
+    expect(devApiModuleDir(routeFile).includes(join(process.cwd(), '.vesk', 'api-modules'))).toBe(true);
     const res = await executeApiRoute(routeFile, 'GET', new Request('http://localhost/api/test'));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
@@ -511,7 +512,7 @@ function makeBody(buf) {
     expect(await nestedRes.json()).toEqual({ value: 'dev-nested' });
     cleanup();
 
-    passed += 13;
+    passed += 14;
     console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected), exposes cookies.get(), resolves previousRoute, loads route modules through file URLs, and prepares dev-only nested extensionless imports');
   } catch (e) {
     failed++;

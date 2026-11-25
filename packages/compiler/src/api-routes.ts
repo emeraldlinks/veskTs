@@ -1,5 +1,6 @@
 import { createHash } from 'crypto';
 import { readdirSync, statSync, existsSync } from 'fs';
+import { tmpdir } from 'os';
 import { join, extname, resolve, dirname } from 'path';
 import type { ApiRouteNode } from '@vesk/compiler/src/types';
 import { collapseSlashes } from '@vesk/compiler/src/router';
@@ -313,12 +314,16 @@ export function tooLargeError(max: number): Error & { status: number } {
   return err;
 }
 
-function devApiModuleDir(filePath: string): string {
+export function devApiModuleDir(filePath: string): string {
+  const systemTmp = resolve(tmpdir());
   let projectRoot = dirname(filePath);
-  while (!existsSync(join(projectRoot, 'package.json'))) {
-    const parent = dirname(projectRoot);
-    if (parent === projectRoot) break;
-    projectRoot = parent;
+  while (true) {
+    if (projectRoot === systemTmp || dirname(projectRoot) === projectRoot) {
+      projectRoot = process.cwd();
+      break;
+    }
+    if (existsSync(join(projectRoot, 'package.json'))) break;
+    projectRoot = dirname(projectRoot);
   }
   const key = createHash('sha256').update(filePath).digest('hex').slice(0, 16);
   return resolve(projectRoot, '.vesk', 'api-modules', key);
