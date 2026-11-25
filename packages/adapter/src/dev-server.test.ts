@@ -16,7 +16,7 @@ import {
   rmSync,
   existsSync,
 } from 'node:fs';
-import { resolve, dirname, join } from 'node:path';
+import { resolve, dirname, join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -206,6 +206,26 @@ try {
     assert(!devSrc.includes("'</body>',\n\t\t\t\t\t'\\t<script type=\"module\" src=\"/_vesk/hmr.js\""), 'no legacy inline hmr.js </body> replace in request handlers');
     assert(devSrc.includes('/__vesk/hmr/state'), 'dev-server.ts serves the HMR state endpoint');
     assert(devSrc.includes('/__vesk/plugins'), 'dev-server.ts serves the plugins endpoints');
+  }
+
+  // ── generated modules are imported through file: URLs on every platform ──
+  {
+    const compilerSrc = resolve(__dirname, '..', '..', 'compiler', 'src');
+    const files = [
+      resolve(compilerSrc, 'api-routes.ts'),
+      resolve(compilerSrc, 'middleware.ts'),
+      resolve(compilerSrc, 'events.ts'),
+      devServerSrcPath,
+      resolve(__dirname, 'prod-server.ts'),
+      resolve(__dirname, 'dev-config.ts'),
+      resolve(__dirname, 'index.ts'),
+    ];
+    for (const file of files) {
+      const src = readFileSync(file, 'utf-8');
+      assert(src.includes("from '@vesk/compiler/src/module-url'"), `${basename(file)} imports the file URL helper`);
+      assert(!src.includes("new URL('file://' +"), `${basename(file)} does not build file URLs by concatenation`);
+      assert(!src.includes('import(`${'), `${basename(file)} does not import raw absolute paths with a query`);
+    }
   }
 
   // ── client-bundle.ts appendHmrGlobals untouched ──────────────────────────

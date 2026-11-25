@@ -5,6 +5,7 @@ import { bundleRuntime } from '@vesk/adapter/src/runtime-bundle';
 import { createHydratePlanRegistry, generateSsrFunction, hydratePlanModuleSource } from '@vesk/adapter/src/ssr-function';
 import { resolveUserCssPath, isTailwindPlugin, resolveCssUrls, hasBuiltGlobalCss } from '@vesk/adapter/src/css';
 import { collectActionIds } from '@vesk/compiler/src/actions';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
 import { ModuleRegistry, assertServerImportsLoadable } from '@vesk/compiler/src/module-imports';
 import { generateApiFunction } from '@vesk/adapter/src/api-function';
 import { describeAsset, type AssetDigest } from '@vesk/adapter/src/asset-hash';
@@ -42,9 +43,9 @@ async function resolveCompilerApi<T = Record<string, unknown>>(name: string): Pr
   if (existsSync(monorepoSrc)) {
     const tsFile = resolve(monorepoSrc, name.replace(/\.js$/, '.ts'));
     if (existsSync(tsFile)) {
-      return import(tsFile) as Promise<T>;
+      return import(fileImportUrl(tsFile)) as Promise<T>;
     }
-    return import(resolve(monorepoSrc, name)) as Promise<T>;
+    return import(fileImportUrl(resolve(monorepoSrc, name))) as Promise<T>;
   }
   return import(`@vesk/compiler/src/${name.replace(/\.js$/, '')}`) as Promise<T>;
 }

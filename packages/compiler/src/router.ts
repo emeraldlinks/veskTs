@@ -358,9 +358,11 @@ function scanDirectory(rootDir: string, dir: string, parentPath: string, options
   return nodes;
 }
 
-function extractComponentName(dir: string, type: string, rootDir: string): string {
-  const rel = relative(rootDir, dir);
-  const parts = rel.split('/').filter(Boolean);
+export function extractComponentName(dir: string, type: string, rootDir: string): string {
+  const normalizedDir = dir.split('\\').join('/');
+  const normalizedRoot = rootDir.split('\\').join('/');
+  const rel = relative(normalizedRoot, normalizedDir);
+  const parts = rel.split('\\').join('/').split('/').filter(Boolean);
   const clean = parts.map(p => {
     let out = '';
     for (const ch of p) {

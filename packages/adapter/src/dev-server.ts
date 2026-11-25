@@ -3,6 +3,7 @@ import { resolve, dirname, basename } from 'node:path';
 import { createServer, type Server, type IncomingMessage, type ServerResponse } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
 import { DEFAULT_MAX_BODY_BYTES, resolveComponentName } from '@vesk/compiler/src/server-codegen';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
@@ -330,7 +331,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
   const pkgRouter = resolve(appDir, '..', 'node_modules', '@vesk/compiler', 'router.js');
   const routerPath = existsSync(monorepoRouter) ? monorepoRouter : (existsSync(pkgRouter) ? pkgRouter : null);
   if (routerPath) {
-    const { scanComponents } = await import(routerPath) as { scanComponents: (componentsDir: string) => Map<string, string> };
+    const { scanComponents } = await import(fileImportUrl(routerPath)) as { scanComponents: (componentsDir: string) => Map<string, string> };
     const componentsDir = resolve(appDir, '..', 'components');
     if (existsSync(componentsDir)) {
       componentMap = scanComponents(componentsDir);
@@ -373,7 +374,7 @@ export async function startDevServer(appDir: string, options?: DevServerOptions)
     const eventsPath = resolve(devDir, 'server', 'events.js');
     if (existsSync(eventsPath)) {
       try {
-        eventsMod = await import(`${eventsPath}?t=${Date.now()}`) as DevEventsModule;
+        eventsMod = await import(fileImportUrl(eventsPath, Date.now())) as DevEventsModule;
         return;
       } catch {
         // ignore — events file present but failed to load
@@ -635,7 +636,7 @@ await doBuild();
         const handlerPath = resolve(devDir, actionEntry.function);
         if (existsSync(handlerPath)) {
           try {
-            const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handleAction?: (req: Request, id: string) => Promise<Response> };
+            const mod = await import(fileImportUrl(handlerPath, ssrVersion)) as { handleAction?: (req: Request, id: string) => Promise<Response> };
             if (mod.handleAction) {
               const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
               const response = await mod.handleAction(webRequest, actionId);
@@ -682,7 +683,7 @@ await doBuild();
             const handlerPath = resolve(devDir, apiRoute.function);
             if (existsSync(handlerPath)) {
               try {
-                const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
+                const mod = await import(fileImportUrl(handlerPath, ssrVersion)) as { handle: (req: Request) => Promise<Response> };
                 const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
                 if (routeSkipMiddleware) Object.defineProperty(webRequest, '__veskSkipMiddleware', { value: true });
                 const response = await mod.handle(webRequest);
@@ -704,7 +705,7 @@ await doBuild();
             try {
               const t0 = process.hrtime.bigint();
               const tImport0 = process.hrtime.bigint();
-              const mod = await import(`${handlerPath}?t=${ssrVersion}`) as { handle: (req: Request) => Promise<Response> };
+              const mod = await import(fileImportUrl(handlerPath, ssrVersion)) as { handle: (req: Request) => Promise<Response> };
               const tImport1 = process.hrtime.bigint();
               const webRequest = makeWebRequest(req, url.href, maxBodyBytes);
               if (routeSkipMiddleware) Object.defineProperty(webRequest, '__veskSkipMiddleware', { value: true });
@@ -738,7 +739,7 @@ await doBuild();
         if (!config.middleware || !existsSync(middlewarePath)) break;
 
         try {
-          const middlewareMod = await import(`${middlewarePath}?t=${ssrVersion}`) as {
+          const middlewareMod = await import(fileImportUrl(middlewarePath, ssrVersion)) as {
             execute: (ctx: Record<string, unknown>) => Promise<{ response: Response | null; rewriteUrl: string | null }>;
           };
           const serverStore = (globalThis as Record<string, unknown>).__vesk_server_ctx as Record<string, unknown> | undefined;
@@ -783,7 +784,7 @@ await doBuild();
       if (boundaryPath) {
         try {
           const runtimePath = resolve(devDir, 'server', 'runtime.js');
-          const { renderFullPage, storeDataScriptGlobal } = await import(`${runtimePath}?t=${ssrVersion}`) as {
+          const { renderFullPage, storeDataScriptGlobal } = await import(fileImportUrl(runtimePath, ssrVersion)) as {
             renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>;
             storeDataScriptGlobal: (payload: unknown) => string | null;
           };

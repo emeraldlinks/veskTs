@@ -81,6 +81,42 @@ it('a single dynamic API param still captures one segment', () => {
 	expectIncludes(funcCode, '"id": urlParts[1]');
 });
 
+const graphRoot = mkdtempSync(join(tmpdir(), 'vesk-api-graph-'));
+const graphApiDir = join(graphRoot, 'app', 'api', 'orders');
+const graphLibDir = join(graphRoot, 'app', 'lib');
+mkdirSync(graphApiDir, { recursive: true });
+mkdirSync(graphLibDir, { recursive: true });
+writeFileSync(join(graphRoot, 'tsconfig.json'), JSON.stringify({
+	compilerOptions: { baseUrl: '.', paths: { '@/*': ['app/lib/*'] } },
+}));
+writeFileSync(join(graphApiDir, 'route.ts'), [
+	"import { value } from '@/db';",
+	"import { suffix } from '../../lib/suffix';",
+	'export const GET = () => new Response(value + suffix);',
+].join('\n'));
+writeFileSync(join(graphLibDir, 'db.ts'), "import { suffix } from './suffix';\nexport const value = 'db:' + suffix;\n");
+writeFileSync(join(graphLibDir, 'suffix.ts'), 'export const suffix = "ok";\n');
+
+const graphNode: ApiRouteNode = {
+	path: 'orders',
+	fullPath: '/api/orders',
+	isDynamic: false,
+	isCatchAll: false,
+	filePath: join(graphApiDir, 'route.ts'),
+	children: [],
+};
+
+it('generated API functions inline a portable prepared module graph', () => {
+	const out = join(graphRoot, 'out');
+	const { funcCode } = generateApiFunction(graphNode, graphApiDir, out);
+	if (funcCode.includes("from '@/db'")) throw new Error('alias import was not prepared');
+	if (funcCode.includes("from '../../lib/suffix'")) throw new Error('extensionless import was not prepared');
+	if (funcCode.includes(graphRoot)) throw new Error('generated code leaks absolute build paths');
+	if (!funcCode.includes('.mjs')) throw new Error('generated code has no prepared module imports');
+	const modulesDir = join(out, 'server', 'api', '_modules');
+	if (!existsSync(modulesDir)) throw new Error('prepared modules directory was not emitted');
+});
+
 it('inlined middleware does not redeclare VeskResponse in an API function', () => {
 	const middlewareCode = compileMiddlewareCode([
 		[
@@ -113,7 +149,17 @@ async function runGateBuild(): Promise<void> {
 	await build(gateApp, { outDir: gateOut, publicDir: join(gateRoot, 'public') });
 }
 
-await itAsync('build fails before the manifest when a server import is not runtime-loadable', async () => {
+await itAsync('build succeeds with extensionless nested imports in an API route graph', async () => {
+	await runGateBuild();
+	if (!existsSync(join(gateOut, 'config.json'))) {
+		throw new Error('successful build did not produce config.json');
+	}
+});
+
+writeFileSync(join(gateApp, 'api', 'broken', 'route.ts'), 'import { missing } from "../../../models/does-not-exist";\nexport const GET = () => new Response(missing);\n');
+rmSync(gateOut, { recursive: true, force: true });
+
+await itAsync('build still fails before the manifest when a server import cannot be resolved', async () => {
 	let message = '';
 	try {
 		await runGateBuild();
@@ -128,17 +174,8 @@ await itAsync('build fails before the manifest when a server import is not runti
 	}
 });
 
-writeFileSync(join(gateRoot, 'models', 'register.ts'), 'export function register() { return "1"; }\n');
-rmSync(gateOut, { recursive: true, force: true });
-
-await itAsync('build succeeds when server imports are runtime-loadable', async () => {
-	await runGateBuild();
-	if (!existsSync(join(gateOut, 'config.json'))) {
-		throw new Error('successful build did not produce config.json');
-	}
-});
-
 rmSync(root, { recursive: true, force: true });
+rmSync(graphRoot, { recursive: true, force: true });
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exitCode = 1;

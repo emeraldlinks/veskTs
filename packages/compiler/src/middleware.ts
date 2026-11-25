@@ -7,6 +7,7 @@ import { PREVIOUS_ROUTE_HEADER, resolvePreviousRoute, sanitizePreviousRoute } fr
 import type { RouteNode } from '@vesk/compiler/src/types';
 import type { VeskPlugin, MiddlewareContext, MiddlewareChainOptions } from '@vesk/compiler/src/types';
 import { isWhitespaceChar } from '@vesk/compiler/src/scan';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
 
 export interface MiddlewareEntry {
   sourcePath: string;
@@ -93,9 +94,7 @@ export async function loadMiddleware(sourcePath: string): Promise<((ctx: any, ne
   }
   if (sourcePath.endsWith('.js') || sourcePath.endsWith('.ts')) {
     try {
-      const url = new URL('file://' + sourcePath);
-      url.searchParams.set('t', String(Date.now()) + Math.random().toString(36).slice(2));
-      const mod = await import(url.href) as Record<string, unknown>;
+      const mod = await import(fileImportUrl(sourcePath, String(Date.now()) + Math.random().toString(36).slice(2))) as Record<string, unknown>;
       return (mod.middleware || mod.default || null) as ((ctx: any, next: any) => any) | null;
     } catch {
       return null;

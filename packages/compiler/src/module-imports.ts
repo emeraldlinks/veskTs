@@ -1760,22 +1760,16 @@ export function findUnresolvedServerImports(entryFiles: string[]): ServerImportP
     if (isCompilerOwnedTarget(specifier) || isValueLessTarget(specifier) || specifier.startsWith('node:')) return null;
     const fromDir = dirname(importer);
     if (specifier === '.' || specifier === '..' || specifier.startsWith('./') || specifier.startsWith('../') || isAbsolute(specifier)) {
-      const target = resolve(fromDir, specifier);
-      let isFile = false;
-      try {
-        isFile = statSync(target).isFile();
-      } catch {
-        isFile = false;
-      }
-      if (!isFile) {
-        pushProblem({ kind: 'specifier', importer, specifier, target });
+      const target = resolveSsrModule(specifier, fromDir);
+      if (!target) {
+        pushProblem({ kind: 'specifier', importer, specifier });
         return null;
       }
       return target;
     }
-    if (resolveAliasModule(specifier, fromDir)) {
-      pushProblem({ kind: 'specifier', importer, specifier });
-      return null;
+    const aliased = resolveAliasModule(specifier, fromDir);
+    if (aliased) {
+      return resolveSsrModule(specifier, fromDir) ?? aliased;
     }
     const target = resolveViaPackageExports(specifier, fromDir) ?? nativeResolve(specifier, fromDir);
     if (!target || isBuiltinPath(target)) return null;

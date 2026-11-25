@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
-import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
-import { resolveImportPath } from '@vesk/compiler/src/module-imports';
+import { prepareApiRouteGraph } from '@vesk/compiler/src/api-module-prepare';
 import type { ApiRouteNode, ApiFunctionOptions } from '@vesk/adapter/src/types';
 
 function apiRouteName(fullPath: string): string {
@@ -21,38 +19,24 @@ export function generateApiFunction(
 
   const routeFilePath = apiNode.filePath;
   if (!routeFilePath) throw new Error(`api route ${apiNode.fullPath} has no filePath`);
-  let routeSrc = readFileSync(routeFilePath, 'utf-8');
 
-  // The function file lives in dist/server/api/, so the route's own relative
-  // specifiers (`../../../../src/_lib/...`) would resolve against that layout
-  // and fail to load. Resolve them against the route file's real directory
-  // while it is still known, then point them at build-machine absolute paths:
-  // `vesk start` imports the file directly, and platform bundling inlines it.
-  const routeDir = dirname(routeFilePath);
-  routeSrc = routeSrc.replace(
-    /(from\s+['"]|import\s*\(\s*['"])(\.{1,2}\/[^'"]+)(['"])/g,
-    (match, prefix: string, spec: string, suffix: string) => {
-      try {
-        return prefix + resolveImportPath(spec, routeDir) + suffix;
-      } catch {
-        return match;
-      }
-    },
+  // The function file lives in dist/server/api/, so the route's own specifiers
+  // would resolve against that layout. Resolve the whole local module graph
+  // against the real route directory and emit portable relative specifiers
+  // into dist/server/api/_modules; `vesk start` imports those files directly
+  // and platform bundling inlines them.
+  const prepared = prepareApiRouteGraph(
+    routeFilePath,
+    resolve(outDir, 'server', 'api', '_modules'),
+    dirname(funcPath),
   );
+  let routeSrc = prepared.code;
 
   routeSrc = routeSrc
     .replace(/from\s+['"]@vesk\/runtime['"]\s*;?/g, "from '../runtime.js';")
     .replace(/from\s+['"]@vesk\/runtime\/(\w+)['"]\s*;?/g, () => {
       return "from '../runtime.js';";
     });
-
-  if (routeFilePath.endsWith('.ts')) {
-    try {
-      routeSrc = stripCodeTypes(routeSrc);
-    } catch {
-      // fall back to original source if stripping fails
-    }
-  }
 
   // fullPath carries the leading "/api" mount prefix; the request's urlParts
   // is built from url.pathname with "/api" already removed. Drop it here so

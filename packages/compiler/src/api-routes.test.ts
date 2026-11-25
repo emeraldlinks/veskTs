@@ -484,8 +484,35 @@ function makeBody(buf) {
 
     const err = tooLargeError(1024);
     expect(err.status).toBe(413);
-    passed += 7;
-    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected), exposes cookies.get(), and resolves previousRoute');
+
+    const { executeApiRoute } = await import('@vesk/compiler/src/api-routes');
+    const routeDir = createTestDir({ 'route.js': 'export async function GET() { return Response.json({ ok: true }); }' });
+    const routeFile = join(routeDir, 'route.js');
+    const res = await executeApiRoute(routeFile, 'GET', new Request('http://localhost/api/test'));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    const cachedRes = await executeApiRoute(routeFile, 'GET', new Request('http://localhost/api/test'), {}, {}, new Map([[routeFile, 123]]));
+    expect(cachedRes.status).toBe(200);
+    cleanup();
+
+    const windowsRes = await executeApiRoute('C:\\Users\\KERRY\\app\\api\\posts\\route.js', 'GET', new Request('http://localhost/api/posts'), {}, {}, new Map());
+    expect(windowsRes.status).toBe(500);
+    const windowsDetail = (await windowsRes.json()).details as string;
+    expect(windowsDetail.includes('Received protocol')).toBe(false);
+
+    const nestedDir = createTestDir({
+      'route.ts': "import { value } from './helper';\nexport async function GET() { return Response.json({ value }); }",
+      'helper.ts': "import { deep } from './deep';\nexport const value = 'dev-' + deep;",
+      'deep.ts': "export const deep = 'nested';",
+    });
+    const nestedRoute = join(nestedDir, 'route.ts');
+    const nestedRes = await executeApiRoute(nestedRoute, 'GET', new Request('http://localhost/api/nested'), {}, {}, new Map([[nestedRoute, Date.now()]]));
+    expect(nestedRes.status).toBe(200);
+    expect(await nestedRes.json()).toEqual({ value: 'dev-nested' });
+    cleanup();
+
+    passed += 13;
+    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected), exposes cookies.get(), resolves previousRoute, loads route modules through file URLs, and prepares dev-only nested extensionless imports');
   } catch (e) {
     failed++;
     console.log(`  ✗ body cap — ${e.message}`);

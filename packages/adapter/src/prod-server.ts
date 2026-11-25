@@ -3,6 +3,7 @@ import { resolve, dirname, basename } from 'node:path';
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { fileURLToPath } from 'node:url';
 import { createRateLimiter, getClientIp, resolveComponentName, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-codegen';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
 import { securityHeaders } from '@vesk/compiler/src/server-utils';
@@ -133,7 +134,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
   const mwPath = resolve(outDir, 'server', 'middleware.js');
   if (existsSync(mwPath)) {
     try {
-      middlewareMod = await import(`${mwPath}?t=${Date.now()}`) as { execute: (ctx: Record<string, unknown>) => Promise<{ response: Response | null; rewriteUrl: string | null }> };
+      middlewareMod = await import(fileImportUrl(mwPath, Date.now())) as { execute: (ctx: Record<string, unknown>) => Promise<{ response: Response | null; rewriteUrl: string | null }> };
     } catch {
       // ignore
     }
@@ -149,7 +150,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
   const eventsPath = resolve(outDir, 'server', 'events.js');
   if (existsSync(eventsPath)) {
     try {
-      eventsMod = await import(`${eventsPath}?t=${Date.now()}`) as EventsModule;
+      eventsMod = await import(fileImportUrl(eventsPath, Date.now())) as EventsModule;
     } catch {
       // ignore
     }
@@ -184,7 +185,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
     const fullPath = resolve(outDir, funcPath);
     if (!existsSync(fullPath)) return null;
     try {
-      const mod = await import(`${fullPath}?t=${Date.now()}`) as SsrFunctionModule;
+      const mod = await import(fileImportUrl(fullPath, Date.now())) as SsrFunctionModule;
       functionCache.set(funcPath, mod);
       return mod;
     } catch (e) {
@@ -622,7 +623,7 @@ export async function startProdServer(outDir: string, options?: ProdServerOption
       if (html === null) {
         try {
           const runtimePath = resolve(outDir, 'server', 'runtime.js');
-          const { renderFullPage, storeDataScriptGlobal } = await import(runtimePath) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
+          const { renderFullPage, storeDataScriptGlobal } = await import(fileImportUrl(runtimePath)) as { renderFullPage: (source: string, componentName: string, props: Record<string, unknown>, registry: Map<string, Function>, options: Record<string, unknown>) => Promise<string>; storeDataScriptGlobal: (payload: unknown) => string | null };
           const src = readFileSync(boundaryPath, 'utf-8');
           const compName = resolveComponentName(src) || (file === 'error.vsk' ? 'Error' : 'NotFound');
           html = await renderFullPage(src, compName, props, new Map(), { hydrate: true, cssUrls: pageCssUrls, clientScriptUrl: buildConfig?.assets?.client?.url || '/_vesk/static/client.js', clientScriptIntegrity: buildConfig?.assets?.client?.integrity, security: securityConfig?.security || {}, externalDataScript: storeDataScriptGlobal, sourcePath: boundaryPath, headExtra: bakedHeadExtra });

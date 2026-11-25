@@ -1,6 +1,7 @@
 import { existsSync } from 'fs';
 import { join } from 'path';
 import type { VeskEventHandlers } from '@vesk/compiler/src/types';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
 
 /**
  * App lifecycle + per-request events.
@@ -44,9 +45,7 @@ export function isEventsFile(path: string): boolean {
 /** Load an events file (cache-busted so dev edits reload without restart). */
 export async function loadEvents(sourcePath: string): Promise<VeskEventHandlers> {
   try {
-    const url = new URL('file://' + sourcePath);
-    url.searchParams.set('t', String(Date.now()) + Math.random().toString(36).slice(2));
-    const mod = (await import(url.href)) as Record<string, unknown>;
+    const mod = (await import(fileImportUrl(sourcePath, String(Date.now()) + Math.random().toString(36).slice(2)))) as Record<string, unknown>;
     const handlers: VeskEventHandlers = {};
     if (typeof mod.onStart === 'function') handlers.onStart = mod.onStart as VeskEventHandlers['onStart'];
     if (typeof mod.onRequest === 'function') handlers.onRequest = mod.onRequest as VeskEventHandlers['onRequest'];

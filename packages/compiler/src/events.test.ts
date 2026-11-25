@@ -1,5 +1,6 @@
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
+import { tmpdir } from 'os';
 import { collectEventsFile, isEventsFile, loadEvents, runEventHandlers } from '@vesk/compiler/src/events';
 
 let passed = 0;
@@ -26,7 +27,7 @@ function expect(actual: unknown) {
 }
 
 function createFixture(files: Record<string, string>) {
-	const tmp = mkdtempSync('/tmp/vesk-events-test-');
+	const tmp = mkdtempSync(join(tmpdir(), 'vesk-events-test-'));
 	for (const [path, content] of Object.entries(files)) {
 		const fullPath = join(tmp, path);
 		mkdirSync(join(fullPath, '..'), { recursive: true });

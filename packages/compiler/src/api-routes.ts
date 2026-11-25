@@ -1,11 +1,14 @@
+import { createHash } from 'crypto';
 import { readdirSync, statSync, existsSync } from 'fs';
-import { join, extname } from 'path';
+import { join, extname, resolve, dirname } from 'path';
 import type { ApiRouteNode } from '@vesk/compiler/src/types';
 import { collapseSlashes } from '@vesk/compiler/src/router';
 import { assertSameOrigin, DEFAULT_MAX_BODY_BYTES } from '@vesk/compiler/src/server-utils';
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
 import { resolvePreviousRoute } from '@vesk/runtime/src/previous-route';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
+import { prepareApiRouteGraph } from '@vesk/compiler/src/api-module-prepare';
 import type { MiddlewareCookies, PreviousRouteInfo, VeskHeaders } from '@vesk/compiler/src/types';
 
 export { parseCookies };
@@ -310,6 +313,17 @@ export function tooLargeError(max: number): Error & { status: number } {
   return err;
 }
 
+function devApiModuleDir(filePath: string): string {
+  let projectRoot = dirname(filePath);
+  while (!existsSync(join(projectRoot, 'package.json'))) {
+    const parent = dirname(projectRoot);
+    if (parent === projectRoot) break;
+    projectRoot = parent;
+  }
+  const key = createHash('sha256').update(filePath).digest('hex').slice(0, 16);
+  return resolve(projectRoot, '.vesk', 'api-modules', key);
+}
+
 export async function executeApiRoute(
   filePath: string,
   method: string,
@@ -320,14 +334,15 @@ export async function executeApiRoute(
 ): Promise<Response | null> {
   let mod: Record<string, unknown>;
   try {
-    if (devCache && devCache.has(filePath)) {
-      const t = devCache.get(filePath)!;
-      const url = new URL('file://' + filePath);
-      url.searchParams.set('t', String(t));
-      mod = await import(url.href) as Record<string, unknown>;
-    } else {
-      mod = await import(filePath) as Record<string, unknown>;
+    let importPath = filePath;
+    let cacheKey: string | number | undefined = devCache?.get(filePath);
+    if (devCache) {
+      const outputDir = devApiModuleDir(filePath);
+      const prepared = prepareApiRouteGraph(filePath, outputDir, outputDir);
+      importPath = prepared.modulePath;
+      cacheKey = prepared.cacheKey;
     }
+    mod = await import(fileImportUrl(importPath, cacheKey)) as Record<string, unknown>;
   } catch (e: unknown) {
     // details only in dev (devCache present); prod gets a generic message
     const body = devCache

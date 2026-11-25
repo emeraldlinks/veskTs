@@ -984,16 +984,28 @@ test('loadSsrModule: one bad module no longer poisons an unrelated good one', ()
   }
 });
 
-test('server imports: extensionless transitive import fails before runtime', () => {
+test('server imports: extensionless transitive import resolves before runtime', () => {
   const fx = makeFixture();
   try {
     writeFileSync(fx.file('payment.ts'), `export const Payment = 1;\n`);
     writeFileSync(fx.file('register.ts'), `import { Payment } from './payment';\nexport const register = () => Payment;\n`);
     writeFileSync(fx.file('entry.js'), `import { register } from ${JSON.stringify(fx.file('register.ts'))};\nexport const handle = register;\n`);
     const problems = findUnresolvedServerImports([fx.file('entry.js')]);
+    expect(problems.length).toEqual(0);
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('server imports: missing transitive import still fails before runtime', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('register.ts'), `import { missing } from './missing';\nexport const register = () => missing;\n`);
+    writeFileSync(fx.file('entry.js'), `import { register } from ${JSON.stringify(fx.file('register.ts'))};\nexport const handle = register;\n`);
+    const problems = findUnresolvedServerImports([fx.file('entry.js')]);
     expect(problems.length).toEqual(1);
     expect(problems[0].kind).toEqual('specifier');
-    expect(problems[0].specifier).toEqual('./payment');
+    expect(problems[0].specifier).toEqual('./missing');
     expect(problems[0].importer).toEqual(fx.file('register.ts'));
   } finally {
     fx.cleanup();

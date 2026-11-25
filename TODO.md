@@ -5,6 +5,50 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (dev/prod API module graph):**
+
+- [x] Fixed the reported WSL failure where `executeApiRoute` imported a raw
+      `route.ts` and Node could not resolve its extensionless local import
+      (`Cannot find module .../app/db/connection`). Added
+      `@vesk/compiler/src/api-module-prepare`, which walks the local module graph
+      with the AST parser/TS stripper and the compiler's resolvers, then emits
+      portable `./<hash>.mjs` specifiers plus a content `cacheKey`. No regex was
+      added to compiler source.
+- [x] Wired the same prepared graph into both dispatchers: `vesk dev` prepares
+      into the project's `.vesk/api-modules` (so app `node_modules` aliases keep
+      resolving), and `vesk build` inlines it into `dist/server/api/_modules`.
+      Nested extensionless imports and tsconfig aliases now work in both modes.
+- [x] Relaxed the `V0902` server-import gate so extensionless/aliased imports
+      resolve with `resolveSsrModule`; genuinely missing specifiers still fail
+      before `config.json` is written.
+- [x] Ported the useful remaining Windows fixes from PR #6 with cross-platform
+      tests: component-name separator folding, nested SSR boundary lookup,
+      portable `tmpdir()` fixtures, and docs `sourceFile`/OpenAPI normalization.
+- [x] Added fixture `test-app/app/api/module-graph` and a new parity assertion in
+      `tests/api-parity-test.mjs`.
+- [x] Validation: api-module-prepare 4/4, api-routes 43/43, module-imports 53/53,
+      api-function 7/7, router 37/37, events 11/11, ssr-function 56/56, docs
+      intelligence all checks, adapter dev 75/75, api-function-middleware 1/1,
+      package rebuild, `npm run typecheck`, and `git diff --check` green.
+      Live dev and prod `tests/api-parity-test.mjs` both passed 20/20. The prod
+      build required temporarily hiding the pre-existing broken test-app
+      `tsconfig.json` typecheck gate; `tsconfig.json` was restored immediately.
+- [ ] Verify in the user's Windows `myshopp` app with the rebuilt CLI.
+
+**This session (Windows file-URL imports):**
+
+- [x] Root-caused the reported `Failed to load route module` / `Received protocol 'c:'`
+      on Windows: API routes, middleware, events, config and generated SSR/API
+      modules were imported from bare absolute paths (`C:\...`) or hand-built
+      `file://` URLs. Added `@vesk/compiler/src/module-url` (`fileImportUrl`) and
+      routed every generated-module import through it, with cache busting via
+      the `t` query parameter.
+- [x] Added cross-platform URL tests (`module-url.test.ts`), a real
+      `executeApiRoute` import test, and source-usage guards in the adapter dev
+      server suite.
+- [x] Validation: module-url 5/5, api-routes 42/42, events 11/11, middleware
+      22/22, adapter dev 75/75, package rebuild, and `npm run typecheck` green.
+
 **This session (installed CLI bootstrap fix):**
 
 - [x] Fixed `build-packages.ts` self-execution in the bundled CLI: the whole

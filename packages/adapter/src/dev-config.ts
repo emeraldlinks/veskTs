@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { defineConfig, validateConfig, preset } from '@vesk/compiler/src/config';
 import { parse as parseVsk } from '@vesk/compiler/src/parser';
+import { fileImportUrl } from '@vesk/compiler/src/module-url';
 import type { VeskConfig } from '@vesk/types';
 
 export interface ConfigReadResult {
@@ -76,7 +77,7 @@ export async function parseConfigSource(source: string, isTs: boolean, projectDi
       definePlugin: (p: unknown) => p,
       preset,
     };
-    const mod = await import(`${tmpFile}?t=${Date.now()}`);
+    const mod = await import(fileImportUrl(tmpFile, Date.now()));
     const raw = (mod.default ?? mod) as VeskConfig | (() => VeskConfig);
     const cfg = (typeof raw === 'function' ? raw() : raw) as VeskConfig;
     return resolveConfig(cfg);

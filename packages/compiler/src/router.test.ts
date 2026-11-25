@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
-import { scanRoutes, matchUrl, collectSources, generateRouteManifest, extractMiddleware, extractMiddlewareParts } from '@vesk/compiler/src/router';
+import { tmpdir } from 'os';
+import { scanRoutes, matchUrl, collectSources, generateRouteManifest, extractMiddleware, extractMiddlewareParts, extractComponentName } from '@vesk/compiler/src/router';
 
 let passed = 0;
 let failed = 0;
@@ -34,7 +35,7 @@ function expect(actual) {
 }
 
 function createFixture(files) {
-	const tmp = mkdtempSync('/tmp/vesk-router-test-');
+	const tmp = mkdtempSync(join(tmpdir(), 'vesk-router-test-'));
 	for (const [path, content] of Object.entries(files)) {
 		const fullPath = join(tmp, path);
 		mkdirSync(join(fullPath, '..'), { recursive: true });
@@ -48,6 +49,15 @@ function cleanup(tmp) {
 }
 
 // ── Tests ──────────────────────────────────────────────────────
+
+console.log('Windows component names\n');
+
+test('component names use URL separators for Windows paths', () => {
+	expect(extractComponentName('C:\\Users\\KERRY\\myshopp\\app\\admin\\panel', 'page', 'C:\\Users\\KERRY\\myshopp\\app')).toBe('Page_Admin_panel');
+	expect(extractComponentName('C:\\Users\\KERRY\\myshopp\\app\\admin\\panel', 'layout', 'C:\\Users\\KERRY\\myshopp\\app')).toBe('Layout_Admin_panel');
+	expect(extractComponentName('C:/Users/KERRY/myshopp/app/admin/panel', 'page', 'C:/Users/KERRY/myshopp/app')).toBe('Page_Admin_panel');
+	expect(extractComponentName('C:\\Users\\KERRY/myshopp/app/admin/panel', 'page', 'C:\\Users\\KERRY/myshopp/app')).toBe('Page_Admin_panel');
+});
 
 console.log('Route Scanner\n');
 

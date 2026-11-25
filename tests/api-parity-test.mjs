@@ -163,5 +163,13 @@ console.log(`\n=== API route parity [${TARGET}] ${BASE} ===`);
   chk('route middleware next(rewrite) targets a sibling API route', r.status === 200 && t.includes('"target":"mw-scope-target"'), `got ${r.status} ${t.slice(0, 90)}`);
 }
 
+// extensionless top-level + nested local imports resolve through the shared
+// prepared module graph in both dev and prod
+{
+  const r = await fetch(`${BASE}/api/module-graph`);
+  const t = await r.text();
+  chk('extensionless nested imports -> 200 JSON', r.status === 200 && t.includes('"value":"graph:nested"'), `got ${r.status} ${t.slice(0, 90)}`);
+}
+
 console.log(`\n  ${pass} passed, ${fail} failed`);
 process.exit(fail > 0 ? 1 : 0);
