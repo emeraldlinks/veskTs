@@ -2,6 +2,14 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.4.4 — 2026-11-26
+
+_No breaking changes._
+
+### Fixes
+
+- **dev:** reload env files and resolve dotted API imports
+
 ## 0.4.3 — 2026-11-25
 
 _No breaking changes._
