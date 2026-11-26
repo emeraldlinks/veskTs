@@ -770,6 +770,34 @@ test('resolveImportPath: extensionless probes .ts and component targets probe .v
   }
 });
 
+test('resolveImportPath/resolveAliasModule: dotted basenames probe .ts (auth.service.ts)', () => {
+  const fx = makeFixture();
+  try {
+    mkdirSync(fx.file('services'), { recursive: true });
+    writeFileSync(fx.file('services/auth.service.ts'), `export const A = 1;`);
+    expect(resolveImportPath('./services/auth.service', fx.dir)).toEqual(fx.file('services/auth.service.ts'));
+    expect(resolveSsrModule('./services/auth.service', fx.dir)).toEqual(fx.file('services/auth.service.ts'));
+    writeTsconfig(fx, `{ "compilerOptions": { "baseUrl": ".", "paths": { "@/*": ["*"] } } }`);
+    expect(resolveAliasModule('@/services/auth.service', fx.dir)).toEqual(fx.file('services/auth.service.ts'));
+    expect(resolveImportPath('@/services/auth.service', fx.dir)).toEqual(fx.file('services/auth.service.ts'));
+  } finally {
+    fx.cleanup();
+  }
+});
+
+test('resolveImportPath: a missing explicit extension is never given another extension', () => {
+  const fx = makeFixture();
+  try {
+    expect(resolveImportPath('./missing.js', fx.dir)).toEqual(fx.file('missing.js'));
+    expect(resolveSsrModule('./missing.js', fx.dir)).toEqual(null);
+    writeFileSync(fx.file('missing.js.ts'), `export const A = 1;`);
+    expect(resolveImportPath('./missing.js', fx.dir)).toEqual(fx.file('missing.js'));
+    expect(resolveSsrModule('./missing.js', fx.dir)).toEqual(null);
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test('resolveImportPath: bare/npm specifiers are returned unchanged without aliases', () => {
   const fx = makeFixture();
   try {

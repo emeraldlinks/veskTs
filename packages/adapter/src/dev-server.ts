@@ -8,6 +8,7 @@ import { DEFAULT_MAX_BODY_BYTES, resolveComponentName } from '@vesk/compiler/src
 import { parseCookies } from '@vesk/compiler/src/server-cookies';
 import { toHeadersMap } from '@vesk/runtime/src/request';
 import { build } from '@vesk/adapter/src/index';
+import { isEnvWatchFile, loadEnvFiles } from '@vesk/adapter/src/env-files';
 import { cacheControlFor } from '@vesk/adapter/src/asset-hash';
 import { mimeFor } from '@vesk/adapter/src/platform-output';
 import { reportServerError, registerErrorHooks } from '@vesk/adapter/src/error-report';
@@ -876,7 +877,8 @@ await doBuild();
       const isVsk = filename.endsWith('.vsk') || filename.endsWith('.md') || filename.endsWith('.markdown');
       const isCss = filename.endsWith('.css');
       const isScript = adapterScriptExts.some((ext) => filename.endsWith(ext));
-      if (!isVsk && !isCss && !isScript && !adapterConfigNames.has(name)) return;
+      const isEnv = isEnvWatchFile(filename);
+      if (!isVsk && !isCss && !isScript && !isEnv && !adapterConfigNames.has(name)) return;
 
       if (isCss) {
         doBuild();
@@ -897,6 +899,7 @@ await doBuild();
         const toAppRelative = (f: string): string =>
           f.startsWith('app/') ? f.slice(4) : f;
 
+        const envFiles = files.filter(isEnvWatchFile);
         const configFiles = files.filter(f => adapterConfigNames.has(f.slice(f.lastIndexOf('/') + 1)));
 
         const apiMiddlewareFiles = files.filter(f =>
@@ -906,7 +909,24 @@ await doBuild();
 
         const vskFiles = files.filter(f => f.endsWith('.vsk'));
 
-        if (configFiles.length > 0) {
+        if (envFiles.length > 0) {
+          loadEnvFiles(projectDir);
+          (async () => {
+            const start = Date.now();
+            hmr.broadcast('compiling');
+            try {
+              await doBuild();
+              if (pendingInitialError) {
+                hmr.broadcast('error', pendingInitialError as unknown as Record<string, unknown>);
+              } else {
+                ssrVersion = Date.now();
+                hmr.broadcast('reload', { reason: `Env: ${envFiles[0]}`, time: Date.now() - start });
+              }
+            } catch (e) {
+              hmr.broadcast('error', buildErrorPayload(e, envFiles[0], { appDir }) as unknown as Record<string, unknown>);
+            }
+          })();
+        } else if (configFiles.length > 0) {
           hmr.handleFileChange(toAppRelative(configFiles[0]), doBuild, routeTree);
         } else if (apiMiddlewareFiles.length > 0) {
           hmr.handleFileChange(toAppRelative(apiMiddlewareFiles[0]), doBuild, routeTree);

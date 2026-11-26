@@ -42,8 +42,9 @@ function expect(actual: unknown) {
 const root = mkdtempSync(join(tmpdir(), 'vesk-api-prepare-'));
 const app = join(root, 'app');
 const api = join(app, 'api', 'health');
+const authApi = join(app, 'api', 'auth');
 const output = join(root, 'prepared');
-for (const dir of [api, join(app, 'db'), join(root, 'lib')]) {
+for (const dir of [api, authApi, join(app, 'db'), join(root, 'lib'), join(root, 'services')]) {
 	mkdirSync(dir, { recursive: true });
 }
 
@@ -74,6 +75,12 @@ writeFileSync(join(api, 'lazy.ts'), 'export const marker = "lazy";\n');
 writeFileSync(join(api, 'types.ts'), 'export interface Unused { value: number }\n');
 writeFileSync(join(api, 'cycle-a.ts'), 'import { b } from "./cycle-b";\nexport const cyc = "a" + b;\n');
 writeFileSync(join(api, 'cycle-b.ts'), 'import { cyc as a } from "./cycle-a";\nexport const b = "b";\nexport const seeA = () => a;\n');
+writeFileSync(join(root, 'services', 'auth.service.ts'), 'export const authLabel = "auth-ok";\n');
+writeFileSync(join(authApi, 'route.ts'), [
+	"import { authLabel } from '../../../services/auth.service';",
+	'export const config = { csrf: false };',
+	'export async function GET() { return new Response(authLabel); }',
+].join('\n'));
 
 console.log('API module preparation\n');
 
@@ -104,6 +111,15 @@ test('cache key follows nested source changes', () => {
 	const after = prepareApiRouteGraph(join(api, 'route.ts'), output, output).cacheKey;
 	expect(before).not.toBe(after);
 	writeFileSync(join(app, 'db', 'secret.ts'), 'export const suffix = "ok";\n');
+});
+
+test('rewrites dotted-basename local imports (auth.service.ts) so Node can load them', async () => {
+	const prepared = prepareApiRouteGraph(join(authApi, 'route.ts'), output, output);
+	expect(prepared.code).not.toContain("from '../../../services/auth.service'");
+	const mod = await import(fileImportUrl(prepared.modulePath, prepared.cacheKey)) as {
+		GET: () => Promise<Response>;
+	};
+	expect(await (await mod.GET()).text()).toBe('auth-ok');
 });
 
 test('cycles terminate and both modules are emitted', () => {

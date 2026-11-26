@@ -335,7 +335,8 @@ export async function executeApiRoute(
   request: Request,
   params: Record<string, string> = {},
   locals: Record<string, unknown> = {},
-  devCache?: DevCache
+  devCache?: DevCache,
+  envCacheKey?: string | number
 ): Promise<Response | null> {
   let mod: Record<string, unknown>;
   try {
@@ -345,7 +346,7 @@ export async function executeApiRoute(
       const outputDir = devApiModuleDir(filePath);
       const prepared = prepareApiRouteGraph(filePath, outputDir, outputDir);
       importPath = prepared.modulePath;
-      cacheKey = prepared.cacheKey;
+      cacheKey = envCacheKey === undefined ? prepared.cacheKey : `${prepared.cacheKey}-${String(envCacheKey)}`;
     }
     mod = await import(fileImportUrl(importPath, cacheKey)) as Record<string, unknown>;
   } catch (e: unknown) {

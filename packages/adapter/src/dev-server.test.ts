@@ -206,6 +206,8 @@ try {
     assert(!devSrc.includes("'</body>',\n\t\t\t\t\t'\\t<script type=\"module\" src=\"/_vesk/hmr.js\""), 'no legacy inline hmr.js </body> replace in request handlers');
     assert(devSrc.includes('/__vesk/hmr/state'), 'dev-server.ts serves the HMR state endpoint');
     assert(devSrc.includes('/__vesk/plugins'), 'dev-server.ts serves the plugins endpoints');
+    assert(devSrc.includes('isEnvWatchFile(filename)'), 'dev-server.ts classifies env file changes');
+    assert(devSrc.includes('loadEnvFiles(projectDir)'), 'dev-server.ts reloads env files before rebuilding');
   }
 
   // ── generated modules are imported through file: URLs on every platform ──

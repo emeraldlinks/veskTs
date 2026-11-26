@@ -9,6 +9,7 @@ import { loadVeskConfig } from '@vesk/adapter/src/load-config';
 import type { VeskSecurity } from '@vesk/compiler/src/types';
 import { setRedactLogging, setRuntimeModule } from '@vesk/compiler/src/server-utils';
 import { build, startProdServer } from '@vesk/adapter/src/index';
+import { loadEnvFiles } from '@vesk/adapter/src/env-files';
 import { runSeoAudit } from '@vesk/adapter/src/seo-audit';
 import { startDevServer } from './dev-server';
 import * as __veskRuntime from '@vesk/runtime/src/index-server';
@@ -66,31 +67,6 @@ function parseHostArg(args: string[]): string | undefined {
 
 if (args.length === 0 || args.includes('--help') || args.includes('-h')) {
   usage(args.length === 0 ? 1 : 0);
-}
-
-function loadEnvFiles(projectDir: string) {
-  const files = [
-    join(projectDir, '.env'),
-    join(projectDir, '.env.local'),
-  ];
-  for (const filePath of files) {
-    if (!existsSync(filePath)) continue;
-    const content = readFileSync(filePath, 'utf-8');
-    for (const line of content.split('\n')) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
-      const eq = trimmed.indexOf('=');
-      if (eq === -1) continue;
-      let key = trimmed.slice(0, eq).trim();
-      let val = trimmed.slice(eq + 1).trim();
-      if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'"))) {
-        val = val.slice(1, -1);
-      }
-      if (!process.env[key]) {
-        process.env[key] = val;
-      }
-    }
-  }
 }
 
 async function loadConfig(projectDir: string) {

@@ -5,6 +5,30 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (env HMR + dotted-basename API imports):**
+
+- [x] **BUG (dev HMR): `.env` / `.env.local` edits were ignored until restart.**
+      Extracted a shared, reloadable loader into `@vesk/adapter/src/env-files`.
+      It loads `.env` then `.env.local`, strips quotes, skips comments, removes
+      keys deleted from the files, and never clobbers shell-owned or
+      post-load in-process values. Both dev servers now classify and watch the
+      two root env files. CLI env edits clear the SSR/API caches, reload env,
+      rebuild, and bump an epoch used to cache-bust prepared API modules;
+      adapter env edits reload env, rebuild, then bump `ssrVersion` only after
+      a successful build.
+- [x] **BUG (Windows API route): `services/auth.service.ts` failed with
+      `Cannot find module .../services/auth.service`.** `extname('auth.service')`
+      reports `.service`, so extension probing was skipped and the specifier
+      stayed unresolved in the generated API module. The resolver now probes
+      `.ts`/`.js` etc. for dotted basenames while leaving genuinely explicit
+      extensions like `./missing.js` unchanged. Added a prepared-graph test
+      that natively imports a route with `auth.service.ts`.
+- [x] Validation: api-module-prepare 5/5, module-imports 55/55, api-routes
+      45/45, env-files 5/5, adapter dev-server 77/77, CLI watch classification
+      96/96, package rebuild, CLI bundle rebuild, `npm run typecheck`,
+      `git diff --check`, and a clean adversarial code review.
+- [ ] Verify in the user's Windows `myshopp` app with the rebuilt CLI bundle.
+
 **This session (dev/prod API module graph):**
 
 - [x] Fixed the reported WSL failure where `executeApiRoute` imported a raw

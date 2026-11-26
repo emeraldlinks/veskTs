@@ -7,7 +7,7 @@
  * file in a vesk project regardless of path — only `node_modules`, build
  * outputs and VCS internals are excluded.
  */
-import { statSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { classifyHmrWatchPath, shouldRescanRoutes, ROUTE_STRUCTURAL_VSK } from './dev-server';
 
 let passed = 0;
@@ -112,6 +112,13 @@ for (const p of scriptCases) {
   assert(classifyHmrWatchPath(p) === 'script', `script: ${p}`);
 }
 
+const envCases: string[] = ['.env', '.env.local'];
+for (const p of envCases) {
+  assert(classifyHmrWatchPath(p) === 'env', `env: ${p}`);
+}
+assert(classifyHmrWatchPath('config/.env') === 'ignored', 'nested .env is not loaded');
+assert(classifyHmrWatchPath('.env.production') === 'ignored', 'unloaded env variant is ignored');
+
 // --- shouldRescanRoutes ---
 assert(shouldRescanRoutes('node_modules/x', 'rename') === true, 'rename (create/delete) always rescans');
 assert(shouldRescanRoutes('app/new-page/page.vsk', 'rename') === true, 'rename new page forces rescan');
@@ -191,6 +198,12 @@ assert(shouldRescanRoutes('app\\components\\Button.vsk', 'change') === false, 'w
   const third = cachedSsrCompile(cache as never, 'component Page { <div>new</div> }', pageFile);
   assert(third !== (first as unknown), 'after a clear the page recompiles from the new source');
 }
+
+const devServerSrc = readFileSync(new URL('./dev-server.ts', import.meta.url), 'utf-8');
+assert(devServerSrc.includes("if (isEnvWatchFile(relPath)) return 'env';"), 'dev-server routes env paths to the env watch kind');
+assert(devServerSrc.includes("} else if (kind === 'env') {"), 'dev-server handles env watch events');
+assert(devServerSrc.includes('apiWatchCache.clear()'), 'env reload clears the API module cache');
+assert(devServerSrc.includes('envEpoch'), 'dev-server busts API modules with an env epoch');
 
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total\n`);
 process.exit(failed > 0 ? 1 : 0);

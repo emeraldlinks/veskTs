@@ -512,8 +512,27 @@ function makeBody(buf) {
     expect(await nestedRes.json()).toEqual({ value: 'dev-nested' });
     cleanup();
 
-    passed += 14;
-    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected), exposes cookies.get(), resolves previousRoute, loads route modules through file URLs, and prepares dev-only nested extensionless imports');
+    const envKey = 'VESK_API_ENV_CACHE_TEST';
+    const originalEnv = process.env[envKey];
+    try {
+      process.env[envKey] = 'first';
+      const envDir = createTestDir({
+        'route.js': `const secret = process.env.${envKey}; export async function GET() { return Response.json({ secret }); }`,
+      });
+      const envRoute = join(envDir, 'route.js');
+      const first = await executeApiRoute(envRoute, 'GET', new Request('http://localhost/api/env'), {}, {}, new Map([[envRoute, 1]]), 'env-1');
+      expect(await first.json()).toEqual({ secret: 'first' });
+      process.env[envKey] = 'second';
+      const second = await executeApiRoute(envRoute, 'GET', new Request('http://localhost/api/env'), {}, {}, new Map([[envRoute, 1]]), 'env-2');
+      expect(await second.json()).toEqual({ secret: 'second' });
+      cleanup();
+    } finally {
+      if (originalEnv === undefined) delete process.env[envKey];
+      else process.env[envKey] = originalEnv;
+    }
+
+    passed += 15;
+    console.log('  ✓ enforces maxBodyBytes with 413 (small ok, big rejected), exposes cookies.get(), resolves previousRoute, loads route modules through file URLs, prepares dev-only nested extensionless imports, and busts API modules on env reload');
   } catch (e) {
     failed++;
     console.log(`  ✗ body cap — ${e.message}`);

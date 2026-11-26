@@ -24,6 +24,7 @@ import { collectEventsFile, loadEvents, runEventHandlers } from '@vesk/compiler/
 import { inlineMdContentAttrs, guessProjectRoots } from '@vesk/compiler/src/md-inline';
 import { generateClientBundle, buildTreeShakenRuntime, runtimeExportNames, buildHmrEvalSnippet, buildChunkName, SHARED_CHUNK_NAME } from '@vesk/adapter/src/client-bundle';
 import { resolveWithin, isAllowedWsUpgrade, installMdReadHook } from '@vesk/adapter/src/paths';
+import { isEnvWatchFile, loadEnvFiles } from '@vesk/adapter/src/env-files';
 import { mimeFor } from '@vesk/adapter/src/platform-output';
 import { createDevApiRouter } from '@vesk/adapter/src/dev-api';
 import {
@@ -534,7 +535,7 @@ const HMR_CONFIG_NAMES = new Set([
   'tsconfig.json', 'package.json',
 ]);
 
-export type HmrWatchKind = 'vsk' | 'css' | 'script' | 'events' | 'config' | 'ignored';
+export type HmrWatchKind = 'vsk' | 'css' | 'script' | 'events' | 'config' | 'env' | 'ignored';
 
 /**
  * Classifies a watch-relative path into the HMR pipeline it belongs to. The
@@ -558,6 +559,7 @@ export function classifyHmrWatchPath(relPathRaw: string): HmrWatchKind {
   const relPath = normalizeWatchPath(relPathRaw);
   const first = relPath.split('/')[0];
   if (HMR_SKIP_DIRS.has(first) || HMR_SKIP_MARKERS.some((m) => relPath.includes(m))) return 'ignored';
+  if (isEnvWatchFile(relPath)) return 'env';
   const name = relPath.slice(relPath.lastIndexOf('/') + 1);
   if (relPath.endsWith('.vsk') || relPath.endsWith('.md') || relPath.endsWith('.markdown')) return 'vsk';
   if (relPath.endsWith('.css')) return 'css';
@@ -1246,6 +1248,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
 
   let devLastBuildMs: number | null = null;
   let devLastError: HmrErrorPayload | null = null;
+  let envEpoch = 0;
   const devDiagnostics: DiagnosticFinding[] = [];
 
   function recordDiagnostic(finding: DiagnosticFinding): void {
@@ -1285,6 +1288,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
   async function fullRebuild(): Promise<{ ok: boolean; error?: string; ms?: number }> {
     const t0 = Date.now();
     try {
+      loadEnvFiles(projectDir);
+      envEpoch++;
       routeTree = scanRoutes(appDirPath);
       updateSourceMapping();
       await refreshIntelligenceArtifacts();
@@ -1739,6 +1744,20 @@ function routeFullPathForChunk(chunkName: string): string | null {
               LOG.err(`CSS rebuild error:`, (e as Error).message);
             }
           }, HMR_DEBOUNCE_MS);
+        } else if (kind === 'env') {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(async () => {
+            const t0 = Date.now();
+            try {
+              bcast({ type: 'compiling' });
+              ssrCompileCache.clear();
+              apiWatchCache.clear();
+              await fullRebuild();
+              LOG.info(`env changed, full rebuild + reload (${filename}) — ${Date.now() - t0}ms`);
+            } catch (e) {
+              LOG.err(`env reload error:`, (e as Error).message);
+            }
+          }, HMR_DEBOUNCE_MS);
         } else if (kind === 'config' || kind === 'script') {
           // API routes compile per-request with an mtime-busted cache — no
           // rebuild needed, just invalidate. Everything else (non-API .ts/.js
@@ -2106,6 +2125,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         target.params,
         locals,
         apiWatchCache,
+        envEpoch,
       );
     }
 
@@ -2133,7 +2153,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         ): Promise<Response | null> => {
           const targetUrl = `${url.origin}${url.pathname}${url.search}`;
           const webRequest = buildWebRequest(req, targetUrl, bodyBuffer.length ? new Uint8Array(bodyBuffer) : null);
-          return await executeApiRoute(target.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, target.params, locals, apiWatchCache);
+          return await executeApiRoute(target.node.filePath!, (req.method || 'GET').toUpperCase(), webRequest, target.params, locals, apiWatchCache, envEpoch);
         };
         if (mwChain.length > 0) {
           const mwReq = new Request(requestUrl, { headers: Object.fromEntries(toHeadersMap(req.headers)), method: req.method || 'GET' });

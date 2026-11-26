@@ -989,11 +989,10 @@ export function resolveAliasModule(spec: string, fromDir: string): string | null
 export function resolveImportPath(spec: string, fromDir: string): string {
   if (spec.startsWith('./') || spec.startsWith('../')) {
     const base = resolve(fromDir, spec);
-    if (extname(base)) return base;
-    for (const suffix of EXTENSIONS) {
-      if (existsSync(base + suffix)) return base + suffix;
-    }
+    const found = probeFile(base);
+    if (found) return found;
     if (existsSync(`${base}.vsk`)) return `${base}.vsk`;
+    if (extname(base)) return base;
     return `${base}.ts`;
   }
   if (!isAbsolute(spec)) {
@@ -1292,12 +1291,11 @@ function probeFile(base: string): string | null {
     return probeFile(join(base, 'index'));
   }
   const ext = extname(base);
-  if (ext.length === 0 || '/\\'.includes(base[base.length - 1] as string)) {
-    for (const suffix of EXTENSIONS) {
-      const candidate = base + suffix;
-      const cst = statOrNull(candidate);
-      if (cst && cst.isFile()) return candidate;
-    }
+  if (ext && (EXTENSIONS.includes(ext) || ext === '.vsk')) return null;
+  for (const suffix of EXTENSIONS) {
+    const candidate = base + suffix;
+    const cst = statOrNull(candidate);
+    if (cst && cst.isFile()) return candidate;
   }
   return null;
 }
