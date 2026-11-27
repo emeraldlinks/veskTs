@@ -5,6 +5,36 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (published 0.4.4 login route SyntaxError):**
+
+- [x] **BUG (reported by Tehilla): `POST /api/auth/login` returned
+      `{"error":"Failed to load route module","details":"Unexpected strict mode reserved word"}`
+      while `/api/posts` and `/api/health/db` were fine.** Cloned
+      `TEHILLA-22/task` and reproduced on npm `@vesk/compiler@0.4.4`: its
+      `prepareApiRouteGraph` used AST-only `stripCodeTypes`, which left
+      `constructor(message, public status: number)` and `catch (error: any)`
+      in the prepared `.mjs` dependency, so Node refused the module. The
+      in-repo fix (commit 911af613, esbuild `transformTsModule` for the whole
+      prepared graph) loads it correctly and preserves parameter-property
+      assignments (`this.status = status`).
+- [x] Added `api-module-prepare.test.ts` regression with the exact login shape
+      (dotted `auth-error.service.ts`, `public` parameter property, typed
+      `req.json<T>()`, `catch (error: any)`), asserting native import, valid
+      generated syntax, and 401/200 handler behavior with `error.status`.
+- [x] **BUG found by the regression:** `withNativeFallback()` never cleared its
+      120s native-esbuild timeout, keeping every transform-using process alive
+      for two extra minutes (`api-module-prepare` suite 2m11s -> 13s). Timer is
+      now `unref()`d and cleared in `finally`; added a handle-count regression
+      in `ts-transform.test.ts`.
+- [x] Verification: package rebuild, ts-transform 4/4, api-module-prepare 7/7,
+      api-routes 45/45, `npm run typecheck`, `git diff --check`. Repacked the
+      app against local CI tarballs: `vesk dev` and `vesk build` + `vesk start`
+      both answer login with `{"ok":false,"error":"Login failed."}` (no DB
+      configured) instead of a module-load failure; all prepared modules pass
+      `node --check`.
+- [ ] npm `latest` is still 0.4.4 with the broken stripper — a release above
+      0.4.4 (or the local CI tarballs) is required for the user's app.
+
 **This session (async boundaries / Pending / DOM hardening):**
 
 - [x] **Runtime DOM hardening:** `destroy_block` idempotent; `disable_scoped_flush` is `export const false`; flush drains queued roots, captures first error, rethrows once; keyed reconcile uses `k-end:` markers, `MapEntry.update`, no-op move avoidance, duplicate-key warning, end-marker range removal/moves. Added `packages/runtime/src/dom-audit.test.ts` (7/7).

@@ -40,10 +40,14 @@ async function getWasm(): Promise<EsbuildLike> {
 async function withNativeFallback<T>(op: (m: EsbuildLike) => Promise<T>): Promise<T> {
   await loadNative();
   if (_native && !_nativeDead) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       return await Promise.race([
         op(_native),
-        new Promise<T>((_, reject) => setTimeout(() => reject(new Error('esbuild native timeout')), 120000)),
+        new Promise<T>((_, reject) => {
+          timer = setTimeout(() => reject(new Error('esbuild native timeout')), 120000);
+          timer.unref();
+        }),
       ]);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -53,6 +57,8 @@ async function withNativeFallback<T>(op: (m: EsbuildLike) => Promise<T>): Promis
       } else {
         throw e;
       }
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
   const wasm = await getWasm();

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
 import { prepareApiRouteGraph } from '@vesk/compiler/src/api-module-prepare';
@@ -149,6 +149,55 @@ test('handles real-app TS syntax in route deps (implements, param props, enum, a
 	const prepared = await prepareApiRouteGraph(join(dir, 'route.ts'), output, output);
 	const mod = await import(fileImportUrl(prepared.modulePath, prepared.cacheKey)) as { GET: () => Promise<Response> };
 	expect(await (await mod.GET()).text()).toBe('p:a:ok');
+});
+
+test('keeps parameter-property and catch-annotation route graphs loadable (login shape)', async () => {
+	const dir = join(app, 'api', 'auth-login');
+	mkdirSync(dir, { recursive: true });
+	writeFileSync(join(root, 'services', 'auth-error.service.ts'), [
+		'export class AuthError extends Error {',
+		'  constructor(message: string, public status: number) {',
+		'    super(message);',
+		"    this.name = 'AuthError';",
+		'  }',
+		'}',
+		'export async function loginUser(input: { email: string; password: string }) {',
+		"  if (input.email !== 'admin@example.com') throw new AuthError('Invalid email or password.', 401);",
+		"  return { user: { email: input.email }, session: { token: 'session-token' } };",
+		'}',
+	].join('\n'));
+	writeFileSync(join(dir, 'route.ts'), [
+		"import { AuthError, loginUser } from '../../../services/auth-error.service';",
+		'export async function POST(req: { json<T>(): Promise<T> }) {',
+		'  try {',
+		'    const body = await req.json<{ email: string; password: string }>();',
+		'    const result = await loginUser(body);',
+		"    return new Response(JSON.stringify({ ok: true, email: result.user.email, token: result.session.token }));",
+		'  } catch (error: any) {',
+		'    if (error instanceof AuthError) {',
+		"      return new Response(JSON.stringify({ ok: false, status: error.status, error: error.message }), { status: error.status });",
+		'    }',
+		"    return new Response(JSON.stringify({ ok: false, error: 'Login failed.' }), { status: 500 });",
+		'  }',
+		'}',
+	].join('\n'));
+	const prepared = await prepareApiRouteGraph(join(dir, 'route.ts'), output, output);
+	const preparedSources = readdirSync(output)
+		.filter((name) => name.endsWith('.mjs'))
+		.map((name) => readFileSync(join(output, name), 'utf-8'));
+	expect(preparedSources.some((code) => code.includes('this.status = status'))).toBe(true);
+	for (const code of [...preparedSources, prepared.code]) {
+		expect(code).not.toContain('public status');
+		expect(code).not.toContain('catch (error: any)');
+	}
+	const mod = await import(fileImportUrl(prepared.modulePath, prepared.cacheKey)) as {
+		POST: (req: { json: () => Promise<unknown> }) => Promise<Response>;
+	};
+	const denied = await mod.POST({ json: async () => ({ email: 'nobody@example.com', password: 'x' }) });
+	expect(denied.status).toBe(401);
+	expect(await denied.text()).toBe('{"ok":false,"status":401,"error":"Invalid email or password."}');
+	const allowed = await mod.POST({ json: async () => ({ email: 'admin@example.com', password: 'x' }) });
+	expect(await allowed.text()).toBe('{"ok":true,"email":"admin@example.com","token":"session-token"}');
 });
 
 await Promise.all(pending);

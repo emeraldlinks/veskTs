@@ -40,6 +40,14 @@ await test('preserves ESM imports/exports', async () => {
   expect(out).toContain('export');
   expect(out).toContain('b');
 });
+await test('clears the native fallback timeout after each transform', async () => {
+  const timers = () => (process.getActiveResourcesInfo?.() || []).filter((kind) => kind === 'Timeout').length;
+  const before = timers();
+  await transformTsModule('const value: number = 1;', { filename: 'timer.ts' });
+  await transformTsModule('export const other: string = "x";', { filename: 'timer2.ts' });
+  const after = timers();
+  if (after > before) throw new Error(`native transform left ${after - before} timer(s) behind`);
+});
 
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);
