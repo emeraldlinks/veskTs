@@ -60,3 +60,11 @@ export interface MatchProps {
 export function Match(props: MatchProps): unknown {
   return props.when ? props.children : null;
 }
+
+export type { PendingProps } from '@vesk/types';
+
+export function Pending<T = unknown>(props: import('@vesk/types').PendingProps<T>): T | unknown {
+  const child = props.children;
+  if (typeof child === 'function') return (child as () => T | Promise<T>)();
+  return child ?? props.fallback ?? null;
+}

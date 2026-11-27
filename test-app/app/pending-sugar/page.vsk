@@ -1,0 +1,14 @@
+async component PendingSugarPage() {
+	<Head>
+		<title>Pending Sugar Demo</title>
+	</Head>
+	<h1 class="text-3xl font-bold mb-4">Pending Sugar Demo</h1>
+	<p id="sugar-shell">shell</p>
+	#pending {
+		await new Promise(r => setTimeout(r, 150));
+		<p id="sugar-done">Sugar resolved</p>
+	}
+	#fallback {
+		<p id="sugar-fallback">Loading sugar...</p>
+	}
+}

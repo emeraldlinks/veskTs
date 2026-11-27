@@ -951,7 +951,7 @@ function emitStatement(
       return;
     }
     case 'VeskBlock': {
-      if (stmt.tag === 'empty') return;
+      if (stmt.tag === 'empty' || stmt.tag === 'fallback' || stmt.tag === 'pending') return;
       const innerStmts = stmt.body ?? [];
       let firstLine = true;
       for (let i = 0; i < innerStmts.length; i++) {
@@ -1004,6 +1004,27 @@ function emitBody(g: VskGen, source: string, stmts: any[], indent: string, opts:
   while (i < stmts.length) {
     const stmt = stmts[i];
     const isLast = i === stmts.length - 1;
+    if (stmt.type === 'VeskBlock' && stmt.tag === 'pending') {
+      const next = stmts[i + 1];
+      const hasFallback = next && next.type === 'VeskBlock' && next.tag === 'fallback';
+      if (!firstLine) g.addRaw('\n');
+      firstLine = false;
+      g.add(indent);
+      g.addRaw('{Promise.resolve().then(async () => {');
+      g.addRaw('\n');
+      emitBody(g, source, stmt.body ?? [], indent + '  ', opts, hoist);
+      g.addRaw('\n');
+      g.add(indent);
+      g.addRaw('})}');
+      if (hasFallback) {
+        g.addRaw('\n');
+        emitBody(g, source, next.body ?? [], indent, opts, hoist);
+        i += 2;
+      } else {
+        i += 1;
+      }
+      continue;
+    }
     if (
       stmt.type === 'ForOfStatement' &&
       stmts[i + 1] && stmts[i + 1].type === 'VeskBlock' && stmts[i + 1].tag === 'empty'

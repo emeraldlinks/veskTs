@@ -1921,6 +1921,132 @@ describe('Compile-Cache (cached) Rendering + Hydrate Markers', () => {
 		expect(out).toContain('<script type="module" src="/_vesk/client.js"></script>');
 		expect(out).toContain('</body>');
 	});
+	it('renderPageStream streams await boundaries as separate chunks', async () => {
+		const src = `
+			async component App() {
+				<p>before</p>
+				const data = await Promise.resolve('after')
+				<p>{data}</p>
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<p>before</p>');
+		expect(out).toContain('data-vsk-boundary=');
+		expect(out).toContain('__vskResolveBoundary');
+		expect(out).toContain('\\u003cp>after\\u003c/p>');
+		expect(out.indexOf('<p>before</p>') < out.indexOf('<script>globalThis.__vskResolveBoundary("')).toBe(true);
+	});
+	it('renderPageStream streams sequential await boundaries in order', async () => {
+		const src = `
+			async component App() {
+				<p>one</p>
+				const a = await Promise.resolve('A')
+				<p>{a}</p>
+				const b = await Promise.resolve('B')
+				<p>{b}</p>
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<p>one</p><template data-vsk-boundary=');
+		expect(out).toContain('\\u003cp>A\\u003c/p>');
+		expect(out).toContain('\\u003cp>B\\u003c/p>');
+		expect(out.indexOf('\\u003cp>A\\u003c/p>') < out.indexOf('\\u003cp>B\\u003c/p>')).toBe(true);
+	});
+	it('renderPageStream streams Pending fallback then async content (statement mode)', async () => {
+		const src = `
+			async component App() {
+				<Pending fallback={<p>loading</p>}>
+					{async () => {
+						const data = await Promise.resolve('done')
+						return <p>{data}</p>
+					}}
+				</Pending>
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<p>loading</p><template data-vsk-boundary=');
+		expect(out).toContain('\\u003cp>done\\u003c/p>');
+		expect(out.indexOf('<p>loading</p>') < out.indexOf('\\u003cp>done\\u003c/p>')).toBe(true);
+	});
+	it('renderPageStream streams Pending fallback then async content (expression mode)', async () => {
+		const src = `
+			async component App() {
+				return <Pending fallback={<p>loading</p>}>{async () => <p>done</p>}</Pending>
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<p>loading</p><template data-vsk-boundary=');
+		expect(out).toContain('\\u003cp>done\\u003c/p>');
+	});
+	it('renderPageStream streams #pending/#fallback sugar (statement mode)', async () => {
+		const src = `
+			async component App() {
+				<div>shell</div>
+				#pending {
+					const data = await Promise.resolve('done')
+					<p>{data}</p>
+				}
+				#fallback {
+					<p>loading</p>
+				}
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<div>shell</div>');
+		expect(out).toContain('<p>loading</p><template data-vsk-boundary=');
+		expect(out).toContain('\\u003cp>done\\u003c/p>');
+	});
+	it('renderPageStream streams #pending/#fallback sugar in expression component statement position', async () => {
+		const src = `
+			async component App() {
+				let body = <p>loading</p>
+				#pending {
+					const data = await Promise.resolve('done')
+					body = <p>{data}</p>
+				}
+				#fallback {
+					<p>loading</p>
+				}
+				return <div>{body}</div>
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('<p>loading</p>');
+		expect(out).toContain('done');
+	});
+	it('Pending renders only resolved content without streaming', async () => {
+		const src = `
+			async component App() {
+				return <Pending fallback={<p>loading</p>}>{async () => <p>done</p>}</Pending>
+			}
+		`;
+		expect(await render(src, 'App')).toBe('<p>done</p>');
+	});
+	it('renderPageStream streams await boundaries in expression mode', async () => {
+		const src = `
+			async component App() {
+				const data = await Promise.resolve('after')
+				return <div>{data}</div>
+			}
+		`;
+		const stream = renderPageStream(src, 'App', {}, new Map(), { streaming: true });
+		let out = '';
+		for await (const chunk of stream) out += chunk;
+		expect(out).toContain('data-vsk-boundary=');
+		expect(out).toContain('\\u003cdiv>after\\u003c/div>');
+	});
 	it('renderPageStream omits client script when no clientScriptUrl', async () => {
 		const stream = renderPageStream(`component App { return <div>hi</div>; }`, 'App', {}, new Map(), {});
 		let out = '';

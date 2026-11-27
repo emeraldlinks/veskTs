@@ -11,6 +11,8 @@ import {
   SwitchBlock,
   TryCatch,
   RuntimeStatement,
+  AwaitBoundary,
+  PendingBoundary,
   ForLoop,
   TrackDecl,
   ComponentRef,
@@ -179,6 +181,9 @@ function collectComponentCalls(nodes: IRNode[], out: Map<string, number>): void 
       collectComponentCalls(n.children, out);
     } else if (n instanceof StaticNode || n instanceof ServerBlock || n instanceof ClientBlock || n instanceof HeadBlock) {
       collectComponentCalls(n.children, out);
+    } else if (n instanceof PendingBoundary) {
+      collectComponentCalls(n.body, out);
+      collectComponentCalls(n.fallback, out);
     } else if (n instanceof PropSlot) {
       collectComponentCalls(n.body, out);
     } else if (n instanceof MapRegion) {
@@ -330,28 +335,62 @@ function collectCallAndJsxTargets(ast: unknown): Set<string> {
   return targets;
 }
 
-function componentUsesFetch(nodes: IRNode[]): boolean {
+function estreeCallsPending(ast: ESTreeNode | null): boolean {
+  if (!ast) return false;
+  const stack: unknown[] = [ast];
+  while (stack.length > 0) {
+    const candidate = stack.pop();
+    if (!candidate || typeof candidate !== 'object') continue;
+    const node = candidate as Record<string, unknown>;
+    const callee = node.callee as Record<string, unknown> | undefined;
+    if (
+      (node.type === 'CallExpression' || node.type === 'NewExpression') &&
+      callee?.type === 'Identifier' && callee.name === 'Pending'
+    ) {
+      return true;
+    }
+    for (const key of Object.keys(node)) {
+      if (key === 'parent' || key === 'loc' || key === 'start' || key === 'end' || key === 'range') continue;
+      const value = node[key];
+      if (Array.isArray(value)) {
+        for (const item of value) stack.push(item);
+      } else {
+        stack.push(value);
+      }
+    }
+  }
+  return false;
+}
+
+function componentUsesAsyncHelpers(nodes: IRNode[]): boolean {
   for (const node of nodes) {
     if (node instanceof ServerBlock || node instanceof ClientBlock) {
-      if (componentUsesFetch(node.children)) return true;
+      if (componentUsesAsyncHelpers(node.children)) return true;
+    } else if (node instanceof PendingBoundary) {
+      if (componentUsesAsyncHelpers(node.body) || componentUsesAsyncHelpers(node.fallback)) return true;
     } else if (node instanceof RuntimeStatement) {
-      if (estreeCallsFetch(node.ast)) return true;
+      if (estreeCallsFetch(node.ast) || estreeCallsPending(node.ast)) return true;
     } else if (node instanceof DynamicBinding) {
-      if (estreeCallsFetch(node.expression.ast)) return true;
+      if (estreeCallsFetch(node.expression.ast) || estreeCallsPending(node.expression.ast)) return true;
+    } else if (node instanceof ComponentCall) {
+      if (node.componentName === 'Pending') return true;
+      if (node.children && componentUsesAsyncHelpers(node.children)) return true;
+      if (node.spreadProps.some((p) => estreeCallsFetch(p.ast) || estreeCallsPending(p.ast))) return true;
+      if (node.props.some((p) => typeof p.value !== 'string' && (estreeCallsFetch(p.value.ast) || estreeCallsPending(p.value.ast)))) return true;
     } else if (node instanceof MapRegion) {
-      if (componentUsesFetch(node.bodyTemplate)) return true;
-      if (componentUsesFetch(node.alternateNodes)) return true;
+      if (componentUsesAsyncHelpers(node.bodyTemplate)) return true;
+      if (componentUsesAsyncHelpers(node.alternateNodes)) return true;
     } else if (node instanceof OpaqueDynamicRegion) {
-      if (componentUsesFetch(node.consequentNodes) || componentUsesFetch(node.alternateNodes)) return true;
+      if (componentUsesAsyncHelpers(node.consequentNodes) || componentUsesAsyncHelpers(node.alternateNodes)) return true;
     } else if (node instanceof WhileLoop) {
-      if (componentUsesFetch(node.bodyTemplate)) return true;
+      if (componentUsesAsyncHelpers(node.bodyTemplate)) return true;
     } else if (node instanceof ForLoop) {
-      if (componentUsesFetch(node.bodyTemplate)) return true;
+      if (componentUsesAsyncHelpers(node.bodyTemplate)) return true;
     } else if (node instanceof TryCatch) {
-      if (componentUsesFetch(node.bodyTemplate) || componentUsesFetch(node.catchBody)) return true;
+      if (componentUsesAsyncHelpers(node.bodyTemplate) || componentUsesAsyncHelpers(node.catchBody)) return true;
     } else if (node instanceof SwitchBlock) {
       for (const c of node.cases) {
-        if (componentUsesFetch(c.body)) return true;
+        if (componentUsesAsyncHelpers(c.body)) return true;
       }
     }
   }
@@ -1734,7 +1773,7 @@ function getLoopControlGuard(consequent: any, kind: 'continue' | 'break'): { pre
 }
 
 function isStatementMode(bodyStmts: any[]): boolean {
-  if (bodyStmts.some((s) => s.type === 'JSXElement' || s.type === 'JSXExpressionContainer' || s.type === 'JSXFragment')) return true;
+  if (bodyStmts.some((s) => s.type === 'JSXElement' || s.type === 'JSXExpressionContainer' || s.type === 'JSXFragment' || s.type === 'VeskBlock')) return true;
   for (const stmt of bodyStmts) {
     if (stmt.type === 'BlockStatement' && hasJSXInSubtree(stmt)) return true;
     if (stmt.type === 'IfStatement' && !isGuardClause(stmt) && hasJSXInSubtree(stmt)) return true;
@@ -1866,7 +1905,25 @@ function processStatementModeBody(source: string, bodyStmts: any[], filename?: s
         nodes.push(...processJSXChildren(source, [c]));
       }
     } else if (stmt.type === 'VeskBlock') {
-      if (stmt.tag === 'empty') continue;
+      if (stmt.tag === 'empty' || stmt.tag === 'fallback') continue;
+      if (stmt.tag === 'pending') {
+        const next = bodyStmts[i + 1];
+        if (!next || next.type !== 'VeskBlock' || next.tag !== 'fallback') {
+          throw new VeskError('#pending must be immediately followed by #fallback', {
+            file: filename,
+            line: stmt.loc?.start?.line,
+            column: stmt.loc?.start?.column,
+            frame: codeFrame(source, stmt.loc?.start?.line, stmt.loc?.start?.column),
+            code: 'V0425',
+            suggestions: ['Place a `#fallback { ... }` block immediately after `#pending { ... }`.'],
+          });
+        }
+        const fallback = processStatementModeBody(source, next.body, filename);
+        const inner = processStatementModeBody(source, stmt.body, filename);
+        nodes.push(new PendingBoundary(inner, fallback, `p${stmt.start ?? 0}`, stmt.start ?? -1));
+        i++;
+        continue;
+      }
       const inner = processStatementModeBody(source, stmt.body, filename);
       if (stmt.tag === 'server') {
         nodes.push(new ServerBlock(inner));
@@ -2267,6 +2324,49 @@ function collectIdentifiers(node: any, into: Set<string>): void {
   }
 }
 
+function astContainsAwait(value: unknown, seen = new WeakSet<object>()): boolean {
+  if (!value || typeof value !== 'object') return false;
+  if (seen.has(value as object)) return false;
+  seen.add(value as object);
+  const node = value as { type?: string };
+  if (node.type === 'AwaitExpression') return true;
+  for (const key of Object.keys(node)) {
+    if (key === 'loc' || key === 'range' || key === 'start' || key === 'end') continue;
+    if (astContainsAwait((node as unknown as Record<string, unknown>)[key], seen)) return true;
+  }
+  return false;
+}
+
+function markAwaitBoundaries(nodes: IRNode[]): void {
+  for (let i = 0; i < nodes.length; i++) {
+    const node = nodes[i];
+    if (node instanceof RuntimeStatement) {
+      if (astContainsAwait(node.ast)) nodes[i] = new AwaitBoundary(node);
+      continue;
+    }
+    if (node instanceof PendingBoundary) {
+      markAwaitBoundaries(node.body);
+      markAwaitBoundaries(node.fallback);
+    }
+    else if (node instanceof StaticNode) markAwaitBoundaries(node.children);
+    else if (node instanceof OpaqueDynamicRegion) {
+      markAwaitBoundaries(node.consequentNodes);
+      markAwaitBoundaries(node.alternateNodes);
+    } else if (node instanceof MapRegion) {
+      markAwaitBoundaries(node.bodyTemplate);
+      markAwaitBoundaries(node.alternateNodes);
+    } else if (node instanceof WhileLoop) markAwaitBoundaries(node.bodyTemplate);
+    else if (node instanceof SwitchBlock) {
+      for (const c of node.cases) markAwaitBoundaries(c.body);
+    } else if (node instanceof TryCatch) {
+      markAwaitBoundaries(node.bodyTemplate);
+      markAwaitBoundaries(node.catchBody);
+    } else if (node instanceof ForLoop) markAwaitBoundaries(node.bodyTemplate);
+    else if (node instanceof ServerBlock || node instanceof ClientBlock || node instanceof HeadBlock) markAwaitBoundaries(node.children);
+    else if (node instanceof PropSlot) markAwaitBoundaries(node.body);
+  }
+}
+
 export function generateIR(ast: any, source: string, filename?: string): IRRoot {
   __vskAnnotations = (ast as { __vskAnnotations?: VeskAnnotation[] }).__vskAnnotations ?? [];
   __slotProps = null;
@@ -2486,7 +2586,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       const raw = processStatementModeBody(source, bodyStmts, file);
       const { body, css } = extractStyle(raw);
       validateBlocks(name, isClientComp, body, file, source);
-      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType, propsAlias });
+      const comp = new ComponentIR(name, paramNames, body, { mode: 'statement', exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesAsyncHelpers(body), propsType, propsAlias });
       comp.style = css;
       components.push(comp);
       __slotProps = prevSlotProps;
@@ -2527,7 +2627,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
       const guardBody = buildGuardChain(source, guardClauses, mainReturn);
       const { body, css } = extractStyle([...preamble, ...guardBody]);
       validateBlocks(name, isClientComp, body, file, source);
-      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesFetch(body), propsType, propsAlias });
+      const comp = new ComponentIR(name, paramNames, body, { exported, defaultExport, isClient: inner.client, isAsync: inner.async, ssrAwait: componentUsesAsyncHelpers(body), propsType, propsAlias });
       comp.style = css;
       components.push(comp);
       __slotProps = prevSlotProps;
@@ -2537,7 +2637,12 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     }
   }
 
+  for (const comp of components) {
+    if (comp.isAsync || comp.ssrAwait) markAwaitBoundaries(comp.body);
+  }
+
   const asyncNames = new Set(components.filter((c) => c.isAsync || c.ssrAwait).map((c) => c.name));
+  asyncNames.add('Pending');
   for (const comp of components) {
     if (asyncNames.has(comp.name)) continue;
     const called = new Map<string, number>();
@@ -2563,7 +2668,7 @@ export function generateIR(ast: any, source: string, filename?: string): IRRoot 
     'createContext',
     'redirect', 'permanentRedirect', 'notFound', 'NotFoundError',
     'createResource', 'getAction', 'validateActionInput', 'issuesToFieldMap', 'isFormAction',
-    'Show', 'For', 'Switch', 'Match',
+    'Show', 'For', 'Switch', 'Match', 'Pending',
     'primitive', 'leaf',
   ];
   // One walk of the already-parsed tree finds every auto-importable call

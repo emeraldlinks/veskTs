@@ -1,0 +1,9 @@
+async component AwaitBoundaryPage() {
+	<Head>
+		<title>Await Boundary Demo</title>
+	</Head>
+	<h1 class="text-3xl font-bold mb-4">Await Boundary Demo</h1>
+	<p id="await-shell">shell</p>
+	const data = await new Promise<string>(r => setTimeout(() => r('await resolved'), 150));
+	<p id="await-done">{data}</p>
+}

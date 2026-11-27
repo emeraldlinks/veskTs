@@ -29,5 +29,6 @@ export default defineConfig({
     pwaPlugin({ name: 'Test App', shortName: 'VeskTest', themeColor: '#4f46e5' }),
     testPlugin,
   ],
+  streaming: true,
   ssg: {},
 })

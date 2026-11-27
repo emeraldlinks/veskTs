@@ -1,4 +1,4 @@
-import { Show, For, Switch, Match } from '@vesk/runtime/src/headless';
+import { Show, For, Switch, Match, Pending } from '@vesk/runtime/src/headless';
 
 let passed = 0;
 let failed = 0;
@@ -46,5 +46,29 @@ test('Switch returns fallback when none match', () => {
   expect(Switch({ children: [a], fallback: 'fb' })).toBe('fb');
 });
 
-console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed+failed} total`);
-if (failed>0) process.exit(1);
+test('Pending invokes function children', () => {
+  expect(Pending({ children: () => 'ready', fallback: 'loading' })).toBe('ready');
+});
+test('Pending uses static children when no function is given', () => {
+  expect(Pending({ children: 'ready', fallback: 'loading' })).toBe('ready');
+});
+test('Pending uses fallback when no children are given', () => {
+  expect(Pending({ fallback: 'loading' })).toBe('loading');
+});
+
+let asyncChain = Promise.resolve();
+function testAsync(name: string, fn: () => Promise<void>) {
+  asyncChain = asyncChain.then(async () => {
+    try { await fn(); passed++; console.log(`  ✓ ${name}`); }
+    catch (e) { failed++; console.log(`  ✗ ${name} — ${(e as Error).message}`); }
+  });
+}
+testAsync('Pending awaits async function children', async () => {
+  const out = await Pending({ children: async () => 'done', fallback: 'loading' });
+  expect(out).toBe('done');
+});
+
+asyncChain.then(() => {
+  console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed+failed} total`);
+  if (failed>0) process.exit(1);
+});

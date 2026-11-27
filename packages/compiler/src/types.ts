@@ -87,6 +87,7 @@ export interface FullPageOptions {
    * when `hydrate` is true.
    */
   markerless?: boolean;
+  streaming?: boolean;
   sourcePath?: string;
   externalDataScript?: import('@vesk/types').ExternalDataScript;
   cached?: CompileFileResult;

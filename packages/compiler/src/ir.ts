@@ -342,6 +342,17 @@ export class RuntimeStatement {
   }
 }
 
+export class AwaitBoundary {
+  id: string;
+  statement: RuntimeStatement;
+
+  constructor(statement: RuntimeStatement) {
+    const ast = statement.ast as { start?: number } | null;
+    this.id = ast && typeof ast.start === 'number' ? `a${ast.start}` : 'a0';
+    this.statement = statement;
+  }
+}
+
 /**
  * A `break` targeting the enclosing reactive loop region.
  *
@@ -395,6 +406,20 @@ export class HeadBlock {
   }
 }
 
+export class PendingBoundary {
+  body: IRNode[];
+  fallback: IRNode[];
+  id: string;
+  start: number;
+
+  constructor(body: IRNode[], fallback: IRNode[], id: string, start = -1) {
+    this.body = body;
+    this.fallback = fallback;
+    this.id = id;
+    this.start = start;
+  }
+}
+
 export type IRNode =
   | StaticNode
   | TextNode
@@ -407,6 +432,8 @@ export type IRNode =
   | ForLoop
   | TrackDecl
   | RuntimeStatement
+  | AwaitBoundary
+  | PendingBoundary
   | BreakSignal
   | ComponentRef
   | ComponentCall

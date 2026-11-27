@@ -686,6 +686,90 @@ async function main() {
     await page.close();
   }
 
+  // ── Test 12b: Async streaming boundaries + Pending/#pending#fallback ──
+  console.log('\n=== TEST 12b: Async streaming boundaries + Pending ===');
+  {
+    const page = await browser.newPage();
+    const errors = [];
+    page.on('pageerror', err => errors.push(err.message));
+
+    const raw = await (await fetch(BASE + '/pending')).text();
+    const pendingStreaming = raw.includes('__vskResolveBoundary') && raw.includes('data-vsk-boundary');
+    assert(raw.includes('id="pending-shell"'), '/pending raw HTML includes shell');
+    if (pendingStreaming && raw.includes('id="pending-fallback"')) {
+      assert(raw.indexOf('id="pending-shell"') < raw.indexOf('id="pending-fallback"'),
+        '/pending shell appears before fallback in raw HTML');
+    }
+    assert(raw.includes('id="pending-done"') || pendingStreaming, '/pending raw HTML includes resolved content or boundary marker');
+
+    await goto(page, BASE + '/pending', { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.waitForFunction(() => !!document.querySelector('#pending-done'), { timeout: 15000 });
+    const pendingState = await page.evaluate(() => ({
+      shell: !!document.querySelector('#pending-shell'),
+      fallback: !!document.querySelector('#pending-fallback'),
+      done: document.querySelector('#pending-done')?.textContent?.trim() || null,
+      h1: document.querySelector('h1')?.textContent?.trim() || null,
+    }));
+    assert(pendingState.shell, '/pending shell rendered');
+    assert(!pendingState.fallback, '/pending fallback replaced after boundary resolves');
+    assert(pendingState.done === 'Pending resolved', '/pending resolved content rendered');
+    assert(pendingState.h1 === 'Pending Demo', '/pending h1 rendered');
+    assert(errors.length === 0, '/pending zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    const rawSugar = await (await fetch(BASE + '/pending-sugar')).text();
+    const sugarStreaming = rawSugar.includes('__vskResolveBoundary') && rawSugar.includes('data-vsk-boundary');
+    assert(rawSugar.includes('id="sugar-shell"'), '/pending-sugar raw HTML includes shell');
+    if (sugarStreaming && rawSugar.includes('id="sugar-fallback"')) {
+      assert(rawSugar.indexOf('id="sugar-shell"') < rawSugar.indexOf('id="sugar-fallback"'),
+        '/pending-sugar shell appears before fallback in raw HTML');
+    }
+    assert(rawSugar.includes('id="sugar-done"') || sugarStreaming, '/pending-sugar raw HTML includes resolved content or boundary marker');
+
+    await goto(page, BASE + '/pending-sugar', { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.waitForFunction(() => !!document.querySelector('#sugar-done'), { timeout: 15000 });
+    const sugarState = await page.evaluate(() => ({
+      shell: !!document.querySelector('#sugar-shell'),
+      fallback: !!document.querySelector('#sugar-fallback'),
+      done: document.querySelector('#sugar-done')?.textContent?.trim() || null,
+    }));
+    assert(sugarState.shell, '/pending-sugar shell rendered');
+    assert(!sugarState.fallback, '/pending-sugar fallback replaced');
+    assert(sugarState.done === 'Sugar resolved', '/pending-sugar resolved content rendered');
+    assert(errors.length === 0, '/pending-sugar zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    const rawAwait = await (await fetch(BASE + '/await-boundary')).text();
+    const awaitStreaming = rawAwait.includes('__vskResolveBoundary') && rawAwait.includes('data-vsk-boundary');
+    assert(rawAwait.includes('id="await-shell"'), '/await-boundary raw HTML includes shell');
+    assert(rawAwait.includes('id="await-done"') || awaitStreaming, '/await-boundary raw HTML includes resolved content or boundary marker');
+
+    await goto(page, BASE + '/await-boundary', { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.waitForFunction(() => !!document.querySelector('#await-done'), { timeout: 15000 });
+    const awaitState = await page.evaluate(() => ({
+      shell: !!document.querySelector('#await-shell'),
+      done: document.querySelector('#await-done')?.textContent?.trim() || null,
+    }));
+    assert(awaitState.shell, '/await-boundary shell rendered');
+    assert(awaitState.done === 'await resolved', '/await-boundary resolved content rendered');
+    assert(errors.length === 0, '/await-boundary zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    await goto(page, BASE + '/about', { waitUntil: 'networkidle0', timeout: 15000 });
+    await page.evaluate(() => { window.__spaFlag = true; });
+    await page.evaluate(() => { const r = window.__vesk_router; if (r && r.navigate) r.navigate('/pending'); });
+    await page.waitForFunction(() => location.pathname === '/pending', { timeout: 15000 });
+    await page.waitForFunction(() => !!document.querySelector('#pending-done'), { timeout: 15000 });
+    const spaPending = await page.evaluate(() => ({
+      spa: window.__spaFlag === true,
+      done: document.querySelector('#pending-done')?.textContent?.trim() || null,
+      leftover: document.querySelectorAll('template[data-vsk-boundary]').length,
+    }));
+    assert(spaPending.spa, 'SPA nav to /pending did not reload');
+    assert(spaPending.done === 'Pending resolved', 'SPA nav to /pending renders resolved content');
+    assert(spaPending.leftover === 0, 'SPA nav to /pending leaves no boundary templates');
+    assert(errors.length === 0, 'SPA nav to /pending zero pageerrors (got ' + errors.length + ': ' + errors.join(', ') + ')');
+
+    await page.close();
+  }
+
   // ── Test 13: Fresh data on repeated SPA navigation (prefetch reuse) ──
   console.log('\n=== TEST 13: Fresh data on repeated SPA navigation ===');
   {
@@ -1396,6 +1480,7 @@ async function main() {
     '/store', '/store/widget', '/typed',
     '/portal', '/portal/guides',
     '/root-components',
+    '/pending', '/pending-sugar', '/await-boundary',
   ];
   const SPA_TEXT = {
     '/': 'Welcome to Vesk',
@@ -1417,6 +1502,9 @@ async function main() {
     '/portal': 'Portal posts',
     '/portal/guides': 'Guides',
     '/root-components': 'Root components via @/ alias',
+    '/pending': 'Pending Demo',
+    '/pending-sugar': 'Pending Sugar Demo',
+    '/await-boundary': 'Await Boundary Demo',
   };
 
   {

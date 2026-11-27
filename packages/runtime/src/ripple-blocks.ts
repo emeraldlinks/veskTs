@@ -238,7 +238,8 @@ export function is_destroyed(target_block: Block): boolean {
 }
 
 export function destroy_block(block: Block, remove_dom = true): void {
-	block.f ^= DESTROYED;
+	if ((block.f & DESTROYED) !== 0) return;
+	block.f |= DESTROYED;
 
 	// A destroyed reaction must stop being a reader of any ownerless cell
 	// (module-scope store) — nothing will ever dirty-check it again.

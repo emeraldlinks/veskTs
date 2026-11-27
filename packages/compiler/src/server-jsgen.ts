@@ -2,7 +2,7 @@ import type { IRNode, ComponentIR, IRRoot } from '@vesk/compiler/src/ir';
 import {
   Expression, StaticNode, TextNode, DynamicBinding, OpaqueDynamicRegion,
   MapRegion, WhileLoop, SwitchBlock, TryCatch, ForLoop,
-  TrackDecl, RuntimeStatement, ComponentRef, ComponentCall,
+  TrackDecl, RuntimeStatement,   AwaitBoundary, PendingBoundary, ComponentRef, ComponentCall,
   BreakSignal,
   ServerBlock, ClientBlock, HeadBlock, SlotNode, PropSlot, PropSlotRender,
   regionMarkerId,
@@ -118,6 +118,52 @@ export function irNodeToJS(node: IRNode, importedNames?: Set<string> | null, isA
       `  return __c;`,
       `})();`,
     ].join('\n');
+  }
+  if (node instanceof PendingBoundary) {
+    const id = node.id || `p${node.start >= 0 ? node.start : nextVskId()}`;
+    const lines: string[] = [];
+    lines.push(`if (globalThis.__vsk_streaming_boundaries && typeof globalThis.__vskPushBoundary === 'function') {`);
+    for (const child of node.fallback) {
+      const code = irNodeToJS(child, importedNames, isAsync, tracked);
+      if (code) lines.push(indent(code));
+    }
+    lines.push(`\t__out.push('<template data-vsk-boundary="${id}"></template>');`);
+    lines.push(`\tif (__vskBoundary !== null) {`);
+    lines.push(`\t\tglobalThis.__vskPushBoundary(__vskBoundary, __out.join(''));`);
+    lines.push(`\t} else {`);
+    lines.push(`\t\tglobalThis.__vskPushHtml(__out.join(''));`);
+    lines.push(`\t}`);
+    lines.push(`\t__out = [];`);
+    lines.push(`\t__vskBoundary = ${JSON.stringify(id)};`);
+    lines.push(`}`);
+    lines.push(`{`);
+    lines.push(`\tconst __prevBoundary = __vskBoundary;`);
+    lines.push(`\tconst __prevPending = __vskPendingBoundary;`);
+    lines.push(`\t__vskPendingBoundary = ${JSON.stringify(id)};`);
+    for (const child of node.body) {
+      const code = irNodeToJS(child, importedNames, isAsync, tracked);
+      if (code) lines.push(indent(code));
+    }
+    lines.push(`\t__vskPendingBoundary = __prevPending;`);
+    lines.push(`\t__vskBoundary = __prevBoundary;`);
+    lines.push(`}`);
+    return lines.join('\n');
+  }
+  if (node instanceof AwaitBoundary) {
+    const lines: string[] = [];
+    lines.push(`if (globalThis.__vsk_streaming_boundaries && typeof globalThis.__vskPushBoundary === 'function') {`);
+    lines.push(`\tconst __vskBoundaryId = __vskPendingBoundary || ${JSON.stringify(node.id)};`);
+    lines.push(`\t__out.push('<template data-vsk-boundary="' + __vskBoundaryId + '"></template>');`);
+    lines.push(`\tif (__vskBoundary !== null) {`);
+    lines.push(`\t\tglobalThis.__vskPushBoundary(__vskBoundary, __out.join(''));`);
+    lines.push(`\t} else {`);
+    lines.push(`\t\tglobalThis.__vskPushHtml(__out.join(''));`);
+    lines.push(`\t}`);
+    lines.push(`\t__out = [];`);
+    lines.push(`\t__vskBoundary = __vskBoundaryId;`);
+    lines.push(`}`);
+    lines.push(irNodeToJS(node.statement, importedNames, isAsync, tracked));
+    return lines.join('\n');
   }
   if (node instanceof RuntimeStatement) {
     const stmt = node as unknown as { ast: ESTreeNode | null };
@@ -514,6 +560,35 @@ function componentCallToJS(node: ComponentCall, importedNames: Set<string> | nul
   // as `children`: a closed-over IIFE that serializes the slot body to a string.
   const slotChildren = node.children.filter((c): c is PropSlot => c instanceof PropSlot);
   const regularChildren = node.children.filter((c) => !(c instanceof PropSlot));
+  if (node.componentName === 'Pending') {
+    const childNode = regularChildren.length === 1 && regularChildren[0] instanceof DynamicBinding && regularChildren[0].kind === 'text'
+      ? regularChildren[0] as DynamicBinding
+      : null;
+    const childType = (childNode?.expression.ast as { type?: string } | null)?.type;
+    if (!isAsync || !childNode || (childType !== 'ArrowFunctionExpression' && childType !== 'FunctionExpression')) {
+      throw new Error('<Pending> requires an async parent and a single async function child.');
+    }
+    const id = `p${node.start >= 0 ? node.start : nextVskId()}`;
+    const fallbackSlot = slotChildren.find((s) => s.propName === 'fallback');
+    const fallbackProp = node.props.find((p) => p.name === 'fallback');
+    lines.push(`const __pending = ${exprJSX(childNode.expression, tracked)};`);
+    lines.push(`if (globalThis.__vsk_streaming_boundaries && typeof globalThis.__vskPushBoundary === 'function') {`);
+    if (fallbackSlot) {
+      for (const child of fallbackSlot.body) {
+        const code = irNodeToJS(child, importedNames, isAsync, tracked);
+        if (code) lines.push(indent(code));
+      }
+    } else if (fallbackProp) {
+      lines.push(`__out.push(__flat(${exprJSX(fallbackProp.value, tracked)}));`);
+    }
+    lines.push(`\t__out.push('<template data-vsk-boundary="${id}"></template>');`);
+    lines.push(`\tglobalThis.__vskPushHtml(__out.join(''));`);
+    lines.push(`\t__out = [];`);
+    lines.push(`\t__vskBoundary = ${JSON.stringify(id)};`);
+    lines.push(`}`);
+    lines.push(`__out.push(__flat(await __pending()));`);
+    return lines.join('\n');
+  }
   for (const slot of slotChildren) {
     const slotLines: string[] = [];
     for (const child of slot.body) {
@@ -615,7 +690,10 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
   if (asyncMode) {
     lines.push(`const __pk = __tk ? '__vsk_ssr_promises_' + __tk : '__vsk_ssr_promises';`);
     lines.push(`let __out = [];`);
-    lines.push(`for (let __pass = 0; __pass < 3; __pass++) {`);
+    lines.push(`let __vskBoundary = null;`);
+    lines.push(`let __vskPendingBoundary = null;`);
+    lines.push(`const __passCount = globalThis.__vsk_streaming_boundaries ? 1 : 3;`);
+    lines.push(`for (let __pass = 0; __pass < __passCount; __pass++) {`);
     lines.push(`__out = [];`);
     lines.push(`const __start = (globalThis[__pk] || []).length;`);
   } else {
@@ -635,10 +713,18 @@ export function generateFunctionBody(comp: ComponentIR, importedNames: Set<strin
 
   if (asyncMode) {
     lines.push(`const __all = globalThis[__pk] || [];`);
-    lines.push(`if (__all.length <= __start) return __out.join('');`);
+    lines.push(`if (__all.length <= __start) {`);
+    lines.push(`\tif (!globalThis.__vsk_streaming_boundaries) return __out.join('');`);
+    lines.push(`\tbreak;`);
+    lines.push(`}`);
     lines.push(`const __ps = __all.slice(__start);`);
     lines.push(`globalThis[__pk] = __all.slice(0, __start);`);
     lines.push(`await Promise.allSettled(__ps);`);
+    lines.push(`}`);
+    lines.push(`if (globalThis.__vsk_streaming_boundaries && typeof globalThis.__vskPushBoundary === 'function') {`);
+    lines.push(`\tif (__vskBoundary !== null) globalThis.__vskPushBoundary(__vskBoundary, __out.join(''));`);
+    lines.push(`\telse globalThis.__vskPushBoundary('__final__', __out.join(''));`);
+    lines.push(`\treturn '';`);
     lines.push(`}`);
     lines.push(`return __out.join('');`);
   } else {
@@ -676,6 +762,7 @@ function bodyNeedsRuntimeCells(nodes: IRNode[]): boolean {
     // Raw statement / expression text: the only place a plain `track(...)`
     // call can appear outside a lowered node.
     if (node instanceof RuntimeStatement && callsIdentifier(node.raw, 'track')) return true;
+    if (node instanceof AwaitBoundary && callsIdentifier(node.statement.raw, 'track')) return true;
 
     if (node instanceof Expression && callsIdentifier(node.raw, 'track')) return true;
 

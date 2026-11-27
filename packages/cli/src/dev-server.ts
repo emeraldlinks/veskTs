@@ -2442,7 +2442,8 @@ function routeFullPathForChunk(chunkName: string): string | null {
         if (!lowerHeadBlock.includes('viewport')) baseHeadBlock.push('\t<meta name="viewport" content="width=device-width, initial-scale=1" />');
         let headBlock = baseHeadBlock.join('\n') + (baseHeadBlock.length ? '\n' : '') + cssLinkTags() + secMeta + (head ? '\t' + head.split('\n').join('\n\t') + '\n' : '');
         headBlock = await applyHeadInjects(headBlock, { plugins: getActiveDevPlugins() as VeskPlugin[] }, { sourcePath: url.pathname });
-        html = `<!DOCTYPE html>\n<html>\n<head>\n${headBlock}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>${dataScriptBlock}\n</body>\n</html>`;
+        const streamingEnabled = (config as VeskConfig).streaming === true;
+        html = `<!DOCTYPE html>\n<html>\n<head>\n${headBlock}${streamingEnabled ? '<script>globalThis.__vskResolveBoundary = function(id, html) { var t = document.querySelector(\'template[data-vsk-boundary="\' + id + \'"]\'); if (!t) return; var x = document.createElement(\'template\'); x.innerHTML = html; t.replaceWith(x.content); };</script>\n' : ''}</head>\n<body>\n<div id="root">\n${prettifyHtml(body)}\n</div>${dataScriptBlock}\n</body>\n</html>`;
         html = injectDevScripts(html);
         html = await applyHtmlPlugins(html, getActiveDevPlugins() as VeskPlugin[], { sourcePath: url.pathname });
       } else {
@@ -2504,7 +2505,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         if (leaf) {
           const src = readFileSync(resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), 'utf-8');
           const compName = extractCompName(src) || (leaf.page as string);
-          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, clientScriptUrl: '/_vesk/client.js', cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), cached: cachedSsrCompile(ssrCompileCache, src, resolve(appDirPath, leaf.sourceDir as string, 'page.vsk')), plugins: getActiveDevPlugins() as VeskPlugin[] });
+          yield* renderPageStream(src, compName, { params: matched.params }, new Map(), { hydrate: true, streaming: (config as VeskConfig).streaming === true, clientScriptUrl: '/_vesk/client.js', cssUrls: activeCssUrls(), security, externalDataScript: storeDataScript, sourcePath: resolve(appDirPath, leaf.sourceDir as string, 'page.vsk'), cached: cachedSsrCompile(ssrCompileCache, src, resolve(appDirPath, leaf.sourceDir as string, 'page.vsk')), plugins: getActiveDevPlugins() as VeskPlugin[] });
         } else {
           throw new Error('No page or layout matched');
         }

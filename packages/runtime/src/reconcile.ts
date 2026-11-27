@@ -2,9 +2,17 @@ import { destroy_block } from '@vesk/runtime/src/ripple-blocks';
 import type { Block } from '@vesk/runtime/src/ripple-runtime';
 import type { ClaimByKeyOptions } from '@vesk/runtime/src/hydrate';
 
-interface MapEntry {
+interface MapEntry<T> {
 	marker: Comment;
+	end: Comment;
+	item: T;
 	effs: Block[];
+	update?: (item: T, index: number) => void;
+}
+
+function warnDuplicateKey(key: string): void {
+	if ((globalThis as { __vsk_dev?: boolean }).__vsk_dev === false) return;
+	console.warn(`[vesk] duplicate keyed item key: ${key}`);
 }
 
 export type KeyedClaimFn = (key: string, options?: ClaimByKeyOptions) => { el: Element } | null;
@@ -20,35 +28,43 @@ export function reconcile<T>(
 	endAnchor: Node,
 	items: T[],
 	keyFn: (item: T, index: number) => string,
-	createItem: (item: T, index: number, effs: Block[], root: Element | null) => void,
+	createItem: (item: T, index: number, effs: Block[], root: Element | null) => void | ((item: T, index: number) => void),
 	claim?: KeyedClaimFn,
 ): (newItems: T[]) => void {
 	const parent = anchor.parentNode as HTMLElement;
-	const map = new Map<string, MapEntry>();
+	const map = new Map<string, MapEntry<T>>();
+	const initialKeys = new Set<string>();
 
 	for (let i = 0; i < items.length; i++) {
 		const item = items[i];
 		const key = keyFn(item, i);
+		if (initialKeys.has(key)) warnDuplicateKey(key);
+		initialKeys.add(key);
 		const marker = document.createComment('k:' + key);
+		const end = document.createComment('k-end:' + key);
 		const effs: Block[] = [];
-		// When hydrated, the item's SSR root element (if any) is claimed here;
-		// the marker is anchored to it so `removeRange`/`moveBefore` operate on
-		// the claimed content instead of duplicating it.
 		const c = claim ? claim(key) : null;
 		parent.insertBefore(marker, c ? c.el : endAnchor);
-		createItem(item, i, effs, c ? c.el : null);
-		map.set(key, { marker, effs });
+		const update = createItem(item, i, effs, c ? c.el : null);
+		parent.insertBefore(end, c ? c.el.nextSibling : endAnchor);
+		map.set(key, { marker, end, item, effs, update: typeof update === 'function' ? update : undefined });
 	}
 
 	return (newItems: T[]) => {
 		const newKeys = newItems.map(keyFn);
-		const newSet = new Set(newKeys);
+		const newSet = new Set<string>();
+		for (let i = 0; i < newKeys.length; i++) {
+			const key = newKeys[i];
+			if (newSet.has(key)) warnDuplicateKey(key);
+			newSet.add(key);
+		}
 
-		for (const [key, { marker, effs }] of map) {
+		for (const [key, entry] of map) {
 			if (!newSet.has(key)) {
-				removeRange(marker, endAnchor);
-				marker.remove();
-				for (const e of effs) destroy_block(e);
+				removeRange(entry.marker, entry.end);
+				entry.marker.remove();
+				entry.end.remove();
+				for (const e of entry.effs) destroy_block(e);
 				map.delete(key);
 			}
 		}
@@ -56,23 +72,24 @@ export function reconcile<T>(
 		let ref: Node = endAnchor;
 		for (let i = newKeys.length - 1; i >= 0; i--) {
 			const key = newKeys[i];
-			let entry = map.get(key);
+			const entry = map.get(key);
 			if (entry) {
-				if (entry.marker.nextSibling !== ref) {
-					moveBefore(entry.marker, endAnchor, ref);
+				if (entry.item !== newItems[i]) {
+					entry.update?.(newItems[i], i);
+					entry.item = newItems[i];
+				}
+				if (entry.end.nextSibling !== ref) {
+					moveBefore(entry, ref);
 				}
 				ref = entry.marker;
 			} else {
 				const marker = document.createComment('k:' + key);
+				const end = document.createComment('k-end:' + key);
 				const effs: Block[] = [];
 				parent.insertBefore(marker, ref);
-				// Builders insert fresh content before their fixed end anchor
-				// (no claim root at update time), i.e. at the region tail.
-				// Relocate the fresh run directly after its marker; leaving it
-				// at the tail would reverse the list because this loop walks
-				// backwards (D, C, B, A appended in that order).
 				const tail = endAnchor.previousSibling;
-				createItem(newItems[i], i, effs, null);
+				const update = createItem(newItems[i], i, effs, null);
+				parent.insertBefore(end, endAnchor);
 				let n = tail ? tail.nextSibling : parent.firstChild;
 				const added: Node[] = [];
 				while (n && n !== endAnchor) {
@@ -80,7 +97,7 @@ export function reconcile<T>(
 					n = n.nextSibling;
 				}
 				for (const node of added) parent.insertBefore(node, ref);
-				map.set(key, { marker, effs });
+				map.set(key, { marker, end, item: newItems[i], effs, update: typeof update === 'function' ? update : undefined });
 				ref = marker;
 			}
 		}
@@ -168,21 +185,21 @@ export function reconcileHydrated<T>(
 
 function removeRange(start: Node, end: Node): void {
 	let n = start.nextSibling;
-	while (n && n !== end && !(n.nodeType === 8 && n.nodeValue && n.nodeValue.startsWith('k:'))) {
+	while (n && n !== end) {
 		const next = n.nextSibling;
 		n.remove();
 		n = next;
 	}
 }
 
-function moveBefore(marker: Node, endAnchor: Node, ref: Node): void {
-	const nodes: Node[] = [];
-	let n = marker.nextSibling;
-	while (n && n !== endAnchor && !(n.nodeType === 8 && n.nodeValue && n.nodeValue.startsWith('k:'))) {
+function moveBefore<T>(entry: MapEntry<T>, ref: Node): void {
+	const parent = entry.marker.parentNode as HTMLElement;
+	const nodes: Node[] = [entry.marker];
+	let n = entry.marker.nextSibling;
+	while (n && n !== entry.end) {
 		nodes.push(n);
 		n = n.nextSibling;
 	}
-	const parent = marker.parentNode as HTMLElement;
-	parent.insertBefore(marker, ref);
+	nodes.push(entry.end);
 	for (const node of nodes) parent.insertBefore(node, ref);
 }

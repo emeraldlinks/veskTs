@@ -494,6 +494,11 @@ export interface GeneratedDocsAsset {
   content: string;
 }
 
+export interface PendingProps<T = unknown> {
+  fallback?: unknown;
+  children?: (() => T | Promise<T>) | unknown;
+}
+
 export interface VeskConfig {
   appDir?: string;
   outDir?: string;
@@ -507,8 +512,8 @@ export interface VeskConfig {
   routeDataCache?: number;
   /** Markdown (`<Md>`) rendering options. */
   md?: MdConfig;
-  /** Transport-level response handling for `vesk start` (brotli/gzip + ETag/304). */
   compression?: CompressionConfig | false;
+  streaming?: boolean;
   /**
    * Serve a liveness probe at `/healthz` (`200 {"status":"ok"}`).
    * Default true. Set `false` to leave the endpoint off the public surface.
@@ -607,6 +612,7 @@ export interface SsrFunctionOptions {
   clientScriptUrl?: string;
   /** SRI digest for `clientScriptUrl`; omitted in dev. */
   clientScriptIntegrity?: string;
+  streaming?: boolean;
 }
 
 export interface ApiFunctionOptions {

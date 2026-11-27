@@ -429,7 +429,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
           appDir,
           outDir,
           componentMap,
-          { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra, clientScriptUrl: clientUrl, clientScriptIntegrity: clientIntegrity },
+          { ancestorLayouts: ssrAncestorLayouts, middlewareCode: mwCode, headExtra: pluginHeadExtra, clientScriptUrl: clientUrl, clientScriptIntegrity: clientIntegrity, streaming: options?.config?.streaming === true },
           registry,
           hydratePlans,
         );

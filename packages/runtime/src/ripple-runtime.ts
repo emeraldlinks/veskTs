@@ -178,7 +178,7 @@ let scheduler_mode = FLUSH_MICROTASK;
 let is_micro_task_queued = false;
 let clock = 0;
 let queued_root_blocks: Block[] = [];
-export let disable_scoped_flush = false;
+export const disable_scoped_flush = false;
 let queued_microtasks: (() => void)[] = [];
 let flush_count = 0;
 const queued_post_block_flush: (() => void)[] = [];
@@ -614,28 +614,28 @@ export function is_block_dirty(block: Block): boolean {
 }
 
 function flush_updates(root_block: Block): void {
-	let current: Block | null = root_block;
 	const pre_effects: Block[] = [];
 	const other_blocks: Block[] = [];
 	const effects: Block[] = [];
-	let scope_root: Block | null = disable_scoped_flush ? root_block : null;
+	const stack: { block: Block; inScope: boolean }[] = [{ block: root_block, inScope: false }];
 
-	while (current !== null) {
+	while (stack.length > 0) {
+		const frame = stack.pop()!;
+		const current = frame.block;
 		const flags = current.f;
 		const on_path = (flags & CONTAINS_UPDATE) !== 0;
+		const is_source = (flags & UPDATE_SOURCE) !== 0;
 
 		if (on_path) {
 			current.f ^= CONTAINS_UPDATE;
 		}
-
-		if ((flags & UPDATE_SOURCE) !== 0) {
+		if (is_source) {
 			current.f ^= UPDATE_SOURCE;
-			if (scope_root === null) {
-				scope_root = current;
-			}
 		}
 
-		if ((flags & PAUSED) === 0 && (on_path || scope_root !== null)) {
+		const in_scope = frame.inScope || on_path || is_source;
+
+		if ((flags & PAUSED) === 0 && in_scope) {
 			if ((flags & PRE_EFFECT_BLOCK) !== 0) {
 				pre_effects.push(current);
 			} else if ((flags & EFFECT_BLOCK) !== 0) {
@@ -643,23 +643,16 @@ function flush_updates(root_block: Block): void {
 			} else {
 				other_blocks.push(current);
 			}
-			const child: Block | null = current.first;
 
-			if (child !== null) {
-				current = child;
-				continue;
+			const siblings: Block[] = [];
+			let sibling: Block | null = current.first;
+			while (sibling !== null) {
+				siblings.push(sibling);
+				sibling = sibling.next;
 			}
-		}
-
-		let parent = current.p;
-		current = current.next;
-
-		while (current === null && parent !== null) {
-			if (parent === scope_root) {
-				scope_root = null;
+			for (let i = siblings.length - 1; i >= 0; i--) {
+				stack.push({ block: siblings[i], inScope: in_scope });
 			}
-			current = parent.next;
-			parent = parent.p;
 		}
 	}
 
@@ -703,17 +696,29 @@ function flush_updates(root_block: Block): void {
 }
 
 function flush_queued_root_blocks(root_blocks: Block[]): void {
+	let first_error: unknown = null;
+
 	for (let i = 0; i < root_blocks.length; i++) {
-		flush_updates(root_blocks[i]);
+		try {
+			flush_updates(root_blocks[i]);
+		} catch (error: unknown) {
+			if (first_error === null) first_error = error;
+		}
 	}
 
 	if (queued_post_block_flush.length > 0) {
 		const callbacks = queued_post_block_flush;
 		queued_post_block_flush.length = 0;
 		for (let j = 0; j < callbacks.length; j++) {
-			callbacks[j]();
+			try {
+				callbacks[j]();
+			} catch (error: unknown) {
+				if (first_error === null) first_error = error;
+			}
 		}
 	}
+
+	if (first_error !== null) throw first_error;
 }
 
 export async function tick(): Promise<void> {
@@ -722,12 +727,17 @@ export async function tick(): Promise<void> {
 
 function flush_microtasks(): void {
 	is_micro_task_queued = false;
+	let first_error: unknown = null;
 
 	if (queued_microtasks.length > 0) {
 		const microtasks = queued_microtasks;
 		queued_microtasks = [];
 		for (let i = 0; i < microtasks.length; i++) {
-			microtasks[i]();
+			try {
+				microtasks[i]();
+			} catch (error: unknown) {
+				if (first_error === null) first_error = error;
+			}
 		}
 	}
 
@@ -741,12 +751,18 @@ function flush_microtasks(): void {
 	}
 	const previous_queued_root_blocks = queued_root_blocks;
 	queued_root_blocks = [];
-	flush_queued_root_blocks(previous_queued_root_blocks);
+	try {
+		flush_queued_root_blocks(previous_queued_root_blocks);
+	} catch (error: unknown) {
+		if (first_error === null) first_error = error;
+	}
 
 	if (!is_micro_task_queued) {
 		flush_count = 0;
 	}
 	old_values.clear();
+
+	if (first_error !== null) throw first_error;
 }
 
 export function queue_microtask(fn?: () => void): void {
@@ -788,29 +804,6 @@ export function schedule_update(block: Block | null): void {
 }
 
 function register_dependency(tracked: Tracked | Derived): void {
-	if (!disable_scoped_flush && active_block !== null && active_block !== (tracked as Tracked).b) {
-		let already_seen = false;
-		let prev_dep = active_reaction === null ? null : active_reaction.d;
-		while (prev_dep !== null) {
-			if (prev_dep.t === tracked) {
-				already_seen = true;
-				break;
-			}
-			prev_dep = prev_dep.n;
-		}
-
-		if (!already_seen) {
-			const owner = (tracked as Tracked).b;
-			let node: Block | null = active_block;
-			while (node !== null && node !== owner) {
-				node = node.p;
-			}
-			if (node === null) {
-				disable_scoped_flush = true;
-			}
-		}
-	}
-
 	let dependency = active_dependency;
 
 	if (dependency === null) {

@@ -238,7 +238,8 @@ export function generateSsrFunction(
   // Static head snippet baked from the active onHead plugins — merged into
   // every rendered head at request time (page tags win via mergeHeadHtml).
   const headExtraOption = headExtra ? `, headExtra: ${JSON.stringify(headExtra)}` : '';
-  const bakedOptions = cssOption + headExtraOption;
+  const streamingOption = options?.streaming ? `, streaming: true` : '';
+  const bakedOptions = cssOption + headExtraOption + streamingOption;
 
   const layoutStack = [
     ...ancestorLayouts.map((a) => ({ sourceDir: a.sourceDir, layoutCompName: a.layoutCompName })),

@@ -1,0 +1,13 @@
+async component PendingPage() {
+	<Head>
+		<title>Pending Demo</title>
+	</Head>
+	<h1 class="text-3xl font-bold mb-4">Pending Demo</h1>
+	<p id="pending-shell">shell</p>
+	<Pending fallback={<p id="pending-fallback">Loading pending...</p>}>
+		{async () => {
+			await new Promise(r => setTimeout(r, 150));
+			return <p id="pending-done">Pending resolved</p>;
+		}}
+	</Pending>
+}

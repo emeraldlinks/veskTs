@@ -583,7 +583,7 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           return node;
         }
 
-        if (this.#componentDepth > 0 && this.type === tt.privateId && (this.value === 'server' || this.value === 'client' || this.value === 'empty')) {
+        if (this.#componentDepth > 0 && this.type === tt.privateId && (this.value === 'server' || this.value === 'client' || this.value === 'empty' || this.value === 'pending' || this.value === 'fallback')) {
           let p = this.end;
           while (p < this.input.length && isWsChar(this.input.charCodeAt(p))) p++;
           if (this.input.charCodeAt(p) === 123) {
@@ -598,12 +598,12 @@ export function VeskParserPlugin(config: VeskPluginConfig = {}) {
           }
         }
 
-        if (this.#componentDepth > 0 && this.type === tt.name && this.value === 'empty') {
+        if (this.#componentDepth > 0 && this.type === tt.name && (this.value === 'empty' || this.value === 'pending' || this.value === 'fallback')) {
           let p = this.end;
           while (p < this.input.length && isWsChar(this.input.charCodeAt(p))) p++;
           if (this.input.charCodeAt(p) === 123) {
             const node = this.startNode();
-            (node as any).tag = 'empty';
+            (node as any).tag = this.value;
             this.next();
             (node as any).body = this.parseBlock(false).body;
             return this.finishNode(node, 'VeskBlock');

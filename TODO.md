@@ -5,6 +5,15 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (async boundaries / Pending / DOM hardening):**
+
+- [x] **Runtime DOM hardening:** `destroy_block` idempotent; `disable_scoped_flush` is `export const false`; flush drains queued roots, captures first error, rethrows once; keyed reconcile uses `k-end:` markers, `MapEntry.update`, no-op move avoidance, duplicate-key warning, end-marker range removal/moves. Added `packages/runtime/src/dom-audit.test.ts` (7/7).
+- [x] **Client region ownership:** removed managed-region effect owner flag in client codegen so branch removal disposes component-owned region effects. Added client-codegen regression suite.
+- [x] **Plain TS async boundaries:** `AwaitBoundary`/`PendingBoundary` IR, `astContainsAwait`, adjacent `#pending {}`/`#fallback {}` sugar, Pending headless component, `renderPageStream` boundary bootstrap/chunk protocol, server-jsgen boundary emission/finalization, dev-server `streaming` config pass-through. Added server-codegen + headless + runtime tests.
+- [x] **Client Pending fix:** special-cased `Pending` component calls and `PendingBoundary` in client codegen to render fallback, resolve async body, and swap; fixed JSX-in-async-child compilation by compiling returned JSX/body through IR. Browser-verified `/pending`, `/pending-sugar`, `/await-boundary` resolve with zero page errors.
+- [x] **Hydration coverage:** expanded `tests/hydration-test.mjs` with Test 12b (Pending, #pending/#fallback sugar, await boundary, SPA nav). 12b passed in dev; full hydration run progressed through many suites with all recorded checks passing but was stalled at Test 15 in this environment when stopped for reporting.
+- [ ] **Known gaps:** dev layout-chain routes buffer async boundaries (no-layout `renderPageStream` path streams); PendingBoundary client hydrate semantics are minimal; adapter/prod layout streaming and full hydration/prod-hydration validation still needed.
+
 **This session (env HMR + dotted-basename API imports):**
 
 - [x] **BUG (dev HMR): `.env` / `.env.local` edits were ignored until restart.**

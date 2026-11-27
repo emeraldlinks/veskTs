@@ -730,6 +730,9 @@ export function renderPageStream(
     { sourcePath: options.sourcePath, url: (options.__vesk?.url as string) || undefined }
   );
   yield finalHead + '\n';
+  if (options.streaming) {
+    yield `<script>globalThis.__vskResolveBoundary = function(id, html) { var t = document.querySelector('template[data-vsk-boundary="' + id + '"]'); if (!t) return; var x = document.createElement('template'); x.innerHTML = html; t.replaceWith(x.content); };</script>\n`;
+  }
   yield '</head>\n<body>\n<div id="root">\n';
 
   (globalThis as any).__vsk_ssr = true;
@@ -737,16 +740,70 @@ export function renderPageStream(
   (globalThis as any).__vsk_ssr_data = {};
   const renderToken = streamToken;
   pruneSsrDataSlots();
-  let bodyHtml: string;
+  let bodyHtml = '';
   try {
-    bodyHtml = await Promise.resolve(renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk)));
+    if (options.streaming) {
+      const chunks: string[] = [];
+      let wake: (() => void) | null = null;
+      let done = false;
+      let renderError: unknown = null;
+      const prevPush = (globalThis as any).__vskPushBoundary;
+      const prevPushHtml = (globalThis as any).__vskPushHtml;
+      const prevStreaming = (globalThis as any).__vsk_streaming_boundaries;
+      (globalThis as any).__vsk_streaming_boundaries = true;
+      (globalThis as any).__vskPushHtml = (html: string) => {
+        chunks.push(html);
+        if (wake) {
+          const resolve = wake;
+          wake = null;
+          resolve();
+        }
+      };
+      (globalThis as any).__vskPushBoundary = (id: string, html: string) => {
+        chunks.push(id === '__final__'
+          ? html
+          : `<script>globalThis.__vskResolveBoundary(${JSON.stringify(id)}, ${safeJsonForScript(JSON.stringify(html))})</script>\n`);
+        if (wake) {
+          const resolve = wake;
+          wake = null;
+          resolve();
+        }
+      };
+      const renderPromise = Promise.resolve(renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk)))
+        .catch((error: unknown) => { renderError = error; })
+        .finally(() => {
+          done = true;
+          if (wake) {
+            const resolve = wake;
+            wake = null;
+            resolve();
+          }
+        });
+      try {
+        while (!done || chunks.length > 0) {
+          if (chunks.length > 0) {
+            yield chunks.shift() as string;
+            continue;
+          }
+          await new Promise<void>((resolve) => { wake = resolve; });
+        }
+        if (renderError !== null) throw renderError;
+        bodyHtml = (await renderPromise) as string;
+        if (bodyHtml) yield bodyHtml;
+      } finally {
+        (globalThis as any).__vskPushBoundary = prevPush;
+        (globalThis as any).__vskPushHtml = prevPushHtml;
+        (globalThis as any).__vsk_streaming_boundaries = prevStreaming;
+      }
+    } else {
+      bodyHtml = await Promise.resolve(renderFn(ssrProps, fullRegistry, scopedVesk(renderFn, __vesk))) as string;
+      if (bodyHtml) yield bodyHtml;
+    }
   } finally {
     delete (globalThis as any).__vsk_ssr;
     await settleSsrPromises(renderToken);
     clearSsrCells(renderToken);
   }
-
-  yield bodyHtml;
 
   const slot = ((globalThis as any)[`__vsk_ssr_data_${renderToken}`] as Record<string, unknown>) || {};
   const ssrData: Record<string, unknown> = {

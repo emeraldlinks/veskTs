@@ -15,6 +15,8 @@ import {
   ForLoop,
   TrackDecl,
   RuntimeStatement,
+  AwaitBoundary,
+  PendingBoundary,
   BreakSignal,
   ComponentRef,
   ComponentCall,
@@ -666,6 +668,44 @@ function emitNode(ctx: Ctx, node: IRNode, tracked: Map<string, TrackedInfo>, eff
   if (node instanceof HeadBlock) {
     emitClientHead(ctx, node, tracked);
     return null;
+  }
+  if (node instanceof AwaitBoundary) {
+    ctx.push(semicolonizeStatement(transformTracked(node.statement as any, tracked)));
+    return null;
+  }
+  if (node instanceof PendingBoundary) {
+    const start = ctx.n();
+    const end = ctx.n();
+    const frag = ctx.n();
+    const renderInto = (nodes: IRNode[], target: string) => {
+      for (const n of nodes) {
+        const nv = emitNode(ctx, n, tracked, effectsVar, target);
+        if (nv) ctx.push(`${target}.appendChild(${nv});`);
+      }
+    };
+    if (ctx.hydrate) {
+      ctx.descriptorClaim = false;
+      ctx.push(`const ${start} = ${ctx.walker}.claimComment() || document.createComment('');`);
+      ctx.push(`const ${end} = ${ctx.walker}.claimComment() || document.createComment('');`);
+      ctx.push(`{ const __p = ${start}.parentNode; let __n = ${start}.nextSibling; while (__n && __n !== ${end}) { const __next = __n.nextSibling; __n.remove(); __n = __next; } }`);
+      ctx.push(`(async () => { const __f = document.createDocumentFragment();`);
+      const savedHydrate = ctx.hydrate;
+      ctx.hydrate = false;
+      renderInto(node.body, '__f');
+      ctx.hydrate = savedHydrate;
+      ctx.push(`const __p = ${start}.parentNode; if (!__p) return; let __n = ${start}.nextSibling; while (__n && __n !== ${end}) { const __next = __n.nextSibling; __n.remove(); __n = __next; } __p.insertBefore(__f, ${end}); })().catch((e) => console.error(e));`);
+      return start;
+    }
+    ctx.push(`const ${start} = document.createComment('');`);
+    ctx.push(`const ${end} = document.createComment('');`);
+    ctx.push(`const ${frag} = document.createDocumentFragment();`);
+    ctx.push(`${frag}.appendChild(${start});`);
+    renderInto(node.fallback, frag);
+    ctx.push(`${frag}.appendChild(${end});`);
+    ctx.push(`(async () => { const __f = document.createDocumentFragment();`);
+    renderInto(node.body, '__f');
+    ctx.push(`const __p = ${start}.parentNode; if (!__p) return; let __n = ${start}.nextSibling; while (__n && __n !== ${end}) { const __next = __n.nextSibling; __n.remove(); __n = __next; } __p.insertBefore(__f, ${end}); })().catch((e) => console.error(e));`);
+    return frag;
   }
   if (node instanceof RuntimeStatement) {
     ctx.push(semicolonizeStatement(transformTracked(node as any, tracked)));
@@ -1329,6 +1369,84 @@ function emitComponentCall(ctx: Ctx, node: ComponentCall, tracked: Map<string, T
     propsEntries.push(`...${expr}`);
   }
 
+  if (node.componentName === 'Pending') {
+    const slotChildrenAll = node.children.filter((c): c is PropSlot => c instanceof PropSlot);
+    const fallbackSlot = slotChildrenAll.find((c) => c.propName === 'fallback');
+    const regChildrenAll = node.children.filter((c) => !(c instanceof PropSlot));
+    const childExprNode = regChildrenAll.find((c): c is DynamicBinding => c instanceof DynamicBinding && !!c.expression?.ast && c.expression.ast.type === 'ArrowFunctionExpression');
+    const v = ctx.n();
+    const end = ctx.n();
+    const renderNodes = (nodes: IRNode[], target: string) => {
+      for (const n of nodes) {
+        const nv = emitNode(ctx, n, tracked, effectsVar, target);
+        if (nv) ctx.push(`${target}.appendChild(${nv});`);
+      }
+    };
+    const emitPendingResolve = (targetStart: string, targetEnd: string) => {
+      if (!childExprNode) return;
+      const fnAst = (childExprNode.expression as any).ast;
+      const emitResolvedExpr = (exprAst: any) => {
+        if (exprAst && (exprAst.type === 'JSXElement' || exprAst.type === 'JSXFragment')) {
+          const jsx = printAst(exprAst);
+          const wrapped = `component __PendingBody() {\n${jsx}\n}`;
+          const ir = generateIR(parse(wrapped, { filename: 'pending.vsk' }), wrapped, 'pending.vsk');
+          const body = ir.components[0]?.body || [];
+          for (const n of body) {
+            const nv = emitNode(ctx, n, tracked, effectsVar, '__f');
+            if (nv) ctx.push(`__f.appendChild(${nv});`);
+          }
+          return;
+        }
+        const expr = transformTracked({ ast: exprAst, raw: printAst(exprAst) } as any, tracked);
+        ctx.push(`__f.appendChild(toDomNode(${expr}));`);
+      };
+      ctx.push(`Promise.resolve().then(async () => { const __f = document.createDocumentFragment();`);
+      if (fnAst && fnAst.type === 'ArrowFunctionExpression') {
+        const body = fnAst.body;
+        if (body.type === 'BlockStatement') {
+          for (const stmt of body.body) {
+            if (stmt.type === 'ReturnStatement') {
+              if (stmt.argument) emitResolvedExpr(stmt.argument);
+            } else {
+              ctx.push(semicolonizeStatement(transformTracked({ ast: stmt, raw: printAst(stmt) } as any, tracked)));
+            }
+          }
+        } else {
+          emitResolvedExpr(body);
+        }
+      } else {
+        const expr = transformTracked(childExprNode.expression as any, tracked);
+        ctx.push(`__f.appendChild(toDomNode(await (${expr})()));`);
+      }
+      ctx.push(`const __p = ${targetStart}.parentNode; if (!__p) return; let __n = ${targetStart}.nextSibling; while (__n && __n !== ${targetEnd}) { const __next = __n.nextSibling; __n.remove(); __n = __next; } __p.insertBefore(__f, ${targetEnd}); }).catch((e) => console.error(e));`);
+    };
+
+    if (ctx.hydrate) {
+      ctx.descriptorClaim = false;
+      const promptExpr = ctx.markerless && (regionBudget || skipK > 0) ? markerlessSkipExpr(regionBudget, skipK) : null;
+      ctx.push(`const ${v} = ${promptExpr ? `${ctx.walker}.claimComment(${promptExpr})` : `${ctx.walker}.claimComment()`} || document.createComment('');`);
+      ctx.push(`const ${end} = ${ctx.walker}.claimComment() || document.createComment('');`);
+      if (regionBudget && ctx.markerless) ctx.push(`${regionBudget} = 0;`);
+      ctx.push(`{ const __p = ${v}.parentNode; let __n = ${v}.nextSibling; while (__n && __n !== ${end}) { const __next = __n.nextSibling; __n.remove(); __n = __next; } }`);
+      if (childExprNode) emitPendingResolve(v, end);
+      else if (fallbackSlot) {
+        ctx.push(`{ const __f = document.createDocumentFragment();`);
+        renderNodes(fallbackSlot.body, '__f');
+        ctx.push(`if (${v}.parentNode) ${v}.parentNode.insertBefore(__f, ${end}); }`);
+      }
+      return v;
+    }
+    ctx.push(`const ${v} = document.createComment('');`);
+    ctx.push(`const ${end} = document.createComment('');`);
+    const frag = ctx.n();
+    ctx.push(`const ${frag} = document.createDocumentFragment();`);
+    ctx.push(`${frag}.appendChild(${v});`);
+    if (fallbackSlot) renderNodes(fallbackSlot.body, frag);
+    ctx.push(`${frag}.appendChild(${end});`);
+    if (childExprNode) emitPendingResolve(v, end);
+    return frag;
+  }
+
   const v = ctx.n();
   // Await children whenever the calling scope is async. Async-ness is
   // parent-driven (mirroring the server side) so that imported async
@@ -1738,7 +1856,7 @@ function emitTryCatch(ctx: Ctx, node: TryCatch, tracked: Map<string, TrackedInfo
       ${effArr}.length = 0;
       __cleanup(${anchor}, ${endAnchor});
       try { ${asyncKw}${tryRenderComp}(); } catch(${catchParam}) { ${hasCatch ? `${asyncKw}${catchRenderComp}(${catchParam});` : 'throw ${catchParam};'} }
-    }, true);
+    });
   }`);
 
   return null;
@@ -1853,7 +1971,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
           ${effInner}
           __iv = __new;
         }
-      }, true);`;
+      });`;
     if (effTarget) {
       ctx.push(`${effTarget}.push((() => {
       let __iv = ${branchSnapshot};
@@ -1953,7 +2071,7 @@ function emitOpaque(ctx: Ctx, node: OpaqueDynamicRegion, tracked: Map<string, Tr
         ${renderBranch}
         __iv = __nv;
       }
-    }, true);`;
+    });`;
 
   // A static condition renders once; an effect referencing it would only ever
   // reference statement/loop-local bindings that are out of scope at the flush
@@ -2049,7 +2167,7 @@ function emitWhileLoop(ctx: Ctx, node: WhileLoop, tracked: Map<string, TrackedIn
       __busy = false;
       __iv = (${condExpr});
     }
-  }, true);
+  });
 }`);
 
   return null;
@@ -2153,7 +2271,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
       __busy = false;
       __iv = (${srcExpr});
     }
-  }, true);
+  });
 }`);
   } else {
     const condReactive = isReactiveExpression(node.condition as any, tracked);
@@ -2218,7 +2336,7 @@ function emitForLoop(ctx: Ctx, node: ForLoop, tracked: Map<string, TrackedInfo>,
     __cleanup(${anchor}, ${endAnchor});
     ${ctx.isAsyncScope ? 'await ' : ''}${renderLoop}();
     __busy = false;
-  }, true);
+  });
 }`);
     }
   }
@@ -2294,7 +2412,7 @@ function emitSwitchBlock(ctx: Ctx, node: SwitchBlock, tracked: Map<string, Track
       __busy = false;
       __iv = (${discExpr});
     }
-  }, true);
+  });
 }`);
 
   return null;
@@ -2504,7 +2622,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
     if (__new) { ${initList}(); } else { ${aw}${emptyRenderName}(); }
-  }, true)`);
+  })`);
     } else {
       ctx.push(`${initList}();`);
       if (!reactiveSource) return null;
@@ -2512,7 +2630,7 @@ function emitMap(ctx: Ctx, node: MapRegion, tracked: Map<string, TrackedInfo>, e
     const __nv = ${arrExpr};
     if (__first) { __first = false; __nv; ${breakReset}${reconciler}(${arrExpr}); return; }
     ${breakVar ? `if (${breakVar}) ${breakVar} = false;` : ''}${reconciler}(${arrExpr});
-  }, true)`);
+  })`);
     }
   } else {
     const renderAllItems = (ind: string, collect: string | null): string => {
@@ -2563,7 +2681,7 @@ ${renderAllItems('        ', null)}
     if (__new) {
 ${renderAllItems('      ', null)}
     } else { ${aw}${emptyRenderName}(); }
-  }, true)`);
+  })`);
     } else {
       const collectVar = hyd ? ctx.n() : null;
       if (collectVar) ctx.push(`const ${collectVar} = [];`);
@@ -2577,7 +2695,7 @@ ${renderAllItems('      ', null)}
     ${effectsVar}.length = 0;
     __cleanup(${anchor}, ${endAnchor});
 ${renderAllItems('    ', null)}
-  }, true)`);
+  })`);
     }
   }
 

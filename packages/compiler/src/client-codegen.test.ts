@@ -3466,6 +3466,35 @@ describe('generated code is valid ESM', () => {
 		const code = compileClient(sources['single-root plain target'], null, { forceClient: true, hydrate: true });
 		expect(code).toContain('__sr.parentNode.replaceChild(');
 	});
+	describe('Client Codegen — component-owned region disposal', () => {
+		const expressionSource = `
+			component Child {
+				return <span>child</span>;
+			}
+			component App {
+				const &[show] = track(true);
+				return show ? <Child/> : null;
+			}
+		`;
+		const statementSource = `
+			component Child {
+				<span>child</span>
+			}
+			component App {
+				const &[show] = track(true);
+				if (show) {
+					<Child/>
+				}
+			}
+		`;
+		for (const [mode, source] of [['expression', expressionSource], ['statement', statementSource]] as const) {
+			bothModes(`region effects are unmanaged so child components are disposed (${mode} mode)`, source, (code) => {
+				expect(code).not.toContain('}, true);');
+				expect(code).not.toContain('}, true)`);');
+				expect(code).toContain('destroy_block');
+			});
+		}
+	});
 });
 
 console.log(`\n${'='.repeat(50)}`);
