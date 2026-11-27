@@ -2,6 +2,20 @@
 
 All notable changes to Vesk. Versions follow [semver](https://semver.org/); `latest` only moves on a stable release, and `canary` tracks `main`.
 
+## 0.4.5 — 2026-11-27
+
+_No breaking changes._
+
+### Fixes
+
+- **compiler:** clear esbuild fallback timer and pin API route TS regression
+- **compiler:** harden TS module loading and pending hydration
+- **runtime:** harden async boundaries and pending streaming
+
+### Chores
+
+- **perf:** ratchet budget for async boundaries
+
 ## 0.4.4 — 2026-11-26
 
 _No breaking changes._
