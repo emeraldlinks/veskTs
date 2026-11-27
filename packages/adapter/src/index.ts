@@ -477,7 +477,7 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
 
   markPhase('server runtime + ssr functions');
   const apiRoutes: ApiRouteNode[] = [];
-  function walkApi(nodes: ApiRouteNode[]): void {
+  async function walkApi(nodes: ApiRouteNode[]): Promise<void> {
     for (const node of nodes) {
       if (node.filePath) {
         // API node.fullPath is mount-relative (`/admin`), while middleware
@@ -489,16 +489,16 @@ export async function build(appDir: string, options?: BuildOptions): Promise<Bui
           const mwSources = mwChain.map((m: MiddlewareChainItem) => readFileSync(m.sourcePath, 'utf-8'));
           mwCode = compileMiddlewareCode(mwSources, { dedupeVeskResponse: true });
         }
-        const { funcPath, funcCode, name } = generateApiFunction(node, apiDir, outDir, { middlewareCode: mwCode });
+        const { funcPath, funcCode, name } = await generateApiFunction(node, apiDir, outDir, { middlewareCode: mwCode });
         writeFileSync(funcPath, funcCode, 'utf-8');
         serverImportEntries.push(funcPath);
         apiRoutes.push(node);
         console.error(`vesk build: api  → server/api/${name}.js  (${node.fullPath})${mwCode ? ' [mw]' : ''}`);
       }
-      walkApi(node.children || []);
+      await walkApi(node.children || []);
     }
   }
-  walkApi(apiTree);
+  await walkApi(apiTree);
 
   let middlewareEnabled = false;
   const mwChain = collectMiddlewareChain(routeTree, '/', appDir);

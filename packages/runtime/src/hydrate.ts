@@ -108,6 +108,13 @@ export interface HydrateWalker {
 	 */
 	claimOnly?(tag?: string, skipK?: number, descriptor?: HydrateClaimDescriptor): Element;
 	/**
+	 * Claim an SSR comment boundary (used by `<Pending>` region fences) at the
+	 * current cursor. `skipK` counts element slots in markerless walks and
+	 * marker slots in marker walks; a string selects a marker identity. Returns
+	 * `null` when no live comment remains, so callers can create a fresh fence.
+	 */
+	claimComment?(skipK?: number | string): Comment | null;
+	/**
 	 * Drop any remaining markers whose comment node is no longer attached to
 	 * the document. Self-claiming runtime components (Link/NavLink/Md/Form/
 	 * Field/LoadingIndicator) rebuild or wipe their SSR content on hydration,
@@ -940,6 +947,36 @@ class WalkerEngine implements HydrateWalker {
 		return createFreshElement(tag || 'div');
 	}
 
+	claimComment(skipK: number | string = 0): Comment | null {
+		if (typeof skipK === 'string') {
+			while (this.idx < this.markers.length) {
+				const tm = this.markers[this.idx++];
+				if (tm.state === 'claimed' || tm.identity !== skipK) continue;
+				tm.state = 'claimed';
+				return tm.comment;
+			}
+			return null;
+		}
+		let scanned = 0;
+		while (this.idx < this.markers.length) {
+			const tm = this.markers[this.idx];
+			if (tm.state === 'claimed') {
+				this.idx++;
+				continue;
+			}
+			if (scanned < skipK) {
+				scanned++;
+				tm.state = 'claimed';
+				this.idx++;
+				continue;
+			}
+			this.idx++;
+			tm.state = 'claimed';
+			return tm.comment;
+		}
+		return null;
+	}
+
 	retireDetached(): void {
 		while (this.idx < this.markers.length) {
 			const tm = this.markers[this.idx];
@@ -1218,12 +1255,17 @@ class StructuralWalker implements HydrateWalker {
 	// Snapshot taken at construction, so fresh nodes mounted during the render
 	// are never re-claimed and claims stay aligned to the SSR source list.
 	private els: Element[];
+	private comments: Comment[];
+	private commentIdx = 0;
 	private idx = 0;
 	private adopted = new WeakSet<Element>();
 
 	constructor(root: HTMLElement | null, els?: Element[]) {
 		this.root = root;
 		this.els = els || (root ? Array.prototype.slice.call(root.children) : []);
+		this.comments = root
+			? (Array.prototype.slice.call(root.childNodes) as Node[]).filter((n) => n.nodeType === 8) as Comment[]
+			: [];
 	}
 
 	/**
@@ -1412,6 +1454,37 @@ class StructuralWalker implements HydrateWalker {
 
 	claimOnly(tag?: string, skipK = 0, descriptor?: HydrateClaimDescriptor): Element {
 		return this.claimAt(tag, skipK, true, descriptor);
+	}
+
+	private elementOrdinalBefore(comment: Comment): number {
+		let ordinal = 0;
+		for (let n = comment.previousSibling; n; n = (n as Node & { previousSibling: Node | null }).previousSibling) {
+			if (n.nodeType === 1 && this.els.indexOf(n as Element) !== -1) ordinal++;
+		}
+		return ordinal;
+	}
+
+	claimComment(skipK: number | string = 0): Comment | null {
+		if (typeof skipK === 'string') {
+			while (this.commentIdx < this.comments.length) {
+				const c = this.comments[this.commentIdx++];
+				if (!c || !c.parentNode) continue;
+				if ((c.data || '').indexOf(skipK) !== -1) return c;
+			}
+			return null;
+		}
+		let offset = skipK || 0;
+		const inherited = this.inheritOffset;
+		this.inheritOffset = 0;
+		if (!offset) offset = inherited;
+		const target = this.advancePastSkippable(this.idx + offset);
+		while (this.commentIdx < this.comments.length) {
+			const c = this.comments[this.commentIdx++];
+			if (!c || !c.parentNode) continue;
+			if (this.elementOrdinalBefore(c) < target) continue;
+			return c;
+		}
+		return null;
 	}
 
 	discardStructuralRegion(branches: StructuralRegionBranchDescriptor[], selected: number, skipK = 0): boolean {

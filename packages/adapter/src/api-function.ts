@@ -7,12 +7,12 @@ function apiRouteName(fullPath: string): string {
   return parts.map(s => s.startsWith(':') ? s.slice(1) || 'param' : s).join('_') || 'index';
 }
 
-export function generateApiFunction(
+export async function generateApiFunction(
   apiNode: ApiRouteNode,
   _apiDir: string,
   outDir: string,
   options?: ApiFunctionOptions,
-): { funcPath: string; funcCode: string; name: string } {
+): Promise<{ funcPath: string; funcCode: string; name: string }> {
   const middlewareCode = options?.middlewareCode || null;
   const name = apiRouteName(apiNode.fullPath);
   const funcPath = resolve(outDir, 'server', 'api', `${name}.js`);
@@ -25,7 +25,7 @@ export function generateApiFunction(
   // against the real route directory and emit portable relative specifiers
   // into dist/server/api/_modules; `vesk start` imports those files directly
   // and platform bundling inlines them.
-  const prepared = prepareApiRouteGraph(
+  const prepared = await prepareApiRouteGraph(
     routeFilePath,
     resolve(outDir, 'server', 'api', '_modules'),
     dirname(funcPath),

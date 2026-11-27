@@ -231,6 +231,40 @@ test('loadSsrModule: TS stripping + ESM export forms', () => {
   }
 });
 
+test('loadSsrModule: real-app TS syntax survives SSR transform', () => {
+  const fx = makeFixture();
+  try {
+    writeFileSync(fx.file('shapes.ts'), [
+      `export interface Repo { save(v: string): string }`,
+      `export abstract class BaseRepo implements Repo { abstract save(v: string): string; protected tag: string = 'base' }`,
+      `export enum Kind { A = 'a', B = 'b' }`,
+      `export class ImplRepo extends BaseRepo {`,
+      `  constructor(private readonly prefix: string = 'p') { super() }`,
+      `  save(v: string): string { return this.prefix + ':' + Kind.A + ':' + this.tag + ':' + v }`,
+      `}`,
+    ].join('\n'));
+    const mod = loadSsrModule(fx.file('shapes.ts')) as Record<string, unknown>;
+    const ImplRepo = mod.ImplRepo as new (prefix?: string) => { save(v: string): string };
+    expect(new ImplRepo('x').save('ok')).toEqual('x:a:base:ok');
+
+    const exprSrc = [
+      `import { ImplRepo } from './shapes.ts';`,
+      `component Page { return <p>{new ImplRepo('expr').save('ok')}</p> }`,
+    ].join('\n');
+    const stmtSrc = [
+      `import { ImplRepo } from './shapes.ts';`,
+      `component Page {`,
+      `  const repo = new ImplRepo('stmt')`,
+      `  <p>{repo.save('ok')}</p>`,
+      `}`,
+    ].join('\n');
+    expect(render(exprSrc, 'Page', {}, new Map(), { sourcePath: fx.file('expr.vsk') }) as string).toContain('expr:a:base:ok');
+    expect(render(stmtSrc, 'Page', {}, new Map(), { sourcePath: fx.file('stmt.vsk') }) as string).toContain('stmt:a:base:ok');
+  } finally {
+    fx.cleanup();
+  }
+});
+
 test('loadSsrModule: nested relative imports, export-from, star and re-export forms', () => {
   const fx = makeFixture();
   try {

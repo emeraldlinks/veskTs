@@ -13,7 +13,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync, existsSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { routeDevPanel, injectDevScripts, injectSsrErrorMarker, DEV_SCRIPTS, buildDevErrorPayload, resolveDevErrorReport, devErrorContextForMatch, resolveRuntimeDir } from './dev-server.js';
+import { routeDevPanel, injectDevScripts, injectSsrErrorMarker, DEV_SCRIPTS, buildDevErrorPayload, resolveDevErrorReport, devErrorContextForMatch, resolveRuntimeDir, clientBundleMatchesRouteTree } from './dev-server.js';
 
 let passed = 0;
 let failed = 0;
@@ -385,6 +385,19 @@ async function main() {
     const resolved = resolveRuntimeDir(tmpProject);
     assert(!!resolved && !resolved.startsWith(appRuntime), 'runtime dir ignores the app-pinned runtime copy');
     assert(!!resolved && existsSync(join(resolved, 'ripple-runtime.js')), 'runtime dir resolves a real runtime build');
+  }
+
+  // ---- a restored client bundle must carry the CURRENT route tree. A cache
+  // entry laundered under a fresh source key can still hold an entry bundle
+  // from before a route was added; its route table is the authoritative check.
+  {
+    const routeTree = [
+      { fullPath: '/about', page: 'Page_About', layout: null, children: [] },
+      { fullPath: '/pending', page: 'PendingPage', layout: null, children: [] },
+    ] as any;
+    const main = (tree: unknown) => `const __routeTree = ${JSON.stringify(tree)};\nconst __pendChunks = [];`;
+    assert(clientBundleMatchesRouteTree(main(routeTree), routeTree), 'current route tree passes client bundle cache validation');
+    assert(!clientBundleMatchesRouteTree(main([routeTree[0]]), routeTree), 'client bundle missing a newly added route is rejected');
   }
 
   rmSync(tmpProject, { recursive: true, force: true });

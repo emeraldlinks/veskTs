@@ -2556,5 +2556,40 @@ describe('reconcile plain update path', () => {
   });
 });
 
+describe('hydrate comment boundary claims', () => {
+  it('markerless walker claims pending fences after skipped element residue', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    root.appendChild(document.createElement('h1'));
+    const shell = document.createElement('p');
+    shell.setAttribute('id', 'pending-shell');
+    root.appendChild(shell);
+    const start = document.createComment('');
+    const end = document.createComment('');
+    root.appendChild(start);
+    root.appendChild(end);
+    const walker = createHydrateWalker(root);
+    expect(walker.claimComment(2)).toBe(start);
+    expect(walker.claimComment()).toBe(end);
+    expect(walker.claimComment()).toBe(null);
+    cleanupDocument();
+  });
+
+  it('marker walker claims positional SSR comments', () => {
+    mockDocument();
+    const root = document.createElement('div');
+    const start = document.createComment('vsk:pending');
+    root.appendChild(start);
+    root.appendChild(document.createElement('p'));
+    const end = document.createComment('vsk:pending');
+    root.appendChild(end);
+    const walker = createHydrateWalker(root, [start, end]);
+    expect(walker.claimComment()).toBe(start);
+    expect(walker.claimComment()).toBe(end);
+    expect(walker.claimComment()).toBe(null);
+    cleanupDocument();
+  });
+});
+
 console.log(`\nResults: ${passed} passed, ${failed} failed, ${passed + failed} total`);
 process.exit(failed > 0 ? 1 : 0);

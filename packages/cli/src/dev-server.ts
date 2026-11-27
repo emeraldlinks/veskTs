@@ -625,6 +625,33 @@ function collectRoutePaths(nodes: RouteNode[], out: string[] = []): string[] {
   return out;
 }
 
+function routeTreeSignature(nodes: RouteNode[]): string {
+  const entries: string[] = [];
+  const walk = (list: RouteNode[]): void => {
+    for (const node of list) {
+      entries.push(`${node.fullPath || ''}\u0000${typeof node.page === 'string' ? node.page : ''}\u0000${typeof node.layout === 'string' ? node.layout : ''}`);
+      if (node.children && node.children.length > 0) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return entries.sort().join('\u0001');
+}
+
+export function clientBundleMatchesRouteTree(main: string, routeTree: RouteNode[]): boolean {
+  const marker = 'const __routeTree = ';
+  const start = main.indexOf(marker);
+  if (start < 0) return false;
+  const jsonStart = start + marker.length;
+  const end = main.indexOf(';\n', jsonStart);
+  if (end < 0) return false;
+  try {
+    const emitted = JSON.parse(main.slice(jsonStart, end)) as RouteNode[];
+    return routeTreeSignature(emitted) === routeTreeSignature(routeTree);
+  } catch {
+    return false;
+  }
+}
+
 function countFilesNamed(dir: string, name: string): number {
   if (!existsSync(dir)) return 0;
   let n = 0;
@@ -925,6 +952,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
   await refreshIntelligenceArtifacts();
 
   let clientBundle = '';
+  let clientBundleRestored = false;
   let clientChunks = new Map<string, string>();
   let runtimeBundle = '';
   let devBundleBytes = 0;
@@ -1040,6 +1068,7 @@ export async function startDevServer(port: number, projectDir: string, config: R
       const file = join(devCacheDir(), 'client-bundle.json');
       const parsed = JSON.parse(readFileSync(file, 'utf8')) as { key?: string; main?: string; chunks?: ChunkEntry[] };
       if (parsed.key !== devCacheKey() || typeof parsed.main !== 'string' || !Array.isArray(parsed.chunks)) return null;
+      if (!clientBundleMatchesRouteTree(parsed.main, routeTree)) return null;
       return { main: parsed.main, chunks: parsed.chunks };
     } catch {
       return null;
@@ -1054,6 +1083,10 @@ export async function startDevServer(port: number, projectDir: string, config: R
    */
   let persistChunksTimer: ReturnType<typeof setTimeout> | null = null;
   function persistDevChunksSoon(): void {
+    // A restored entry bundle is already paired with its original cache key.
+    // Re-writing it under a newer key after an on-demand chunk build would
+    // launder stale route metadata into a key that looks current.
+    if (clientBundleRestored) return;
     if (persistChunksTimer) return;
     persistChunksTimer = setTimeout(() => {
       persistChunksTimer = null;
@@ -1160,6 +1193,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
       const cached = readDevBundleCache();
       if (cached) {
         clientBundle = cached.main;
+        clientBundleRestored = true;
         devBundleBytes = Buffer.byteLength(cached.main, 'utf8');
         storeChunks(cached.chunks);
         // Restored chunk bodies count as built, so a first visit to any route
@@ -1184,6 +1218,7 @@ function routeFullPathForChunk(chunkName: string): string | null {
         ...(config.routeDataCache !== undefined ? { routeDataCache: config.routeDataCache as number } : {}),
       });
       clientBundle = main;
+      clientBundleRestored = false;
       devBundleBytes = Buffer.byteLength(main, 'utf8');
       storeChunks(chunks);
       // `storeChunks` REPLACES the chunk map. The routes marked built belong

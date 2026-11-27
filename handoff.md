@@ -1,85 +1,91 @@
-# Gin-like middleware/req/res handoff
+# Handoff: Robust TS transform for dev/SSR/API module loading
 
 ## Objective
-Implement additive Gin-like req/res/middleware features in Vesk (excluding router groups) with **no existing API/signature changes** so current codebases/apps keep working, and verify/test properly in `test-app`.
+- Fix reported Windows dev API route failure: `C:\Users\KERRY\Documents\myshopp\app\api\auth\login\route.ts` returns `{"error":"Failed to load route module","details":"Unexpected strict mode reserved word"}`.
+- Replace brittle custom TS stripping in module/API loading paths with robust esbuild-based transform (native esbuild first, `esbuild-wasm` fallback), while keeping Vesk AST/specifier rewriting where required.
 
-**Hard constraint:** no changes to existing exports, function/method names, parameter lists/types/requiredness, return shapes/types, or runtime semantics; new behavior must be additive/opt-in and backward-compatible.
+## Root Cause (confirmed)
+- `packages/compiler/src/strip-ts.ts` leaves valid TS constructs unstripped; repro: `class X implements Y {}` -> `stripCodeTypes` keeps `implements`, Node ESM throws `SyntaxError: Unexpected strict mode reserved word`.
+- Dev API route loading used stripped/raw TS parsing paths; real-app deps containing `implements`/param properties/enum/abstract/etc. can hit this.
 
-## Changes made (additive)
+## Changes Made (uncommitted)
 
-### Types (`packages/types`)
-- `packages/types/src/index.ts`, `packages/types/src/index.d.ts`
-  - Added `MiddlewareError`.
-  - Extended `MiddlewareContext` with optional members: `errors?`, `error?`, `abort?`, `isAborted?`, `abortWithStatus?`, `abortWithStatusJSON?`, `cookie?`, `status?`, `json?`, `text?`, `html?`, `redirect?`, `header?`, `getHeader?`, `shouldBindJSON?`, `bindJSON?`, `shouldBindQuery?`, `bindQuery?`.
-  - Extended `VeskRequest` with optional helpers: `cookie?`, `shouldBindQuery?`, `bindQuery?`, `shouldBindJSON?`, `bindJSON?`.
-  - Extended `VeskResponse` with optional introspection: `statusCode?`, `getHeader?`.
-  - Existing signatures/required members unchanged.
+### New TS transform service
+- `packages/compiler/src/ts-transform.ts`: async `transformTsModule` and sync `transformTsModuleSync` via esbuild/esbuild-wasm fallback strategy; `loaderForPath`.
+- `packages/compiler/src/ts-transform.test.ts`: covers implements/private types, generics/parameter properties, ESM import/export preservation.
+- `packages/adapter/src/esbuild-fallback.ts`: added `transform()` alongside existing `build()`, native-first then wasm fallback.
+- `packages/compiler/package.json`: added `esbuild`, optional `esbuild-wasm`.
+- `packages/adapter/package.json`: added optional `esbuild-wasm`.
 
-### Runtime (`packages/runtime`)
-- `packages/runtime/src/request.ts`: added `VeskRequest.cookie`, `shouldBindQuery/bindQuery`, `shouldBindJSON/bindJSON`; `VeskResponse.statusCode/getHeader`; `toVeskResponse` export helper (normalizes/clones to VeskResponse, preserves cookie/sec/final-status metadata when present).
-- `packages/runtime/src/index-server.ts`: exports `toVeskResponse`.
+### API route/module preparation
+- `packages/compiler/src/api-module-prepare.ts`: `prepareApiRouteGraph` now async; transforms TS via esbuild, parses transformed JS with `parseGeneratedJs`, rewrites local/alias specifiers to flat prepared `.mjs` files. Cache key includes ts-transform version marker.
+- `packages/compiler/src/api-routes.ts`: awaits `prepareApiRouteGraph`; dev load/handler failures log stack with route context and return dev JSON with `route/message/details` where applicable.
+- `packages/adapter/src/api-function.ts`, `packages/adapter/src/index.ts`: `generateApiFunction`/build flow awaited for async prep/generation.
 
-### Middleware chain behavior
-- `packages/compiler/src/middleware.ts` (dev/runtime chain executor): added `__mwCloneResponse`, ctx `errors/error/abort/isAborted/abortWithStatus/abortWithStatusJSON`, response normalization, abort-aware `next`/chain handling, and preserved existing control-flow/redirect/TypeError semantics.
-- `packages/adapter/src/middleware.ts`: mirrored abort/error/response-normalization in generated chains for both `compileMiddleware` (`server/middleware.js`) and `compileMiddlewareCode` (inline `__executeMw`) to keep build/prod parity with compiler behavior.
+### SSR/module import loading
+- `packages/compiler/src/module-imports.ts`:
+  - `readSsrSource` async; transforms `.ts/.tsx/.mts/.cts` with esbuild before parsing; parse/transform errors include file/line.
+  - `loadSsrModule` async with in-flight dedupe; evaluates transformed JS AST.
+  - Added `loadSsrModuleSync` for cached/builtin/JSON/JS and sync native esbuild TS transform (used by lazy barrels/property access).
+  - `applyLocalModuleImports` async.
+  - `collectModuleBundled`/`resolveBundledDeps`/`collectModuleBundle` async.
+- `packages/compiler/src/server-render.ts`: `compileFile`, `compileFileInternal`, `render`, `renderPage` made async; `renderPageStream` awaits async compile/import paths as needed.
+- `packages/compiler/src/precompile.ts`: `precompileFile`/internal async.
+- `packages/adapter/src/ssr-function.ts`: `generateSsrFunction` async; awaits precompile.
+- `packages/cli/src/dev-server.ts`: `cachedSsrCompile` async; dev render/cache call sites awaited.
+- `packages/testing/src/index.ts`: `renderComponent`/`mount` async (typecheck-driven API update).
 
-### Tests
-- `packages/compiler/src/middleware.test.ts`: added additive tests for abort short-circuit (`abortWithStatusJSON`) and error collection; restructured test registration so all tests run under the harness (15 total).
+### Tests updated
+- `packages/compiler/src/api-module-prepare.test.ts`: async + real-app TS syntax case (`implements`, param properties, enum, abstract).
+- `packages/compiler/src/module-imports.test.ts`: updated for async API; all module-imports tests currently passing after fixes.
+- `packages/compiler/src/precompile-cache.test.ts`, `packages/compiler/src/server-codegen.test.ts`: async precompile updates.
+- `packages/adapter/src/api-function.test.ts`, `packages/adapter/src/api-function-middleware.test.ts`, `packages/adapter/src/ssr-function.test.ts`, `packages/adapter/src/plugin-head.test.ts`, `packages/adapter/src/asset-hash.test.ts`, `packages/adapter/src/server-only.test.ts`.
+- `packages/cli/src/dev-ssr-cache.test.ts`, `packages/testing/src/harness.test.ts`.
 
-### `test-app` (local verification target)
-- Deps relinked to local packages (`file:../packages/*`), `npm install` run earlier.
-- Middlewares typed/updated (`app/middleware.ts`, `app/admin/middleware.ts`, `app/blog/middleware.ts`).
-- Added `/mw-cookie` probe: `app/mw-cookie/page.vsk`, `app/api/mw-cookie/route.ts`; root middleware attempts pass-through cookie/header mutation on `/mw-cookie`.
+## Validation Run
+- `npx tsx packages/cli/src/build-packages.ts` — passes after iterative fixes.
+- `npx tsx packages/compiler/src/ts-transform.test.ts` — `3 passed, 0 failed`.
+- `npx tsx packages/compiler/src/api-module-prepare.test.ts` — `6 passed, 0 failed` (includes real-app TS syntax case).
+- `npx tsx packages/compiler/src/module-imports.test.ts` — `55 passed, 0 failed` (latest run after async/sync fixes).
+- `npx tsc --noEmit -p packages/compiler/tsconfig.json` — pass.
+- `npx tsc --noEmit -p packages/adapter/tsconfig.json` — pass.
+- `npx tsc --noEmit -p packages/cli/tsconfig.json` — pass.
+- Full `npm run typecheck` was started but repeatedly timed out/stalled in this environment before completing; key packages above pass.
 
-## Build state
-- `npm run build` completed successfully (exit 0) with current sources; package dists/CLI bundle updated (notably `packages/cli/dist/cli.js`, `packages/compiler/dist/middleware.js`, `packages/adapter/dist/middleware.js`, `packages/runtime/dist/request.js`, `packages/runtime/dist/index-server.js`).
-- `test-app` rebuilt: `node ../packages/cli/dist/cli.js build` succeeded (`dist/` generated, `mw -> server/middleware.js (1 middlewares)`).
+## Not Done / Risks
+- **Reported Windows app not reverified end-to-end**. The exact user project/route was not run here. The identified `implements`/TS-syntax failure mode is covered by transform + API prep tests; need user/dev-server confirmation on their app.
+- **Async API ripple not fully audited**. `compileFile`/`render`/`renderPage`/`loadSsrModule`/`applyLocalModuleImports`/`collectModuleBundle`/`precompileFile` became async or changed behavior; compile/typecheck caught many call sites, but there may be runtime callers in tests/scripts outside targeted paths.
+- **Lazy barrel + sync TS loading**: `loadSsrModuleSync` now uses native `esbuild.transformSync` for TS. This fixes lazy barrel access; environments without native esbuild sync support will throw a clear error. `esbuild-wasm` has no sync transform.
+- **AST-strip paths still exist** (`strip-ts.ts`, `client-codegen.transformTracked`, actions/router/ir/server-jsgen transforms) where AST mutation requires TS stripping/reparse. These were not fully migrated to esbuild+reparse; they are separate from the reported API/SSR module-load failure but still a robustness debt.
+- **Dev/adapter/prod layout-chain streaming** still buffered for layout-chain routes (known TODO).
+- **Hydration/prod hydration not rerun** in this session after these changes. Required by AGENTS for reactivity/hydration work: `node tests/hydration-test.mjs` (needs test-app dev server on :3000 and `CHROMIUM_PATH`).
+- **TODO.md not updated**.
 
-## Verification (confirmed)
-- Targeted tests passed:
-  - `npx tsx packages/compiler/src/middleware.test.ts` → **17/17** (includes pass-through cookie/header mutation and additive ctx helper tests)
-  - `npx tsx packages/adapter/src/middleware.test.ts` → **5/5**
-  - `npx tsx packages/adapter/src/api-function.test.ts` → 3/3
-  - `npx tsx packages/adapter/src/api-function-middleware.test.ts` → **1/1** (generated API function runs the route inside the onion and applies pass-through cookie/header mutation; route imports colliding runtime names to prove aliases)
-  - `npx tsx packages/adapter/src/ssr-function.test.ts` → 42/42
-  - `npx tsx packages/adapter/src/platform-handler.test.ts` → 14/14
-  - `npx tsx packages/adapter/src/platform-deploy.test.ts` → 4/4
-  - `npx tsx packages/adapter/src/dev-api.test.ts` → 37/37
-- `npm run typecheck` → clean (testing, types, compiler, runtime, adapter, cli, plugin-pwa).
-- `node scripts/refresh-testapp-deps.mjs` repacked CI tarballs + reinstalled `test-app`; `npm run build` in `test-app` succeeded.
-- Prod smoke (`vesk start -p 3014`, rebuilt `test-app/dist`):
-  - `GET /mw-cookie` → `200`, `set-cookie: mw_seen=1; ...`, `x-mw: ok`, body contains `id="mw"`.
-  - `GET /api/mw-cookie` → `200`, `set-cookie: mw_seen=1; ...`, `x-mw: ok`, JSON `{"ok":true}`.
-- Dev smoke (`vesk dev -p 3015`):
-  - `GET /mw-cookie` → `200`, same `set-cookie` + `x-mw: ok`, body contains `id="mw"`.
-  - `GET /api/mw-cookie` → `200`, same `set-cookie` + `x-mw: ok`, `{"ok":true}`.
-- Edge/serverless smoke: `vesk build --platform cloudflare`, imported `.vesk/cloudflare/_worker.js`, then `default.fetch(new Request('http://localhost/api/mw-cookie'))` → `200`, `x-mw: ok`, `mw_seen=1`, `{"ok":true}`; `/mw-cookie` SSR → `200`, `x-mw: ok`, `mw_seen=1`, `id="mw"`.
-- Direct generated-function check: `handle(new Request('http://localhost/mw-cookie'))` → `200`, cookies/header present, body rendered.
+## Files Worth Inspecting First
+- `packages/compiler/src/ts-transform.ts` - new transform service/sync+async behavior.
+- `packages/compiler/src/module-imports.ts` - async load, sync cache path, barrel behavior, transform integration.
+- `packages/compiler/src/api-module-prepare.ts` - async graph prep + specifier rewrite.
+- `packages/compiler/src/api-routes.ts` - dev error payload/logging.
+- `packages/compiler/src/server-render.ts` - async compile/render path.
+- `packages/adapter/src/ssr-function.ts`, `packages/adapter/src/index.ts` - async build/precompile.
+- `packages/cli/src/dev-server.ts` - cachedSsrCompile async.
 
-## Fixes in this pass
-- `packages/adapter/src/middleware.ts`: inline executor now wraps `onLast()` with `__mwCloneResponse`, so pass-through middleware receives a `VeskResponse` with `setCookie`/`clearCookie` instead of a plain `Response`.
-- `packages/adapter/src/index.ts`: `walkApi` now collects the route middleware chain, compiles it inline, and passes `middlewareCode` to `generateApiFunction`; logs `[mw]` for API routes.
-- `packages/adapter/src/api-function.ts`: route runs inside the middleware onion via `__runRoute` + `__executeMw(__ctx, __runRoute)`. Runtime imports are aliased (`__veskParseCookies`, `__veskAssertSameOrigin`, `__veskRunHooks`, `__veskMaxBodyBytes`, `__veskVeskResponse`) so a route importing the same names from `@vesk/runtime/server` cannot collide. Removed the unused duplicate `parseCookies as __parseCookies` import.
-- `packages/adapter/src/ssr-function.ts`: same onion wiring; `__runRoute` supplies `url = __ctx.url`.
-- `packages/adapter/src/runtime-bundle.ts`: `server/runtime.js` now exports `toVeskResponse`.
-- `packages/compiler/src/middleware.ts`: removed duplicate `getSetCookie()` merge (headers were already copied), added additive ctx helpers + pending-header application.
-- `packages/cli/src/dev-server.ts`: sets `globalThis.VeskResponse` for compiler middleware helpers; API requests now run `executeApiRoute` inside middleware `onLast`, so dev matches prod pass-through behavior.
+## Suggested Next Steps
+1. **Reproduce reported case** in a Windows-like fixture or ask user to retry after rebuild: create API route importing deps with `implements`, param properties, enum, abstract; verify dev server no longer returns `Unexpected strict mode reserved word`.
+2. **Audit async ripple**: grep for old sync assumptions (`compileFile(`, `renderPage(`, `loadSsrModule(`, `applyLocalModuleImports(`, `collectModuleBundle(`) in tests/scripts/docs.
+3. **Decide TS-strip strategy for AST-mutation paths**: where code must be parsed/mutated as AST, prefer transform TS->JS then parse JS, or harden stripper; avoid regex.
+4. **Run full validation**: `npm run typecheck` to completion, relevant compiler/adapter tests, and `CHROMIUM_PATH="${CHROMIUM_PATH:-/data/data/com.termux/files/usr/bin/chromium-browser}" BASE=http://localhost:3017 node tests/hydration-test.mjs` (per prior TODO context; confirm port/setup).
+5. **Update `TODO.md`** with root cause, fix, validation, remaining async/AST-strip/hydration debt.
 
-## Known gaps
-- Root middleware is executed both inline (SSR/API function) and in `prod-server.ts`/edge handler (pre-existing double execution; logs `user:` twice). It is idempotent for the current fixture but should be consolidated.
-- No dedicated tests for runtime request bind/shouldBind/cookie/statusCode/getHeader/toVeskResponse yet.
-- Full suite (`scripts/test.js`, `npm test`, hydration probes) not run in this pass.
-
-## Suggested next steps
-1. Consolidate root middleware execution so it runs once per request while keeping route-level chains inline (prod-server, edge handler, SSR/API functions).
-2. Add dedicated runtime tests for the new `VeskRequest`/`VeskResponse` helpers and `toVeskResponse`.
-3. Run `node tests/hydration-test.mjs` with a running dev server + `CHROMIUM_PATH`, then the broader suite if time allows.
-4. Update `test-app/llms.txt` route table if not already including `/mw-cookie`.
-
-## Relevant files
-- `packages/compiler/src/middleware.ts`, `packages/adapter/src/middleware.ts`, `packages/adapter/src/index.ts`, `packages/adapter/src/api-function.ts`, `packages/adapter/src/ssr-function.ts`, `packages/adapter/src/runtime-bundle.ts`, `packages/cli/src/dev-server.ts`, `packages/adapter/src/prod-server.ts`, `packages/adapter/src/platform-handler.ts`
-- `packages/runtime/src/request.ts`, `packages/runtime/src/index-server.ts`
-- `packages/types/src/index.ts`, `packages/types/src/index.d.ts`
-- Tests: `packages/compiler/src/middleware.test.ts`, `packages/adapter/src/middleware.test.ts`, `packages/adapter/src/api-function.test.ts`, `packages/adapter/src/api-function-middleware.test.ts`, `packages/adapter/src/platform-handler.test.ts`, `packages/runtime/src/request.test.ts`, `packages/compiler/src/integration.test.ts`
-- `test-app/` (esp. `app/middleware.ts`, `app/mw-cookie/page.vsk`, `app/api/mw-cookie/route.ts`, `app/components/primitives.vsk` pre-existing errors)
-- Build: `packages/cli/src/build-packages.ts`, root `npm run build`
+## Useful Commands
+```bash
+npx tsx packages/cli/src/build-packages.ts
+npx tsx packages/compiler/src/ts-transform.test.ts
+npx tsx packages/compiler/src/api-module-prepare.test.ts
+npx tsx packages/compiler/src/module-imports.test.ts
+npx tsc --noEmit -p packages/compiler/tsconfig.json
+npx tsc --noEmit -p packages/adapter/tsconfig.json
+npx tsc --noEmit -p packages/cli/tsconfig.json
+# hydration (needs running test-app dev server + chromium)
+CHROMIUM_PATH="${CHROMIUM_PATH:-/data/data/com.termux/files/usr/bin/chromium-browser}" BASE=http://localhost:3017 node tests/hydration-test.mjs
+```

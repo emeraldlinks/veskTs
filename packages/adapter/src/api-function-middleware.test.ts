@@ -107,7 +107,7 @@ export async function middleware(ctx, next) {
     children: [],
   };
 
-  const { funcPath, funcCode } = generateApiFunction(route, apiDir, out, { middlewareCode });
+  const { funcPath, funcCode } = await generateApiFunction(route, apiDir, out, { middlewareCode });
   assert(funcCode.includes('const __mwResult = await __executeMw(__ctx, (rewrite) =>'), 'generated wrapper runs the API route inside the middleware onion');
   writeFileSync(funcPath, funcCode, 'utf-8');
 

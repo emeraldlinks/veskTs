@@ -8,7 +8,7 @@ import {
   resolveImportPath,
 } from '@vesk/compiler/src/module-imports';
 import { parseGeneratedJs } from '@vesk/compiler/src/parser';
-import { stripCodeTypes } from '@vesk/compiler/src/strip-ts';
+import { loaderForPath, transformTsModule } from '@vesk/compiler/src/ts-transform';
 
 export interface PreparedApiRoute {
   code: string;
@@ -72,18 +72,18 @@ function collectSpecifiers(body: unknown[]): SpecifierNode[] {
  * module directory. Bare npm imports and framework-owned packages are left for
  * Node (dev) or esbuild (platform builds) to resolve normally.
  */
-export function prepareApiRouteGraph(
+export async function prepareApiRouteGraph(
   routeFile: string,
   outputDir: string,
   importerDir: string = dirname(routeFile),
-): PreparedApiRoute {
+): Promise<PreparedApiRoute> {
   mkdirSync(outputDir, { recursive: true });
 
   const prepared = new Map<string, string>();
   const rawSources = new Map<string, string>();
 
   const routeAbsPath = resolve(routeFile);
-  const prepare = (sourcePath: string): string => {
+  const prepare = async (sourcePath: string): Promise<string> => {
     const absPath = resolve(sourcePath);
     const existing = prepared.get(absPath);
     if (existing) return existing;
@@ -94,9 +94,15 @@ export function prepareApiRouteGraph(
     prepared.set(absPath, preparedPath);
     const specifierDir = absPath === routeAbsPath ? importerDir : dirname(preparedPath);
 
-    const stripped = stripCodeTypes(raw);
-    const ast = parseGeneratedJs(stripped);
-    let code = stripped;
+    const transformed = await transformTsModule(raw, {
+      filename: absPath,
+      loader: loaderForPath(absPath),
+      format: 'esm',
+      target: 'node20',
+      sourcemap: false,
+    });
+    const ast = parseGeneratedJs(transformed);
+    let code = transformed;
     if (ast) {
       const specifiers = collectSpecifiers(ast.body as unknown[]);
       for (let i = specifiers.length - 1; i >= 0; i--) {
@@ -114,7 +120,7 @@ export function prepareApiRouteGraph(
           continue;
         }
         if (!existsSync(resolved) || resolved.endsWith('.vsk')) continue;
-        const dependency = prepare(resolved);
+        const dependency = await prepare(resolved);
         const rewritten = posixSpecifier(specifierDir, dependency);
         code = code.slice(0, spec.start) + JSON.stringify(rewritten) + code.slice(spec.end);
       }
@@ -126,7 +132,7 @@ export function prepareApiRouteGraph(
     return preparedPath;
   };
 
-  const modulePath = prepare(routeFile);
+  const modulePath = await prepare(routeFile);
   const cacheKey = hash(
     [...rawSources.entries()]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))

@@ -344,15 +344,19 @@ export async function executeApiRoute(
     let cacheKey: string | number | undefined = devCache?.get(filePath);
     if (devCache) {
       const outputDir = devApiModuleDir(filePath);
-      const prepared = prepareApiRouteGraph(filePath, outputDir, outputDir);
+      const prepared = await prepareApiRouteGraph(filePath, outputDir, outputDir);
       importPath = prepared.modulePath;
       cacheKey = envCacheKey === undefined ? prepared.cacheKey : `${prepared.cacheKey}-${String(envCacheKey)}`;
     }
     mod = await import(fileImportUrl(importPath, cacheKey)) as Record<string, unknown>;
   } catch (e: unknown) {
-    // details only in dev (devCache present); prod gets a generic message
+    const err = e as Error & { cause?: unknown };
+    const details = err?.stack || err?.message || String(e);
+    if (devCache) {
+      console.error(`[vesk] API route failed to load: ${filePath}\n${details}`);
+    }
     const body = devCache
-      ? { error: 'Failed to load route module', details: (e as Error).message }
+      ? { error: 'Failed to load route module', route: filePath, details, message: err?.message || String(e) }
       : { error: 'Failed to load route module' };
     return new Response(JSON.stringify(body), {
       status: 500, headers: { 'Content-Type': 'application/json' },
@@ -444,6 +448,14 @@ export async function executeApiRoute(
     } catch (e: unknown) {
       let errorResult = await execHooks('onError', e, request);
       if (errorResult instanceof Response) return errorResult;
+      const err = e as Error & { cause?: unknown };
+      const details = err?.stack || err?.message || String(e);
+      if (devCache) {
+        console.error(`[vesk] API route handler failed: ${filePath}\n${details}`);
+        return new Response(JSON.stringify({ error: 'API route handler failed', route: filePath, details, message: err?.message || String(e) }), {
+          status: 500, headers: { 'Content-Type': 'application/json' },
+        });
+      }
       throw e;
     }
 

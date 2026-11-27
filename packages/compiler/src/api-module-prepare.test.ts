@@ -84,12 +84,12 @@ writeFileSync(join(authApi, 'route.ts'), [
 
 console.log('API module preparation\n');
 
-test('rewrites the whole local graph to portable prepared modules', () => {
-	const prepared = prepareApiRouteGraph(join(api, 'route.ts'), output, output);
+test('rewrites the whole local graph to portable prepared modules', async () => {
+	const prepared = await prepareApiRouteGraph(join(api, 'route.ts'), output, output);
 	expect(prepared.code).not.toContain("from '../../db/connection'");
 	expect(prepared.code).not.toContain("from '@/util'");
 	expect(prepared.code).not.toContain("import type");
-	expect(prepared.code).toContain("from 'node:fs'");
+	expect(prepared.code.includes("from 'node:fs'") || prepared.code.includes('from "node:fs"')).toBe(true);
 	expect(prepared.dependencies.length).toBeGreaterThan(5);
 	for (const path of prepared.dependencies) {
 		if (!readFileSync(path, 'utf-8')) throw new Error(`empty prepared module ${path}`);
@@ -97,7 +97,7 @@ test('rewrites the whole local graph to portable prepared modules', () => {
 });
 
 test('prepared entry loads natively with nested extensionless and alias imports resolved', async () => {
-	const prepared = prepareApiRouteGraph(join(api, 'route.ts'), output, output);
+	const prepared = await prepareApiRouteGraph(join(api, 'route.ts'), output, output);
 	const mod = await import(fileImportUrl(prepared.modulePath, prepared.cacheKey)) as {
 		GET: () => Promise<Response>;
 	};
@@ -105,16 +105,16 @@ test('prepared entry loads natively with nested extensionless and alias imports 
 	expect(await res.text()).toBe('db-ok:alias:reexport:ab:lazy:function');
 });
 
-test('cache key follows nested source changes', () => {
-	const before = prepareApiRouteGraph(join(api, 'route.ts'), output, output).cacheKey;
+test('cache key follows nested source changes', async () => {
+	const before = (await prepareApiRouteGraph(join(api, 'route.ts'), output, output)).cacheKey;
 	writeFileSync(join(app, 'db', 'secret.ts'), 'export const suffix = "next";\n');
-	const after = prepareApiRouteGraph(join(api, 'route.ts'), output, output).cacheKey;
+	const after = (await prepareApiRouteGraph(join(api, 'route.ts'), output, output)).cacheKey;
 	expect(before).not.toBe(after);
 	writeFileSync(join(app, 'db', 'secret.ts'), 'export const suffix = "ok";\n');
 });
 
 test('rewrites dotted-basename local imports (auth.service.ts) so Node can load them', async () => {
-	const prepared = prepareApiRouteGraph(join(authApi, 'route.ts'), output, output);
+	const prepared = await prepareApiRouteGraph(join(authApi, 'route.ts'), output, output);
 	expect(prepared.code).not.toContain("from '../../../services/auth.service'");
 	const mod = await import(fileImportUrl(prepared.modulePath, prepared.cacheKey)) as {
 		GET: () => Promise<Response>;
@@ -122,11 +122,33 @@ test('rewrites dotted-basename local imports (auth.service.ts) so Node can load 
 	expect(await (await mod.GET()).text()).toBe('auth-ok');
 });
 
-test('cycles terminate and both modules are emitted', () => {
-	const prepared = prepareApiRouteGraph(join(api, 'route.ts'), output, output);
+test('cycles terminate and both modules are emitted', async () => {
+	const prepared = await prepareApiRouteGraph(join(api, 'route.ts'), output, output);
 	const names = prepared.dependencies.map((path) => basename(path));
 	expect(names.length).toBeGreaterThan(5);
 	expect(prepared.dependencies.length === new Set(prepared.dependencies).size).toBe(true);
+});
+
+
+test('handles real-app TS syntax in route deps (implements, param props, enum, abstract)', async () => {
+	const dir = join(app, 'api', 'ts-shapes');
+	mkdirSync(join(dir, 'svc'), { recursive: true });
+	writeFileSync(join(dir, 'svc', 'base.ts'), [
+		'export interface Repo { save(v: string): string }',
+		'export abstract class BaseRepo implements Repo { abstract save(v: string): string; protected tag: string = "base"; }',
+		'export enum Kind { A = "a", B = "b" }',
+	].join('\n'));
+	writeFileSync(join(dir, 'svc', 'impl.ts'), [
+		'import { BaseRepo, Kind } from "./base";',
+		'export class ImplRepo extends BaseRepo { constructor(private readonly prefix: string = "p") { super(); } save(v: string): string { return this.prefix + ":" + Kind.A + ":" + v; } }',
+	].join('\n'));
+	writeFileSync(join(dir, 'route.ts'), [
+		'import { ImplRepo } from "./svc/impl";',
+		'export async function GET() { return new Response(new ImplRepo().save("ok")); }',
+	].join('\n'));
+	const prepared = await prepareApiRouteGraph(join(dir, 'route.ts'), output, output);
+	const mod = await import(fileImportUrl(prepared.modulePath, prepared.cacheKey)) as { GET: () => Promise<Response> };
+	expect(await (await mod.GET()).text()).toBe('p:a:ok');
 });
 
 await Promise.all(pending);

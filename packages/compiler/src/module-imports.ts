@@ -6,6 +6,7 @@ import ts from 'esrap/languages/ts';
 import { walk } from 'zimmerframe';
 import { parse, parseGeneratedJs } from '@vesk/compiler/src/parser';
 import { stripTsTypes, hasTsSyntax, isTypeOnlyStatement } from '@vesk/compiler/src/strip-ts';
+import { loaderForPath, transformTsModuleSync } from '@vesk/compiler/src/ts-transform';
 import { importModuleTarget } from '@vesk/compiler/src/tokens';
 import { VeskError } from '@vesk/compiler/src/errors';
 import { isWhitespaceChar } from '@vesk/compiler/src/scan';
@@ -388,36 +389,87 @@ export interface SsrSource {
   parseError?: VeskError;
 }
 
+const ESBUILD_ONLY_TS_NODES = new Set([
+  'TSParameterProperty',
+  'TSEnumDeclaration',
+  'TSModuleDeclaration',
+  'TSImportEqualsDeclaration',
+  'TSExpressionWithTypeArguments',
+]);
+
+function needsTsTransform(ast: ReturnType<typeof parse>): boolean {
+  let found = false;
+  walk(ast, null, {
+    _(node: Record<string, unknown>, ctx: any) {
+      if (ESBUILD_ONLY_TS_NODES.has(String(node.type)) ||
+          (Array.isArray(node.implements) && node.implements.length > 0) ||
+          node.abstract === true || typeof node.accessibility === 'string' || node.readonly === true) {
+        found = true;
+        return;
+      }
+      return ctx.next();
+    },
+  });
+  return found;
+}
+
+function ssrParseError(e: unknown, absPath: string): VeskError {
+  const err = e as VeskError;
+  if (err instanceof VeskError) {
+    if (err.code === undefined) err.code = 'V0901';
+    return err;
+  }
+  return VeskError.moduleParseFailed({ file: absPath, reason: (e as Error)?.message });
+}
+
 export function readSsrSource(absPath: string): SsrSource | null {
   const cachedRaw = readSourceCached(absPath);
   if (cachedRaw === null) {
-    // Keep the original warning: a missing module is a build-time signal, not
-    // a cache miss to swallow.
     console.warn(`[vesk] SSR: failed to read ${absPath}`);
     return null;
   }
-  const raw = cachedRaw;
+  const ext = extname(absPath).toLowerCase();
+  const tsLike = ext === '.ts' || ext === '.tsx' || ext === '.mts' || ext === '.cts';
+  const rawSource = cachedRaw;
+  let ast: ReturnType<typeof parse> | null = null;
+  let parseFailure: unknown = null;
+  try {
+    ast = parse(rawSource, { filename: absPath });
+  } catch (e) {
+    parseFailure = e;
+  }
+  if (!tsLike || (ast && !needsTsTransform(ast))) {
+    if (ast) return { raw: rawSource, ast };
+    return { raw: rawSource, ast: null, parseError: ssrParseError(parseFailure, absPath) };
+  }
+  let raw: string;
+  try {
+    raw = transformTsModuleSync(rawSource, {
+      filename: absPath,
+      loader: loaderForPath(absPath),
+      format: 'esm',
+      target: 'node20',
+      sourcemap: false,
+    });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : String(e);
+    return {
+      raw: rawSource,
+      ast: null,
+      parseError: new VeskError(`Cannot transform ${absPath} for SSR import: ${reason}`, {
+        file: absPath,
+        line: 1,
+        nextSteps: [
+          'Check the module for TypeScript/syntax errors.',
+          'Vesk transforms imported TS modules with esbuild before SSR evaluation.',
+        ],
+      }),
+    };
+  }
   try {
     return { raw, ast: parse(raw, { filename: absPath }) };
   } catch (e) {
-    // A parse failure is a BUILD FAILURE, not a fallback. It used to return
-    // `ast: null` silently, and the caller then substituted the raw source — so
-    // the file's TypeScript syntax reached `new Function` and surfaced as a
-    // bare `Unexpected token ':'` in whichever module imported it, with no
-    // file, no line, and (because the module's exports came back undefined) a
-    // trail of unrelated `X is not iterable` failures behind it.
-    const err = e as VeskError;
-    let parseError: VeskError;
-    if (err instanceof VeskError) {
-      // `parse()` already produced a located diagnostic for this file. Keep its
-      // message, frame and position — they are strictly better than a wrapper's
-      // — and add the code so the failure is identifiable in build logs.
-      parseError = err;
-      if (err.code === undefined) err.code = 'V0901';
-    } else {
-      parseError = VeskError.moduleParseFailed({ file: absPath, reason: (e as Error)?.message });
-    }
-    return { raw, ast: null, parseError };
+    return { raw, ast: null, parseError: ssrParseError(e, absPath) };
   }
 }
 

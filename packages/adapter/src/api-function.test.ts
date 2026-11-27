@@ -52,8 +52,8 @@ const catchAll: ApiRouteNode = {
 	children: [],
 };
 
-it('a catch-all API param captures the whole remaining tail', () => {
-	const { funcCode } = generateApiFunction(catchAll, join(root, 'api'), join(root, 'out'));
+it('a catch-all API param captures the whole remaining tail', async () => {
+	const { funcCode } = await generateApiFunction(catchAll, join(root, 'api'), join(root, 'out'));
 	expectIncludes(funcCode, `"path": urlParts.slice(1).join('/')`);
 });
 
@@ -62,8 +62,8 @@ const catchAllMounted: ApiRouteNode = {
 	fullPath: '/api/auth/:path',
 };
 
-it('a catch-all under the /api mount still captures the tail after the mount prefix', () => {
-	const { funcCode } = generateApiFunction(catchAllMounted, join(root, 'api'), join(root, 'out'));
+it('a catch-all under the /api mount still captures the tail after the mount prefix', async () => {
+	const { funcCode } = await generateApiFunction(catchAllMounted, join(root, 'api'), join(root, 'out'));
 	expectIncludes(funcCode, `"path": urlParts.slice(1).join('/')`);
 });
 
@@ -76,8 +76,8 @@ const dynamic: ApiRouteNode = {
 	children: [],
 };
 
-it('a single dynamic API param still captures one segment', () => {
-	const { funcCode } = generateApiFunction(dynamic, join(root, 'api'), join(root, 'out'));
+it('a single dynamic API param still captures one segment', async () => {
+	const { funcCode } = await generateApiFunction(dynamic, join(root, 'api'), join(root, 'out'));
 	expectIncludes(funcCode, '"id": urlParts[1]');
 });
 
@@ -106,9 +106,9 @@ const graphNode: ApiRouteNode = {
 	children: [],
 };
 
-it('generated API functions inline a portable prepared module graph', () => {
+it('generated API functions inline a portable prepared module graph', async () => {
 	const out = join(graphRoot, 'out');
-	const { funcCode } = generateApiFunction(graphNode, graphApiDir, out);
+	const { funcCode } = await generateApiFunction(graphNode, graphApiDir, out);
 	if (funcCode.includes("from '@/db'")) throw new Error('alias import was not prepared');
 	if (funcCode.includes("from '../../lib/suffix'")) throw new Error('extensionless import was not prepared');
 	if (funcCode.includes(graphRoot)) throw new Error('generated code leaks absolute build paths');
@@ -117,14 +117,14 @@ it('generated API functions inline a portable prepared module graph', () => {
 	if (!existsSync(modulesDir)) throw new Error('prepared modules directory was not emitted');
 });
 
-it('inlined middleware does not redeclare VeskResponse in an API function', () => {
+it('inlined middleware does not redeclare VeskResponse in an API function', async () => {
 	const middlewareCode = compileMiddlewareCode([
 		[
 			"import { VeskResponse } from '@vesk/runtime/server';",
 			'export async function middleware(ctx, next) { return VeskResponse.redirect("/next", 302); }',
 		].join('\n'),
 	], { dedupeVeskResponse: true });
-	const { funcCode } = generateApiFunction(catchAll, join(root, 'api'), join(root, 'out'), { middlewareCode });
+	const { funcCode } = await generateApiFunction(catchAll, join(root, 'api'), join(root, 'out'), { middlewareCode });
 	if (funcCode.includes("from '@vesk/runtime/server'")) {
 		throw new Error('middleware VeskResponse import was not deduped');
 	}
