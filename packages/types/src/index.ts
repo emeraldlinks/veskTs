@@ -165,7 +165,7 @@ export interface MiddlewareContext<L extends Record<string, unknown> = VeskLocal
   /** Additive (opt-in): convenience helpers. */
   cookie?: (name: string) => string | undefined;
   status?: (code: number) => VeskResponse | Response;
-  json?: (body: unknown, init?: ResponseInit) => VeskResponse | Response;
+  json?: <T = unknown>(body: T, init?: ResponseInit) => VeskResponse | Response;
   text?: (body: string, init?: ResponseInit) => VeskResponse | Response;
   html?: (body: string, init?: ResponseInit) => VeskResponse | Response;
   redirect?: (url: string, status?: number) => VeskResponse | Response;
@@ -1057,6 +1057,7 @@ export interface SetCookieOptions {
 }
 
 export interface VeskResponse extends Response {
+  json<T = unknown>(): Promise<T>;
   setStatus(code: number): VeskResponse;
   build(): VeskResponse;
   setCookie(name: string, value: string, opts?: SetCookieOptions): VeskResponse;
@@ -1085,7 +1086,7 @@ export declare function VeskResponse(body?: BodyInit | null, init?: ResponseInit
 
 export declare namespace VeskResponse {
   /** Create a JSON response with `Content-Type: application/json`. */
-  export function json(body: unknown, init?: ResponseInit): VeskResponse;
+  export function json<T = unknown>(body: T, init?: ResponseInit): VeskResponse;
   /** Create an HTML response with `Content-Type: text/html; charset=utf-8`. */
   export function html(html: string, init?: ResponseInit): VeskResponse;
   /** Create an internal rewrite response (`x-vesk-rewrite`). */

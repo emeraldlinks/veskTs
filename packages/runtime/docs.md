@@ -449,13 +449,14 @@ unparameterized `locals()` and `MiddlewareContext` reads globally typed while
 retaining `unknown` for undeclared keys.
 (`resolveUrl`, `from`, `host`/`origin`, `query`/`parsedUrl`, `getBody`);
 `request.json<Type>()` is a compile-time cast over `Request.json()`; use `bindJSON`/`withValidation` when runtime validation is required.
-`ServerResponse`, `VeskResponse` (`json`/`redirect`/`rewrite`/`next`/`html`/`stream`),
+`ServerResponse`, `VeskResponse` (`json<Type>()`/`redirect`/`rewrite`/`next`/`html`/`stream`),
 `withValidation`, `useBody`, `useParams` (request), `useRequest`, `cors`,
 `defineHook`, `removeHook`, `runHooks`, `webhook`, `WebhookOptions`, `signCookie`, `unsignCookie`,
 `setSignedCookie`, `readSignedCookie`, `applyRequestSecurity`. `VeskResponse.stream(readable, init?)`
 creates a chunked `ReadableStream` response (`Transfer-Encoding: chunked`,
 no `Content-Length`; delivered via `deliverResponse`'s `getReader()` loop on dev/prod servers;
 `readable` is coerced `as unknown as BodyInit`).
+`VeskResponse.json<Type>(body, init?)` and `await res.json<Type>()` are compile-time annotations over `JSON.stringify`/`Response.json()`; they do not validate the value at runtime.
 ISR: `isr`, `revalidatePath`, `revalidateTag`, `clearIsrCache`, `pageIsr`,
 `componentIsr`, `revalidateComponent`, `isrConfigToRevalidate`.
 

@@ -5,6 +5,39 @@
 Companion tracker: `/root/vesk-libs/TODO.md` — the first-party library ports
 (VeskAuth, VeskPaystack, VeskChart, +30 catalogued). Lives outside the repo.
 
+**This session (generic JSON request/response types + typed API routes):**
+
+- [x] Added native `json<T>()` request/response generics to framework runtime and
+      `@vesk/types`: `ServerRequest.json<T>()`, `ServerResponse.json<T>()`,
+      `ServerResponse.json<T>(body, init?)`, `VeskResponseInstance.json<T>()`, and
+      `VeskResponse.json<T>(body, init?)`. Generics annotate parsed JSON and the
+      stringified response body; they do not add runtime validation.
+- [x] Updated canonical framework surfaces: runtime `docs.md`, `llms.txt`,
+      `packages/runtime/AGENTS.md` file map, and `skills/vesk/SKILL.md` API route
+      example now use `const input = await req.json<BodyType>()` and
+      `return VeskResponse.json<ResponseType>(response)`.
+- [x] Added `request.test.ts` regressions for request parsing, response body
+      typing, and `VeskResponse` response typing. `npx tsx
+      packages/runtime/src/request.test.ts` passed.
+- [x] Verification: rebuilt packages with `npx tsx packages/cli/src/build-packages.ts`,
+      verified generated `dist/request.d.ts` and `@vesk/types/dist/index.d.ts`
+      declarations, ran `npm run typecheck` (after one 120s timeout, rerun passed),
+      and checked `git diff --check`.
+- [x] Converted all 290 `/root/oryn-vsk` API routes to the docs-example typed
+      style: local concrete request/response types, canonical typed `req.json<T>()`
+      and `VeskResponse.json<T>()`, no response `as` casts, no index signatures,
+      no added comments, and no added route logic. `ai/chat` keeps local concrete
+      message types to avoid the docs analyzer stack overflow; dynamic-key admin
+      settings guards stay concrete.
+- [x] Removed the temporary `/root/oryn-vsk` shim files and tsconfig path mapping.
+      Ran `node scripts/refresh-testapp-deps.mjs /root/oryn-vsk`; all `@vesk/*`
+      packages were rebuilt, repacked as `0.4.5+ci.1795879681090`, pinned, and
+      installed. Installed runtime/types declarations are natively generic.
+- [x] Verified the user app against fixed framework packages: `npm run typecheck`
+      passed, `npm run build` passed (`290 routes`, `2035 schemas`, `699 operations`),
+      `@vesk/docs` analyzer returned `routes=290`, `operations=699`,
+      `diagnostics=0`, and `git diff --check` was clean.
+
 **This session (published 0.4.4 login route SyntaxError):**
 
 - [x] **BUG (reported by Tehilla): `POST /api/auth/login` returned

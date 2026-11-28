@@ -71,6 +71,15 @@ describe('ServerResponse', () => {
 		expect(body.count).toBe(42);
 	});
 
+	it('ServerResponse.json supports body and response type generics', async () => {
+		type JsonPayload = { ok: boolean; count: number };
+		const payload: JsonPayload = { ok: true, count: 42 };
+		const res = ServerResponse.json<JsonPayload>(payload);
+		const body = await res.json<JsonPayload>();
+		expect(body.ok).toBe(true);
+		expect(body.count).toBe(42);
+	});
+
 	it('ServerResponse.redirect creates redirect', () => {
 		const res = ServerResponse.redirect('/login');
 		expect(res.status).toBe(307);
@@ -127,6 +136,18 @@ describe('ServerRequest', () => {
 		});
 		const body = await req.json();
 		expect(body.hello).toBe('world');
+	});
+
+	it('json<T>() parses a typed request body', async () => {
+		type JsonPayload = { hello: string; num: number };
+		const req = new ServerRequest('http://test', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({ hello: 'world', num: 42 }),
+		});
+		const body = await req.json<JsonPayload>();
+		expect(body.hello).toBe('world');
+		expect(body.num).toBe(42);
 	});
 
 	it('has default empty cookies, params, locals', () => {
@@ -851,6 +872,15 @@ describe('VeskResponse', () => {
 		expect(res).toBeInstanceOf(VeskResponse);
 		const body = await res.json();
 		expect(body.ok).toBe(true);
+	});
+
+	it('VeskResponse.json supports body and response type generics', async () => {
+		type JsonPayload = { ok: boolean; count: number };
+		const payload: JsonPayload = { ok: true, count: 42 };
+		const res = VeskResponse.json<JsonPayload>(payload);
+		const body = await res.json<JsonPayload>();
+		expect(body.ok).toBe(true);
+		expect(body.count).toBe(42);
 	});
 
 	it('VeskResponse.redirect creates redirect VeskResponse', () => {

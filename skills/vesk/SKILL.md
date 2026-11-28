@@ -892,9 +892,10 @@ export async function GET(req: VeskRequest) {
 		.cors({ origin: 'https://app.example.com', methods: 'GET,POST' });
 }
 
-export async function POST(req) {
-	const body = await req.json();
-	return VeskResponse.json({ received: body });
+export async function POST(req: VeskRequest) {
+	type HelloBody = { message: string };
+	const body = await req.json<HelloBody>();
+	return VeskResponse.json<{ received: HelloBody }>({ received: body });
 }
 ```
 
@@ -931,7 +932,7 @@ trustProxy), `protocol`, `hostname`, `await req.body` (lazy parse),
 
 ### VeskResponse builders
 
-`VeskResponse.json/html/redirect(url, status=307)/rewrite(url)/next()`.
+`VeskResponse.json<Type>()/html/redirect(url, status=307)/rewrite(url)/next()`.
 Chain: `.setStatus(n).setCookie(name,val,opts).clearCookie(name).redirect(url, status=302)
 .setCsp(policy|false).setSecurityHeader(name,val|false).cache(ttlSeconds).noCache()
 .cors({origin,methods,headers,credentials}).build()`. The instance `redirect()`

@@ -421,13 +421,17 @@ export class ServerRequest extends Request {
 
 	get locals(): Record<string, unknown> { return this._locals; }
 	set locals(v: Record<string, unknown>) { this._locals = v; }
+
+	async json<T = unknown>(): Promise<T> {
+		return super.json() as Promise<T>;
+	}
 }
 
 interface VeskResponseInstance extends Response {
 	setStatus(code: number): VeskResponseInstance;
 	build(): VeskResponseInstance;
 	text(): Promise<string>;
-	json(): Promise<unknown>;
+	json<T = unknown>(): Promise<T>;
 	setCookie(name: string, value: string, opts?: {
 		maxAge?: number; httpOnly?: boolean; secure?: boolean;
 		sameSite?: 'Lax' | 'Strict' | 'None'; path?: string; domain?: string;
@@ -446,7 +450,11 @@ interface VeskResponseInstance extends Response {
 }
 
 export class ServerResponse extends Response {
-	static json(body: unknown, init?: ResponseInit): ServerResponse {
+	async json<T = unknown>(): Promise<T> {
+		return super.json() as Promise<T>;
+	}
+
+	static json<T = unknown>(body: T, init?: ResponseInit): ServerResponse {
 		return new ServerResponse(JSON.stringify(body), {
 			...init,
 			headers: { 'Content-Type': 'application/json', ...init?.headers },
@@ -928,7 +936,7 @@ class _VeskResponse extends ServerResponse {
 		this._cookieHeaders = [];
 	}
 
-	static json(body: unknown, init?: ResponseInit): _VeskResponse {
+	static json<T = unknown>(body: T, init?: ResponseInit): _VeskResponse {
 		return new _VeskResponse(JSON.stringify(body), {
 			...init,
 			headers: { 'Content-Type': 'application/json', ...init?.headers },
